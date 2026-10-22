@@ -157,7 +157,7 @@ plugin pane is no host either: a PTY, closed by the user, gone after a server re
 `$XDG_STATE_HOME/vega/post-relay-<host>.log` (moved to `.log.1` above 10 MB at start), and waits
 up to 3 s for the lock. Env: the starter's, minus pane variables (`HERDR_PANE_ID`, ...) and the
 agent shims on PATH, plus `vegad.env` (`$XDG_STATE_HOME/vega/vegad.env`: `VEGA_NATS_URL`,
-`VEGA_NATS_NKEY`, `VEGA_POST_HOST`, `HERDR_SOCKET_PATH` as `relay install` found them, the values
+`VEGA_NATS_NKEY`, `VEGA_POST_HOST`, `HERDR_SOCKET_PATH`, `DOLT_REMOTE_USER` as `relay install` found them, the values
 the unit used to pin). The pinned socket keeps a named herdr session from binding vegad to itself.
 
 **One instance**: the existing lock (`post-relay-<host>.lock`). Two racing starts each spawn; the
