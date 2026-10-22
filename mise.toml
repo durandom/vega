@@ -41,7 +41,8 @@ run = [
   "sh plugins/board/link-herdr.sh",
   # vega open's reveal/diff actions go through this extension's URI handler.
   "cd vscode && npm run -s package",
-  "code --install-extension vscode/dist/vega-vscode.vsix --force",
+  # `code` is missing on hosts without the VS Code CLI (e.g. WSL without the Windows PATH): skip, don't fail.
+  "if command -v code >/dev/null; then code --install-extension vscode/dist/vega-vscode.vsix --force; else echo 'skip: code not on PATH; install vscode/dist/vega-vscode.vsix by hand'; fi",
 ]
 
 [tasks.nats]
