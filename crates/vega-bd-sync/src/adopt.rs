@@ -210,7 +210,13 @@ pub fn push(dolt_bin: &Path, repo: &Path, url: &str) -> Result<Pushed, PushError
 }
 
 fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
-    let fetch = dolt(dolt_bin, repo, &["fetch", REMOTE], 600);
+    let fetch_args = bd::remote_args("fetch", &[REMOTE]);
+    let fetch = dolt(
+        dolt_bin,
+        repo,
+        &fetch_args.iter().map(String::as_str).collect::<Vec<_>>(),
+        600,
+    );
     if !fetch.ok {
         return Err(match bd::classify(&fetch) {
             bd::Outcome::Unreachable(m) => PushError::Unreachable(m),
@@ -219,7 +225,7 @@ fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
     }
     let h = heads(dolt_bin, repo).map_err(PushError::Failed)?;
     let p = plan(&h);
-    let args: &[&str] = match p {
+    let args: Vec<String> = match p {
         Plan::Present => {
             return Ok(Pushed {
                 plan: p,
@@ -231,10 +237,15 @@ fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
                 remote_commits: h.remote_commits,
             })
         }
-        Plan::Push => &["push", REMOTE, "main"],
-        Plan::ForceOntoEmpty => &["push", "--force", REMOTE, "main"],
+        Plan::Push => bd::remote_args("push", &[REMOTE, "main"]),
+        Plan::ForceOntoEmpty => bd::remote_args("push", &["--force", REMOTE, "main"]),
     };
-    let r = dolt(dolt_bin, repo, args, 1800);
+    let r = dolt(
+        dolt_bin,
+        repo,
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        1800,
+    );
     match bd::classify(&r) {
         bd::Outcome::Ok => Ok(Pushed {
             plan: p,

@@ -241,6 +241,22 @@ pub enum Probe {
     Unknown(String),
 }
 
+/// Arguments for a `dolt` subcommand that talks to a remote: `--user $DOLT_REMOTE_USER` when set
+/// (dolt only reads the password, `DOLT_REMOTE_PASSWORD`, from the environment and defaults the
+/// user to `root`), then `rest`.
+pub fn remote_args(sub: &str, rest: &[&str]) -> Vec<String> {
+    remote_args_for(std::env::var("DOLT_REMOTE_USER").ok().as_deref(), sub, rest)
+}
+
+fn remote_args_for(user: Option<&str>, sub: &str, rest: &[&str]) -> Vec<String> {
+    let mut a = vec![sub.to_string()];
+    if let Some(u) = user.filter(|u| !u.is_empty()) {
+        a.extend(["--user".to_string(), u.to_string()]);
+    }
+    a.extend(rest.iter().map(|r| r.to_string()));
+    a
+}
+
 pub fn probe(dolt: &Path, url: &str, scratch: &Path) -> Probe {
     let init = {
         let mut c = Command::new(dolt);
@@ -259,11 +275,13 @@ pub fn probe(dolt: &Path, url: &str, scratch: &Path) -> Probe {
         return Probe::Unknown(format!("dolt remote add: {}", last_line(&add.out)));
     }
     let mut fetch = Command::new(dolt);
-    fetch.current_dir(scratch).args([
+    fetch.current_dir(scratch).args(remote_args(
         "fetch",
-        "probe",
-        "refs/heads/vega-probe-none:refs/remotes/probe/none",
-    ]);
+        &[
+            "probe",
+            "refs/heads/vega-probe-none:refs/remotes/probe/none",
+        ],
+    ));
     probe_result(&run(fetch, Duration::from_secs(60)))
 }
 
@@ -358,8 +376,10 @@ pub(crate) mod testsrv {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    /// dolt on PATH, if any: tests that need it skip without it.
+    /// dolt on PATH, if any: tests that need it skip without it. Clears `DOLT_REMOTE_USER`: the
+    /// local test servers only know `root`, whatever the caller's remote user is.
     pub fn dolt() -> Option<PathBuf> {
+        std::env::remove_var("DOLT_REMOTE_USER");
         std::env::var_os("PATH").and_then(|p| {
             std::env::split_paths(&p)
                 .map(|d| d.join("dolt"))
@@ -543,6 +563,22 @@ mod tests {
         assert_ne!(head(&behind), head(&seed));
         sh(&behind, &["sql", "-q", FAST_FORWARD_SQL]);
         assert_eq!(head(&behind), head(&seed));
+    }
+
+    #[test]
+    fn remote_args_add_the_user_only_when_set() {
+        assert_eq!(
+            remote_args_for(None, "fetch", &["probe"]),
+            ["fetch", "probe"]
+        );
+        assert_eq!(
+            remote_args_for(Some(""), "fetch", &["probe"]),
+            ["fetch", "probe"]
+        );
+        assert_eq!(
+            remote_args_for(Some("goern"), "push", &["--force", "r", "main"]),
+            ["push", "--user", "goern", "--force", "r", "main"]
+        );
     }
 
     #[test]
