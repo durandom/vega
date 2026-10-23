@@ -8,6 +8,7 @@
 //! Dolt's initial commit (just created, or never pushed to). A remote with
 //! any other history that is not part of the local one is refused.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -121,7 +122,7 @@ pub struct Pushed {
     pub head: String,
 }
 
-fn dolt(dolt: &Path, dir: &Path, args: &[&str], secs: u64) -> bd::Run {
+fn dolt<S: AsRef<OsStr>>(dolt: &Path, dir: &Path, args: &[S], secs: u64) -> bd::Run {
     let mut c = Command::new(dolt);
     c.current_dir(dir).args(args);
     run(c, Duration::from_secs(secs))
@@ -210,13 +211,7 @@ pub fn push(dolt_bin: &Path, repo: &Path, url: &str) -> Result<Pushed, PushError
 }
 
 fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
-    let fetch_args = bd::remote_args("fetch", &[REMOTE]);
-    let fetch = dolt(
-        dolt_bin,
-        repo,
-        &fetch_args.iter().map(String::as_str).collect::<Vec<_>>(),
-        600,
-    );
+    let fetch = dolt(dolt_bin, repo, &bd::remote_args("fetch", &[REMOTE]), 600);
     if !fetch.ok {
         return Err(match bd::classify(&fetch) {
             bd::Outcome::Unreachable(m) => PushError::Unreachable(m),
@@ -240,12 +235,7 @@ fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
         Plan::Push => bd::remote_args("push", &[REMOTE, "main"]),
         Plan::ForceOntoEmpty => bd::remote_args("push", &["--force", REMOTE, "main"]),
     };
-    let r = dolt(
-        dolt_bin,
-        repo,
-        &args.iter().map(String::as_str).collect::<Vec<_>>(),
-        1800,
-    );
+    let r = dolt(dolt_bin, repo, &args, 1800);
     match bd::classify(&r) {
         bd::Outcome::Ok => Ok(Pushed {
             plan: p,

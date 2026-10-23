@@ -243,9 +243,15 @@ pub enum Probe {
 
 /// Arguments for a `dolt` subcommand that talks to a remote: `--user $DOLT_REMOTE_USER` when set
 /// (dolt only reads the password, `DOLT_REMOTE_PASSWORD`, from the environment and defaults the
-/// user to `root`), then `rest`.
+/// user to `root`), then `rest`. Unit tests never read the variable: their local servers only
+/// know `root`, whatever the caller's remote user is, and clearing it would race other tests.
 pub fn remote_args(sub: &str, rest: &[&str]) -> Vec<String> {
-    remote_args_for(std::env::var("DOLT_REMOTE_USER").ok().as_deref(), sub, rest)
+    let user = if cfg!(test) {
+        None
+    } else {
+        std::env::var("DOLT_REMOTE_USER").ok()
+    };
+    remote_args_for(user.as_deref(), sub, rest)
 }
 
 fn remote_args_for(user: Option<&str>, sub: &str, rest: &[&str]) -> Vec<String> {
@@ -376,10 +382,8 @@ pub(crate) mod testsrv {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    /// dolt on PATH, if any: tests that need it skip without it. Clears `DOLT_REMOTE_USER`: the
-    /// local test servers only know `root`, whatever the caller's remote user is.
+    /// dolt on PATH, if any: tests that need it skip without it.
     pub fn dolt() -> Option<PathBuf> {
-        std::env::remove_var("DOLT_REMOTE_USER");
         std::env::var_os("PATH").and_then(|p| {
             std::env::split_paths(&p)
                 .map(|d| d.join("dolt"))
