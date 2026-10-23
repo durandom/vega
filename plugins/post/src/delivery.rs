@@ -506,30 +506,41 @@ pub enum Draft {
     Unknown,
 }
 
-/// Claude Code and Codex: the last line that starts with a prompt glyph is
-/// the input line (Claude's sits right under a rule, Codex's below the last
-/// one). pi: the box between the last two rules (`─`), without a glyph
-/// (pi-tui's editor); a glyph elsewhere is transcript. Any other screen is
-/// `Unknown`.
+/// Claude Code: the last line that starts with `❯`, right under a rule and
+/// with a rule below. Codex: the last line that starts with `›`, with its
+/// status line (`  GPT-… · dir · …` or `? for shortcuts`) below. pi: the box
+/// between the last two rules (`─`), without a glyph (pi-tui's editor); a
+/// glyph elsewhere is transcript. Any other screen is `Unknown`, also a bare
+/// glyph (a shell prompt such as starship's `❯`).
 pub fn draft(screen: &str) -> Draft {
     let lines: Vec<&str> = screen.lines().collect();
     let rule = |i: usize| is_rule(&plain(lines[i], true));
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| rule(i)).collect();
     let prompt = lines
         .iter()
         .rposition(|l| plain(l, true).trim_start().starts_with(PROMPTS));
-    let rules: Vec<usize> = (0..lines.len()).filter(|&i| rule(i)).collect();
     if let Some(at) = prompt {
-        if rules.last().is_none_or(|&r| at > r) || (at > 0 && rule(at - 1)) {
+        let glyph = plain(lines[at], true).trim_start().chars().next();
+        let claude =
+            glyph == Some('❯') && at > 0 && rule(at - 1) && rules.last().is_some_and(|&r| r > at);
+        let codex = glyph == Some('›')
+            && lines[at + 1..]
+                .iter()
+                .any(|l| codex_status(&plain(l, true)));
+        if claude || codex {
             return prompt_draft(&lines[at..]);
         }
     }
     match rules[..] {
         [.., top, bottom] => pi_draft(&lines[top..=bottom]),
-        _ => match prompt {
-            Some(at) => prompt_draft(&lines[at..]),
-            None => Draft::Unknown,
-        },
+        _ => Draft::Unknown,
     }
+}
+
+/// A line of Codex's footer: `  GPT-6.1-Sol medium · vega · Ready` or
+/// `  ? for shortcuts` (seen live).
+fn codex_status(line: &str) -> bool {
+    line.starts_with("  ") && (line.contains(" · ") || line.trim_end().ends_with("for shortcuts"))
 }
 
 /// A full-width rule: only `─`, or pi's scroll indicator (`─── ↑ 3 more ─`).
@@ -703,36 +714,49 @@ mod tests {
         let grey = "\x1b[0m\x1b[38;2;153;153;153m❯\u{a0}\x1b[0m";
         let rule = "────────";
         let line = |s: &str| Draft::Text(s.into());
+        // Claude's box: a rule above and below its input line.
+        let claude = |input: &str| format!("answer\n{rule}\n{input}\n{rule}\n  status");
         // Empty input; an earlier prompt in the transcript does not count.
         assert_eq!(
-            draft(&format!(
-                "❯ old question\nanswer\n{rule}\n{grey}\n{rule}\n  status"
-            )),
+            draft(&format!("❯ old question\n{}", claude(grey))),
             Draft::None
         );
         // The agent's dim suggestion is not a draft.
         assert_eq!(
-            draft("❯\u{a0} \x1b[0m\x1b[2mwann sind die rennen\x1b[0m"),
+            draft(&claude("❯\u{a0} \x1b[0m\x1b[2mwann sind die rennen\x1b[0m")),
             Draft::None
         );
         assert_eq!(
-            draft(&format!(
-                "{grey}\x1b[0mhalf a sentence\n{rule}\n  status line"
-            )),
+            draft(&claude(&format!("{grey}\x1b[0mhalf a sentence"))),
             line("half a sentence")
         );
-        assert_eq!(draft("› codex draft"), Draft::Opaque);
-        // Seen live: an empty codex box (dim placeholder) with status lines below.
-        let codex = "\x1b[1m› \x1b[0m\x1b[2mAsk Codex to do anything\x1b[0m\n  GPT-6.1-Sol max · feat\n  ? for shortcuts   ⚠ 1 · f2\n";
-        assert_eq!(draft(codex), Draft::None);
-        // A truecolor argument of 2 is not dim.
-        assert_eq!(draft("\x1b[38;2;2;2;2m❯ typed\x1b[0m"), line("typed"));
+        // Seen live: codex's box, empty (dim placeholder) and with a draft.
+        let status = "\n\n  \x1b[0m\x1b[38;5;6mGPT-6.1-Sol medium\x1b[0m · \x1b[0m\x1b[38;5;2mvega\x1b[0m · \x1b[0m\x1b[38;5;6mReady\x1b[0m";
+        let codex = format!(
+            "\x1b[0m\x1b[1m› \x1b[0m\x1b[2mAsk Codex to do anything\x1b[0m{status}\n  \x1b[0m\x1b[1m? \x1b[0mfor shortcuts\n"
+        );
+        assert_eq!(draft(&codex), Draft::None);
         assert_eq!(
-            draft(&format!("❯ first\n  second\n\n{rule}")),
+            draft(&format!("\x1b[0m\x1b[1m› \x1b[0mhalf a sentence{status}")),
+            Draft::Opaque
+        );
+        assert_eq!(
+            draft(&format!("› codex\n  two lines{status}")),
+            Draft::Opaque
+        );
+        // A truecolor argument of 2 is not dim.
+        assert_eq!(
+            draft(&claude("\x1b[38;2;2;2;2m❯ typed\x1b[0m")),
+            line("typed")
+        );
+        assert_eq!(
+            draft(&format!("{rule}\n❯ first\n  second\n\n{rule}")),
             line("first\nsecond")
         );
-        assert_eq!(draft("❯ see [Pasted text #1 +20 lines]"), Draft::Opaque);
-        assert_eq!(draft("› codex\n  two lines"), Draft::Opaque);
+        assert_eq!(
+            draft(&claude("❯ see [Pasted text #1 +20 lines]")),
+            Draft::Opaque
+        );
         assert_eq!(draft("no prompt on screen"), Draft::Unknown);
     }
 
@@ -783,6 +807,10 @@ mod tests {
         for screen in [
             "╭──────╮\n│ > typing here │\n╰──────╯\n  esc to cancel",
             "user@host ~/src $ half a command",
+            // A bare glyph is no known box: an empty or typed shell prompt.
+            "~/src/vega main\n❯ ",
+            "~/src/vega main\n❯ half a command",
+            "› ",
             "",
         ] {
             assert_eq!(draft(screen), Draft::Unknown, "{screen:?}");

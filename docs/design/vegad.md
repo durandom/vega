@@ -72,8 +72,8 @@ Jobs, all in one process:
 
    **Draft guard (vega-lhc.194).** Before each pointer (also urgent and parent mail) vegad reads the
    pane's screen (`delivery::draft`): a pointer never joins text the user is typing. It knows three
-   input boxes: Claude Code (`❯`, under a rule), Codex (`›`, below the last rule) and pi (the box
-   between the last two rules, no glyph). A draft holds the pointer; one unchanged for 5 minutes is
+   input boxes: Claude Code (`❯` between two rules), Codex (`›` above its status line) and pi (the
+   box between the last two rules, no glyph); a bare glyph (a shell prompt) is no box. A draft holds the pointer; one unchanged for 5 minutes is
    stashed, cleared, the pointer typed and the draft typed back (a draft it cannot type back, such as
    a paste placeholder, a Codex draft or a multi-line pi draft, keeps holding and notifies the user
    once). A screen with no known box (another harness, a full-screen view) is never read as empty:
