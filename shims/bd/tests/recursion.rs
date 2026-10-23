@@ -68,7 +68,9 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let tmp = tempfile::tempdir().unwrap();
+        // Same filesystem as the test binary: the hardlink test fails with EXDEV when /tmp is
+        // a separate mount (GitHub runners).
+        let tmp = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let repo = tmp.path().join("embedded");
         fs::create_dir_all(repo.join(".beads")).unwrap();
         fs::write(
