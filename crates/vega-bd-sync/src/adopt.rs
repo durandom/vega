@@ -8,6 +8,7 @@
 //! Dolt's initial commit (just created, or never pushed to). A remote with
 //! any other history that is not part of the local one is refused.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -121,7 +122,7 @@ pub struct Pushed {
     pub head: String,
 }
 
-fn dolt(dolt: &Path, dir: &Path, args: &[&str], secs: u64) -> bd::Run {
+fn dolt<S: AsRef<OsStr>>(dolt: &Path, dir: &Path, args: &[S], secs: u64) -> bd::Run {
     let mut c = Command::new(dolt);
     c.current_dir(dir).args(args);
     run(c, Duration::from_secs(secs))
@@ -194,8 +195,14 @@ pub enum PushError {
 }
 
 /// Pushes `main` of the local repo to `url` by [`plan`]. The repo gets the
-/// temporary remote [`REMOTE`] and loses it again, whatever happens.
-pub fn push(dolt_bin: &Path, repo: &Path, url: &str) -> Result<Pushed, PushError> {
+/// temporary remote [`REMOTE`] and loses it again, whatever happens. `user`: see
+/// [`bd::remote_user`].
+pub fn push(
+    dolt_bin: &Path,
+    repo: &Path,
+    url: &str,
+    user: Option<&str>,
+) -> Result<Pushed, PushError> {
     let _ = dolt(dolt_bin, repo, &["remote", "remove", REMOTE], 30);
     let add = dolt(dolt_bin, repo, &["remote", "add", REMOTE, url], 30);
     if !add.ok {
@@ -204,13 +211,18 @@ pub fn push(dolt_bin: &Path, repo: &Path, url: &str) -> Result<Pushed, PushError
             last_line(&add.out)
         )));
     }
-    let result = push_added(dolt_bin, repo);
+    let result = push_added(dolt_bin, repo, user);
     let _ = dolt(dolt_bin, repo, &["remote", "remove", REMOTE], 30);
     result
 }
 
-fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
-    let fetch = dolt(dolt_bin, repo, &["fetch", REMOTE], 600);
+fn push_added(dolt_bin: &Path, repo: &Path, user: Option<&str>) -> Result<Pushed, PushError> {
+    let fetch = dolt(
+        dolt_bin,
+        repo,
+        &bd::remote_args(user, "fetch", &[REMOTE]),
+        600,
+    );
     if !fetch.ok {
         return Err(match bd::classify(&fetch) {
             bd::Outcome::Unreachable(m) => PushError::Unreachable(m),
@@ -219,7 +231,7 @@ fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
     }
     let h = heads(dolt_bin, repo).map_err(PushError::Failed)?;
     let p = plan(&h);
-    let args: &[&str] = match p {
+    let args: Vec<String> = match p {
         Plan::Present => {
             return Ok(Pushed {
                 plan: p,
@@ -231,10 +243,10 @@ fn push_added(dolt_bin: &Path, repo: &Path) -> Result<Pushed, PushError> {
                 remote_commits: h.remote_commits,
             })
         }
-        Plan::Push => &["push", REMOTE, "main"],
-        Plan::ForceOntoEmpty => &["push", "--force", REMOTE, "main"],
+        Plan::Push => bd::remote_args(user, "push", &[REMOTE, "main"]),
+        Plan::ForceOntoEmpty => bd::remote_args(user, "push", &["--force", REMOTE, "main"]),
     };
-    let r = dolt(dolt_bin, repo, args, 1800);
+    let r = dolt(dolt_bin, repo, &args, 1800);
     match bd::classify(&r) {
         bd::Outcome::Ok => Ok(Pushed {
             plan: p,
@@ -389,6 +401,32 @@ mod tests {
         }
     }
 
+    /// A fake dolt logs its argv: the fetch and the push both carry the user. Its database has
+    /// no remote main (the heads query fails), so the plan is a plain push.
+    #[test]
+    fn fetches_and_pushes_as_the_user() {
+        let t = tempfile::tempdir().unwrap();
+        let log = t.path().join("log");
+        let dolt_bin = testsrv::fake_dolt(
+            t.path(),
+            &format!(
+                "echo \"$*\" >>'{}'\n[ \"$1\" = sql ] || exit 0\n[ \"$5\" = \"select hashof('main') as h\" ] && echo '{{\"rows\":[{{\"h\":\"L\"}}]}}'",
+                log.display()
+            ),
+        );
+        let p = push(&dolt_bin, t.path(), "http://r/db", Some("goern")).unwrap();
+        assert_eq!(p.plan, Plan::Push);
+        let calls = fs::read_to_string(&log).unwrap();
+        assert!(
+            calls.contains("\nfetch --user goern vega-adopt\n"),
+            "{calls}"
+        );
+        assert!(
+            calls.contains("\npush --user goern vega-adopt main\n"),
+            "{calls}"
+        );
+    }
+
     /// Against a local sql-server with remotesapi: force onto a freshly
     /// created database, then a fast-forward, a no-op, and a refusal of
     /// foreign history.
@@ -408,13 +446,13 @@ mod tests {
 
         let a = t.path().join("a");
         repo(&dolt_bin, &a, 2);
-        let p = push(&dolt_bin, &a, &url).unwrap();
+        let p = push(&dolt_bin, &a, &url, None).unwrap();
         assert_eq!(p.plan, Plan::ForceOntoEmpty);
         assert_eq!(p.head, head(&dolt_bin, &a).unwrap());
         let r = dolt(&dolt_bin, &a, &["remote"], 10);
         assert!(!r.out.contains(REMOTE), "temporary remote left: {}", r.out);
 
-        assert_eq!(push(&dolt_bin, &a, &url).unwrap().plan, Plan::Present);
+        assert_eq!(push(&dolt_bin, &a, &url, None).unwrap().plan, Plan::Present);
         let r = dolt(
             &dolt_bin,
             &a,
@@ -424,29 +462,29 @@ mod tests {
         assert!(r.ok, "{}", r.out);
         let r = dolt(&dolt_bin, &a, &["commit", "-Am", "more"], 30);
         assert!(r.ok, "{}", r.out);
-        assert_eq!(push(&dolt_bin, &a, &url).unwrap().plan, Plan::Push);
+        assert_eq!(push(&dolt_bin, &a, &url, None).unwrap().plan, Plan::Push);
 
         // Another repo's history on the same database: refused, untouched.
         let b = t.path().join("b");
         repo(&dolt_bin, &b, 1);
         assert!(matches!(
-            push(&dolt_bin, &b, &url),
+            push(&dolt_bin, &b, &url, None),
             Err(PushError::Diverged { .. })
         ));
-        assert_eq!(push(&dolt_bin, &a, &url).unwrap().plan, Plan::Present);
+        assert_eq!(push(&dolt_bin, &a, &url, None).unwrap().plan, Plan::Present);
 
         // A database someone else pushed to (more than the initial commit).
         let other = format!("{}/OTHER", s.remote);
         assert_eq!(
-            push(&dolt_bin, &b, &other).unwrap().plan,
+            push(&dolt_bin, &b, &other, None).unwrap().plan,
             Plan::ForceOntoEmpty
         );
         assert!(matches!(
-            push(&dolt_bin, &a, &other),
+            push(&dolt_bin, &a, &other, None),
             Err(PushError::Diverged { .. })
         ));
         assert!(matches!(
-            push(&dolt_bin, &a, "http://127.0.0.1:1/X"),
+            push(&dolt_bin, &a, "http://127.0.0.1:1/X", None),
             Err(PushError::Unreachable(_))
         ));
     }

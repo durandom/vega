@@ -367,7 +367,7 @@ fn ensure_database(dolt: &Path, url: &str, database: &str) -> Result<bool, Failu
     let scratch = env::temp_dir().join(format!("vega-bd-probe-{}", std::process::id()));
     std::fs::create_dir_all(&scratch)
         .map_err(|e| Failure::new("probe_failed", e.to_string(), "check the temp dir"))?;
-    let probe = bd::probe(dolt, url, &scratch);
+    let probe = bd::probe(dolt, url, &scratch, bd::remote_user().as_deref());
     let created = match probe {
         Probe::Exists => Ok(false),
         Probe::Missing => create(dolt, database, &scratch).map(|()| true),
@@ -470,7 +470,7 @@ fn adopt_existing(
         let _ = run_bd(&p.bd_bin, &p.top, &["dolt", "stop"], 60);
     }
 
-    let pushed = adopt::push(&dolt, &l.repo, &p.url).map_err(|e| match e {
+    let pushed = adopt::push(&dolt, &l.repo, &p.url, bd::remote_user().as_deref()).map_err(|e| match e {
         PushError::Diverged { remote_commits } => Failure::new(
             "remote_diverged",
             format!(

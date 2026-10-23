@@ -21,6 +21,7 @@ run = [
   "sh scripts/vegad-refresh.test.sh",
   "sh scripts/readmes.test.sh",
   "sh scripts/inline-md.test.sh",
+  "sh scripts/install-vscode-ext.test.sh",
 ]
 
 [tasks.install-cli]
@@ -41,7 +42,8 @@ run = [
   "sh plugins/board/link-herdr.sh",
   # vega open's reveal/diff actions go through this extension's URI handler.
   "cd vscode && npm run -s package",
-  "code --install-extension vscode/dist/vega-vscode.vsix --force",
+  # Skips with a hint where `code` is not on PATH (e.g. WSL).
+  "sh scripts/install-vscode-ext.sh",
 ]
 
 [tasks.nats]

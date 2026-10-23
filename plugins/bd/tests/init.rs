@@ -60,7 +60,7 @@ fn init_missing_sql_endpoint_stops_before_credentials_or_sql() {
         .success());
     let dolt = bin.join("dolt");
     // The remote probe reports a missing database. SQL must never be invoked.
-    std::fs::write(&dolt, "#!/bin/sh\ncase \"$1\" in\ninit|remote) exit 0;;\nfetch) echo 'database not found'; exit 1;;\n*) touch \"$SQL_CALLED\"; exit 1;;\nesac\n").unwrap();
+    std::fs::write(&dolt, "#!/bin/sh\ncase \"$1\" in\ninit|remote) exit 0;;\nfetch) echo \"$*\" >\"$FETCH_ARGS\"; echo 'database not found'; exit 1;;\n*) touch \"$SQL_CALLED\"; exit 1;;\nesac\n").unwrap();
     std::fs::set_permissions(&dolt, std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = std::env::join_paths(
         std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
@@ -77,11 +77,16 @@ fn init_missing_sql_endpoint_stops_before_credentials_or_sql() {
         .env("VEGA_BD_REMOTE", "http://dolt.example:8080")
         .env_remove("VEGA_BD_SQL")
         .env("SQL_CALLED", tmp.path().join("sql-called"))
+        .env("FETCH_ARGS", tmp.path().join("fetch-args"))
+        .env("DOLT_REMOTE_USER", "goern")
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{out}");
     assert!(out.contains("sql_unconfigured"), "{out}");
     assert!(!tmp.path().join("sql-called").exists());
+    // The probe authenticates as DOLT_REMOTE_USER (dolt itself would default to root).
+    let fetch = std::fs::read_to_string(tmp.path().join("fetch-args")).unwrap();
+    assert!(fetch.starts_with("fetch --user goern probe "), "{fetch}");
     assert!(!tmp.path().join("config/vega/secrets.toml").exists());
 }

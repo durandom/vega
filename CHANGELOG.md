@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 71 · 2026-10-23
+
+- feature: `vega bd init` (and `--adopt`) authenticate against a Dolt remote with a
+  named user: set `DOLT_REMOTE_USER` next to `DOLT_REMOTE_PASSWORD` and the remote
+  fetch and push pass `--user` (dolt itself defaults to `root`). See
+  [Beads sync](docs/design/beads-sync.md). Thanks to goern (Christoph Görn).
+- feature: `mise run install` no longer fails where the VS Code CLI `code` is not
+  on PATH (e.g. WSL): it skips the extension with a hint to install
+  `vscode/dist/vega-vscode.vsix` by hand. Thanks to goern (Christoph Görn).
+
 ## 70 · 2026-10-23
 
 - feature: vegad's draft guard knows pi's input box: a pointer no longer joins
