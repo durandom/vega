@@ -241,29 +241,27 @@ pub enum Probe {
     Unknown(String),
 }
 
-/// Arguments for a `dolt` subcommand that talks to a remote: `--user $DOLT_REMOTE_USER` when set
-/// (dolt only reads the password, `DOLT_REMOTE_PASSWORD`, from the environment and defaults the
-/// user to `root`), then `rest`. Unit tests never read the variable: their local servers only
-/// know `root`, whatever the caller's remote user is, and clearing it would race other tests.
-pub fn remote_args(sub: &str, rest: &[&str]) -> Vec<String> {
-    let user = if cfg!(test) {
-        None
-    } else {
-        std::env::var("DOLT_REMOTE_USER").ok()
-    };
-    remote_args_for(user.as_deref(), sub, rest)
+/// The user for dolt remote calls, `DOLT_REMOTE_USER` when set: dolt only reads the password,
+/// `DOLT_REMOTE_PASSWORD`, from the environment and defaults the user to `root`.
+pub fn remote_user() -> Option<String> {
+    std::env::var("DOLT_REMOTE_USER")
+        .ok()
+        .filter(|u| !u.is_empty())
 }
 
-fn remote_args_for(user: Option<&str>, sub: &str, rest: &[&str]) -> Vec<String> {
+/// Arguments for a `dolt` subcommand that talks to a remote: `--user <user>` when given, then
+/// `rest`.
+pub fn remote_args(user: Option<&str>, sub: &str, rest: &[&str]) -> Vec<String> {
     let mut a = vec![sub.to_string()];
-    if let Some(u) = user.filter(|u| !u.is_empty()) {
+    if let Some(u) = user {
         a.extend(["--user".to_string(), u.to_string()]);
     }
     a.extend(rest.iter().map(|r| r.to_string()));
     a
 }
 
-pub fn probe(dolt: &Path, url: &str, scratch: &Path) -> Probe {
+/// `user`: see [`remote_user`].
+pub fn probe(dolt: &Path, url: &str, scratch: &Path, user: Option<&str>) -> Probe {
     let init = {
         let mut c = Command::new(dolt);
         c.current_dir(scratch)
@@ -282,6 +280,7 @@ pub fn probe(dolt: &Path, url: &str, scratch: &Path) -> Probe {
     }
     let mut fetch = Command::new(dolt);
     fetch.current_dir(scratch).args(remote_args(
+        user,
         "fetch",
         &[
             "probe",
@@ -377,6 +376,7 @@ pub fn create_result(r: &Run) -> Create {
 #[cfg(test)]
 pub(crate) mod testsrv {
     use super::run;
+    use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
     use std::thread;
@@ -389,6 +389,29 @@ pub(crate) mod testsrv {
                 .map(|d| d.join("dolt"))
                 .find(|p| p.is_file())
         })
+    }
+
+    /// An executable `dolt` script in `dir` running `body`. It is run once before it is
+    /// returned, retrying ETXTBSY: a fork in a parallel test may still hold the write fd.
+    pub fn fake_dolt(dir: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join("dolt");
+        fs::write(
+            &p,
+            format!("#!/bin/sh\n[ \"$1\" = --warmup ] && exit 0\n{body}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        for _ in 0..50 {
+            match Command::new(&p).arg("--warmup").status() {
+                Err(e) if e.raw_os_error() == Some(26) => thread::sleep(Duration::from_millis(20)),
+                r => {
+                    assert!(r.unwrap().success());
+                    return p;
+                }
+            }
+        }
+        panic!("{}: ETXTBSY", p.display());
     }
 
     /// A local dolt sql-server with remotesapi, killed on drop.
@@ -470,6 +493,7 @@ pub(crate) mod testsrv {
 mod tests {
     use super::testsrv;
     use super::*;
+    use std::fs;
 
     fn failed(out: &str) -> Run {
         Run {
@@ -570,18 +594,29 @@ mod tests {
     }
 
     #[test]
-    fn remote_args_add_the_user_only_when_set() {
+    fn remote_args_add_the_user_only_when_given() {
+        assert_eq!(remote_args(None, "fetch", &["probe"]), ["fetch", "probe"]);
         assert_eq!(
-            remote_args_for(None, "fetch", &["probe"]),
-            ["fetch", "probe"]
-        );
-        assert_eq!(
-            remote_args_for(Some(""), "fetch", &["probe"]),
-            ["fetch", "probe"]
-        );
-        assert_eq!(
-            remote_args_for(Some("goern"), "push", &["--force", "r", "main"]),
+            remote_args(Some("goern"), "push", &["--force", "r", "main"]),
             ["push", "--user", "goern", "--force", "r", "main"]
+        );
+    }
+
+    #[test]
+    fn probe_fetches_as_the_user() {
+        let t = tempfile::tempdir().unwrap();
+        let log = t.path().join("log");
+        let dolt = testsrv::fake_dolt(t.path(), &format!("echo \"$*\" >>'{}'", log.display()));
+        let scratch = t.path().join("scratch");
+        fs::create_dir_all(&scratch).unwrap();
+        assert_eq!(
+            probe(&dolt, "http://r/db", &scratch, Some("goern")),
+            Probe::Exists
+        );
+        let calls = fs::read_to_string(&log).unwrap();
+        assert!(
+            calls.contains("fetch --user goern probe refs/heads/vega-probe-none:"),
+            "{calls}"
         );
     }
 
@@ -669,7 +704,7 @@ mod tests {
         let probe_in = |name: &str| {
             let d = tmp.path().join(name);
             std::fs::create_dir_all(&d).unwrap();
-            probe(&dolt, &url, &d)
+            probe(&dolt, &url, &d, None)
         };
         assert_eq!(probe_in("p1"), Probe::Missing);
         let create = |pw: &str| create_database(&dolt, &s.sql, "vega", pw, database, tmp.path());
