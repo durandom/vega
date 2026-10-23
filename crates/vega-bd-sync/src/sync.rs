@@ -45,7 +45,10 @@ pub struct Bd {
 impl Ops for Bd {
     fn pull(&mut self, p: &Project) -> Outcome {
         let mut c = bd::bd(p, &self.actor);
-        c.args(["dolt", "pull"]);
+        match bd::pull_sql(bd::remote_user().as_deref()) {
+            Some(sql) => c.args(["sql", &sql]),
+            None => c.args(["dolt", "pull"]),
+        };
         bd::classify(&bd::run(c, NET_LIMIT))
     }
 
@@ -57,7 +60,7 @@ impl Ops for Bd {
 
     fn fast_forward(&mut self, p: &Project) -> Outcome {
         let mut c = bd::bd(p, &self.actor);
-        c.args(["sql", bd::FAST_FORWARD_SQL]);
+        c.args(["sql", &bd::fast_forward_sql(bd::remote_user().as_deref())]);
         bd::classify(&bd::run(c, NET_LIMIT))
     }
 
