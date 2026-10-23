@@ -493,7 +493,7 @@ const PROMPTS: [char; 2] = ['❯', '›'];
 /// --format ansi`): a pointer would join it and submit it.
 #[derive(Debug, PartialEq)]
 pub enum Draft {
-    /// Empty input, or no input box on screen.
+    /// An empty input box.
     None,
     /// Text the relay can stash and type back: lines joined with `\n` (a
     /// soft wrap reads as a line break, which keeps the words).
@@ -501,20 +501,78 @@ pub enum Draft {
     /// Text the screen does not hold faithfully: a paste or image
     /// placeholder, or several lines outside Claude Code.
     Opaque,
+    /// No input box this parser knows (another harness, a full-screen
+    /// view): the user may be typing, so it is never read as empty.
+    Unknown,
 }
 
-/// The last line that starts with a prompt glyph is the input line; the box
-/// ends at the next rule (`─`), continuation lines are indented two
-/// columns. Dim text is the agent's suggestion, not the user's.
+/// Claude Code and Codex: the last line that starts with a prompt glyph is
+/// the input line (Claude's sits right under a rule, Codex's below the last
+/// one). pi: the box between the last two rules (`─`), without a glyph
+/// (pi-tui's editor); a glyph elsewhere is transcript. Any other screen is
+/// `Unknown`.
 pub fn draft(screen: &str) -> Draft {
     let lines: Vec<&str> = screen.lines().collect();
-    let Some(at) = lines
+    let rule = |i: usize| is_rule(&plain(lines[i], true));
+    let prompt = lines
         .iter()
-        .rposition(|l| plain(l, true).trim_start().starts_with(PROMPTS))
-    else {
+        .rposition(|l| plain(l, true).trim_start().starts_with(PROMPTS));
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| rule(i)).collect();
+    if let Some(at) = prompt {
+        if rules.last().is_none_or(|&r| at > r) || (at > 0 && rule(at - 1)) {
+            return prompt_draft(&lines[at..]);
+        }
+    }
+    match rules[..] {
+        [.., top, bottom] => pi_draft(&lines[top..=bottom]),
+        _ => match prompt {
+            Some(at) => prompt_draft(&lines[at..]),
+            None => Draft::Unknown,
+        },
+    }
+}
+
+/// A full-width rule: only `─`, or pi's scroll indicator (`─── ↑ 3 more ─`).
+fn is_rule(line: &str) -> bool {
+    let l = line.trim();
+    l.starts_with("───") && l.ends_with('─')
+}
+
+/// The box from its top to its bottom rule. pi's draft is restored only as
+/// one line: ctrl+c clears its editor, but twice within 0.5 s quits pi, and
+/// a soft wrap cannot be told from a line break.
+fn pi_draft(boxed: &[&str]) -> Draft {
+    let (top, bottom) = (plain(boxed[0], true), plain(boxed[boxed.len() - 1], true));
+    let mut text: Vec<String> = boxed[1..boxed.len() - 1]
+        .iter()
+        .map(|l| plain(l, false).trim_end().to_string())
+        .collect();
+    while text.last().is_some_and(|l| l.trim().is_empty()) {
+        text.pop();
+    }
+    while text.first().is_some_and(|l| l.trim().is_empty()) {
+        text.remove(0);
+    }
+    if text.is_empty() {
         return Draft::None;
-    };
-    let first = plain(lines[at], false);
+    }
+    let text = text.join("\n");
+    if text.contains('\n')
+        || text.contains("[paste #")
+        || top.contains(" more ")
+        || bottom.contains(" more ")
+    {
+        Draft::Opaque
+    } else {
+        Draft::Text(text)
+    }
+}
+
+/// From the prompt line on: the box ends at the next rule (`─`),
+/// continuation lines are indented two columns. Dim text is the agent's
+/// suggestion, not the user's.
+fn prompt_draft(lines: &[&str]) -> Draft {
+    let first = plain(lines[0], false);
     let first = first.trim_start();
     let claude = first.starts_with('❯');
     let first = first
@@ -532,7 +590,7 @@ pub fn draft(screen: &str) -> Draft {
     }
     let mut text: Vec<String> = vec![first.trim_end().to_string()];
     text.extend(
-        lines[at + 1..]
+        lines[1..]
             .iter()
             .map(|l| plain(l, false))
             .take_while(|l| !l.trim_start().starts_with('─'))
@@ -544,10 +602,7 @@ pub fn draft(screen: &str) -> Draft {
     let text = text.join("\n");
     if text.trim().is_empty() {
         Draft::None
-    } else if text.contains("[Pasted text #")
-        || text.contains("[Image #")
-        || (text.contains('\n') && !claude)
-    {
+    } else if text.contains("[Pasted text #") || text.contains("[Image #") {
         Draft::Opaque
     } else {
         Draft::Text(text)
@@ -678,7 +733,60 @@ mod tests {
         );
         assert_eq!(draft("❯ see [Pasted text #1 +20 lines]"), Draft::Opaque);
         assert_eq!(draft("› codex\n  two lines"), Draft::Opaque);
-        assert_eq!(draft("no prompt on screen"), Draft::None);
+        assert_eq!(draft("no prompt on screen"), Draft::Unknown);
+    }
+
+    /// pi's screen as `pane read --format ansi` shows it (seen live, rules
+    /// shortened): transcript, a separator, the editor box, the footer.
+    fn pi(boxed: &str) -> String {
+        let rule = |c: &str| format!("\x1b[0m\x1b[38;2;{c}m────────────\x1b[0m");
+        let foot = "\x1b[0m\x1b[38;2;127;132;156m";
+        format!(
+            "Welcome to pi\n - pi-subagents\n{}\n\n{}\n{boxed}\n{}\n\
+             {foot}~/src/vega (main)\x1b[0m\n\
+             {foot}$0.000 (sub) 0.0%/500k (auto)   (xai) grok-4.7 • medium\x1b[0m\n\
+             {foot}◆ \x1b[0m\x1b[38;2;166;173;200m1 checkpoint\x1b[0m",
+            rule("249;226;175"),
+            rule("148;226;213"),
+            rule("148;226;213"),
+        )
+    }
+
+    #[test]
+    fn pi_draft_is_the_text_in_its_editor_box() {
+        let cursor = "\x1b[0m\x1b[7m \x1b[0m";
+        assert_eq!(draft(&pi(&format!("{cursor}            "))), Draft::None);
+        assert_eq!(
+            draft(&pi(&format!("half a sentence{cursor}      "))),
+            Draft::Text("half a sentence".into())
+        );
+        // Several lines (or one soft-wrapped): not restorable, held.
+        assert_eq!(
+            draft(&pi(&format!("half a sentence   \nsecond line{cursor}  "))),
+            Draft::Opaque
+        );
+        assert_eq!(draft(&pi("see [paste #1 +20 lines]")), Draft::Opaque);
+        // A Claude prompt in pi's transcript is not the input line.
+        let quoted = pi(&format!("my draft{cursor}")).replace(
+            "Welcome to pi",
+            "\x1b[38;2;153;153;153m❯\u{a0}\x1b[0mquoted claude screen",
+        );
+        assert_eq!(draft(&quoted), Draft::Text("my draft".into()));
+        // Scrolled: lines above the box are hidden.
+        let scrolled = pi("last line").replacen("────────────", "─── ↑ 3 more ───", 2);
+        assert_eq!(draft(&scrolled), Draft::Opaque);
+    }
+
+    #[test]
+    fn unknown_harness_screen_is_never_empty() {
+        // A box drawn without rules, a bare shell prompt, nothing at all.
+        for screen in [
+            "╭──────╮\n│ > typing here │\n╰──────╯\n  esc to cancel",
+            "user@host ~/src $ half a command",
+            "",
+        ] {
+            assert_eq!(draft(screen), Draft::Unknown, "{screen:?}");
+        }
     }
 
     fn d(status: &str) -> Delivery {

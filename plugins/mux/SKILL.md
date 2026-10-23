@@ -12,7 +12,8 @@ Help: `--help`.
 - `vega mux transcript <pane|name> [--last|--since N|--count]` reads its session log: the
   evidence of what it said, unlike `show`.
 - `vega mux send <pane|name> "<text>"` (or `--file <path>`) mails it; the reply arrives
-  as a new prompt (do not poll). `--now` pastes it at once (urgent only).
+  as a new prompt (do not poll). `--now` pastes at once (urgent; no draft
+  guard).
 - `vega mux dialog <pane|name> [--json]` classifies a visible dialog; exit 1 means none.
 - `vega mux answer <target> --option N | --text "…"` answers questions only; trust/permission stay
   with the Slayer.

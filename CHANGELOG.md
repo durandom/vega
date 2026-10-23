@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 70 · 2026-10-23
+
+- feature: vegad's draft guard knows pi's input box: a pointer no longer joins
+  text you are typing in pi (it waits, and a single-line draft left 5 minutes is
+  stashed and typed back). A screen without a known input box (another harness)
+  now holds the pointer until it has been unchanged for 20 s instead of typing at
+  once. `vega mux send --now` still pastes directly. See
+  [Draft guard](docs/design/vegad.md). Takes effect after the vegad upgrade.
+
 ## 69 · 2026-10-23
 
 - feature: `vega mux spawn --kind codex` also sets `HERDR_PANE_ID` (and a local

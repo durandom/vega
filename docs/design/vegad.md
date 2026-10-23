@@ -69,6 +69,19 @@ Jobs, all in one process:
    last pointer was typed 5 minutes ago and is still unread gets one more pointer when the agent
    is `idle` or `done`, at most once per 5 minutes; the log marks it `again`. It also catches
    aborts vegad does not detect (a child that reported earlier, a pane that is no child).
+
+   **Draft guard (vega-lhc.194).** Before each pointer (also urgent and parent mail) vegad reads the
+   pane's screen (`delivery::draft`): a pointer never joins text the user is typing. It knows three
+   input boxes: Claude Code (`❯`, under a rule), Codex (`›`, below the last rule) and pi (the box
+   between the last two rules, no glyph). A draft holds the pointer; one unchanged for 5 minutes is
+   stashed, cleared, the pointer typed and the draft typed back (a draft it cannot type back, such as
+   a paste placeholder, a Codex draft or a multi-line pi draft, keeps holding and notifies the user
+   once). A screen with no known box (another harness, a full-screen view) is never read as empty:
+   the pointer waits until the screen has not changed for 20 s (the user is not typing); one that
+   keeps changing for 5 minutes notifies the user once and keeps holding. Residual risk: a draft
+   left untouched for 20 s in an unknown harness is joined. Not guarded, by design: `vega mux send
+   --now` and its fallbacks (no relay, local mode, broker away) paste directly with `herdr agent
+   prompt`.
 3. **Gather.** `vega post ask <targets...> --fields task,branch,bead,blockers` sends one question
    with a correlation id. vegad wakes the asker once: when all answered, or at the deadline.
    `vega post inbox --re <id>` returns one table.
