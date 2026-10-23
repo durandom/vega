@@ -1,0 +1,5 @@
+[tool]
+requirements = [{ name = "lanista", git = "https://github.com/b4arena/lanista?rev=main" }]
+entrypoints = [
+    { name = "lanista", install-path = "/Users/mhild/.local/bin/lanista", from = "lanista" },
+]

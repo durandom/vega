@@ -1,0 +1,4 @@
+# `cargo install --root .` output (herdr runs ./bin/vega-board), see herdr-plugin.toml.
+/bin
+/.crates.toml
+/.crates2.json

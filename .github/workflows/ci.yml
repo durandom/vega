@@ -1,0 +1,68 @@
+# Linux CI: the steps of `mise run check` (mise.toml [tasks.check]); keep both in sync.
+# Rust comes from rust-toolchain.toml, nats-server from the mise [tools] pin: the
+# vega post tests start a local broker. Tests that need live forges or an
+# installed bd are #[ignore]d in the code and stay skipped here.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TEST_THREADS: 1
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          install_args: gitleaks
+      - name: Scan full history (including PR history)
+        run: gitleaks git --config .gitleaks.toml --log-opts=--all --redact --exit-code 1
+      - name: Prove the scanner rejects a secret removed from HEAD
+        run: sh scripts/gitleaks.test.sh
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          install_args: nats-server
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Test git identity
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+      - name: cargo fmt
+        run: nice cargo fmt --all --check
+      - name: cargo clippy
+        run: nice cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: nice cargo test --workspace
+      - name: vscode tests
+        working-directory: vscode
+        run: node --test
+      - name: shell tests
+        run: |
+          sh githooks/wt-guard.test.sh
+          sh shims/activate.test.sh
+          sh scripts/vegad-refresh.test.sh
+          sh scripts/readmes.test.sh
+          sh scripts/inline-md.test.sh

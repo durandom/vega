@@ -1,0 +1,15 @@
+[package]
+name = "vega-theme-sync"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "OS dark/light mode to every TUI: preferences, applied state, per-tool adapters and the watcher logic vegad runs"
+publish = false
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+toml_edit = "0.25"
+vega-herdr = { path = "../vega-herdr" }
+
+[dev-dependencies]
+tempfile = "3"

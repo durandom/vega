@@ -1,0 +1,31 @@
+[package]
+name = "vega-gate"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "LLM review before an agent's push: segments, diff keys, reviewer tab, verdict, records in beads"
+publish = false
+
+[lib]
+name = "vega_gate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vega-gate"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+vega-shim = { path = "../../crates/vega-shim" }
+vega-transcript = { path = "../../crates/vega-transcript" }
+serde_json = "1"
+sha2 = "0.10"
+toml_edit = "0.25"
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

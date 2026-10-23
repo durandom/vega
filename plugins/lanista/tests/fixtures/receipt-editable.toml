@@ -1,0 +1,5 @@
+[tool]
+requirements = [{ name = "lanista", editable = "/Users/mhild/src/durandom/lanista" }]
+entrypoints = [
+    { name = "lanista", install-path = "/Users/mhild/.local/bin/lanista", from = "lanista" },
+]

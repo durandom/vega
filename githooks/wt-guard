@@ -1,0 +1,60 @@
+#!/bin/sh
+# Git post-checkout hook: warns when a worktree is created without wt.
+#
+# A repo with a worktrunk config (.config/wt.toml) runs setup in its
+# pre-start/post-start hooks (spellkave: pnpm install, cargo fetch). Plain
+# `git worktree add`, `herdr worktree create` or an agent harness's own
+# worktree skip them, and commit hooks fail later. This hook catches every
+# such path at the moment the worktree is made and prints the fix on stderr.
+#
+# Installed as a config-based hook (git >= 2.54, scripts/install-cli.sh), so
+# it runs next to core.hooksPath and repo hooks. It never changes stdout or
+# the exit code of the git command: it always exits 0.
+#
+# Escape: VEGA_WT_GUARD=0
+# Test:   githooks/wt-guard.test.sh
+
+null=0000000000000000000000000000000000000000
+
+# post-checkout args: <prev HEAD> <new HEAD> <1 = branch checkout>.
+# A null prev HEAD means a fresh checkout: clone or worktree add.
+[ "${1:-}" = "$null" ] && [ "${3:-}" = 1 ] || exit 0
+[ "${VEGA_WT_GUARD:-}" = 0 ] && exit 0
+
+# Clone checks out the main worktree; only linked worktrees count.
+git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+common_dir=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) || exit 0
+[ "$(cd "$git_dir" && pwd -P)" != "$common_dir" ] || exit 0
+
+# Git runs the hook in the new worktree.
+config=.config/wt.toml
+[ -f "$config" ] || exit 0
+# A table ([post-start]) or a single command (post-start = "...").
+hooks=$(grep -E '^[[:space:]]*(\[(pre|post)-start\]|(pre|post)-start[[:space:]]*=)' "$config" |
+	grep -oE '(pre|post)-start' | sort -u)
+[ -n "$hooks" ] || exit 0
+
+# Made by wt (directly or via vega mux / herdr's worktrunk plugin): fine.
+pid=$PPID
+depth=0
+while [ "$depth" -lt 8 ] && [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; do
+	comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
+	# Not basename: a login shell's comm is "-zsh".
+	[ "${comm##*/}" = wt ] && exit 0
+	pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+	depth=$((depth + 1))
+done
+
+path=$(pwd -P)
+branch=$(git symbolic-ref --short -q HEAD 2>/dev/null) || branch="<branch>"
+run=""
+for h in $hooks; do
+	run="${run:+$run && }wt -C $path hook $h"
+done
+
+{
+	echo "hint: this worktree was made without wt, so the repo's wt hooks ($config: $(echo $hooks | tr ' ' ',')) did not run (setup is missing)."
+	echo "hint: run them now: $run"
+	echo "hint: next time: wt switch --create $branch (or vega mux spawn --worktree $branch)"
+} >&2
+exit 0

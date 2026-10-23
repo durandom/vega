@@ -1,0 +1,33 @@
+[package]
+name = "vega-onboard"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Onboarding and upgrades: the infra vega needs on this host, the defaults to apply, what changed since the last look"
+publish = false
+
+[lib]
+name = "vega_onboard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vega-onboard"
+path = "src/main.rs"
+
+[[bin]]
+name = "vega-upgrade"
+path = "src/upgrade_main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+vega-config = { path = "../config" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

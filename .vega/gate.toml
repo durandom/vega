@@ -1,0 +1,25 @@
+# vega gate: which rubric reviews which paths before an agent pushes.
+# Read from the push target (origin/main), never from the pushed branch. Design: docs/design/gate.md
+# Active in agent sessions once the git shim (shims/git) is installed.
+
+timeout = "20m"
+tier = "budget"
+reviewers = ["codex", "pi:xai/grok-4.7", "pi:zai/glm-5.3", "claude:claude/claude-sonnet-5-5"]
+
+[[review]]
+name = "vega"
+paths = [
+  "crates/**",
+  "plugins/**",
+  "shims/**",
+  "scripts/**",
+  "githooks/**",
+  "config/**",
+  "vega/**",
+  "Cargo.toml",
+  "mise.toml",
+  "CHANGELOG.md",
+  "docs/**",
+]
+exclude = ["**/fixtures/**", "**/testdata/**"]
+rubric = ".agents/skills/vega-gate-rubric"

@@ -1,0 +1,39 @@
+# herdr plugin manifest for `vega open`.
+#
+# Commands run ./bin/vega-open relative to this directory, so the herdr
+# server's PATH does not matter. `plugin install` runs the [[build]] step;
+# `plugin link` does not, so build by hand first:
+#   cargo install --locked --path plugins/open --root plugins/open
+#   herdr plugin link plugins/open
+#
+# Bind the action in ~/.config/herdr/config.toml:
+#   [[keys.command]]
+#   key = "prefix+l"
+#   type = "plugin_action"
+#   command = "vega.open.selection"
+
+id = "vega.open"
+name = "vega open"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Open the selection, the workspace or the git diff from a pane, VS Code first"
+platforms = ["macos"]
+
+# Requires cargo. Writes bin/vega-open (plus cargo's .crates*.toml), all
+# gitignored; honours CARGO_TARGET_DIR for incremental rebuilds.
+[[build]]
+command = ["cargo", "install", "--quiet", "--locked", "--path", ".", "--root", "."]
+
+[[actions]]
+id = "selection"
+title = "vega open"
+description = "Menu: open the selection, the workspace or the git diff in VS Code (and friends)."
+command = ["./bin/vega-open", "action"]
+
+[[panes]]
+id = "menu"
+title = "vega open"
+placement = "popup"
+width = 72
+height = 13
+command = ["./bin/vega-open", "menu"]

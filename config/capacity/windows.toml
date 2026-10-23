@@ -1,0 +1,25 @@
+# Window scopes for vega capacity (docs/design/capacity.md "Window scopes").
+#
+# Every window a source reports is account-wide unless it is listed here.
+# Account windows bind: per provider, the one with the least left is the
+# window the spawn warning and `vega uac status` read. A model-scoped window
+# limits one model only: `vega capacity` shows it, it never binds.
+#
+#   [<provider>]
+#   <window> = "account" | "model:<name>"
+#
+# Names are the source's (token-burn's `Provider` and `WindowName`). Override
+# locally: `vega config init capacity/windows.toml`, then edit
+# ~/.config/vega/config/capacity/windows.toml (the whole file replaces this one).
+
+[claude]
+seven_day_fable = "model:fable"
+seven_day_opus = "model:opus"
+seven_day_sonnet = "model:sonnet"
+# Allowances of other Claude surfaces, not of the coding agents' lanes.
+seven_day_cowork = "model:cowork"
+seven_day_oauth_apps = "model:oauth_apps"
+
+[codex]
+additional_codex_bengalfox_primary = "model:bengalfox"
+additional_codex_bengalfox_secondary = "model:bengalfox"

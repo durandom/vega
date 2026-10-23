@@ -1,0 +1,7 @@
+[package]
+name = "vega-build"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Build-script helper: stamps every vega binary with its git commit and release/dev status"
+publish = false

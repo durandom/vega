@@ -1,0 +1,161 @@
+[
+  {
+    "provider": "antigravity",
+    "account_id": "antigravity-default",
+    "window_name": "claude_and_gpt",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 715,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "antigravity",
+    "account_id": "antigravity-default",
+    "window_name": "claude_and_gpt_weekly",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "antigravity",
+    "account_id": "antigravity-default",
+    "window_name": "gemini",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 715,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "antigravity",
+    "account_id": "antigravity-default",
+    "window_name": "gemini_weekly",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 475,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T17:18:45.173789Z"
+  },
+  {
+    "provider": "claude",
+    "account_id": "claude-default",
+    "window_name": "five_hour",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 184,
+    "burn_rate_percent_per_hour": 1.140694616044971,
+    "estimated_90_at": "2026-10-13T02:17:19.088283666Z",
+    "estimated_100_at": "2026-10-13T11:03:18.805927306Z",
+    "confidence": 0.4131127928056,
+    "stable_window_observed_from": "2026-10-10T01:35:45.190256Z"
+  },
+  {
+    "provider": "claude",
+    "account_id": "claude-default",
+    "window_name": "seven_day",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0.9261836779463269,
+    "estimated_90_at": "2026-10-13T05:50:34.90355225Z",
+    "estimated_100_at": "2026-10-13T16:38:24.083453827Z",
+    "confidence": 0.9259836037217144,
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "claude",
+    "account_id": "claude-default",
+    "window_name": "seven_day_fable",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0.007218495636543373,
+    "estimated_90_at": "2028-02-18T17:30:08.209586104Z",
+    "estimated_100_at": "2028-04-16T10:49:56.927655176Z",
+    "confidence": 0.07335580367824013,
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "codex",
+    "account_id": "codex-default",
+    "window_name": "primary",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0.4649398717894419,
+    "estimated_90_at": "2026-10-16T14:13:10.803708145Z",
+    "estimated_100_at": "2026-10-17T11:43:40.17078188Z",
+    "confidence": 0.9539426130983318,
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "copilot",
+    "account_id": "copilot-default",
+    "window_name": "chat",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "copilot",
+    "account_id": "copilot-default",
+    "window_name": "completions",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "copilot",
+    "account_id": "copilot-default",
+    "window_name": "premium_interactions",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0.015950012098921773,
+    "estimated_90_at": "2027-06-01T15:28:57.90179214Z",
+    "estimated_100_at": "2027-06-27T18:26:29.481234744Z",
+    "confidence": 0.5225376164326121,
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "xai",
+    "account_id": "xai-default",
+    "window_name": "weekly",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "zai",
+    "account_id": "zai-default",
+    "window_name": "5h",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 715,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 1,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  },
+  {
+    "provider": "zai",
+    "account_id": "zai-default",
+    "window_name": "weekly",
+    "computed_at": "2026-10-10T07:40:13.847265Z",
+    "sample_count": 714,
+    "burn_rate_percent_per_hour": 0,
+    "confidence": 0,
+    "insufficient_data_reason": "flat_usage",
+    "stable_window_observed_from": "2026-10-09T12:19:45.101813Z"
+  }
+]

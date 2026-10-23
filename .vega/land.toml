@@ -1,0 +1,6 @@
+# Stable landing policy; incoming branches cannot change their own landing.
+strategy = "no-ff"
+remote = "origin"
+target = "main"
+check = ["nice", "mise", "run", "check"]
+install = ["mise", "run", "install-cli"]

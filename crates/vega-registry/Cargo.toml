@@ -1,0 +1,18 @@
+[package]
+name = "vega-registry"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Cross-machine registry of vega agents, lineage and UACs in NATS KV (local state stays the truth)"
+publish = false
+
+[dependencies]
+async-nats = "0.50"
+futures-util = "0.3"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+vega-herdr = { path = "../vega-herdr" }
+
+[dev-dependencies]
+tempfile = "3"

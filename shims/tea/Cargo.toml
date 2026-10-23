@@ -1,0 +1,17 @@
+[package]
+name = "tea-shim"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent-session shim for tea: passthrough, hints at vega ci, counts calls per pane"
+publish = false
+
+[[bin]]
+name = "tea"
+path = "src/main.rs"
+
+[dependencies]
+vega-shim = { path = "../../crates/vega-shim" }
+
+[dev-dependencies]
+tempfile = "3"

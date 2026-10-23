@@ -1,0 +1,195 @@
+# herdr's ~/.config/herdr/config.toml, rendered by `vega config` (unit herdr,
+# plugins/config/src/herdr.rs, docs/design/config.md). Edit the source, not
+# the rendered file: ~/.config/vega/config/herdr/config.toml when it exists
+# (`vega config init herdr/config.toml`), else the repo's config/herdr/.
+# `vega config apply herdr` (and `vega deploy apply`) write it after
+# `herdr config check` accepts it.
+#
+# Double-brace placeholders come from ~/.config/vega/theme.toml ([symbols.colors],
+# [symbols.hosts], [symbols.host_colors], the sentinel and agent kind icons) or from vega's
+# fixed sidebar colours; each renders to a complete TOML value.
+# Keys herdr writes back itself (ui.agent_panel_sort) keep their live value;
+# the value here is the default for a host without one.
+
+onboarding = false
+
+[theme]
+name = "catppuccin-latte"
+auto_switch = true
+light_name = "catppuccin-latte"
+dark_name = "catppuccin"
+
+# The Catppuccin default active_row_bg nearly matches the background, so the
+# selected sidebar row was only visible as bold text. Use surface1 instead.
+[theme.custom.light]
+active_row_bg = "#bcc0cc"   # Latte surface1
+
+[theme.custom.dark]
+active_row_bg = "#45475a"   # Mocha surface1
+
+[ui]
+pane_borders = true
+pane_gaps = true
+# Owned by herdr: toggling the sidebar sort in the UI rewrites it, and
+# `vega theme herdr` keeps the live value.
+agent_panel_sort = "priority"
+show_agent_labels_on_pane_borders = true
+
+[keys]
+prefix = "ctrl+s"
+# Pane focus on the arrows instead of herdr's vim-style prefix+h/j/k/l
+# defaults; that frees h/j/k/l for our own bindings (prefix+l: vega open).
+focus_pane_left = "prefix+left"
+focus_pane_down = "prefix+down"
+focus_pane_up = "prefix+up"
+focus_pane_right = "prefix+right"
+# Swap follows focus: shift+arrows instead of the prefix+shift+h/j/k/l defaults.
+swap_pane_left = "prefix+shift+left"
+swap_pane_down = "prefix+shift+down"
+swap_pane_up = "prefix+shift+up"
+swap_pane_right = "prefix+shift+right"
+# tmux-style last-session toggle; prefix+shift+l is free since swap moved to arrows.
+last_pane = "prefix+shift+l"
+
+# Override herdr's built-in "new worktree" key (prefix+shift+g) with worktrunk's
+# default-branch switch/create picker:
+[[keys.command]]
+key = "prefix+shift+g"
+type = "plugin_action"
+command = "worktrunk.open"
+description = "Worktree: switch / create from default branch"
+
+# Optional: bind current-branch creation separately.
+[[keys.command]]
+key = "prefix+shift+c"
+type = "plugin_action"
+command = "worktrunk.open-current"
+description = "Worktree: switch / create from current branch"
+
+[[keys.command]]              # open in a split beside your work
+key = "prefix+f"
+type = "shell"
+command = "\"$HERDR_BIN_PATH\" plugin action invoke open-file-viewer --plugin herdr-file-viewer"
+
+[[keys.command]]              # …or in its own tab
+key = "prefix+shift+f"
+type = "shell"
+command = "\"$HERDR_BIN_PATH\" plugin action invoke open-file-viewer-tab --plugin herdr-file-viewer"
+
+# tmux-style break-pane: pop the focused split out into its own tab,
+# keeping the rest of the current split intact.
+[[keys.command]]
+key = "prefix+!"
+type = "shell"
+command = "\"$HERDR_BIN_PATH\" pane move \"$HERDR_ACTIVE_PANE_ID\" --new-tab"
+description = "Pane: break into new tab"
+
+# vega open (plugins/open): menu to open the selection, the workspace or the
+# git diff, VS Code first. prefix+l is free because pane focus moved to the
+# arrows above.
+[[keys.command]]
+key = "prefix+l"
+type = "plugin_action"
+command = "vega.open.selection"
+description = "vega open: selection, workspace, git diff"
+
+# vega board (plugins/board): the UAC's open decisions in a docked split
+# (D: all beads, m: answer). prefix+b is herdr's sidebar toggle.
+[[keys.command]]
+key = "prefix+u"
+type = "plugin_action"
+command = "vega.board.toggle-dock"
+description = "vega board: UAC decisions (toggle dock)"
+
+[[keys.command]]                # …or floating (q closes it)
+key = "prefix+shift+u"
+type = "plugin_action"
+command = "vega.board.open-board"
+description = "vega board: UAC decisions (floating)"
+
+[ui.toast]
+# In-app toasts: prefix+o (open_notification_target) only works on a toast
+# herdr itself shows; "system" hands them to macOS and leaves prefix+o dead.
+delivery = "herdr"
+
+[ui.toast.herdr]
+position = "top-right"
+
+[ui.sound]
+# Silent: toasts and the sidebar carry the signal. Per agent instead:
+# [ui.sound.agents] claude = "on".
+enabled = false
+
+[ui.sidebar.agents]
+# vegad reports $host (planet + moon label, e.g. "♆₈" = proteus) on every
+# pane; it replaces the built-in "machine" token, which cannot carry an icon.
+# $project is the parent workspace for sentinels in worktree workspaces.
+# $kind is the agent kind's glyph (claude, codex, copilot, pi, other) on every
+# agent pane, UAC and sentinels included, in the kind's colour (a Nerd Font
+# glyph carries a U+2800 blank that keeps it one cell in Ghostty); $label is
+# the sentinel cog plus the tab, or the tab (else the kind) of a plain agent
+# (empty on UAC panes);
+# $uac, $notes, $decisions and $waiting appear only on the UAC pane.
+# docs/design/theme-symbols.md lists the tokens.
+rows = [
+  ["state_icon",
+   { token = "$host", fg = {{color.host}}, rules = [
+{{host_rules}}
+   ] },
+   "$project",
+   { token = "$git", fg = {{color.git_dirty}}, rules = [{ equals = "✓", fg = {{color.git_clean}} }] }],
+  [
+    { token = "$kind", fg = {{color.other_agent}}, rules = [
+{{kind_rules}}
+    ] },
+    { token = "$label", rules = [{ starts_with = {{icon.sentinel}}, fg = {{color.sentinel}} }] },
+    { token = "$uac", fg = {{color.uac}}, bold = true },
+    { token = "$notes", fg = {{color.notes}}, bold = true },
+    { token = "$decisions", fg = {{color.decisions}}, bold = true },
+    { token = "$waiting", fg = {{color.waiting}}, bold = true },
+  ],
+]
+
+[ui.sidebar.spaces]
+# $badge: u▲c on a workspace with a UAC pane, the sentinel cog on one with a
+# sentinel. $kind1..$kind5: distinct harness glyphs, UAC/sentinel first,
+# compact Unicode text glyphs, coloured like $kind in the agents section.
+# $git: ✓ when clean and level with upstream, else ↑N ↓N ●. Only on
+# the main checkout's workspace, vegad reports $decisions, $waiting and $notes
+# (same values as on the UAC pane). The branch is hidden when it is main.
+# $upgrade: "vega ↓N" on the vega checkout's workspace when vegad found an
+# upgrade and no agent pane there to tell (docs/design/upgrade.md).
+rows = [
+  ["state_icon",
+   { token = "$badge", fg = {{color.uac}}, bold = true, rules = [
+     { starts_with = {{icon.sentinel}}, fg = {{color.sentinel}} } ] },
+   { token = "$kind1", fg = {{color.other_agent}}, rules = [
+{{space_kind_rules}}
+   ] },
+   { token = "$kind2", fg = {{color.other_agent}}, rules = [
+{{space_kind_rules}}
+   ] },
+   { token = "$kind3", fg = {{color.other_agent}}, rules = [
+{{space_kind_rules}}
+   ] },
+   { token = "$kind4", fg = {{color.other_agent}}, rules = [
+{{space_kind_rules}}
+   ] },
+   { token = "$kind5", fg = {{color.other_agent}}, rules = [
+{{space_kind_rules}}
+   ] },
+   "workspace",
+   { token = "$git", fg = {{color.git_dirty}}, rules = [{ equals = "✓", fg = {{color.git_clean}} }] }],
+  [{ token = "branch", rules = [{ equals = "main", hide = true }] }],
+  [
+    { token = "$decisions", fg = {{color.decisions}}, bold = true },
+    { token = "$waiting", fg = {{color.waiting}}, bold = true },
+    { token = "$notes", fg = {{color.notes}}, bold = true },
+    { token = "$upgrade", fg = {{color.notes}}, bold = true },
+  ],
+]
+
+[experimental]
+switch_ascii_input_source_in_prefix = false
+pane_history = true
+kitty_graphics = true

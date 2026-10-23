@@ -1,0 +1,24 @@
+[package]
+name = "vega-orchestration"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Project waits, question evidence and declared ownership"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+vega-ci-watch = { path = "../../crates/vega-ci-watch" }
+serde_json = "1"
+vega-shim = { path = "../../crates/vega-shim" }
+tokio = { version = "1", features = ["rt", "time"] }
+async-nats = "0.50"
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

@@ -1,0 +1,10 @@
+[package]
+name = "vega-transcript"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Reads coding agents' native session logs (claude, codex, pi, agy) as transcript entries"
+publish = false
+
+[dependencies]
+serde_json = "1"

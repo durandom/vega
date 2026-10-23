@@ -1,0 +1,21 @@
+HTTP/2.0 304 Not Modified
+Access-Control-Allow-Origin: *
+Cache-Control: private, max-age=60, s-maxage=60
+Content-Security-Policy: default-src 'none'
+Date: Sat, 10 Oct 2026 07:13:36 GMT
+Etag: "22ecfb612ab041067316f24be02a07850ec41b67bf52c0ba09e42e515cb22a4d"
+Last-Modified: Thu, 08 Oct 2026 22:20:01 GMT
+Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+Server: github.com
+Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+Vary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With
+X-Content-Type-Options: nosniff
+X-Frame-Options: deny
+X-Github-Api-Version-Selected: 2022-11-28
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4856
+X-Ratelimit-Reset: 1791618450
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 144
+X-Xss-Protection: 0
+

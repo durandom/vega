@@ -1,0 +1,28 @@
+[package]
+name = "vega-board"
+version = "0.1.0"
+edition = "2021"
+description = "The UAC's open decisions and the repo's beads in a herdr pane (copied from herdr-beads)"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "vega-board"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+vega-theme-sync = { path = "../../crates/vega-theme-sync" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }
+
+[dev-dependencies]
+tempfile = "3"

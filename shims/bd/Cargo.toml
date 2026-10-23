@@ -1,0 +1,19 @@
+[package]
+name = "bd-shim"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent-session shim for bd: derives BEADS_ACTOR per worktree (<host>/<worktree dir>), no-ops bd dolt push/pull in vegad-synced projects, prints sync hints on stderr, then execs the real bd"
+publish = false
+
+[[bin]]
+name = "bd"
+path = "src/main.rs"
+
+[dependencies]
+vega-shim = { path = "../../crates/vega-shim" }
+vega-bd-sync = { path = "../../crates/vega-bd-sync" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+
+tempfile = "3"
+libc = "0.2"

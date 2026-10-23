@@ -1,0 +1,16 @@
+model = "x"
+
+[projects."/src/sk"]
+trust_level = "trusted"
+
+[projects."/src/other"]
+trust_level = "untrusted"
+
+[hooks.state."/src/sk/main/.codex/hooks.json:stop:0:0"]
+trusted_hash = "sha256:aa"
+
+[hooks.state."/src/sk/main/.codex/hooks.json:session_start:1:0"]
+trusted_hash = "sha256:bb"
+
+[hooks.state."/src/sk/feat/.codex/hooks.json:stop:0:0"]
+trusted_hash = "sha256:cc"

@@ -1,0 +1,56 @@
+# Rust is pinned in rust-toolchain.toml (read by rustup); [tools] is for non-Rust toolchains.
+
+# One target dir per checkout: a shared one (~/.cargo/config.toml) lets parallel
+# sentinel worktrees overwrite each other's vega crates mid-build.
+[env]
+CARGO_TARGET_DIR = "{{config_root}}/target"
+
+[tasks.build]
+description = "Build all Rust crates (release)"
+run = "cargo build --workspace --release"
+
+[tasks.check]
+description = "Format check, lint and test"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets -- -D warnings",
+  "cargo test --workspace",
+  "cd vscode && node --test",
+  "sh githooks/wt-guard.test.sh",
+  "sh shims/activate.test.sh",
+  "sh scripts/vegad-refresh.test.sh",
+  "sh scripts/readmes.test.sh",
+  "sh scripts/inline-md.test.sh",
+]
+
+[tasks.install-cli]
+description = "Install the portable CLI part (vega, mux, deploy, lanista, shims, git hooks, skill link); also run by vega deploy"
+run = "scripts/install-cli.sh"
+
+[tasks.install]
+description = "Install everything on this workstation: install-cli plus vega open and vega board (herdr plugins, VS Code extension)"
+depends = ["check"]
+run = [
+  "scripts/install-cli.sh",
+  "cargo install --locked --path plugins/open --root ~/.local",
+  # herdr runs the open plugin from its own dir (./bin/vega-open), not from PATH;
+  # the script only links from the main checkout, never from a worktree.
+  "sh plugins/open/link-herdr.sh",
+  # vega board likewise; the PATH copy serves `vega skills board`.
+  "cargo install --locked --path plugins/board --root ~/.local",
+  "sh plugins/board/link-herdr.sh",
+  # vega open's reveal/diff actions go through this extension's URI handler.
+  "cd vscode && npm run -s package",
+  "code --install-extension vscode/dist/vega-vscode.vsix --force",
+]
+
+[tasks.nats]
+description = "Run the local NATS JetStream broker for the vega mux broker spike (foreground)"
+run = "nats-server -c spike/nats/nats.conf"
+
+[tools]
+# Public CI secret scanning; run separately from the developer check task.
+gitleaks = "8.30.1"
+# Broker spike: nats-server plus the `nats` CLI for inspection.
+nats-server = "2.15.0"
+"github:nats-io/natscli" = "0.5.0"

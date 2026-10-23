@@ -1,0 +1,10 @@
+target/
+repos/
+.nats-data/
+.nats-data.log
+spike/bin/
+spike/relay.log
+spike/during.out
+
+# Local mise overrides (secrets)
+mise.local.toml

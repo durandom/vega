@@ -1,0 +1,25 @@
+[package]
+name = "vega-janitor"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Map of every git checkout on this machine: find by name, overview, cleanup report (read-only)"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+vega-herdr = { path = "../../crates/vega-herdr" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+ureq = { version = "2", features = ["json"] }
+sha2 = "0.10"
+vega-secrets = { path = "../../crates/vega-secrets" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

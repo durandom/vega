@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"p1","timestamp":"2026-10-10T07:54:00.000Z","cwd":"/work/repo"}
+{"type":"model_change","id":"e1","parentId":null,"timestamp":"2026-10-10T07:54:00.100Z","provider":"x","modelId":"y"}
+{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-10-10T07:54:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Read the README."}],"timestamp":1791618841000}}
+{"type":"message","id":"e3","parentId":"e2","timestamp":"2026-10-10T07:54:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"},{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"README.md"}}],"stopReason":"toolUse"}}
+{"type":"message","id":"e4","parentId":"e3","timestamp":"2026-10-10T07:54:03.000Z","message":{"role":"toolResult","toolCallId":"c1","content":[{"type":"text","text":"# repo"}]}}
+{"type":"message","id":"e5","parentId":"e4","timestamp":"2026-10-10T07:54:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"It is about repo."}],"stopReason":"stop"}}
+{"type":"message","id":"e6","parentId":"e5","timestamp":"2026-10-10T07:55:00.000Z","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"terminated"}}

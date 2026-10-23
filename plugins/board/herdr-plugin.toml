@@ -1,0 +1,68 @@
+# herdr plugin manifest for `vega board`: the UAC's open decisions and the
+# repo's beads, docked as a split pane or floating as a popup.
+#
+# Commands run ./bin/vega-board relative to this directory, so the herdr
+# server's PATH does not matter. `plugin install` runs the [[build]] step;
+# `plugin link` does not, so build by hand first (or `sh link-herdr.sh`):
+#   cargo install --locked --path plugins/board --root plugins/board
+#   herdr plugin link plugins/board
+#
+# Bind the actions in ~/.config/herdr/config.toml:
+#   [[keys.command]]
+#   key = "prefix+b"
+#   type = "plugin_action"
+#   command = "vega.board.toggle-dock"
+
+id = "vega.board"
+name = "vega board"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "The UAC's open decisions and the repo's beads (List / Table / Kanban), docked or floating"
+platforms = ["macos", "linux"]
+
+# Requires cargo. Writes bin/vega-board (plus cargo's .crates*.toml), all
+# gitignored; honours CARGO_TARGET_DIR for incremental rebuilds.
+[[build]]
+command = ["cargo", "install", "--quiet", "--locked", "--path", ".", "--root", "."]
+
+# The docked split pane. The `./` is required: herdr resolves a pane command
+# through PATH, and a bare relative path fails even though cwd is the plugin root.
+[[panes]]
+id = "dock"
+title = "vega board"
+placement = "split"
+command = ["./bin/vega-board", "--mode", "dock"]
+
+# The floating popup board.
+[[panes]]
+id = "board"
+title = "vega board"
+placement = "popup"
+command = ["./bin/vega-board", "--mode", "popup"]
+
+# Toggle the dock on the LEFT edge of the current tab (open / close).
+[[actions]]
+id = "toggle-dock"
+title = "vega board: toggle dock"
+contexts = ["workspace", "tab", "pane"]
+command = ["bash", "scripts/open-dock.sh"]
+
+# Open the floating board popup (q closes it).
+[[actions]]
+id = "open-board"
+title = "vega board: open floating board"
+contexts = ["workspace", "tab", "pane"]
+command = ["bash", "scripts/open-board.sh"]
+
+# Opt-in: open the dock in each new tab. Off unless the user turns it on with
+# A in the board, so existing layouts are untouched.
+[[events]]
+on = "tab.created"
+command = ["bash", "scripts/auto-dock.sh"]
+
+# Close every board pane so they respawn on the latest build after a rebuild.
+[[actions]]
+id = "redeploy"
+title = "vega board: redeploy panes"
+contexts = ["workspace"]
+command = ["bash", "scripts/redeploy.sh"]

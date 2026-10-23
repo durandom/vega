@@ -1,0 +1,23 @@
+[package]
+name = "vega-lanista"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Install, configure and use lanista, the LLM model catalog"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+vega-bd-sync = { path = "../../crates/vega-bd-sync" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-secrets = { path = "../../crates/vega-secrets" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

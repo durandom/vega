@@ -1,0 +1,8 @@
+title = "vega secret scanning"
+
+[extend]
+useDefault = true
+
+# No exclusions are needed by the current fixtures. Any future allowlist must
+# match a specific synthetic fixture and rule; never exclude source directories,
+# whole commits, or history. Keep the default rules enabled.

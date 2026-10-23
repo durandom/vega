@@ -1,0 +1,35 @@
+{
+  "_schema": "Named seat allowlists: provider-facing pin ids a host/rig can start.",
+  "_updated": "2026-10-19",
+  "_note": "Owned by vega (plugins/lanista/seats.json): `vega lanista install` writes it to ~/.config/lanista/seats.json on every host; edit it in the vega repo, not on a host. `tier` (flagship, balanced, budget) is vega's: `vega lanista pin` reads it, lanista ignores it. Pins keep the host spelling (dots ok).",
+  "seats": {
+    "herdr-agents": {
+      "description": "Models startable via spellkave herdr-agents-collaboration (Pi xai / zai + agy). GitHub Copilot retired as a lane. Lanes claude and codex are the native CLIs (claude --model, codex -m).",
+      "source": "spellkave .agents/skills/herdr-agents-collaboration (+ local ~/.pi/agent/models-store.json lanes)",
+      "models": [
+        {"provider": "xai", "engine": "pi", "pin": "grok-4.6", "role": "frontier", "tier": "flagship"},
+        {"provider": "xai", "engine": "pi", "pin": "grok-4.5", "role": "default", "tier": "balanced"},
+        {"provider": "xai", "engine": "pi", "pin": "grok-4.3", "role": "thrifty", "tier": "budget"},
+        {"provider": "xai", "engine": "pi", "pin": "grok-build-0.1", "role": "coding-agent"},
+
+        {"provider": "zai", "engine": "pi", "pin": "glm-5.3", "role": "frontier", "tier": "flagship"},
+        {"provider": "zai", "engine": "pi", "pin": "glm-5.2", "role": "default", "tier": "balanced"},
+        {"provider": "zai", "engine": "pi", "pin": "glm-4.7", "role": "thrifty", "tier": "budget"},
+
+        {"provider": "agy", "engine": "agy", "pin": "claude-sonnet-4-6", "role": "mid-claude", "tier": "balanced"},
+        {"provider": "agy", "engine": "agy", "pin": "claude-opus-4-6-thinking", "role": "max-quality", "tier": "flagship"},
+        {"provider": "agy", "engine": "agy", "pin": "gpt-oss-120b-medium", "role": "open-weights"},
+        {"provider": "agy", "engine": "agy", "pin": "gemini-3.7-flash-high", "role": "flash"},
+        {"provider": "agy", "engine": "agy", "pin": "gemini-3.7-flash", "role": "flash", "tier": "budget"},
+
+        {"provider": "claude", "engine": "claude", "pin": "claude-opus-5-5", "role": "max-quality", "tier": "flagship"},
+        {"provider": "claude", "engine": "claude", "pin": "claude-sonnet-5-5", "role": "mid", "tier": "balanced"},
+        {"provider": "claude", "engine": "claude", "pin": "claude-haiku-5-5", "role": "thrifty", "tier": "budget"},
+
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6-astra", "role": "frontier", "tier": "flagship"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6.1-sol", "role": "workhorse", "tier": "balanced"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6-luna", "role": "thrifty", "tier": "budget"}
+      ]
+    }
+  }
+}

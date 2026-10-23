@@ -1,0 +1,6 @@
+[
+  {"Provider": "acme", "WindowName": "daily", "RemainingPercent": 55, "ResetAt": "2099-01-01T00:00:00Z", "LimitReached": false, "ObservedAt": "2026-10-10T07:39:45Z"},
+  {"Provider": "acme", "WindowName": "monthly", "RemainingPercent": 8, "ResetAt": "2099-01-01T00:00:00Z", "LimitReached": false, "ObservedAt": "2026-10-10T07:39:45Z"},
+  {"Provider": "claude", "WindowName": "five_hour", "RemainingPercent": 60, "ResetAt": "2099-01-01T00:00:00Z", "LimitReached": false, "ObservedAt": "2026-10-10T07:39:45Z"},
+  {"Provider": "claude", "WindowName": "seven_day_fable", "RemainingPercent": 2, "ResetAt": "2099-01-01T00:00:00Z", "LimitReached": false, "ObservedAt": "2026-10-10T07:39:45Z"}
+]

@@ -1,0 +1,30 @@
+[package]
+name = "vega-config"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "vega owns the coding agents', herdr's and dcg's config: status, diff and apply from the repo's config/"
+publish = false
+
+[lib]
+name = "vega_config"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vega-config"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml_edit = "0.25"
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-theme-sync = { path = "../../crates/vega-theme-sync" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

@@ -1,0 +1,187 @@
+onboarding = false
+
+[theme]
+name = "catppuccin-latte"
+auto_switch = true
+light_name = "catppuccin-latte"
+dark_name = "catppuccin"
+
+# The Catppuccin default active_row_bg nearly matches the background, so the
+# selected sidebar row was only visible as bold text. Use surface1 instead.
+[theme.custom.light]
+active_row_bg = "#bcc0cc"   # Latte surface1
+
+[theme.custom.dark]
+active_row_bg = "#45475a"   # Mocha surface1
+
+[ui]
+pane_borders = true
+pane_gaps = true
+# Owned by herdr, not by chezmoi -- see the modify_ script that generates this
+# file. Toggling the sidebar sort in the UI is persisted and survives apply.
+agent_panel_sort = "priority"
+show_agent_labels_on_pane_borders = true
+
+[keys]
+prefix = "ctrl+s"
+# Pane focus on the arrows instead of herdr's vim-style prefix+h/j/k/l
+# defaults; that frees h/j/k/l for our own bindings (prefix+l: vega open).
+focus_pane_left = "prefix+left"
+focus_pane_down = "prefix+down"
+focus_pane_up = "prefix+up"
+focus_pane_right = "prefix+right"
+# Swap follows focus: shift+arrows instead of the prefix+shift+h/j/k/l defaults.
+swap_pane_left = "prefix+shift+left"
+swap_pane_down = "prefix+shift+down"
+swap_pane_up = "prefix+shift+up"
+swap_pane_right = "prefix+shift+right"
+# tmux-style last-session toggle; prefix+shift+l is free since swap moved to arrows.
+last_pane = "prefix+shift+l"
+
+# Override herdr's built-in "new worktree" key (prefix+shift+g) with worktrunk's
+# default-branch switch/create picker:
+[[keys.command]]
+key = "prefix+shift+g"
+type = "plugin_action"
+command = "worktrunk.open"
+description = "Worktree: switch / create from default branch"
+
+# Optional: bind current-branch creation separately.
+[[keys.command]]
+key = "prefix+shift+c"
+type = "plugin_action"
+command = "worktrunk.open-current"
+description = "Worktree: switch / create from current branch"
+
+[[keys.command]]              # open in a split beside your work
+key = "prefix+f"
+type = "shell"
+command = "\"$HERDR_BIN_PATH\" plugin action invoke open-file-viewer --plugin herdr-file-viewer"
+
+[[keys.command]]              # …or in its own tab
+key = "prefix+shift+f"
+type = "shell"
+command = "\"$HERDR_BIN_PATH\" plugin action invoke open-file-viewer-tab --plugin herdr-file-viewer"
+
+# tmux-style break-pane: pop the focused split out into its own tab,
+# keeping the rest of the current split intact.
+[[keys.command]]
+key = "prefix+!"
+type = "shell"
+command = "\"$HERDR_BIN_PATH\" pane move \"$HERDR_ACTIVE_PANE_ID\" --new-tab"
+description = "Pane: break into new tab"
+
+# vega open (~/src/durandom/vega/plugins/open): menu to open the selection,
+# the workspace or the git diff, VS Code first. prefix+l is free because
+# pane focus moved to the arrows above.
+[[keys.command]]
+key = "prefix+l"
+type = "plugin_action"
+command = "vega.open.selection"
+description = "vega open: selection, workspace, git diff"
+
+# vega board (~/src/durandom/vega/plugins/board): the UAC's open decisions in a
+# docked split (D: all beads, m: answer). prefix+b is herdr's sidebar toggle.
+[[keys.command]]
+key = "prefix+u"
+type = "plugin_action"
+command = "vega.board.toggle-dock"
+description = "vega board: UAC decisions (toggle dock)"
+
+[[keys.command]]                # …or floating (q closes it)
+key = "prefix+shift+u"
+type = "plugin_action"
+command = "vega.board.open-board"
+description = "vega board: UAC decisions (floating)"
+
+[ui.toast]
+# In-app toasts: prefix+o (open_notification_target) only works on a toast
+# herdr itself shows; "system" hands them to macOS and leaves prefix+o dead.
+delivery = "herdr"
+
+[ui.toast.herdr]
+position = "top-right"
+
+[ui.sound]
+enabled = false
+
+[ui.sidebar.agents]
+# vegad reports $host (planet + moon label, e.g. "♆₈" = proteus) on every pane; it replaces the
+# built-in "machine" token, which cannot carry an icon. $project is the
+# parent workspace for sentinels in worktree workspaces. $label is the
+# sentinel cog or agent kind plus the tab (empty on UAC panes); $uac, $notes,
+# $decisions and $waiting appear only on the UAC pane. Colours match
+# ~/.config/vega/theme.toml ([symbols.colors], [symbols.host_colors]).
+rows = [
+  ["state_icon",
+   { token = "$host", fg = "#8a8a8a", rules = [
+     { equals = "♆₈", fg = "#3d73cc" },
+     { equals = "♃₃", fg = "#2a9187" },
+     { equals = "♂₂", fg = "#c8463c" },
+     { equals = "♃₁", fg = "#a87c00" } ] },
+   "$project",
+   { token = "$git", fg = "#f07830", rules = [{ equals = "✓", fg = "#45922a" }] }],
+  [
+    { token = "$kind", fg = "#808080", rules = [
+      { equals = "\U0000EC82\U00002800", fg = "#c96442" },
+      { equals = "\U0000EC81\U00002800", fg = "#0e8f6f" },
+      { equals = "\U0000EC1E\U00002800", fg = "#8957e5" },
+      { equals = "\U000F03FF\U00002800", fg = "#1f8fb0" } ] },
+    { token = "$label", rules = [{ starts_with = "\U000F0493", fg = "#45922a" }] },
+    { token = "$uac", fg = "#e5484d", bold = true },
+    { token = "$notes", fg = "#e0a020", bold = true },
+    { token = "$decisions", fg = "#9d6bf0", bold = true },
+    { token = "$waiting", fg = "#f07830", bold = true },
+  ],
+]
+
+[ui.sidebar.spaces]
+# $badge: u▲c on a workspace with a UAC pane (red), the md-cog on one with a
+# sentinel (green). $git: ✓ (green) when clean and level with upstream,
+# else ↑N ↓N ● (orange). Only on the main checkout's workspace, vegad reports
+# $decisions, $waiting and $notes (same values as on the UAC pane). The
+# branch is hidden when it is main.
+rows = [
+  ["state_icon",
+   { token = "$badge", fg = "#e5484d", bold = true, rules = [
+     { starts_with = "\U000F0493", fg = "#45922a" } ] },
+   { token = "$kind1", fg = "#808080", rules = [
+      { equals = "✳", fg = "#c96442" },
+      { equals = "֍", fg = "#0e8f6f" },
+      { equals = "✈", fg = "#8957e5" },
+      { equals = "π", fg = "#1f8fb0" } ] },
+   { token = "$kind2", fg = "#808080", rules = [
+      { equals = "✳", fg = "#c96442" },
+      { equals = "֍", fg = "#0e8f6f" },
+      { equals = "✈", fg = "#8957e5" },
+      { equals = "π", fg = "#1f8fb0" } ] },
+   { token = "$kind3", fg = "#808080", rules = [
+      { equals = "✳", fg = "#c96442" },
+      { equals = "֍", fg = "#0e8f6f" },
+      { equals = "✈", fg = "#8957e5" },
+      { equals = "π", fg = "#1f8fb0" } ] },
+   { token = "$kind4", fg = "#808080", rules = [
+      { equals = "✳", fg = "#c96442" },
+      { equals = "֍", fg = "#0e8f6f" },
+      { equals = "✈", fg = "#8957e5" },
+      { equals = "π", fg = "#1f8fb0" } ] },
+   { token = "$kind5", fg = "#808080", rules = [
+      { equals = "✳", fg = "#c96442" },
+      { equals = "֍", fg = "#0e8f6f" },
+      { equals = "✈", fg = "#8957e5" },
+      { equals = "π", fg = "#1f8fb0" } ] },
+   "workspace",
+   { token = "$git", fg = "#f07830", rules = [{ equals = "✓", fg = "#45922a" }] }],
+  [{ token = "branch", rules = [{ equals = "main", hide = true }] }],
+  [
+    { token = "$decisions", fg = "#9d6bf0", bold = true },
+    { token = "$waiting", fg = "#f07830", bold = true },
+    { token = "$notes", fg = "#e0a020", bold = true },
+    { token = "$upgrade", fg = "#e0a020", bold = true },
+  ],
+]
+
+[experimental]
+switch_ascii_input_source_in_prefix = false
+pane_history = true
+kitty_graphics = true

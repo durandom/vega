@@ -1,0 +1,23 @@
+{
+  "name": "vega-vscode",
+  "displayName": "vega",
+  "description": "URI handler for vega open: reveal in Explorer, a file's git diff, Source Control view",
+  "version": "0.1.0",
+  "publisher": "vega",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onUri"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "test": "node --test",
+    "package": "mkdir -p dist && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license --out dist/vega-vscode.vsix"
+  }
+}

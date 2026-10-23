@@ -1,0 +1,19 @@
+[package]
+name = "git-shim"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent-session shim for git: plain exec, except git push in repos with a vega gate"
+publish = false
+
+[[bin]]
+name = "git"
+path = "src/main.rs"
+
+[dependencies]
+vega-shim = { path = "../../crates/vega-shim" }
+vega-gate = { path = "../../plugins/gate" }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"

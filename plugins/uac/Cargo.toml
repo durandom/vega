@@ -1,0 +1,27 @@
+[package]
+name = "vega-uac"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Coordinator mode: the role guide and the home view of the agents this session runs"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+serde_json = "1"
+vega-bd-sync = { path = "../../crates/vega-bd-sync" }
+vega-ci-watch = { path = "../../crates/vega-ci-watch" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-shim = { path = "../../crates/vega-shim" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+serde = { version = "1", features = ["derive"] }
+toml_edit = "0.25"
+vega-gate = { path = "../gate" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

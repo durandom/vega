@@ -1,0 +1,178 @@
+# Custom pack: OpenShift CLI (oc) destructive operations.
+#
+# dcg ships a built-in kubernetes.kubectl pack, but its patterns are anchored
+# to the literal string "kubectl" and don't match `oc`, the CLI actually used
+# here. oc is kubectl-compatible for resource verbs (get/delete/apply/scale),
+# so these patterns mirror kubectl's 1:1 with `oc` substituted, plus one
+# OpenShift-specific rule for `oc delete project` (Project wraps Namespace).
+schema_version: 1
+id: personal.oc
+name: OpenShift CLI (oc) destructive operations
+version: 1.0.0
+description: |
+  Protects against destructive oc operations: delete namespace/project, drain,
+  mass deletion, force operations. Mirrors the built-in kubernetes.kubectl
+  pack for the oc CLI, which kubectl's patterns don't match.
+
+keywords:
+  - oc
+
+destructive_patterns:
+  - name: delete-namespace
+    pattern: 'oc\b.*?\bdelete\s+(?:namespace|ns)\b'
+    severity: critical
+    description: oc delete namespace removes the entire namespace and ALL resources within it.
+    explanation: |
+      Deleting a namespace destroys everything inside it: deployments, pods,
+      services, configmaps, secrets, PVCs (data may be lost), and RBAC. This
+      is irreversible.
+
+      Preview first: oc get all -n <namespace>
+      Safer: oc delete deployment <name> -n <namespace>
+
+  - name: delete-project
+    pattern: 'oc\b.*?\bdelete\s+project\b'
+    severity: critical
+    description: oc delete project removes the Project and its underlying Namespace, with everything in it.
+    explanation: |
+      OpenShift Projects wrap a Namespace. Deleting a project deletes the
+      namespace and everything inside it — same blast radius as
+      `oc delete namespace`, just through a different noun.
+
+      Preview first: oc get all -n <project>
+
+  - name: delete-all
+    pattern: 'oc\b.*?\bdelete\s+.*--all\b'
+    severity: high
+    description: oc delete --all removes ALL resources of that type. Use --dry-run=client first.
+    explanation: |
+      --all deletes every resource of the specified type in the namespace
+      (e.g. oc delete pods --all kills all pods).
+
+      Preview: oc delete <resource> --all --dry-run=client
+      Safer: oc delete <resource> -l app=myapp
+
+  - name: delete-all-namespaces
+    pattern: 'oc\b.*?\bdelete\s+.*(?:-A\b|--all-namespaces)'
+    severity: critical
+    description: oc delete with -A/--all-namespaces affects ALL namespaces. Very dangerous!
+    explanation: |
+      Expands deletion to every namespace in the cluster, including system
+      namespaces. Almost never what you want.
+
+  - name: drain-node
+    pattern: 'oc\b.*?\bdrain\b'
+    severity: high
+    description: oc adm drain evicts all pods from a node. Ensure proper pod disruption budgets.
+    explanation: |
+      Evicts ALL pods from a node for maintenance. DaemonSet pods remain
+      unless --ignore-daemonsets; without replicas elsewhere, services go
+      down.
+
+      Safer: oc adm cordon <node> first, then drain gradually.
+
+  - name: cordon-node
+    pattern: 'oc\b.*?\bcordon\b'
+    severity: medium
+    description: oc adm cordon marks a node unschedulable. Existing pods continue running.
+    explanation: |
+      Marks a node unschedulable; existing pods are unaffected. Reverse with
+      oc adm uncordon <node>.
+
+  - name: taint-noexecute
+    pattern: 'oc\b.*?\btaint\s+.*:NoExecute'
+    severity: high
+    description: oc adm taint with NoExecute evicts existing pods that don't tolerate the taint.
+    explanation: |
+      NoExecute immediately evicts pods without a matching toleration — more
+      aggressive than NoSchedule, which only blocks new scheduling.
+
+  - name: delete-workload
+    pattern: 'oc\b.*?\bdelete\s+(?:deployment|deploymentconfig|dc|statefulset|daemonset|replicaset)\b'
+    severity: high
+    description: oc delete deployment/deploymentconfig/statefulset/daemonset removes the workload. Use --dry-run first.
+    explanation: |
+      Deleting a workload terminates all its pods. DeploymentConfig (dc) is
+      the OpenShift-specific workload type in addition to the standard
+      kubernetes kinds.
+
+      Preview: oc delete <type> <name> --dry-run=client
+      Consider scaling to 0 first: oc scale deployment <name> --replicas=0
+
+  - name: delete-pvc
+    pattern: 'oc\b.*?\bdelete\s+(?:pvc|persistentvolumeclaim)\b'
+    severity: critical
+    description: oc delete pvc may permanently delete data if ReclaimPolicy is Delete.
+    explanation: |
+      Depending on reclaim policy, deleting a PVC can permanently delete the
+      underlying storage. Check reclaim policy and back up first.
+
+  - name: delete-pv
+    pattern: 'oc\b.*?\bdelete\s+(?:pv|persistentvolume)\b'
+    severity: critical
+    description: oc delete pv may permanently delete the underlying storage.
+    explanation: |
+      Even with a Retain policy, deleting the PV may trigger storage cleanup
+      of cloud disks or NFS mounts.
+
+  - name: scale-to-zero
+    pattern: 'oc\b.*?\bscale\s+.*--replicas=0'
+    severity: high
+    description: oc scale --replicas=0 stops all pods for the workload.
+    explanation: |
+      Terminates ALL pods for the workload; service becomes unavailable.
+      Often intentional, but can cause accidental outages.
+
+  - name: delete-force
+    pattern: 'oc\b.*?\bdelete\s+.*--force.*--grace-period=0|oc\b.*?\bdelete\s+.*--grace-period=0.*--force'
+    severity: critical
+    description: oc delete --force --grace-period=0 immediately removes resources without graceful shutdown.
+    explanation: |
+      Pods are killed immediately (no SIGTERM). In-flight requests fail and
+      there's a data-corruption risk if writes are in progress. Use only for
+      stuck pods that won't terminate normally.
+
+  - name: apply-force
+    pattern: 'oc\b.*?\bapply\s+.*--force\b'
+    severity: high
+    description: oc apply --force deletes and recreates resources, causing downtime.
+    explanation: |
+      Deletes and recreates the resource from the manifest, causing pod
+      churn and downtime. Prefer --server-side apply for immutable-field
+      changes.
+
+  - name: delete-from-stdin
+    pattern: 'oc\b.*?\bdelete\b.*?(?:-f(?:=|\s+)?|--filename(?:=|\s+))["'']?(?:[^,"''\s]+,)*-(?:,[^,"''\s]+)*["'']?(?=\s|$)'
+    severity: high
+    description: oc delete -f - deletes every resource described by stdin without a reviewable manifest path.
+    explanation: |
+      Materialize the manifest, inspect with oc diff, and run
+      oc delete --dry-run=client before deleting the resources.
+
+  - name: delete-from-directory
+    pattern: 'oc\b.*?\bdelete\s+-f\s+\.\s*$|oc\b.*?\bdelete\s+-f\s+\./|oc\b.*?\bdelete\s+--recursive\s+-f|oc\b.*?\bdelete\s+-f.*--recursive'
+    severity: high
+    description: oc delete -f with directories or --recursive deletes many resources at once.
+    explanation: |
+      Removes ALL resources defined in every file under the directory, with
+      no confirmation. Preview first: oc diff -f <directory>
+
+safe_patterns:
+  - name: oc-get
+    pattern: 'oc\b(?:\s+--?\S+(?:\s+\S+)?)*\s+get(?=\s|$)'
+    description: Read-only.
+  - name: oc-describe
+    pattern: 'oc\b(?:\s+--?\S+(?:\s+\S+)?)*\s+describe(?=\s|$)'
+    description: Read-only.
+  - name: oc-logs
+    pattern: 'oc\b(?:\s+--?\S+(?:\s+\S+)?)*\s+logs(?=\s|$)'
+    description: Read-only.
+  - name: oc-status
+    pattern: 'oc\b(?:\s+--?\S+(?:\s+\S+)?)*\s+status(?=\s|$)'
+    description: Read-only.
+  - name: oc-whoami
+    pattern: 'oc\b(?:\s+--?\S+(?:\s+\S+)?)*\s+whoami(?=\s|$)'
+    description: Read-only.
+  - name: oc-project-switch
+    pattern: 'oc\b(?:\s+--?\S+(?:\s+\S+)?)*\s+project(?=\s|$)'
+    description: Switching/viewing the current project, not deleting one.

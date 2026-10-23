@@ -1,0 +1,23 @@
+[package]
+name = "vega-open"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Open a selected file path in VS Code or MarkEdit, or jump to a selected herdr pane (herdr plugin)"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+path-clean = "1.0.1"
+serde_json = "1"
+url = "2.5.8"
+vega-herdr = { path = "../../crates/vega-herdr" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

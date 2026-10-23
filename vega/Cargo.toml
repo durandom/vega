@@ -1,0 +1,17 @@
+[package]
+name = "vega"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Umbrella CLI: dispatches `vega <name>` to `vega-<name>` on PATH"
+publish = false
+
+[dependencies]
+vega-build = { path = "../crates/vega-build" }
+vega-plugin = { path = "../crates/vega-plugin" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../crates/vega-build" }

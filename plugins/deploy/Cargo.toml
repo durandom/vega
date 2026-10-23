@@ -1,0 +1,19 @@
+[package]
+name = "vega-deploy"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Build and install vega on herdr machines"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

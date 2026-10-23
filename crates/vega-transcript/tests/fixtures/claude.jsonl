@@ -1,0 +1,12 @@
+{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"s1"}
+{"parentUuid":null,"isSidechain":false,"attachment":{"type":"hook_success","hookName":"SessionStart:startup"},"type":"attachment","uuid":"a0","timestamp":"2026-10-10T07:54:00.000Z","sessionId":"s1"}
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"Run the tests and report."},"uuid":"u1","timestamp":"2026-10-10T07:54:01.000Z","sessionId":"s1"}
+{"parentUuid":"u1","isSidechain":false,"type":"user","isMeta":true,"message":{"role":"user","content":"<system-reminder>injected</system-reminder>"},"uuid":"u1m","timestamp":"2026-10-10T07:54:01.100Z","sessionId":"s1"}
+{"parentUuid":"u1","isSidechain":false,"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"thinking","thinking":"plan","signature":"x"}]},"uuid":"a1","timestamp":"2026-10-10T07:54:03.000Z","sessionId":"s1"}
+{"parentUuid":"a1","isSidechain":false,"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"mise run check","description":"Run the gate"}}]},"uuid":"a2","timestamp":"2026-10-10T07:54:04.000Z","sessionId":"s1"}
+{"parentUuid":"a2","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok","is_error":false}]},"uuid":"r1","timestamp":"2026-10-10T07:55:00.000Z","sessionId":"s1"}
+{"parentUuid":"r1","isSidechain":false,"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"All tests pass.\n\nGate: exit 0."}]},"uuid":"a3","timestamp":"2026-10-10T07:55:02.000Z","sessionId":"s1"}
+{"parentUuid":"a3","isSidechain":true,"type":"assistant","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"subagent noise"}]},"uuid":"a4","timestamp":"2026-10-10T07:55:03.000Z","sessionId":"s1"}
+{"parentUuid":"a3","isSidechain":false,"type":"user","message":{"role":"user","content":"Now commit."},"uuid":"u2","timestamp":"2026-10-10T07:56:00.000Z","sessionId":"s1"}
+{"parentUuid":"u2","isSidechain":false,"type":"assistant","error":"rate_limit","isApiErrorMessage":true,"message":{"id":"m4","role":"assistant","content":[{"type":"text","text":"API Error: 429 rate limited"}]},"uuid":"a5","timestamp":"2026-10-10T07:56:01.000Z","sessionId":"s1"}
+not json at all

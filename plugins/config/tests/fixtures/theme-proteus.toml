@@ -1,0 +1,24 @@
+[symbols]
+set = "nerd"
+uac_text = "u▲c"
+
+[symbols.icons]
+uac = ""
+
+[symbols.colors]
+uac = "#e5484d"
+notes = "#e0a020"
+decisions = "#9d6bf0"
+waiting = "#f07830"
+
+[symbols.hosts]
+proteus = "♆₈"
+ganymede = "♃₃"
+io = "♃₁"
+deimos = "♂₂"
+
+[symbols.host_colors]
+proteus = "#3d73cc"
+ganymede = "#2a9187"
+io = "#a87c00"
+deimos = "#c8463c"

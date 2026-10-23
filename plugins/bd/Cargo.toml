@@ -1,0 +1,26 @@
+[package]
+name = "vega-bd"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Beads sync: provision a project's bd database on a configured Dolt remote; vegad keeps it synced"
+publish = false
+
+[[bin]]
+name = "vega-bd"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+vega-bd-sync = { path = "../../crates/vega-bd-sync" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-secrets = { path = "../../crates/vega-secrets" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

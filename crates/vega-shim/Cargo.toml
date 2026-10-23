@@ -1,0 +1,10 @@
+[package]
+name = "vega-shim"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Shared shim mechanics: resolve and exec the real tool, session id, once-per-session hints, call counts"
+publish = false
+
+[dev-dependencies]
+tempfile = "3"

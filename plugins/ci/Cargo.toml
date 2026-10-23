@@ -1,0 +1,23 @@
+[package]
+name = "vega-ci"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "GitHub CI watch: register a PR or branch, get its verdict by mail from vegad's one poller per host"
+publish = false
+
+[[bin]]
+name = "vega-ci"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+vega-ci-watch = { path = "../../crates/vega-ci-watch" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

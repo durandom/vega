@@ -1,0 +1,19 @@
+[package]
+name = "vega-mux"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent-to-agent messaging over herdr"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-transcript = { path = "../../crates/vega-transcript" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

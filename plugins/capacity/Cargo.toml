@@ -1,0 +1,19 @@
+[package]
+name = "vega-capacity"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Subscription capacity from token-burn: every window, the resets ledger, token-burn's health"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+serde_json = "1"
+vega-herdr = { path = "../../crates/vega-herdr" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

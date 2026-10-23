@@ -1,0 +1,23 @@
+[package]
+name = "vega-theme"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "OS dark/light mode to every TUI: status per tool, set dark/light/auto, apply"
+publish = false
+
+[[bin]]
+name = "vega-theme"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-theme-sync = { path = "../../crates/vega-theme-sync" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

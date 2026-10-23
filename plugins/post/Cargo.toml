@@ -1,0 +1,38 @@
+[package]
+name = "vega-post"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent mail over a NATS JetStream broker"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+async-nats = "0.50"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+libc = "0.2"
+nkeys = "0.4"
+nuid = "0.5"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+toml_edit = "0.25"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+vega-bd-sync = { path = "../../crates/vega-bd-sync" }
+vega-ci-watch = { path = "../../crates/vega-ci-watch" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-transcript = { path = "../../crates/vega-transcript" }
+vega-theme-sync = { path = "../../crates/vega-theme-sync" }
+vega-secrets = { path = "../../crates/vega-secrets" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+vega-onboard = { path = "../onboard" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

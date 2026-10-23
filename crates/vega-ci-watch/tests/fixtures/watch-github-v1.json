@@ -1,0 +1,9 @@
+{
+  "target": {
+    "host": "github.com",
+    "repo": "o/r",
+    "pr": 42
+  },
+  "pane": "w1:p1",
+  "since": 1791600000
+}
