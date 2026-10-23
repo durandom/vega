@@ -95,7 +95,9 @@ remotesapi, titan's version): a push to a missing one fails `database not found`
 - A remote with named users (e.g. a DoltHub-style hub): set `DOLT_REMOTE_USER` and
   `DOLT_REMOTE_PASSWORD`. dolt reads only the password from the environment and defaults the
   user to `root`, so the probe fetch and the `--adopt` fetch and push add `--user
-  $DOLT_REMOTE_USER` (`bd::remote_args`); `bd dolt pull`/`push` read both variables themselves.
+  $DOLT_REMOTE_USER` (`bd::remote_args`). vegad's pull and fast-forward heal run `CALL DOLT_PULL('--user', ...)` through
+  bd's server when the variable is set (`bd dolt pull` would use `root`); `relay install` pins it in
+  `vegad.env`. `bd dolt push` still reads the variables itself.
   The password never goes into argv.
 
 Tested: `bd::tests::creates_a_missing_database_with_create_only` runs a local sql-server with

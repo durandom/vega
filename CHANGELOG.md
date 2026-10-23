@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 72 · 2026-10-23
+
+- required: with a Dolt remote that has named users, run `vega post relay install` again: it pins
+  `DOLT_REMOTE_USER` in `vegad.env`, and vegad's sync pull and fast-forward heal pass `--user`
+  (they pulled as `root` before). See [Beads sync](docs/design/beads-sync.md). Thanks to goern
+  (Christoph Görn).
+
 ## 71 · 2026-10-23
 
 - feature: `vega bd init` (and `--adopt`) authenticate against a Dolt remote with a

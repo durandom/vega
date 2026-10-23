@@ -203,6 +203,30 @@ pub fn fast_forwardable(msg: &str) -> bool {
 /// fails rather than merge when the branches diverged.
 pub const FAST_FORWARD_SQL: &str = "CALL DOLT_PULL('origin', 'main', '--ff-only')";
 
+/// `DOLT_PULL` for the sync pull, through bd's server. `bd dolt pull` leaves the remote user at
+/// `root`; with a `user` ([`remote_user`]), pull by SQL with `--user` (the server reads the
+/// password from its environment). `None`: no user, `bd dolt pull` as before.
+pub fn pull_sql(user: Option<&str>) -> Option<String> {
+    user_pull_sql(user?, false)
+}
+
+/// [`FAST_FORWARD_SQL`] with `--user` when a `user` is given.
+pub fn fast_forward_sql(user: Option<&str>) -> String {
+    user.and_then(|u| user_pull_sql(u, true))
+        .unwrap_or_else(|| FAST_FORWARD_SQL.to_string())
+}
+
+fn user_pull_sql(user: &str, ff_only: bool) -> Option<String> {
+    if user.is_empty() {
+        return None;
+    }
+    let tail = if ff_only { ", '--ff-only'" } else { "" };
+    Some(format!(
+        "CALL DOLT_PULL('--user', '{}', 'origin', 'main'{tail})",
+        user.replace('\'', "''")
+    ))
+}
+
 /// Ahead, behind (against the remote-tracking `origin/main`, as of the last
 /// fetch) and the head commit.
 #[derive(Debug, Clone, PartialEq)]
@@ -556,6 +580,22 @@ mod tests {
         assert!(matches!(classify(&tip), Outcome::Retry(ref m) if fast_forwardable(m)));
         let conn = failed("Error: failed to pull from origin/main: invalid connection");
         assert!(matches!(classify(&conn), Outcome::Retry(ref m) if !fast_forwardable(m)));
+    }
+
+    #[test]
+    fn pull_sql_adds_the_user_only_when_set() {
+        assert_eq!(pull_sql(None), None);
+        assert_eq!(pull_sql(Some("")), None);
+        assert_eq!(fast_forward_sql(Some("")), FAST_FORWARD_SQL);
+        assert_eq!(fast_forward_sql(None), FAST_FORWARD_SQL);
+        assert_eq!(
+            pull_sql(Some("goern")).as_deref(),
+            Some("CALL DOLT_PULL('--user', 'goern', 'origin', 'main')")
+        );
+        assert_eq!(
+            fast_forward_sql(Some("o'x")),
+            "CALL DOLT_PULL('--user', 'o''x', 'origin', 'main', '--ff-only')"
+        );
     }
 
     /// [`FAST_FORWARD_SQL`] in a clone behind its remote: at the remote's

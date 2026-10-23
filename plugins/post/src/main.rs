@@ -297,7 +297,7 @@ enum RelayAction {
     Stop,
     /// Once per machine: herdr startup hook, pinned env, start; removes a launchd/systemd unit (idempotent)
     #[command(
-        after_help = "Writes ~/.local/share/vega/herdr-plugin (plugin vega.vegad: [[startup]] `vega-post relay start`) and links it.\nVEGA_NATS_URL, VEGA_NATS_NKEY, VEGA_POST_HOST and HERDR_SOCKET_PATH go to ~/.local/state/vega/vegad.env if set.\nMigration: stops and removes ~/Library/LaunchAgents/vega.post-relay.plist or the systemd --user unit.\n\nExamples:\n  vega post relay install"
+        after_help = "Writes ~/.local/share/vega/herdr-plugin (plugin vega.vegad: [[startup]] `vega-post relay start`) and links it.\nVEGA_NATS_URL, VEGA_NATS_NKEY, VEGA_POST_HOST, HERDR_SOCKET_PATH and DOLT_REMOTE_USER go to ~/.local/state/vega/vegad.env if set.\nMigration: stops and removes ~/Library/LaunchAgents/vega.post-relay.plist or the systemd --user unit.\n\nExamples:\n  vega post relay install"
     )]
     Install,
     /// Stop the relay, remove the herdr startup hook, a legacy unit and the env file

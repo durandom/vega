@@ -26,11 +26,14 @@ const LABEL: &str = "vega.post-relay";
 const UNIT: &str = "vega-post-relay.service";
 const PLUGIN_ID: &str = "vega.vegad";
 /// Env vegad keeps from the installing shell, if set there (`vegad.env`).
-const PINNED_ENV: [&str; 4] = [
+/// `DOLT_REMOTE_USER` is the beads sync's remote user (no secret; the password stays with the
+/// dolt server).
+const PINNED_ENV: [&str; 5] = [
     "VEGA_NATS_URL",
     "VEGA_NATS_NKEY",
     "VEGA_POST_HOST",
     "HERDR_SOCKET_PATH",
+    "DOLT_REMOTE_USER",
 ];
 /// Env of the starting pane or plugin command that vegad must not inherit.
 const PANE_ENV: [&str; 4] = [
