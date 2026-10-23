@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn decide_guards_the_pane() {
-        let empty = || Some("output\n❯ \n────".to_string());
+        let empty = || Some("output\n────\n❯ \n────".to_string());
         assert_eq!(decide(None, false, empty), Action::Drop);
         assert_eq!(decide(Some("working"), false, empty), Action::Wait);
         assert_eq!(decide(Some("blocked"), false, empty), Action::Wait);

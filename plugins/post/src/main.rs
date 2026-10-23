@@ -3179,6 +3179,14 @@ const DRAFT_STALE: Duration = Duration::from_secs(300);
 /// The `seen` text of a draft that cannot be restored.
 const OPAQUE: &str = "\0opaque";
 
+/// A screen without a known input box (delivery::Draft::Unknown) holds the
+/// pointer until it has not changed for this long: the user is not typing.
+/// A draft left there that long can still be joined (no box to read).
+const UNKNOWN_QUIET: Duration = Duration::from_secs(20);
+
+/// The `seen` prefix of an unknown screen; the screen itself follows.
+const UNKNOWN: &str = "\0unknown:";
+
 /// Drafts in input lines (delivery::draft): pointers never join them.
 #[derive(Default)]
 struct Drafts {
@@ -3186,13 +3194,17 @@ struct Drafts {
     seen: HashMap<String, (String, Instant, Instant)>,
     /// Pane -> draft cleared for a pointer, to type back after it.
     stashed: HashMap<String, String>,
-    /// Panes told that a pointer waits behind an opaque draft.
+    /// Panes told that a pointer waits behind an opaque draft or a screen
+    /// that never settles.
     nagged: std::collections::HashSet<String>,
+    /// Pane -> first hold on an unknown screen.
+    unknown: HashMap<String, Instant>,
 }
 
 impl Drafts {
     /// True while the pointer must wait. A stale draft is cleared (and
-    /// stashed) instead; an unreadable screen does not hold.
+    /// stashed) instead; an unreadable screen does not hold, an unknown one
+    /// holds until it is quiet.
     fn holds(&mut self, pane: &str) -> bool {
         let now = Instant::now();
         if self
@@ -3202,12 +3214,13 @@ impl Drafts {
         {
             return true;
         }
-        let draft = screen(pane).map(|s| delivery::draft(&s));
+        let shown = screen(pane);
+        let draft = shown.as_deref().map(delivery::draft);
         // Stashed at an earlier check: go once the line shows empty.
         if let Some(stash) = self.stashed.get(pane).cloned() {
             match &draft {
                 Some(Draft::None) => return false,
-                None => return true,
+                None | Some(Draft::Unknown) => return true,
                 Some(Draft::Text(t)) if *t == stash => {
                     // The clear did not take: an ordinary draft again.
                     self.stashed.remove(pane);
@@ -3223,12 +3236,17 @@ impl Drafts {
             Some(Draft::Text(t)) => t,
             // Not restorable from the screen: it waits for the user.
             Some(Draft::Opaque) => OPAQUE.into(),
+            Some(Draft::Unknown) => {
+                return self.unknown_holds(pane, shown.as_deref().unwrap_or_default(), now)
+            }
             _ => {
                 self.seen.remove(pane);
                 self.nagged.remove(pane);
+                self.unknown.remove(pane);
                 return false;
             }
         };
+        self.unknown.remove(pane);
         let since = match self.seen.get(pane) {
             Some((old, since, _)) if *old == text => *since,
             Some(_) => now,
@@ -3276,6 +3294,46 @@ impl Drafts {
         args.extend(keys);
         let _ = herdr(&args);
         !settles(pane, |d| d == Draft::None)
+    }
+
+    /// An unknown screen (delivery::Draft::Unknown): the pointer waits until
+    /// the screen has not changed for UNKNOWN_QUIET. One that keeps changing
+    /// for DRAFT_STALE notifies the user once and keeps holding.
+    fn unknown_holds(&mut self, pane: &str, shown: &str, now: Instant) -> bool {
+        let key = format!("{UNKNOWN}{shown}");
+        let since = match self.seen.get(pane) {
+            Some((old, since, _)) if *old == key => *since,
+            _ => now,
+        };
+        let first = *self.unknown.entry(pane.to_string()).or_insert_with(|| {
+            log(&format!(
+                "pointer held: {pane} shows no known input box; waiting for a quiet screen"
+            ));
+            now
+        });
+        if now.duration_since(since) >= UNKNOWN_QUIET {
+            log(&format!(
+                "pointer: {pane} shows no known input box, screen quiet {} s",
+                now.duration_since(since).as_secs()
+            ));
+            self.seen.remove(pane);
+            self.unknown.remove(pane);
+            self.nagged.remove(pane);
+            return false;
+        }
+        self.seen.insert(pane.to_string(), (key, since, now));
+        if now.duration_since(first) >= DRAFT_STALE && self.nagged.insert(pane.to_string()) {
+            log(&format!(
+                "screen busy: {pane}; pointer waits, user notified"
+            ));
+            vega_herdr::notes::notify(
+                "draft",
+                Some(pane),
+                &format!("vegad: a message waits for {pane}"),
+                "Its screen keeps changing and shows no known input box: run `vega post inbox` there.",
+            );
+        }
+        true
     }
 
     /// Types a stashed draft back after the pointer, and checks it arrived;
@@ -5148,6 +5206,24 @@ fn log(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_screen_holds_until_quiet() {
+        let mut d = Drafts::default();
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        assert!(d.unknown_holds("w1:p1", "> typ", t0), "first sight holds");
+        assert!(
+            d.unknown_holds("w1:p1", "> typing", at(15)),
+            "changed: holds"
+        );
+        assert!(d.unknown_holds("w1:p1", "> typing", at(30)), "quiet 15 s");
+        assert!(
+            !d.unknown_holds("w1:p1", "> typing", at(35)),
+            "quiet 20 s: types"
+        );
+        assert!(d.unknown.is_empty() && d.seen.is_empty(), "state cleared");
+    }
 
     #[test]
     fn broker_requires_explicit_endpoint() {

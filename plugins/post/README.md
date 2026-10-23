@@ -4,6 +4,13 @@ Agent mail through a NATS broker, also across machines. A message is stored in t
 target pane; vegad, the relay on each host, types a one-line pointer into the pane and the target pulls its mail.
 This keeps long messages out of busy panes and lets agents on different machines talk.
 
+A pointer never joins text the user is typing (the draft guard): vegad reads the input box of Claude Code,
+Codex and pi and holds the pointer while it has a draft; a draft left 5 minutes is stashed and typed back
+after the pointer, or, when it cannot be typed back, keeps holding with one notification. A screen with no
+known input box holds the pointer until it has been unchanged for 20 s (one notification after 5 busy
+minutes). `vega mux send --now` pastes without the guard. See
+[Draft guard](../../docs/design/vegad.md).
+
 Reply commands carry a timestamped `--re` token. Replies within 120 seconds count toward the eight-hop
 loop limit; later replies reset to hop 1 on the same thread, so long task threads can continue. At the
 limit, stop automatic replies and tell the user; resume only with a substantive reply after work.

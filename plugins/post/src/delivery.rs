@@ -493,7 +493,7 @@ const PROMPTS: [char; 2] = ['❯', '›'];
 /// --format ansi`): a pointer would join it and submit it.
 #[derive(Debug, PartialEq)]
 pub enum Draft {
-    /// Empty input, or no input box on screen.
+    /// An empty input box.
     None,
     /// Text the relay can stash and type back: lines joined with `\n` (a
     /// soft wrap reads as a line break, which keeps the words).
@@ -501,20 +501,89 @@ pub enum Draft {
     /// Text the screen does not hold faithfully: a paste or image
     /// placeholder, or several lines outside Claude Code.
     Opaque,
+    /// No input box this parser knows (another harness, a full-screen
+    /// view): the user may be typing, so it is never read as empty.
+    Unknown,
 }
 
-/// The last line that starts with a prompt glyph is the input line; the box
-/// ends at the next rule (`─`), continuation lines are indented two
-/// columns. Dim text is the agent's suggestion, not the user's.
+/// Claude Code: the last line that starts with `❯`, right under a rule and
+/// with a rule below. Codex: the last line that starts with `›`, with its
+/// status line (`  GPT-… · dir · …` or `? for shortcuts`) below. pi: the box
+/// between the last two rules (`─`), without a glyph (pi-tui's editor); a
+/// glyph elsewhere is transcript. Any other screen is `Unknown`, also a bare
+/// glyph (a shell prompt such as starship's `❯`).
 pub fn draft(screen: &str) -> Draft {
     let lines: Vec<&str> = screen.lines().collect();
-    let Some(at) = lines
+    let rule = |i: usize| is_rule(&plain(lines[i], true));
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| rule(i)).collect();
+    let prompt = lines
         .iter()
-        .rposition(|l| plain(l, true).trim_start().starts_with(PROMPTS))
-    else {
+        .rposition(|l| plain(l, true).trim_start().starts_with(PROMPTS));
+    if let Some(at) = prompt {
+        let glyph = plain(lines[at], true).trim_start().chars().next();
+        let claude =
+            glyph == Some('❯') && at > 0 && rule(at - 1) && rules.last().is_some_and(|&r| r > at);
+        let codex = glyph == Some('›')
+            && lines[at + 1..]
+                .iter()
+                .any(|l| codex_status(&plain(l, true)));
+        if claude || codex {
+            return prompt_draft(&lines[at..]);
+        }
+    }
+    match rules[..] {
+        [.., top, bottom] => pi_draft(&lines[top..=bottom]),
+        _ => Draft::Unknown,
+    }
+}
+
+/// A line of Codex's footer: `  GPT-6.1-Sol medium · vega · Ready` or
+/// `  ? for shortcuts` (seen live).
+fn codex_status(line: &str) -> bool {
+    line.starts_with("  ") && (line.contains(" · ") || line.trim_end().ends_with("for shortcuts"))
+}
+
+/// A full-width rule: only `─`, or pi's scroll indicator (`─── ↑ 3 more ─`).
+fn is_rule(line: &str) -> bool {
+    let l = line.trim();
+    l.starts_with("───") && l.ends_with('─')
+}
+
+/// The box from its top to its bottom rule. pi's draft is restored only as
+/// one line: ctrl+c clears its editor, but twice within 0.5 s quits pi, and
+/// a soft wrap cannot be told from a line break.
+fn pi_draft(boxed: &[&str]) -> Draft {
+    let (top, bottom) = (plain(boxed[0], true), plain(boxed[boxed.len() - 1], true));
+    let mut text: Vec<String> = boxed[1..boxed.len() - 1]
+        .iter()
+        .map(|l| plain(l, false).trim_end().to_string())
+        .collect();
+    while text.last().is_some_and(|l| l.trim().is_empty()) {
+        text.pop();
+    }
+    while text.first().is_some_and(|l| l.trim().is_empty()) {
+        text.remove(0);
+    }
+    if text.is_empty() {
         return Draft::None;
-    };
-    let first = plain(lines[at], false);
+    }
+    let text = text.join("\n");
+    if text.contains('\n')
+        || text.contains("[paste #")
+        || top.contains(" more ")
+        || bottom.contains(" more ")
+    {
+        Draft::Opaque
+    } else {
+        Draft::Text(text)
+    }
+}
+
+/// From the prompt line on: the box ends at the next rule (`─`),
+/// continuation lines are indented two columns. Dim text is the agent's
+/// suggestion, not the user's.
+fn prompt_draft(lines: &[&str]) -> Draft {
+    let first = plain(lines[0], false);
     let first = first.trim_start();
     let claude = first.starts_with('❯');
     let first = first
@@ -532,7 +601,7 @@ pub fn draft(screen: &str) -> Draft {
     }
     let mut text: Vec<String> = vec![first.trim_end().to_string()];
     text.extend(
-        lines[at + 1..]
+        lines[1..]
             .iter()
             .map(|l| plain(l, false))
             .take_while(|l| !l.trim_start().starts_with('─'))
@@ -544,10 +613,7 @@ pub fn draft(screen: &str) -> Draft {
     let text = text.join("\n");
     if text.trim().is_empty() {
         Draft::None
-    } else if text.contains("[Pasted text #")
-        || text.contains("[Image #")
-        || (text.contains('\n') && !claude)
-    {
+    } else if text.contains("[Pasted text #") || text.contains("[Image #") {
         Draft::Opaque
     } else {
         Draft::Text(text)
@@ -648,37 +714,107 @@ mod tests {
         let grey = "\x1b[0m\x1b[38;2;153;153;153m❯\u{a0}\x1b[0m";
         let rule = "────────";
         let line = |s: &str| Draft::Text(s.into());
+        // Claude's box: a rule above and below its input line.
+        let claude = |input: &str| format!("answer\n{rule}\n{input}\n{rule}\n  status");
         // Empty input; an earlier prompt in the transcript does not count.
         assert_eq!(
-            draft(&format!(
-                "❯ old question\nanswer\n{rule}\n{grey}\n{rule}\n  status"
-            )),
+            draft(&format!("❯ old question\n{}", claude(grey))),
             Draft::None
         );
         // The agent's dim suggestion is not a draft.
         assert_eq!(
-            draft("❯\u{a0} \x1b[0m\x1b[2mwann sind die rennen\x1b[0m"),
+            draft(&claude("❯\u{a0} \x1b[0m\x1b[2mwann sind die rennen\x1b[0m")),
             Draft::None
         );
         assert_eq!(
-            draft(&format!(
-                "{grey}\x1b[0mhalf a sentence\n{rule}\n  status line"
-            )),
+            draft(&claude(&format!("{grey}\x1b[0mhalf a sentence"))),
             line("half a sentence")
         );
-        assert_eq!(draft("› codex draft"), Draft::Opaque);
-        // Seen live: an empty codex box (dim placeholder) with status lines below.
-        let codex = "\x1b[1m› \x1b[0m\x1b[2mAsk Codex to do anything\x1b[0m\n  GPT-6.1-Sol max · feat\n  ? for shortcuts   ⚠ 1 · f2\n";
-        assert_eq!(draft(codex), Draft::None);
-        // A truecolor argument of 2 is not dim.
-        assert_eq!(draft("\x1b[38;2;2;2;2m❯ typed\x1b[0m"), line("typed"));
+        // Seen live: codex's box, empty (dim placeholder) and with a draft.
+        let status = "\n\n  \x1b[0m\x1b[38;5;6mGPT-6.1-Sol medium\x1b[0m · \x1b[0m\x1b[38;5;2mvega\x1b[0m · \x1b[0m\x1b[38;5;6mReady\x1b[0m";
+        let codex = format!(
+            "\x1b[0m\x1b[1m› \x1b[0m\x1b[2mAsk Codex to do anything\x1b[0m{status}\n  \x1b[0m\x1b[1m? \x1b[0mfor shortcuts\n"
+        );
+        assert_eq!(draft(&codex), Draft::None);
         assert_eq!(
-            draft(&format!("❯ first\n  second\n\n{rule}")),
+            draft(&format!("\x1b[0m\x1b[1m› \x1b[0mhalf a sentence{status}")),
+            Draft::Opaque
+        );
+        assert_eq!(
+            draft(&format!("› codex\n  two lines{status}")),
+            Draft::Opaque
+        );
+        // A truecolor argument of 2 is not dim.
+        assert_eq!(
+            draft(&claude("\x1b[38;2;2;2;2m❯ typed\x1b[0m")),
+            line("typed")
+        );
+        assert_eq!(
+            draft(&format!("{rule}\n❯ first\n  second\n\n{rule}")),
             line("first\nsecond")
         );
-        assert_eq!(draft("❯ see [Pasted text #1 +20 lines]"), Draft::Opaque);
-        assert_eq!(draft("› codex\n  two lines"), Draft::Opaque);
-        assert_eq!(draft("no prompt on screen"), Draft::None);
+        assert_eq!(
+            draft(&claude("❯ see [Pasted text #1 +20 lines]")),
+            Draft::Opaque
+        );
+        assert_eq!(draft("no prompt on screen"), Draft::Unknown);
+    }
+
+    /// pi's screen as `pane read --format ansi` shows it (seen live, rules
+    /// shortened): transcript, a separator, the editor box, the footer.
+    fn pi(boxed: &str) -> String {
+        let rule = |c: &str| format!("\x1b[0m\x1b[38;2;{c}m────────────\x1b[0m");
+        let foot = "\x1b[0m\x1b[38;2;127;132;156m";
+        format!(
+            "Welcome to pi\n - pi-subagents\n{}\n\n{}\n{boxed}\n{}\n\
+             {foot}~/src/vega (main)\x1b[0m\n\
+             {foot}$0.000 (sub) 0.0%/500k (auto)   (xai) grok-4.7 • medium\x1b[0m\n\
+             {foot}◆ \x1b[0m\x1b[38;2;166;173;200m1 checkpoint\x1b[0m",
+            rule("249;226;175"),
+            rule("148;226;213"),
+            rule("148;226;213"),
+        )
+    }
+
+    #[test]
+    fn pi_draft_is_the_text_in_its_editor_box() {
+        let cursor = "\x1b[0m\x1b[7m \x1b[0m";
+        assert_eq!(draft(&pi(&format!("{cursor}            "))), Draft::None);
+        assert_eq!(
+            draft(&pi(&format!("half a sentence{cursor}      "))),
+            Draft::Text("half a sentence".into())
+        );
+        // Several lines (or one soft-wrapped): not restorable, held.
+        assert_eq!(
+            draft(&pi(&format!("half a sentence   \nsecond line{cursor}  "))),
+            Draft::Opaque
+        );
+        assert_eq!(draft(&pi("see [paste #1 +20 lines]")), Draft::Opaque);
+        // A Claude prompt in pi's transcript is not the input line.
+        let quoted = pi(&format!("my draft{cursor}")).replace(
+            "Welcome to pi",
+            "\x1b[38;2;153;153;153m❯\u{a0}\x1b[0mquoted claude screen",
+        );
+        assert_eq!(draft(&quoted), Draft::Text("my draft".into()));
+        // Scrolled: lines above the box are hidden.
+        let scrolled = pi("last line").replacen("────────────", "─── ↑ 3 more ───", 2);
+        assert_eq!(draft(&scrolled), Draft::Opaque);
+    }
+
+    #[test]
+    fn unknown_harness_screen_is_never_empty() {
+        // A box drawn without rules, a bare shell prompt, nothing at all.
+        for screen in [
+            "╭──────╮\n│ > typing here │\n╰──────╯\n  esc to cancel",
+            "user@host ~/src $ half a command",
+            // A bare glyph is no known box: an empty or typed shell prompt.
+            "~/src/vega main\n❯ ",
+            "~/src/vega main\n❯ half a command",
+            "› ",
+            "",
+        ] {
+            assert_eq!(draft(screen), Draft::Unknown, "{screen:?}");
+        }
     }
 
     fn d(status: &str) -> Delivery {
