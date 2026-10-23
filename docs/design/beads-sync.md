@@ -92,6 +92,11 @@ remotesapi, titan's version): a push to a missing one fails `database not found`
   because its local database existed before the remote one.
 - remotesapi has no authentication: a push to an existing database works anonymously; the tailnet
   grant (`tag:dolt-client` → `tag:dolt:8080`) is the only access control.
+- A remote with named users (e.g. a DoltHub-style hub): set `DOLT_REMOTE_USER` and
+  `DOLT_REMOTE_PASSWORD`. dolt reads only the password from the environment and defaults the
+  user to `root`, so the probe fetch and the `--adopt` fetch and push add `--user
+  $DOLT_REMOTE_USER` (`bd::remote_args`); `bd dolt pull`/`push` read both variables themselves.
+  The password never goes into argv.
 
 Tested: `bd::tests::creates_a_missing_database_with_create_only` runs a local sql-server with
 remotesapi and a CREATE-only `vega` user (probe `Missing`, wrong password `Denied`, create, probe
