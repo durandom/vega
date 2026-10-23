@@ -68,9 +68,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        // Same filesystem as the test binary: the hardlink test fails with EXDEV when /tmp is
-        // a separate mount (GitHub runners).
-        let tmp = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("embedded");
         fs::create_dir_all(repo.join(".beads")).unwrap();
         fs::write(
@@ -176,7 +174,11 @@ fn copied_shim_override_cannot_recurse() {
 #[test]
 fn self_override_and_hardlink_on_path_are_skipped() {
     let f = Fixture::new();
-    let hard = f._tmp.path().join("hard");
+    // Same filesystem as the test binary: a hardlink into /tmp fails with EXDEV where /tmp is a
+    // separate mount (GitHub runners). Only this dir lives there; the fixture repo stays outside
+    // the checkout so the shim cannot find vega's own .beads.
+    let hard_tmp = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let hard = hard_tmp.path().join("hard");
     fs::create_dir(&hard).unwrap();
     fs::hard_link(env!("CARGO_BIN_EXE_bd"), hard.join("bd")).unwrap();
     let path =
