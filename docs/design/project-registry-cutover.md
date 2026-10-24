@@ -143,7 +143,8 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    Treat exports as private backups; historical bd backups remain untouched.
 
    Include offline hosts in the inventory: bring them online quiesced for preview
-   and upgrade, or keep them disconnected until a new audited inventory. Never
+   and upgrade, or keep them disconnected until a new audited inventory
+   ([Late host rejoin](#late-host-rejoin)). Never
    let an old binary rejoin. Inbox-only hosts generate an empty mapping array and
    `--registry-read <exact-v2-key>` for each authorized project key; they must
    have no local project writer state. Theme/catalog permissions stay unchanged.
@@ -188,7 +189,8 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    to v2 readers; durable data is retained. There is no migrate-only phase or
    cross-host runtime lock.
 
-3. **Verify.** On an owner run `vega post identity verify`: every planned owner
+3. **Verify.** On an owner run `vega post identity verify` (flag day only: once
+   writers resume, live UACs/pins drift from the projections). Every planned owner
    must have a fresh schema-2 heartbeat, all planned UAC/pin direct gets must
    match and no legacy project keys may remain. Check inbox daemon completion,
    every host's completion marker/logs, and compare stopped bd locations,
@@ -214,6 +216,80 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    or resnapshot partial state. Snapshot rollback is for the quiesced flag-day
    window; after writers resume, recovery needs separate coordination to retain
    newer work.
+
+## Late host rejoin
+
+A host that was offline on the flag day (io on 2026-10-22) is not in
+`approved.json`. Completed hosts treat its fresh beat as an unplanned live host
+and hold ordinary publication (heartbeat only), and its own new vegad stays
+quiesced. It rejoins with a re-audited bundle: the completed hosts' plans
+unchanged plus the late host's preview. No completed host re-migrates:
+
+- Startup compares its durable journal with its own bundle entry (JSON
+  equality) and, with `complete.json` present, only runs the live checks. The
+  completed hosts' entries must therefore be the original plan files, unchanged.
+- Registry reconciliation re-reads `approved.json` every cycle, so a completed
+  host takes the new bundle without a restart. It must have it before the late
+  host's v2 beat appears. Replace the file atomically (rename).
+- `audit` checks the late host's claims and pins only against the flag-day
+  plans, not against UACs/pins created since. This runbook covers a late host
+  without a registry projection (no UAC claims or pins in its preview). A late
+  host that has some needs a live collision check first (follow-up of vega-lhc.14.15).
+- Plain `verify` compares every owner's flag-day projection and fails once
+  writers resume. `verify --host <late>` runs the beat/legacy checks for all
+  owners and the projection check only for the named host.
+- Identity subcommands load `vegad.env` like `relay`: a host whose
+  `hostname -s` differs from its registry host (io-wsl vs `VEGA_POST_HOST=io`)
+  previews under vegad's host token and holds vegad's relay lock.
+
+Keep the late host's old vegad stopped. Its herdr plugin `vega.vegad` runs
+`vega-post relay start` whenever herdr starts, so install the new binary
+first: from then on any start is a new vegad that stays quiesced without a plan.
+
+Runbook (the UAC runs it; `[S]` needs the Slayer's approval typed in orrery).
+`<cut>` is the flag-day directory with `live/plan-<host>.json` and
+`grants.json`; the example host is io (WSL: `ssh io`, then `wsl -e ...`).
+
+1. **Check stopped.** io: `vega post relay status` says stopped.
+2. **New history.** io: `cd ~/src/durandom/vega && git fetch origin && git reset --keep origin/main`.
+3. **Install.** proteus: `vega deploy apply io`. Its relay step starts the new
+   vegad, which stays quiesced (no `approved.json`: no beat, no publication).
+   Then io: `vega post relay stop`, since preview needs the relay lock. Check
+   `vega --version` shows main and relay status is stopped.
+4. **Preview.** io, writers stopped: `mkdir -m 700 ~/identity-io`, then
+   `vega post identity mappings --output ~/identity-io/mappings.json` (an owner
+   without project state exports `[]`) and
+   `vega post identity preview --mappings ~/identity-io/mappings.json --output ~/identity-io/plan-io.json`.
+   `jq -c '{host,inbox_only,b:(.registry.backup|length),p:(.registry.projection|length)}' ~/identity-io/plan-io.json`
+   must print `{"host":"io","inbox_only":false,"b":0,"p":0}`; a non-zero `p`
+   stops this runbook (see the collision limit above).
+5. **Fetch.** proteus, umask 077: `mkdir <cut>/rejoin-io` and
+   `ssh io wsl -e cat identity-io/plan-io.json > <cut>/rejoin-io/plan-io.json`.
+6. **Grants [S].** orrery exports the inbox hosts' actual effective grants as
+   for the flag-day audit. An owner like io needs no grant change. Reusing
+   `<cut>/grants.json` is valid only if orrery confirms nothing changed.
+7. **Audit.** proteus:
+   `vega post identity audit --plan <cut>/live/plan-proteus.json --plan <cut>/live/plan-ganymede.json --plan <cut>/live/plan-deimos.json --plan <cut>/rejoin-io/plan-io.json --host proteus --host ganymede --host deimos --host io --grants <grants> --output <cut>/rejoin-io/approved.json`.
+   For each completed host `h`, the outputs of
+   `jq -S '.hosts[]|select(.host=="h")'` on the live
+   `~/.local/state/vega/identity-cutover/approved.json` and on the new bundle
+   are identical (`diff` is empty).
+8. **Distribute, before io starts.** On proteus and ganymede, in
+   `~/.local/state/vega/identity-cutover/`: copy `approved.json` to
+   `approved.json.2026-10-22`, copy the new bundle to `approved.json.tmp`, then
+   rename `approved.json.tmp` to `approved.json`. deimos may keep its old bundle
+   (its entry is unchanged); give it the new one for uniformity. Each vegad log
+   shows no new identity error.
+9. **Start.** io: `vega post relay start`. The log shows `identity: ready`;
+   `identity-cutover/journal.json` and `complete.json` exist; relay status is current.
+10. **Verify.** proteus: `vega post identity verify --host io`. `vega post
+    relay status` on proteus and ganymede is not identity quiesced or blocked;
+    `vega uac` lists io. Then io's writers resume.
+
+Rollback, if io stays quiesced or verification fails: io `vega post relay stop`,
+then `vega post identity rollback` (restores io's original bytes and owned
+registry payloads); put `approved.json.2026-10-22` back on the completed hosts
+(atomic rename); keep io's vegad stopped and its journal, previews and bundles.
 
 ## Rehearsal on state copies
 
