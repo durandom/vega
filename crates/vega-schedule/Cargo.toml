@@ -1,0 +1,17 @@
+[package]
+name = "vega-schedule"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "vegad timed tasks: schedule.toml jobs, slots with DST rules, catch-up state, approvals, reminder store"
+publish = false
+
+[dependencies]
+jiff = { version = "0.2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+toml_edit = "0.25"
+
+[dev-dependencies]
+tempfile = "3"
