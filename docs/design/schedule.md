@@ -89,9 +89,11 @@ execution on every host that has the checkout, unless something on the host says
 ## Running
 
 **Catch-up.** A scheduler thread in vegad wakes every 30 s and, per approved job, computes the latest slot ≤ now.
-If that slot is newer than the job's last start, it runs once. Many missed slots (a week asleep) give one run, the
-most recent. After the first approval the clock starts at the approval: no instant run of slots before it.
-`catchup = false` skips a missed slot older than 15 min instead (for jobs where late is worse than never).
+If that slot is newer than the job's last handled slot, vegad handles it once: it starts a run or records a skip,
+and in both cases writes the slot as `last_slot` before anything else (`state.json` per job, atomic replace).
+Many missed slots (a week asleep) give one run, the most recent. After the first approval the clock starts at the
+approval: no instant run of slots before it. `catchup = false` skips a missed slot older than 15 min instead (for
+jobs where late is worse than never).
 After reboot nothing runs until herdr starts vegad; the first tick catches up.
 
 **Runner.** vegad does not run the command itself. It spawns `vega-schedule exec <project>/<job> --slot <ts>` in
@@ -101,8 +103,10 @@ after 10 s) and writes `run.json` (start, end, exit code or signal, outcome). So
 the middle of a job loses nothing: the next tick reads `run.json`. `vega schedule run` uses the same runner.
 
 **Overlap.** One flock per job (`$XDG_STATE_HOME/vega/schedule/<project>/<job>/lock`). A slot that comes due while
-the job runs is not queued: the run counts as `skipped (running)` in the history. Jobs of different projects run
-in parallel; `hosts` keeps one project's job off other hosts.
+the job runs is not queued: vegad records it as `skipped (running)` and advances `last_slot`, so the run that
+ends later does not pick it up again; the next run is the next slot. A runner that finds the lock taken (a manual
+`vega schedule run`) records the same skip. Manual runs never touch `last_slot`. Jobs of different projects run in
+parallel; `hosts` keeps one project's job off other hosts.
 
 **Environment.** vegad's env (no agent markers, no shims on PATH: vegad.md, Lifecycle) plus `env`, plus
 `VEGA_SCHEDULE_JOB=<project>/<job>`, `VEGA_SCHEDULE_SLOT` (RFC 3339) and `VEGA_SCHEDULE_NOTIFY` (a file path).
@@ -119,7 +123,8 @@ proteus with the real `fristen-execute` before anything else is built. If it fai
 - Per run: `$XDG_STATE_HOME/vega/schedule/<project>/<job>/<UTC slot>.log` and `.json`. Keep the last 20 runs per
   job and nothing older than 30 days; pruning happens on each run.
 - vegad's own log gets one line per start and end, never the job's output.
-- State that survives restarts: last slot started, last outcome (per job, in the run files); approvals in config.
+- State that survives restarts: `last_slot` (the last slot started or skipped) in `state.json`, outcomes in the
+  run files, approvals in config.
 
 ## Mail
 
@@ -172,8 +177,8 @@ shows that EventKit refuses vegad's descendants and `launchctl asuser` does not 
    the herdr server) and record whether EventKit works; try `launchctl asuser` if not. Done when the bead notes
    the result. Decides `session = "gui"`.
 2. **crates/vega-schedule: model.** Parse and validate `schedule.toml` (unknown keys fail), next-slot and
-   latest-slot with DST rules, canonical hash, approvals file. Unit tests for DST, catch-up arithmetic, hash
-   stability.
+   latest-slot with DST rules, canonical hash, approvals file, `state.json`. Unit tests for DST, catch-up
+   arithmetic (a skipped slot never runs later), hash stability.
 3. **Runner: `vega-schedule exec`.** Lock, hash re-check, default-branch check, env, log file, timeout with process
    group kill, `run.json`, pruning. Tests with fake jobs (exit codes, timeout, overlap).
 4. **vegad thread.** Discovery of main checkouts, minute re-read, 30 s tick, catch-up, spawn the runner, read
