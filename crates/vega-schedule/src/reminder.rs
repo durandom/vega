@@ -150,9 +150,15 @@ impl Store {
         }
     }
 
-    /// CLI: stores a new definition. `reminder_limit` at [`MAX_ACTIVE`].
+    /// CLI: stores a new definition. `reminder_limit` at [`MAX_ACTIVE`];
+    /// count and write hold `.create.lock`, so concurrent creators never
+    /// exceed it.
     pub fn create(&self, r: &Reminder) -> Result<(), Error> {
         r.validate()?;
+        fs::create_dir_all(&self.root).map_err(|e| Error::io(&self.root, e))?;
+        let lock_path = self.root.join(".create.lock");
+        let lock = fs::File::create(&lock_path).map_err(|e| Error::io(&lock_path, e))?;
+        lock.lock().map_err(|e| Error::io(&lock_path, e))?;
         let l = self.list()?;
         if l.reminders.len() + l.broken.len() >= MAX_ACTIVE {
             return Err(Error::new(
@@ -346,6 +352,37 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.code, "reminder_limit");
         assert!(e.message.contains("vega post reminders"));
+    }
+
+    #[test]
+    fn limit_holds_under_concurrent_creates() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::new(dir.path().to_path_buf());
+        for i in 0..MAX_ACTIVE - 10 {
+            s.create(&reminder(
+                &format!("r{i:08x}"),
+                When::daily("08:30").unwrap(),
+                uac(),
+            ))
+            .unwrap();
+        }
+        let workers: Vec<_> = (0..8u32)
+            .map(|w| {
+                let s = s.clone();
+                std::thread::spawn(move || {
+                    (0..5u32)
+                        .filter(|k| {
+                            let id = format!("r{:08x}", 0x1000 + w * 16 + k);
+                            s.create(&reminder(&id, When::daily("08:30").unwrap(), uac()))
+                                .is_ok()
+                        })
+                        .count()
+                })
+            })
+            .collect();
+        let created: usize = workers.into_iter().map(|h| h.join().unwrap()).sum();
+        assert_eq!(created, 10);
+        assert_eq!(s.list().unwrap().reminders.len(), MAX_ACTIVE);
     }
 
     #[test]
