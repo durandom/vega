@@ -74,12 +74,16 @@ ganymede; `hosts` is hashed as well, so adding or removing a host in the file as
   write a crontab anyway, so the approval defends against remote pushes, not against local agents. The guide
   tells agents to ask the user and never approve on their own; the UAC records the request as a `slayer-decision`
   bead when the user is away. No technical agent block (the env markers would also block the user's `!` call).
-- Definitions come from committed `HEAD`, not the working tree: an uncommitted edit cannot change what runs.
-- Residual risk, stated in the guide: the hash pins the entrypoint, not the code it reaches. `just fristen-execute`
-  runs whatever the committed `justfile` and scripts say. `pin` closes that for the files a project names
-  (brainz: `justfile` and the script it calls); everything else is as trusted as the project's main branch
-  (its review rules decide what lands there). The job also refuses to start when the main checkout's HEAD is not
-  on the default branch (`skipped: checkout on <branch>`), so a local experiment branch never runs unattended.
+- The job definition comes from committed `HEAD`, not the working tree: an uncommitted edit to
+  `.vega/schedule.toml` cannot change what runs.
+- The code runs from the working tree, though. Before it starts `cmd`, the runner checks that every `pin` file is
+  unmodified against `HEAD` (`git diff --quiet HEAD -- <pins>`, untracked pins count as modified); otherwise the
+  run is `skipped (pin modified: <path>)` and mails. So the pinned files that run are the approved blobs.
+- Residual risk, stated in the guide: the hash pins the entrypoint and the named files, not all the code they
+  reach. Unpinned files run as they are in the working tree: committed code is as trusted as the project's main
+  branch (its review rules decide what lands there), uncommitted edits are local and inside the box (P7). The job
+  also refuses to start when the main checkout's HEAD is not on the default branch
+  (`skipped (checkout on <branch>)`), so a local experiment branch never runs unattended.
 
 ## When
 
@@ -142,9 +146,10 @@ proteus with the real `fristen-execute` before anything else is built. If it fai
   (no broker) only a UAC pane on this host gets it (local tool-mail delivery). No UAC: a durable board note.
 - `notify` decides (default `failure`): `failure` mails the outcomes below, `always` also every success, `never`
   mails nothing, not even `$VEGA_SCHEDULE_NOTIFY` text (the runs stay in `vega schedule` and the logs).
-- Sent as `tool vega-schedule` (unless `never`): on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and
-  `skipped (checkout …)`; never for `skipped (running)`. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
-  (at most 2 KiB), the log path and `vega schedule show <job>`.
+- Sent as `tool vega-schedule` (unless `never`): on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error`,
+  `skipped (checkout …)` and `skipped (pin modified …)`; never for `skipped (running)`. Body: job, host, slot,
+  outcome, exit code, duration, the last 20 lines of output (at most 2 KiB), the log path and
+  `vega schedule show <job>`.
 - A failing daily job mails each failed run; the next success after a failure mails one `recovered` line.
 - With `failure` or `always`, a job may write text to `$VEGA_SCHEDULE_NOTIFY`: if the file is non-empty at exit,
   its first 2 KiB are mailed even on success (`fristen-execute`: "3 deadlines today").
@@ -192,8 +197,9 @@ shows that EventKit refuses vegad's descendants and `launchctl asuser` does not 
    latest-slot with DST rules, canonical hash, approvals file, `state.json`. Unit tests for DST, catch-up
    arithmetic (a skipped slot never runs later; a crash between the steps neither repeats a slot nor
    ends it silently), hash stability.
-3. **Runner: `vega-schedule exec`.** Lock, hash re-check, default-branch check, env, log file, timeout with process
-   group kill, run file, pruning. Tests with fake jobs (exit codes, timeout, overlap).
+3. **Runner: `vega-schedule exec`.** Lock, hash re-check, default-branch and clean-pin checks, env, log file,
+   timeout with process group kill, run file, pruning. Tests with fake jobs (exit codes, timeout, overlap, a
+   modified pin).
 4. **vegad thread.** Discovery of main checkouts, minute re-read, 30 s tick, catch-up, spawn the runner, read
    run files and `pending` after restart. Tests with a fake clock and a temp state dir.
 5. **Mail.** Failure, recovered, always and `$VEGA_SCHEDULE_NOTIFY`; registry routing, local-mode delivery, board
