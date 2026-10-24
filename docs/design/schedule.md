@@ -20,7 +20,8 @@ after sleep on cron, nothing in `vega uac` or the board.
 
 1. Jobs are declared in a checked-in `.vega/schedule.toml`, read from the main checkout's committed `HEAD`.
 2. vegad runs a job only after a human on that host approved the job's exact definition hash
-   (`vega schedule approve`). A changed `cmd`, `cwd`, `env` or `pin` needs a new approval; a changed time does not.
+   (`vega schedule approve`). A changed `cmd`, `cwd`, `env`, `hosts` or `pin` needs a new approval; a changed time
+   does not.
 3. `daily = "HH:MM"` and `weekly = "<day> HH:MM"` in host local time. No cron in v1.
 4. A missed slot (sleep, vegad down) runs once at the next chance. One run per job at a time; a slot that comes due
    while it runs is skipped. Default timeout 1 h.
@@ -58,10 +59,11 @@ vega is public and collaborators can push. A checked-in file that makes vegad ex
 execution on every host that has the checkout, unless something on the host says yes.
 
 **Rule: a job runs only if this host approved its hash.** Hash = SHA-256 over the canonical form of
-`project id, name, cmd, cwd, env` plus the git blob id of each `pin` file at HEAD. `when`, `timeout`, `notify` and
-`hosts` are not hashed: they cannot make the job run other code. Approvals live in
+`project id, name, cmd, cwd, env, hosts` plus the git blob id of each `pin` file at HEAD. `when`, `timeout` and
+`notify` are not hashed: they cannot make the job run other code or run elsewhere. Approvals live in
 `$XDG_CONFIG_HOME/vega/schedule-approved.toml` (host-local, never deployed, not in any repo):
-`"<project id>/<name>" = "<hash>"`.
+`"<project id>/<name>" = "<hash>"`. Each host keeps its own file, so an approval on proteus never lets a job run on
+ganymede; `hosts` is hashed as well, so adding or removing a host in the file asks every host again.
 
 - `vega schedule approve <project>/<job>` prints the definition and the diff against the approved one, then
   stores the hash. A new or changed job lists as `unapproved` with that command as the next step; vegad also
