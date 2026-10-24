@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 73 · 2026-10-24
+
+- feature: a host that missed the identity flag day (io) rejoins with a
+  re-audited bundle that completed hosts accept without re-migrating; the UAC
+  runs the [Late host rejoin](docs/design/project-registry-cutover.md#late-host-rejoin)
+  runbook. `vega post identity verify --host <late>` checks that host's
+  projection; plain `verify` stays the flag-day check (later UAC/pin changes
+  fail it). Identity subcommands now load `vegad.env`, so a WSL host whose
+  `hostname -s` differs from `VEGA_POST_HOST` previews under vegad's host name.
+
 ## 72 · 2026-10-24
 
 - feature: a vegad in identity quiesce (e.g. `relay status` says `identity

@@ -54,7 +54,12 @@ pub enum Action {
         output: PathBuf,
     },
     /// Check that every planned owner is v2 and no legacy keys remain
-    Verify,
+    Verify {
+        /// Check only these hosts' planned v2 projection (a late-host rejoin);
+        /// completed owners' UACs and pins drift once writers resume
+        #[arg(long)]
+        host: Vec<String>,
+    },
     /// Restore this host's journal; writers must stay stopped until old deploy
     Rollback,
 }
@@ -495,6 +500,9 @@ fn export_mappings(output: &Path) -> Result<(), Failure> {
 }
 
 pub fn run(action: Action) -> Result<(), Failure> {
+    // Same host token and relay lock as vegad: `hostname -s` can differ from
+    // the registry host (io-wsl vs io) in a shell without VEGA_POST_HOST.
+    crate::service::load_env_file();
     if let Action::Mappings { output } = action {
         return export_mappings(&output);
     }
@@ -605,20 +613,24 @@ fn run_inner(action: Action) -> Result<(), String> {
             );
             Ok(())
         }
-        Action::Verify => {
+        Action::Verify { host } => {
             let root = crate::service::state_dir().map_err(|e| e.message)?;
             let bundle: Bundle = read(&root.join(BUNDLE))?;
+            let plans = projection_hosts(&bundle, &host)?;
             crate::runtime().map_err(|e| e.message)?.block_on(async {
                 let c = vega_registry::connect("identity verify").await?;
                 let kv = vega_registry::bucket(&c).await?;
                 let entries = raw_entries(&kv).await?;
                 verify_deployment(&entries, &bundle, now())?;
-                for p in &bundle.hosts {
+                for p in &plans {
                     p.registry.verify(&c, &kv).await?;
                 }
                 Ok::<_, String>(())
             })?;
             println!("identity: all planned owners publish v2; no legacy keys remain");
+            if !host.is_empty() {
+                println!("projection: verified for {}", host.join(", "));
+            }
             Ok(())
         }
         Action::Rollback => {
@@ -990,6 +1002,22 @@ fn validate_grants(bundle: &Bundle) -> Result<(), String> {
     Ok(())
 }
 
+/// Plans whose flag-day projection `verify` compares: all, or only the named
+/// (late) hosts. Every named host must be in the audited bundle.
+fn projection_hosts<'a>(bundle: &'a Bundle, hosts: &[String]) -> Result<Vec<&'a HostPlan>, String> {
+    if let Some(h) = hosts
+        .iter()
+        .find(|h| !bundle.hosts.iter().any(|p| &p.host == *h))
+    {
+        return Err(format!("host {h} is not in the audited bundle"));
+    }
+    Ok(bundle
+        .hosts
+        .iter()
+        .filter(|p| hosts.is_empty() || hosts.contains(&p.host))
+        .collect())
+}
+
 fn verify_deployment(
     entries: &BTreeMap<String, Value>,
     bundle: &Bundle,
@@ -1216,6 +1244,24 @@ mod tests {
         assert!(verify_deployment(&entries, &b, 1000).is_err());
         entries.insert("unplanned.uac.old".into(), json!({"project":"/old"}));
         assert!(check_live(&entries, &b, 1000).is_err());
+    }
+
+    #[test]
+    fn verify_host_limits_projection_check_to_named_audited_hosts() {
+        let mut b = bundle(fixture("a", "p1"));
+        b.hosts.push(fixture("late", "p2"));
+        let all: Vec<_> = projection_hosts(&b, &[])
+            .unwrap()
+            .iter()
+            .map(|p| p.host.clone())
+            .collect();
+        assert_eq!(all, ["a", "late"]);
+        let late = projection_hosts(&b, &["late".into()]).unwrap();
+        assert_eq!(late.len(), 1);
+        assert_eq!(late[0].host, "late");
+        assert!(projection_hosts(&b, &["io-wsl".into()])
+            .err()
+            .is_some_and(|e| e.contains("not in the audited bundle")));
     }
 
     #[test]

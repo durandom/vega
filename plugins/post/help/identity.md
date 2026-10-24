@@ -22,6 +22,9 @@ backup; inbox-only hosts cannot enumerate and skip that check.
 Inbox-only preview uses --registry-read once per exact authorized v2 key;
 startup checks reads and forbidden enumeration after owners have started.
 Only orrery changes grants, with the Slayer's approval. Keep backups.
+Every subcommand loads vegad.env (VEGA_POST_HOST, broker) like `relay`, so
+host and relay lock match vegad. A late host rejoins with a re-audited bundle
+(project-registry-cutover.md, Late host rejoin).
 
 Examples:
   vega post identity mappings --output mappings.json
@@ -30,3 +33,4 @@ Examples:
   vega post identity rollback
 
 After deployment: vega post identity verify (owning host, all owners fresh v2).
+After a late-host rejoin: vega post identity verify --host io (projection of io only).
