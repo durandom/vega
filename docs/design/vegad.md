@@ -583,9 +583,9 @@ installed from is behind its upstream, and mails one vega session once per new u
 
 ## Schedule
 
-vegad also runs per-project jobs declared in a committed `.vega/schedule.toml`, only after the host approved
-each job's hash, with catch-up after sleep and failure mail to the project UAC. Design:
-[schedule.md](schedule.md).
+Proposed, not built (vega-lhc.197): vegad would run per-project jobs declared in a committed
+`.vega/schedule.toml`, only after the host approved each job's hash, with catch-up after sleep and failure mail
+to the project UAC. Design: [schedule.md](schedule.md).
 
 ## Hygiene
 
