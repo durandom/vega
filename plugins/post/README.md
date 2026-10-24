@@ -35,3 +35,8 @@ Inbox-only hosts migrate local project records without registry publication.
 For separate Git directories, set `core.worktree` to the actual checkout before
 generating mappings from the Git directory. The runbook also describes an
 opt-in startup/file-rollback rehearsal on state copies without broker writes.
+A host that missed the flag day rejoins with a re-audited bundle that completed
+hosts accept without re-migrating ([Late host rejoin](../../docs/design/project-registry-cutover.md#late-host-rejoin)).
+`vega post identity verify --host <host>` checks only that host's planned
+projection (plain `verify` is the flag-day check). Identity subcommands load
+`vegad.env`, so host token, relay lock and broker match vegad's.

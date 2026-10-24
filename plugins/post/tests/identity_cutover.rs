@@ -661,3 +661,49 @@ fn inbox_mappings_need_no_broker_and_reject_exports_into_live_state() {
     );
     assert!(!home.join("suffix.cutover-tmp.next").exists());
 }
+
+#[test]
+fn identity_commands_take_host_and_broker_from_vegad_env() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().canonicalize().unwrap();
+    let state = home.join("state/vega");
+    fs::create_dir_all(&state).unwrap();
+    // A WSL shell: `hostname -s` (io-wsl) is not the registry host vegad pins.
+    fs::write(
+        state.join("vegad.env"),
+        "VEGA_POST_HOST=io\nVEGA_NATS_URL=not-a-nats-url\n",
+    )
+    .unwrap();
+    let mut cmd = post_command(&home, "", "", &["identity", "rollback"]);
+    cmd.env_remove("VEGA_POST_HOST").env_remove("VEGA_NATS_URL");
+    let out = vega_herdr::output_within(&mut cmd, Duration::from_secs(20))
+        .unwrap()
+        .expect("command timed out");
+    assert_eq!(out.status.code(), Some(1), "no journal to roll back");
+    // Rollback took vegad's relay lock, keyed by the vegad.env host.
+    let locks: Vec<_> = fs::read_dir(&state)
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".lock"))
+        .collect();
+    assert_eq!(locks, ["post-relay-io.lock"]);
+
+    // verify reaches the broker from vegad.env, not from this shell.
+    fs::create_dir_all(state.join("identity-cutover")).unwrap();
+    fs::write(
+        state.join("identity-cutover/approved.json"),
+        r#"{"schema":2,"hosts":[],"grants":{}}"#,
+    )
+    .unwrap();
+    let mut cmd = post_command(&home, "", "", &["identity", "verify"]);
+    cmd.env_remove("VEGA_POST_HOST").env_remove("VEGA_NATS_URL");
+    let out = vega_herdr::output_within(&mut cmd, Duration::from_secs(20))
+        .unwrap()
+        .expect("command timed out");
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    // Without vegad.env's URL this would be "no broker configured".
+    assert!(text.contains("broker unreachable"), "{text}");
+    assert!(!text.contains("no broker configured"), "{text}");
+}
