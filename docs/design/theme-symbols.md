@@ -218,7 +218,11 @@ worktree, a remote pane its own vegad's answer; cleared outside a checkout.
 Workspace rows (Spaces) carry the distinct kinds in that workspace (below).
 
 A pane no vegad labels has neither `$host`, `$project`, `$kind` nor `$label`; keep `machine`, `workspace`
-and `agent` in the rows if such panes should still show something.
+and `agent` in the rows if such panes should still show something. That is a host without vega, a
+stopped vegad, or another herdr session on the host (vegad reports to the default one only, e.g. not
+ganymede's `tops`). A vegad in identity quiesce (vegad.md, Fallback) still reports `$host`, `$kind`,
+`$project` (the pane's own workspace label) and `$label` (tab label, else the kind; no sentinel symbol,
+not cleared on the UAC); the other tokens wait for the identity.
 
 ## Workspace inbox (herdr Spaces)
 

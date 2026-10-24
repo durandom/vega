@@ -76,10 +76,15 @@ fn quiesced_command(home: &Path, url: &str, host: &str, reason: &str, args: &[&s
         child.0.try_wait().unwrap().is_none(),
         "cutover failure must stay alive"
     );
-    assert_eq!(
-        fs::read(home.join("herdr-calls")).unwrap_or_default(),
-        calls,
-        "quiesced daemon started project work"
+    // Only the sidebar's identity-free labels (main.rs report_quiesced):
+    // herdr's lists and pane metadata, no project work.
+    let after = fs::read(home.join("herdr-calls")).unwrap_or_default();
+    let new = String::from_utf8_lossy(&after[calls.len()..]).into_owned();
+    assert!(
+        new.lines()
+            .all(|l| ["pane list", "workspace list", "tab list"].contains(&l)
+                || l.starts_with("pane report-metadata ")),
+        "quiesced daemon started project work: {new}"
     );
     assert!(
         fs::read_to_string(home.join(format!("state/vega/post-relay-{host}.broker")))
@@ -128,7 +133,7 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
     fs::create_dir_all(home.join("bin")).unwrap();
     fs::write(
         home.join("bin/herdr"),
-        "#!/bin/sh\necho called >> \"$HOME/herdr-calls\"\necho '{\"result\":{\"agents\":[],\"workspaces\":[],\"panes\":[]}}'\n",
+        "#!/bin/sh\necho \"$*\" >> \"$HOME/herdr-calls\"\necho '{\"result\":{\"agents\":[],\"workspaces\":[],\"panes\":[]}}'\n",
     )
     .unwrap();
     fs::set_permissions(home.join("bin/herdr"), fs::Permissions::from_mode(0o755)).unwrap();

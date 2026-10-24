@@ -238,7 +238,11 @@ An unmigrated or failed-cutover host instead remains alive in identity quiesce
 before this local loop or any project worker starts. It reports each changed
 error once and retries without workers; self-exec is available. A completed
 online rejoin that detects mixed versions or reappeared legacy keys uses the
-same quiesce. Once repaired, it automatically continues startup.
+same quiesce. Once repaired, it automatically continues startup. While quiesced, each retry still
+labels this herdr's panes from herdr's layout alone (`report_quiesced`): `$host`, `$kind`, `$project`
+(the workspace label) and `$label` (tab label, else the kind), so the host's agent rows are not blank in
+the Slayer's sidebar (vega-lhc.200). UAC badges, sentinel names, `$git` and workspace tokens need the
+identity and stay off.
 
 - On: herdr status events, sidebar metadata, attention and parent wakes for local panes, parks, the upgrade
   check, git sync, theme follow, the self-exec upgrade (the handoff also carries undelivered tool mail).
