@@ -118,8 +118,8 @@ pointers, watches agent status through herdr events and wakes a parent on a done
 silent or exited child, publishes this host's agents to the registry (a KV bucket on the broker), and runs the
 beads sync, git sync (fetch every 5 min, fast-forward of
 checkouts without local changes or commits), the CI watch and the daily upgrade
-check. Without a broker it runs in local mode: herdr-only jobs stay on, mail, registry, beads sync and CI watch
-are off.
+check. Without a broker it runs in local mode: herdr-only jobs stay on (status, wake-ups, git sync, the upgrade check,
+and local tool mail such as the upgrade proposal); broker mail, the registry, beads sync and CI watch are off.
 
 - Show: `vega post relay status`, `vega post`, `vega bd status` (git sync too).
 - Design: [vegad.md](design/vegad.md), [git-sync.md](design/git-sync.md), [ci-watch.md](design/ci-watch.md).

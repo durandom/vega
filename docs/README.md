@@ -20,7 +20,7 @@
 ## Design docs (background)
 
 Decision records and research, written while building vega. They explain why; the CLI guides and `--help` are
-the current reference. Some describe proposals or one-time cutovers; each states its status at the top.
+the current reference. Some describe proposals, research or one-time cutovers; check a doc's header for its status and date.
 
 | Doc | About |
 | --- | --- |
