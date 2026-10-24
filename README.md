@@ -4,6 +4,12 @@ Agent tooling for a small estate of machines: the `vega` CLI, its plugins, shims
 (Claude Code, Codex, Pi) in [herdr](https://github.com/herdrdev/herdr) panes, lets them message each other, and
 keeps their tools, themes and config in sync across hosts.
 
+## Concepts
+
+New here? [docs/concepts.md](docs/concepts.md) explains hosts, panes, agent kinds, the UAC (one coordinator
+per project) and its sentinels, project identity, mail, vegad, beads, the gate and the trust model.
+[docs/README.md](docs/README.md) indexes the how-tos and the design docs.
+
 ## What is in it
 
 | Plugin | Purpose |
@@ -61,16 +67,15 @@ Then `vega` with no arguments shows the home view, and `vega skills` lists the a
 
 ## Onboarding with an agent
 
-The repo is private: your GitHub account needs read access. Only `mise`, `cargo`, `git`, `herdr` and one coding
+The repo is public; cloning needs no GitHub account. Only `mise`, `cargo`, `git`, `herdr` and one coding
 agent are required; the broker, tailnet and Dolt remote of the original setup are optional, and `vega onboard`
 says what each one adds. Paste this into a fresh agent session (Claude Code, Codex or pi):
 
 ```text
-Set up vega (agent tooling, private repo github.com/durandom/vega; my GitHub account has read access).
+Set up vega (agent tooling, public repo github.com/durandom/vega).
 1. Check `mise --version`, `cargo --version` (rustup) and `git --version`. If one is missing, tell me and
    ask before installing it.
-2. Clone it: `gh repo clone durandom/vega ~/src/durandom/vega` (or `git clone git@github.com:durandom/vega.git`
-   into the same path).
+2. Clone it: `git clone https://github.com/durandom/vega.git ~/src/durandom/vega`.
 3. In the checkout: `mise trust`, then `mise run install-cli`. Make sure ~/.local/bin is on my PATH.
 4. Run `vega onboard`. Go through the required gaps with me first. For each optional gap, tell me what it
    enables and ask whether I want it. Then run `vega post relay install` (also without a NATS broker: vegad
