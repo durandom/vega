@@ -89,8 +89,12 @@ execution on every host that has the checkout, unless something on the host says
 ## Running
 
 **Catch-up.** A scheduler thread in vegad wakes every 30 s and, per approved job, computes the latest slot ≤ now.
-If that slot is newer than the job's last handled slot, vegad handles it once: it starts a run or records a skip,
-and in both cases writes the slot as `last_slot` before anything else (`state.json` per job, atomic replace).
+If that slot is newer than the job's `last_slot`, vegad handles it once, crash-safe in three steps (`state.json`
+per job, atomic replace): (1) write the slot as `pending`; (2) spawn the runner, or record the skip in the slot's
+run file; (3) once the slot's run file exists, move `pending` to `last_slot`. The runner creates the slot's run file
+under the job lock as its first act and exits at once if it already exists, so a respawn is idempotent. After a
+crash or restart, a `pending` slot without a run file is spawned again; one with a run file just completes step 3.
+A slot is therefore never lost and never run twice.
 Many missed slots (a week asleep) give one run, the most recent. After the first approval the clock starts at the
 approval: no instant run of slots before it. `catchup = false` skips a missed slot older than 15 min instead (for
 jobs where late is worse than never).
@@ -99,8 +103,8 @@ After reboot nothing runs until herdr starts vegad; the first tick catches up.
 **Runner.** vegad does not run the command itself. It spawns `vega-schedule exec <project>/<job> --slot <ts>` in
 its own session (setsid). The runner takes the job's lock, re-checks the hash, runs `cmd` with stdout and stderr
 appended to the run's log file (no pipe to vegad), enforces the timeout (SIGTERM to the process group, SIGKILL
-after 10 s) and writes `run.json` (start, end, exit code or signal, outcome). So a vegad self-exec or restart in
-the middle of a job loses nothing: the next tick reads `run.json`. `vega schedule run` uses the same runner.
+after 10 s) and fills the slot's run file `<slot>.json` (start, end, exit code or signal, outcome). So a vegad
+self-exec or restart in the middle of a job loses nothing: the next tick reads the run file. `vega schedule run` uses the same runner.
 
 **Overlap.** One flock per job (`$XDG_STATE_HOME/vega/schedule/<project>/<job>/lock`). A slot that comes due while
 the job runs is not queued: vegad records it as `skipped (running)` and advances `last_slot`, so the run that
@@ -123,8 +127,8 @@ proteus with the real `fristen-execute` before anything else is built. If it fai
 - Per run: `$XDG_STATE_HOME/vega/schedule/<project>/<job>/<UTC slot>.log` and `.json`. Keep the last 20 runs per
   job and nothing older than 30 days; pruning happens on each run.
 - vegad's own log gets one line per start and end, never the job's output.
-- State that survives restarts: `last_slot` (the last slot started or skipped) in `state.json`, outcomes in the
-  run files, approvals in config.
+- State that survives restarts: `last_slot` (the last slot started or skipped) and `pending` in `state.json`,
+  outcomes in the run files, approvals in config.
 
 ## Mail
 
@@ -178,11 +182,12 @@ shows that EventKit refuses vegad's descendants and `launchctl asuser` does not 
    the result. Decides `session = "gui"`.
 2. **crates/vega-schedule: model.** Parse and validate `schedule.toml` (unknown keys fail), next-slot and
    latest-slot with DST rules, canonical hash, approvals file, `state.json`. Unit tests for DST, catch-up
-   arithmetic (a skipped slot never runs later), hash stability.
+   arithmetic (a skipped slot never runs later; a crash between the steps neither loses nor repeats a slot), hash
+   stability.
 3. **Runner: `vega-schedule exec`.** Lock, hash re-check, default-branch check, env, log file, timeout with process
-   group kill, `run.json`, pruning. Tests with fake jobs (exit codes, timeout, overlap).
+   group kill, run file, pruning. Tests with fake jobs (exit codes, timeout, overlap).
 4. **vegad thread.** Discovery of main checkouts, minute re-read, 30 s tick, catch-up, spawn the runner, read
-   `run.json` after restart. Tests with a fake clock and a temp state dir.
+   run files and `pending` after restart. Tests with a fake clock and a temp state dir.
 5. **Mail.** Failure, recovered, always and `$VEGA_SCHEDULE_NOTIFY`; registry routing, local-mode delivery, board
    note without a UAC; one note per new unapproved hash.
 6. **CLI.** `vega schedule` home, `show`, `approve`, `revoke`, `run`, `log`; `--skill` guide (with the trust rules
