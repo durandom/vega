@@ -58,6 +58,9 @@ pub fn parse_hhmm(s: &str) -> Result<Time, Error> {
 /// `<n>m`, `<n>h` or `<n>d` (a day is 24 h), n > 0.
 pub fn parse_duration(s: &str) -> Result<SignedDuration, Error> {
     let bad = || invalid(format!("{s:?}: want a duration like 90m, 2h or 3d"));
+    if !s.is_ascii() {
+        return Err(bad());
+    }
     let (num, unit) = s.split_at(s.len().saturating_sub(1));
     if num.is_empty() || !num.bytes().all(|c| c.is_ascii_digit()) {
         return Err(bad());
@@ -113,7 +116,7 @@ impl When {
             return Ok(When::At(t));
         }
         let bad = || invalid(format!("{s:?}: want HH:MM or YYYY-MM-DDTHH:MM"));
-        if s.len() != 16 || s.as_bytes()[10] != b'T' {
+        if s.len() != 16 || !s.is_ascii() || s.as_bytes()[10] != b'T' {
             return Err(bad());
         }
         let date: Date = s[..10].parse().map_err(|_| bad())?;
@@ -297,6 +300,8 @@ pub(crate) mod tests {
             SignedDuration::from_hours(72)
         );
         for bad in [
+            "\u{e9}",
+            "1\u{e9}",
             "0m",
             "m",
             "2",
@@ -333,6 +338,11 @@ pub(crate) mod tests {
         );
         assert!(When::at("2026-10-24T13:00", now, &tz).is_err(), "past");
         assert!(When::at("2026-10-24 18:00", now, &tz).is_err());
+        assert!(
+            When::at("2026-10-24T\u{e9}:00", now, &tz).is_err(),
+            "no panic on UTF-8"
+        );
+        assert!(When::at("\u{e9}\u{e9}:0", now, &tz).is_err());
     }
 
     #[test]
