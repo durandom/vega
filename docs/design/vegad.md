@@ -581,6 +581,12 @@ vegad also checks, at most once per 24 h and off the relay loop, whether the veg
 installed from is behind its upstream, and mails one vega session once per new upstream state. See
 [upgrade.md](upgrade.md).
 
+## Schedule
+
+vegad also runs per-project jobs declared in a committed `.vega/schedule.toml`, only after the host approved
+each job's hash, with catch-up after sleep and failure mail to the project UAC. Design:
+[schedule.md](schedule.md).
+
 ## Hygiene
 
 Badges pile up when nobody settles them (vega-lhc.126, `plugins/post/src/hygiene.rs`). On the metadata
