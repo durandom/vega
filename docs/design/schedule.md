@@ -139,12 +139,14 @@ proteus with the real `fristen-execute` before anything else is built. If it fai
 
 - Recipient: the project's live UAC, resolved through the registry on any host (as PagerDuty does). In local mode
   (no broker) only a UAC pane on this host gets it (local tool-mail delivery). No UAC: a durable board note.
-- Sent as `tool vega-schedule`: on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and `skipped (checkout …)`;
+- `notify` decides (default `failure`): `failure` mails the outcomes below, `always` also every success, `never`
+  mails nothing, not even `$VEGA_SCHEDULE_NOTIFY` text (the runs stay in `vega schedule` and the logs).
+- Sent as `tool vega-schedule` (unless `never`): on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and `skipped (checkout …)`;
   never for `skipped (running)`. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
   (at most 2 KiB), the log path and `vega schedule show <job>`.
 - A failing daily job mails each failed run; the next success after a failure mails one `recovered` line.
-- `notify = "always"` mails every run. Any job may write text to `$VEGA_SCHEDULE_NOTIFY`: if the file is non-empty
-  at exit, its first 2 KiB are mailed even on success (`fristen-execute`: "3 deadlines today").
+- With `failure` or `always`, a job may write text to `$VEGA_SCHEDULE_NOTIFY`: if the file is non-empty at exit,
+  its first 2 KiB are mailed even on success (`fristen-execute`: "3 deadlines today").
 - Job output is untrusted data in the mail; the UAC rules already treat tool mail bodies that way.
 
 ## `vega schedule` (AXI)
