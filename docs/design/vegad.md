@@ -583,9 +583,11 @@ installed from is behind its upstream, and mails one vega session once per new u
 
 ## Schedule
 
-Proposed, not built (vega-lhc.197): vegad would run per-project jobs declared in a committed
-`.vega/schedule.toml`, only after the host approved each job's hash, with catch-up after sleep and failure mail
-to the project UAC. Design: [schedule.md](schedule.md).
+Proposed, not built (vega-lhc.204): a timer thread for timed tasks. Reminders are `vega post` messages
+delivered at a time, once or daily/weekly (`vega post send --at|--in|--daily|--weekly`), without approval;
+jobs are repo scripts declared in a committed `.vega/schedule.toml`, run from the repo root only after the
+host approved each job's hash, with catch-up after sleep and result mail to the project UAC. Design:
+[schedule.md](schedule.md).
 
 ## Hygiene
 
