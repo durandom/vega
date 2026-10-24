@@ -92,9 +92,11 @@ execution on every host that has the checkout, unless something on the host says
 If that slot is newer than the job's `last_slot`, vegad handles it once, crash-safe in three steps (`state.json`
 per job, atomic replace): (1) write the slot as `pending`; (2) spawn the runner, or record the skip in the slot's
 run file; (3) once the slot's run file exists, move `pending` to `last_slot`. The runner creates the slot's run file
-under the job lock as its first act and exits at once if it already exists, so a respawn is idempotent. After a
-crash or restart, a `pending` slot without a run file is spawned again; one with a run file just completes step 3.
-A slot is therefore never lost and never run twice.
+under the job lock as its first act, with `outcome = "started"`, and exits at once if it already exists, so a respawn
+is idempotent. After a crash or restart, a `pending` slot without a run file is spawned again; one with a run file
+completes step 3. A run file still `started` whose job lock is free (the runner died) becomes `lost` and mails like
+a failure. Guarantee: a slot runs at most once and never ends silently; a slot whose runner died is reported, not
+retried (a half-run job may not be safe to repeat).
 Many missed slots (a week asleep) give one run, the most recent. After the first approval the clock starts at the
 approval: no instant run of slots before it. `catchup = false` skips a missed slot older than 15 min instead (for
 jobs where late is worse than never).
@@ -104,7 +106,8 @@ After reboot nothing runs until herdr starts vegad; the first tick catches up.
 its own session (setsid). The runner takes the job's lock, re-checks the hash, runs `cmd` with stdout and stderr
 appended to the run's log file (no pipe to vegad), enforces the timeout (SIGTERM to the process group, SIGKILL
 after 10 s) and fills the slot's run file `<slot>.json` (start, end, exit code or signal, outcome). So a vegad
-self-exec or restart in the middle of a job loses nothing: the next tick reads the run file. `vega schedule run` uses the same runner.
+self-exec or restart in the middle of a job loses nothing: the next tick reads the run file.
+`vega schedule run` uses the same runner.
 
 **Overlap.** One flock per job (`$XDG_STATE_HOME/vega/schedule/<project>/<job>/lock`). A slot that comes due while
 the job runs is not queued: vegad records it as `skipped (running)` and advances `last_slot`, so the run that
@@ -134,7 +137,7 @@ proteus with the real `fristen-execute` before anything else is built. If it fai
 
 - Recipient: the project's live UAC, resolved through the registry on any host (as PagerDuty does). In local mode
   (no broker) only a UAC pane on this host gets it (local tool-mail delivery). No UAC: a durable board note.
-- Sent as `tool vega-schedule`: on `failed` (exit ≠ 0), `timeout`, `spawn error` and `skipped (checkout …)`;
+- Sent as `tool vega-schedule`: on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and `skipped (checkout …)`;
   never for `skipped (running)`. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
   (at most 2 KiB), the log path and `vega schedule show <job>`.
 - A failing daily job mails each failed run; the next success after a failure mails one `recovered` line.
@@ -182,8 +185,8 @@ shows that EventKit refuses vegad's descendants and `launchctl asuser` does not 
    the result. Decides `session = "gui"`.
 2. **crates/vega-schedule: model.** Parse and validate `schedule.toml` (unknown keys fail), next-slot and
    latest-slot with DST rules, canonical hash, approvals file, `state.json`. Unit tests for DST, catch-up
-   arithmetic (a skipped slot never runs later; a crash between the steps neither loses nor repeats a slot), hash
-   stability.
+   arithmetic (a skipped slot never runs later; a crash between the steps neither repeats a slot nor
+   ends it silently), hash stability.
 3. **Runner: `vega-schedule exec`.** Lock, hash re-check, default-branch check, env, log file, timeout with process
    group kill, run file, pruning. Tests with fake jobs (exit codes, timeout, overlap).
 4. **vegad thread.** Discovery of main checkouts, minute re-read, 30 s tick, catch-up, spawn the runner, read
