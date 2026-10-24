@@ -59,7 +59,8 @@ vega is public and collaborators can push. A checked-in file that makes vegad ex
 execution on every host that has the checkout, unless something on the host says yes.
 
 **Rule: a job runs only if this host approved its hash.** Hash = SHA-256 over the canonical form of
-`project id, name, cmd, cwd, env, hosts` plus the git blob id of each `pin` file at HEAD. `when`, `timeout` and
+`project id, name, cmd, cwd, env, hosts` plus a sorted `(path, blob id at HEAD)` pair per `pin` entry, so adding,
+removing or editing a pinned file changes the hash. `when`, `timeout` and
 `notify` are not hashed: they cannot make the job run other code or run elsewhere. Approvals live in
 `$XDG_CONFIG_HOME/vega/schedule-approved.toml` (host-local, never deployed, not in any repo):
 `"<project id>/<name>" = "<hash>"`. Each host keeps its own file, so an approval on proteus never lets a job run on
@@ -141,8 +142,8 @@ proteus with the real `fristen-execute` before anything else is built. If it fai
   (no broker) only a UAC pane on this host gets it (local tool-mail delivery). No UAC: a durable board note.
 - `notify` decides (default `failure`): `failure` mails the outcomes below, `always` also every success, `never`
   mails nothing, not even `$VEGA_SCHEDULE_NOTIFY` text (the runs stay in `vega schedule` and the logs).
-- Sent as `tool vega-schedule` (unless `never`): on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and `skipped (checkout …)`;
-  never for `skipped (running)`. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
+- Sent as `tool vega-schedule` (unless `never`): on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and
+  `skipped (checkout …)`; never for `skipped (running)`. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
   (at most 2 KiB), the log path and `vega schedule show <job>`.
 - A failing daily job mails each failed run; the next success after a failure mails one `recovered` line.
 - With `failure` or `always`, a job may write text to `$VEGA_SCHEDULE_NOTIFY`: if the file is non-empty at exit,
