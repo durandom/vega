@@ -1959,6 +1959,9 @@ async fn wait_for_identity(
                     service::write_mode("identity quiesced; project workers/publication off");
                     last = Some(reason);
                 }
+                // The sidebar's identity-free tokens; they outlive the 5 s
+                // retry by METADATA_TTL_MS.
+                report_quiesced();
             }
         }
         for _ in 0..5 {
@@ -3987,6 +3990,11 @@ struct Layout {
 
 impl Layout {
     fn read() -> Layout {
+        Layout::read_herdr().resolve_projects()
+    }
+
+    /// herdr's lists alone, without project resolution (identity quiesce).
+    fn read_herdr() -> Layout {
         let list = |args: &[&str], k: &str| {
             herdr(args)
                 .ok()
@@ -3998,7 +4006,6 @@ impl Layout {
             workspaces: list(&["workspace", "list"], "workspaces"),
             tabs: list(&["tab", "list"], "tabs"),
         }
-        .resolve_projects()
     }
 
     /// Only this host's herdr snapshot is inspected. Never resolve a registry
@@ -4243,6 +4250,53 @@ fn sentinel_label(sym: &vega_herdr::theme::Symbols, name: &str) -> String {
 /// bare host name.
 fn host_token(sym: &vega_herdr::theme::Symbols, host: &str) -> [String; 2] {
     ["--token".into(), format!("host={}", sym.host_label(host))]
+}
+
+/// The tokens every pane gets while vegad is in identity quiesce: `$host`,
+/// `$kind`, `$project` (its workspace label) and `$label`, all from herdr's
+/// layout alone, so the sidebar still names the host's agents. UAC badges,
+/// sentinel names, `$git` and the workspace tokens wait for the identity.
+fn quiesced_metadata(
+    layout: &Layout,
+    sym: &vega_herdr::theme::Symbols,
+    host: &str,
+) -> Vec<(String, Vec<String>)> {
+    layout
+        .panes
+        .iter()
+        .filter_map(|p| p["pane_id"].as_str().filter(|id| valid_pane_id(id)))
+        .map(|id| {
+            let mut args = host_token(sym, host).to_vec();
+            args.extend(layout.kind_token(sym, id));
+            args.extend(layout.project_token(id, None));
+            args.extend(layout.label_token(sym, id, None, false));
+            (id.to_string(), args)
+        })
+        .collect()
+}
+
+/// Reports `quiesced_metadata` to this host's herdr.
+fn report_quiesced() {
+    let sym = vega_herdr::theme::symbols();
+    for (pane, args) in quiesced_metadata(&Layout::read_herdr(), sym.as_ref(), &st::post_host()) {
+        let mut cmd: Vec<String> = vec![
+            "pane".into(),
+            "report-metadata".into(),
+            pane.clone(),
+            "--source".into(),
+            "vega:vegad".into(),
+            "--ttl-ms".into(),
+            METADATA_TTL_MS.into(),
+        ];
+        cmd.extend(args);
+        let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
+        if let Err(f) = vega_herdr::herdr_text(&refs) {
+            log(&format!(
+                "metadata failed for {pane}: {} {}",
+                f.code, f.message
+            ));
+        }
+    }
 }
 
 /// `herdr workspace report-metadata` for workspace `ws`'s count tokens
@@ -5636,6 +5690,63 @@ mod tests {
         let sym = vega_herdr::theme::parse("[symbols.hosts]\nalpha = \"A\"\n");
         assert_eq!(host_token(&sym, "alpha"), ["--token", "host=A"]);
         assert_eq!(host_token(&sym, "beta"), ["--token", "host=beta"]);
+    }
+
+    #[test]
+    fn quiesced_metadata_names_host_and_kind_on_every_pane() {
+        let sym = vega_herdr::theme::parse(
+            "[symbols.hosts]\nganymede = \"G\"\n[symbols.icons]\nclaude = \"C\"\npi = \"P\"\n",
+        );
+        let mut l = fixture_layout();
+        l.panes[0]["workspace_id"] = "w1".into();
+        l.workspaces = vec![serde_json::json!({"workspace_id": "w1", "label": "vega"})];
+        l.panes.push(serde_json::json!({"pane_id": "bogus id"}));
+        let got: HashMap<_, _> = quiesced_metadata(&l, &sym, "ganymede")
+            .into_iter()
+            .collect();
+        // Every valid pane, with the plain tab label: no UAC or sentinel
+        // records before the identity is ready.
+        assert_eq!(
+            got["w1:p1"],
+            [
+                "--token",
+                "host=G",
+                "--token",
+                "kind=C",
+                "--token",
+                "project=vega",
+                "--token",
+                "label=vega"
+            ]
+        );
+        assert_eq!(
+            got["w1:p3"],
+            [
+                "--token",
+                "host=G",
+                "--token",
+                "kind=P",
+                "--clear-token",
+                "project",
+                "--token",
+                "label=deimos"
+            ]
+        );
+        // A pane without an agent keeps its host, nothing else.
+        assert_eq!(
+            got["w1:p4"],
+            [
+                "--token",
+                "host=G",
+                "--clear-token",
+                "kind",
+                "--clear-token",
+                "project",
+                "--clear-token",
+                "label"
+            ]
+        );
+        assert_eq!(got.len(), 4);
     }
 
     #[test]

@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 72 · 2026-10-24
+
+- feature: a vegad in identity quiesce (e.g. `relay status` says `identity
+  quiesced (… unplanned live host: io …)`) still labels its host's panes in
+  herdr's sidebar: `$host`, `$kind`, `$project` (the workspace label) and
+  `$label`. Before, every agent row of that host showed only its state icon.
+  UAC badges, sentinel names and `$git` still wait for the identity. See
+  [Sidebar label](docs/design/theme-symbols.md). Takes effect after the vegad upgrade.
+
 ## 71 · 2026-10-23
 
 - feature: `vega bd init` (and `--adopt`) authenticate against a Dolt remote with a
