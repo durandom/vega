@@ -1,217 +1,196 @@
-# vega schedule: per-project jobs run by vegad
+# Timed tasks in vegad: reminders and repo-bound jobs
 
-Status: design, 2026-10-24. Bead: vega-lhc.197 (request from the brainz UAC). Part of [vegad](vegad.md).
-Builds on [pagerduty.md](pagerduty.md) (committed config read from HEAD), [git-sync.md](git-sync.md) (the main
-checkout), [gate.md](gate.md) (config from the reviewed target).
+Status: design, revised 2026-10-24 (vega-lhc.204.8, Slayer direction of 2026-10-24; first version vega-lhc.197).
+Part of [vegad](vegad.md). Builds on [pagerduty.md](pagerduty.md) (committed config read from HEAD) and
+[git-sync.md](git-sync.md) (the main checkout).
 
 ## Problem
 
-Projects need recurring commands on a given host. First consumers (brainz):
-
-| Job | When | Host | Note |
-| --- | --- | --- | --- |
-| `just fristen-execute` | daily | proteus | EventKit (Reminders/Calendar): needs the user's GUI login session |
-| `just vault-reindex` | weekly | proteus only | |
-
-Today each project would hand-write a launchd plist or crontab: invisible to the UAC, no failure mail, no catch-up
-after sleep on cron, nothing in `vega uac` or the board.
+Agents and projects need things to happen at a time: "remind me at 07:00 to check the deploy", "tell the brainz
+UAC every Monday to triage", "run brainz's deadline script daily on proteus". Today that means a hand-written
+crontab or launchd plist: invisible to the UAC, no failure mail, no catch-up after sleep, no trust check.
 
 ## Decision (summary)
 
-1. Jobs are declared in a checked-in `.vega/schedule.toml`, read from the main checkout's committed `HEAD`.
-2. vegad runs a job only after a human on that host approved the job's exact definition hash
-   (`vega schedule approve`). A changed `cmd`, `cwd`, `env`, `hosts` or `pin` needs a new approval; a changed time
-   does not.
-3. `daily = "HH:MM"` and `weekly = "<day> HH:MM"` in host local time. No cron in v1.
-4. A missed slot (sleep, vegad down) runs once at the next chance. One run per job at a time; a slot that comes due
-   while it runs is skipped. Default timeout 1 h.
-5. Mail to the project UAC on failure only, or when the job writes to `$VEGA_SCHEDULE_NOTIFY`.
-6. vegad, not generated launchd plists: vega already left launchd (vegad.md, Lifecycle), and everything except the
-   timer (trust, mail, list, logs, locking) must be built either way.
+1. One primitive in vegad, no external dependencies: a timer thread with two kinds of timed task.
+2. **Reminders** (the main path): a `vega post` message delivered at a time, once or daily/weekly, through the
+   normal mail and pointer path. No code runs, so agents create, list and cancel them without approval.
+3. **Jobs**: a script inside the repo, declared in a checked-in `.vega/schedule.toml`, run with the repo root as
+   cwd, only after the host's user approved its hash. Results go to the project's UAC as mail.
+4. Shared rules: `daily = "HH:MM"`, `weekly = "<day> HH:MM"` (jobs and reminders), `at`/`in` (reminders), host
+   local time, a missed slot fires once at the next chance, no overlap, durable state across restarts.
+5. Out of scope: what a job does (GUI session, EventKit, `just`, secrets) is the project's business; vega
+   gives no `session = "gui"`, no `launchctl asuser`, no app-specific hooks.
 
-## Declaration
+## When (both kinds)
+
+- `daily = "HH:MM"`, `weekly = "mon|…|sun HH:MM"`, 24 h clock, the owning host's local time zone. Reminders
+  also take `--at HH:MM` (next occurrence), `--at YYYY-MM-DDTHH:MM` and `--in 90m|2h|3d` (once).
+- DST: a local time that does not exist (spring forward) fires at the first valid minute after it; one that
+  occurs twice (fall back) fires at the first occurrence.
+- Catch-up: a tick every 30 s computes the latest slot ≤ now. If it is newer than the task's `last_slot`, it
+  fires once; a week asleep gives one firing, the most recent slot. Nothing fires for slots before the task
+  existed (or before its first approval). After a reboot nothing fires until herdr starts vegad.
+- No cron expressions or `every = "6h"` in v1: no consumer needs them; both would be additive keys.
+
+## Reminders
+
+```
+vega post send --at 07:00 <target> "check the deploy"          # once, next 07:00
+vega post send --in 2h --uac brainz "re-run the import"         # once
+vega post send --daily 08:30 --uac . "standup: vega uac"        # recurring
+vega post send --weekly "mon 09:00" review-bot "triage backlog"
+vega post reminders [--all]                                      # list
+vega post reminders cancel <id>
+```
+
+- A time flag (`--at`, `--in`, `--daily`, `--weekly`; exactly one) turns `send` into a reminder; every other
+  `send` flag keeps its meaning (`--uac`, `--host`, `--now`). Without a time flag `send` is unchanged.
+- Target: a pane id, a unique herdr agent name on this host (no `--host` with a name), or `--uac <project>`. Your own pane is
+  allowed (the common "remind me"), unlike a plain send. A pane id is resolved once at creation (`pane_gone`
+  as today); a name or `--uac` is resolved at each firing, so a recurring reminder follows a UAC that moved
+  host or pane. Recurring reminders take a name or `--uac`, not a pane id (panes do not outlive their agent).
+- Owner: the vegad of the host where the reminder is created. It stores one definition file per reminder in
+  `$XDG_STATE_HOME/vega/reminders/<id>.json` (written by the CLI, deleted by `cancel`) and its firing state in
+  `reminders/state/<id>.json` (written by vegad only), so the CLI and vegad never write the same file. vegad
+  re-reads the definition right before it publishes: a cancelled reminder never fires.
+- Firing publishes a normal mail to the target's inbox, sender `tool vega-remind`, body
+  `reminder <id> (<when>, set by <pane> on <host>): <text>`, plus `late: due <slot>` after a catch-up. From
+  there the usual delivery applies: pointer when idle or done, draft guard, `--now` urgency, bounces. In
+  local mode (no broker) a target on this host gets the local tool-mail line; another host waits for the broker.
+- At least once: vegad writes the slot as `pending`, publishes with `Nats-Msg-Id = <id>/<slot>` (JetStream
+  drops the duplicate of a retried publish), then moves it to `last_slot`. A publish that fails stays pending
+  and retries each tick. A one-shot reminder is deleted once its slot is `last_slot`.
+- Undeliverable at firing (the name or UAC does not resolve, the pane closed): one board note naming the
+  reminder; a one-shot ends, a recurring one stays for its next slot.
+- Who may: any agent on the host, no approval (no code runs, P7: the box is the boundary). Inbox-only hosts
+  (deimos) cannot create reminders. Limits: text ≤ 2 KiB, at most 100 active reminders per host
+  (`reminder_limit` error naming `vega post reminders`).
+- AXI output. Create: `scheduled: <id>`, `to: <target>`, `next: <local time> (<in>)`, `help: vega post
+  reminders cancel <id>`. List (TOON): `id, when, next, to, by, text` (text truncated to 60 chars), by
+  default the reminders this pane created or that target it; `--all` the host's. Empty state:
+  `0 reminders on <host> (all: <n>)`.
+
+## Jobs
 
 ```toml
 # .vega/schedule.toml (committed; read with `git show HEAD:.vega/schedule.toml`)
 [[job]]
-name = "fristen-execute"          # [a-z0-9-]+, unique in the file
-cmd = ["just", "fristen-execute"] # argv, no shell; resolved on vegad's PATH
-daily = "07:30"                   # or weekly = "mon 03:00"; exactly one of them
-hosts = ["proteus"]               # required: no implicit "every host"
-cwd = "."                         # optional, relative to the repo root, must stay inside it
-timeout = "15m"                   # optional, default "1h", max "24h"
-notify = "failure"                # optional: failure (default) | always | never
-env = { BRAINZ_MODE = "batch" }   # optional, plain values only (secrets: `vega secrets run` inside cmd)
-pin = ["justfile"]                # optional: repo files whose blob ids enter the approval hash
-catchup = true                    # optional, default true: run a missed slot once (see Running)
+name = "fristen-execute"            # [a-z0-9-]+, unique in the file
+run = "scripts/fristen-execute"     # a file in the repo, relative to the repo root
+args = ["--batch"]                  # optional, plain strings, no shell
+daily = "07:30"                     # or weekly = "mon 03:00"; exactly one
+hosts = ["proteus"]                 # required: no implicit "every host"
+timeout = "15m"                     # optional, default "1h", max "24h"
+notify = "failure"                  # optional: failure (default) | always | never
+pin = ["justfile"]                  # optional: further repo files whose blobs enter the hash
+catchup = true                      # optional, default true; false skips a slot missed by > 15 min
 ```
 
-- Which checkout: the project's main checkout on this host (git-sync.md: the worktree with the default branch),
-  found through the same project discovery as the PagerDuty poller. No main checkout on the host: the job is
-  listed as `no checkout`, never run from a sentinel worktree.
-- Re-read every minute, like `.vega/pagerduty.toml`. A file that does not parse lists as `invalid` with the error
-  and runs nothing of that project; vegad never guesses a partial file.
-- Unknown keys are an error (a typo like `daly` must not silently mean "never").
+**Repo-bound.** cwd is always the root of the project's main checkout on this host (git-sync.md); there is no
+`cwd` key. `run` is a relative path: absolute paths and any `..` component are an error at parse time. Before
+each run the runner resolves it in the working tree: after following symlinks it must still lie inside the repo
+root, be a regular executable file, and be tracked at `HEAD` with the same blob id. vega never resolves `run` on
+PATH, so `just x` becomes a two-line script in the repo; what that script calls is the project's business.
+No main checkout on the host: listed as `no checkout`, never run from a sentinel worktree. The file is
+re-read every minute; one that does not parse (unknown keys included: `daly` must not mean "never") lists as
+`invalid` and runs nothing of that project.
 
-## Trust
+**Trust.** vega is public and collaborators can push, so a checked-in job is remote code execution on every
+host with the checkout unless the host says yes. Rule: a job runs only if this host approved its hash.
 
-vega is public and collaborators can push. A checked-in file that makes vegad execute code is remote code
-execution on every host that has the checkout, unless something on the host says yes.
-
-**Rule: a job runs only if this host approved its hash.** Hash = SHA-256 over the canonical form of
-`project id, name, cmd, cwd, env, hosts` plus a sorted `(path, blob id at HEAD)` pair per `pin` entry, so adding,
-removing or editing a pinned file changes the hash. `when`, `timeout` and
-`notify` are not hashed: they cannot make the job run other code or run elsewhere. Approvals live in
-`$XDG_CONFIG_HOME/vega/schedule-approved.toml` (host-local, never deployed, not in any repo):
-`"<project id>/<name>" = "<hash>"`. Each host keeps its own file, so an approval on proteus never lets a job run on
-ganymede; `hosts` is hashed as well, so adding or removing a host in the file asks every host again.
-
+- Hash = SHA-256 over the canonical `project id, name, run, args, hosts` plus a sorted `(path, blob id at
+  HEAD)` pair for `run` and each `pin` entry. A changed script or pinned file needs a new approval; `daily`,
+  `weekly`, `timeout`, `notify` and `catchup` do not (they cannot change what runs or where).
+- Approvals live in `$XDG_CONFIG_HOME/vega/schedule-approved.toml`, `"<project id>/<name>" = "<hash>"`,
+  per host, never in a repo: an approval on proteus never lets a job run on ganymede.
 - `vega schedule approve <project>/<job>` prints the definition and the diff against the approved one, then
-  stores the hash. A new or changed job lists as `unapproved` with that command as the next step; vegad also
-  sends the UAC one note per new hash, so nobody has to poll.
-- Same model as `mise trust` and direnv `allow`: per host, per exact content, revoked by any change.
-- Who approves: the user, typed in a shell or with `!` in a pane. P7 makes the box the boundary: a local agent can
-  write a crontab anyway, so the approval defends against remote pushes, not against local agents. The guide
-  tells agents to ask the user and never approve on their own; the UAC records the request as a `slayer-decision`
-  bead when the user is away. No technical agent block (the env markers would also block the user's `!` call).
-- The job definition comes from committed `HEAD`, not the working tree: an uncommitted edit to
-  `.vega/schedule.toml` cannot change what runs.
-- The code runs from the working tree, though. Before it starts `cmd`, the runner checks each `pin` path: it must
-  be a regular file in the working tree, and `git hash-object <path>` must equal the blob id at `HEAD` that went
-  into the approved hash (a path missing from `HEAD` has no blob id and never matches). Otherwise the run is
-  `skipped (pin modified: <path>)` and mails. So the pinned files that run are byte for byte the approved blobs.
-- Residual risk, stated in the guide: the hash pins the entrypoint and the named files, not all the code they
-  reach. Unpinned files run as they are in the working tree: committed code is as trusted as the project's main
-  branch (its review rules decide what lands there), uncommitted edits are local and inside the box (P7). The job
-  also refuses to start when the main checkout's HEAD is not on the default branch
-  (`skipped (checkout on <branch>)`), so a local experiment branch never runs unattended.
+  stores the hash. Same model as `mise trust` and direnv `allow`. A new hash lists as `unapproved` and vegad
+  mails the UAC once per new hash.
+- The user approves, typed in a shell or with `!`. The guide tells agents never to approve; the UAC records the
+  request as a `slayer-decision` bead when the user is away. No technical block (P7: it defends against
+  remote pushes, not local agents; env markers would also block the user's `!`).
+- Run-time checks, each a mailed skip: `run` or a `pin` file differs from its blob at HEAD (`skipped (modified:
+  <path>)`), the main checkout is not on the default branch (`skipped (checkout on <branch>)`).
+- Residual risk, stated in the guide: the hash covers `run` and the pins, not every file they reach; unpinned
+  committed code is as trusted as the project's default branch.
 
-## When
+**Runner.** vegad spawns `vega-schedule exec <project>/<job> --slot <ts>` in its own session (setsid) and does
+not run the script itself. The runner takes the job's flock, creates the slot's run file `<slot>.json`
+(`outcome = "started"`; it exits at once if the file exists, so a respawn is idempotent), re-checks hash and
+files, runs the script with stdout and stderr appended to `<slot>.log`, enforces the timeout (SIGTERM to the
+process group, SIGKILL after 10 s) and fills the run file (end, exit code or signal, outcome). Env: vegad's
+(no agent markers, no shims) plus `VEGA_SCHEDULE_JOB`, `VEGA_SCHEDULE_SLOT` (RFC 3339) and
+`VEGA_SCHEDULE_NOTIFY` (a file path); stdin `/dev/null`.
 
-- `daily = "HH:MM"`, `weekly = "mon|tue|…|sun HH:MM"`, 24 h clock, the host's local time zone.
-- DST: a local time that does not exist (spring forward) runs at the first valid minute after it; a time that
-  occurs twice (fall back) runs at the first occurrence.
-- No cron expressions in v1: no consumer needs them, and a cron parser plus DST rules is the largest part of the
-  code. A later `cron = "…"` key is additive. Sub-daily intervals (`every = "6h"`) likewise wait for a consumer.
+**Crash safety.** Per job `state.json` (atomic replace): (1) write the slot as `pending`; (2) spawn the runner
+or record the skip; (3) once the run file exists, move it to `last_slot`. After a restart a `pending` slot
+without a run file is spawned again; a run file still `started` whose lock is free becomes `lost` and mails like
+a failure. A slot runs at most once and never ends silently; a half-run job is reported, never retried.
 
-## Running
+**Overlap.** A slot due while the job runs is recorded `skipped (running)` and not queued. `vega schedule run`
+uses the same runner and lock and never touches `last_slot`. Jobs of different projects run in parallel.
 
-**Catch-up.** A scheduler thread in vegad wakes every 30 s and, per approved job, computes the latest slot ≤ now.
-If that slot is newer than the job's `last_slot`, vegad handles it once, crash-safe in three steps (`state.json`
-per job, atomic replace): (1) write the slot as `pending`; (2) spawn the runner, or record the skip in the slot's
-run file; (3) once the slot's run file exists, move `pending` to `last_slot`. The runner creates the slot's run file
-under the job lock as its first act, with `outcome = "started"`, and exits at once if it already exists, so a respawn
-is idempotent. After a crash or restart, a `pending` slot without a run file is spawned again; one with a run file
-completes step 3. A run file still `started` whose job lock is free (the runner died) becomes `lost` and mails like
-a failure. Guarantee: a slot runs at most once and never ends silently; a slot whose runner died is reported, not
-retried (a half-run job may not be safe to repeat).
-Many missed slots (a week asleep) give one run, the most recent. After the first approval the clock starts at the
-approval: no instant run of slots before it. `catchup = false` skips a missed slot older than 15 min instead (for
-jobs where late is worse than never).
-After reboot nothing runs until herdr starts vegad; the first tick catches up.
+**Logs.** `$XDG_STATE_HOME/vega/schedule/<project>/<job>/<UTC slot>.{log,json}`; keep the last 20 runs and
+nothing older than 30 days, pruned on each run. vegad's own log gets one line per start and end.
 
-**Runner.** vegad does not run the command itself. It spawns `vega-schedule exec <project>/<job> --slot <ts>` in
-its own session (setsid). The runner takes the job's lock, re-checks the hash, runs `cmd` with stdout and stderr
-appended to the run's log file (no pipe to vegad), enforces the timeout (SIGTERM to the process group, SIGKILL
-after 10 s) and fills the slot's run file `<slot>.json` (start, end, exit code or signal, outcome). So a vegad
-self-exec or restart in the middle of a job loses nothing: the next tick reads the run file.
-`vega schedule run` uses the same runner.
+**Results by mail.** Through `vega post` as `tool vega-schedule` to the project's live UAC, resolved through the
+registry on any host (as PagerDuty does); in local mode only a UAC pane on this host; no UAC: a board note.
+`notify = failure` (default) mails `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and the skips above
+(never `skipped (running)`), and one `recovered` line on the next success after a failure. `always` also mails
+each success, `never` nothing. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
+(≤ 2 KiB), the log path, `vega schedule show <job>`. A non-empty `$VEGA_SCHEDULE_NOTIFY` file is mailed even on
+success ("3 deadlines today"). Job output is untrusted data in the mail.
 
-**Overlap.** One flock per job (`$XDG_STATE_HOME/vega/schedule/<project>/<job>/lock`). A slot that comes due while
-the job runs is not queued: vegad records it as `skipped (running)` and advances `last_slot`, so the run that
-ends later does not pick it up again; the next run is the next slot. A runner that finds the lock taken (a manual
-`vega schedule run`) records the same skip. Manual runs never touch `last_slot`. Jobs of different projects run in
-parallel; `hosts` keeps one project's job off other hosts.
-
-**Environment.** vegad's env (no agent markers, no shims on PATH: vegad.md, Lifecycle) plus `env`, plus
-`VEGA_SCHEDULE_JOB=<project>/<job>`, `VEGA_SCHEDULE_SLOT` (RFC 3339) and `VEGA_SCHEDULE_NOTIFY` (a file path).
-stdin is `/dev/null`.
-
-**GUI session.** vegad is a descendant of the herdr server, which the user starts in their login session, so on
-macOS it shares the Aqua bootstrap namespace a LaunchAgent would get. Whether EventKit grants the permission to
-a process with this ancestry (TCC's responsible process after setsid) I don't know: step 1 below proves it on
-proteus with the real `fristen-execute` before anything else is built. If it fails, the job declares
-`session = "gui"` and the runner hands it to `launchctl asuser` (fallback, not the default).
-
-## Output and logs
-
-- Per run: `$XDG_STATE_HOME/vega/schedule/<project>/<job>/<UTC slot>.log` and `.json`. Keep the last 20 runs per
-  job and nothing older than 30 days; pruning happens on each run.
-- vegad's own log gets one line per start and end, never the job's output.
-- State that survives restarts: `last_slot` (the last slot started or skipped) and `pending` in `state.json`,
-  outcomes in the run files, approvals in config.
-
-## Mail
-
-- Recipient: the project's live UAC, resolved through the registry on any host (as PagerDuty does). In local mode
-  (no broker) only a UAC pane on this host gets it (local tool-mail delivery). No UAC: a durable board note.
-- `notify` decides (default `failure`): `failure` mails the outcomes below, `always` also every success, `never`
-  mails nothing, not even `$VEGA_SCHEDULE_NOTIFY` text (the runs stay in `vega schedule` and the logs).
-- Sent as `tool vega-schedule` (unless `never`): on `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error`,
-  `skipped (checkout …)` and `skipped (pin modified …)`; never for `skipped (running)`. Body: job, host, slot,
-  outcome, exit code, duration, the last 20 lines of output (at most 2 KiB), the log path and
-  `vega schedule show <job>`.
-- A failing daily job mails each failed run; the next success after a failure mails one `recovered` line.
-- With `failure` or `always`, a job may write text to `$VEGA_SCHEDULE_NOTIFY`: if the file is non-empty at exit,
-  its first 2 KiB are mailed even on success (`fristen-execute`: "3 deadlines today").
-- Job output is untrusted data in the mail; the UAC rules already treat tool mail bodies that way.
-
-## `vega schedule` (AXI)
+**CLI (AXI).**
 
 ```
-vega schedule                     # home: jobs for this host
-vega schedule show <project>/<job> # definition, hash, approval, last 5 runs, log path, tail of the last log
-vega schedule approve <project>/<job>
-vega schedule revoke <project>/<job>
-vega schedule run <project>/<job>  # run now through the runner; respects the lock; no approval, no run
+vega schedule                        # home: jobs for this host, plus the reminder count
+vega schedule show <project>/<job>   # definition, hash, approval, last 5 runs, tail of the last log
+vega schedule approve|revoke <project>/<job>
+vega schedule run <project>/<job>    # now, through the runner; respects lock and approval
 vega schedule log <project>/<job> [--run <slot>] [--full]
 ```
 
-Home view (TOON, AXI 1, 4, 5): one row per job declared for this host in any known project:
-`job, when, next, last (outcome, age), state`. `state` is `ok`, `unapproved`, `changed` (approved hash differs),
-`invalid`, `no checkout`, `running` or `vegad stopped`; every non-`ok` row carries its next step once below the
-table. Empty state: `0 jobs: no .vega/schedule.toml declares this host (<n> projects checked)`. Exit 0 unless the
-command itself failed. v1 is host-local; jobs of other hosts appear only after a KV mirror (later step).
+Home (TOON): `job, when, next, last (outcome, age), state`, with `state` one of `ok`, `unapproved`, `changed`,
+`invalid`, `no checkout`, `running`, `vegad stopped`; each non-`ok` row's next step once below the table, then
+`reminders: <n> on this host (vega post reminders --all)`. Empty: `0 jobs: no .vega/schedule.toml declares
+this host (<n> projects checked)`. Host-local in v1.
 
-Plugin layout follows CI watch: `crates/vega-schedule` (parse, next slot, hash, approvals, run files),
-`plugins/schedule` (`vega schedule` and `exec`, `--skill` guide), `plugins/post/src/schedule.rs` (vegad thread).
+## Layout
 
-## Why not launchd
+`crates/vega-schedule`: slots (once/daily/weekly, DST), catch-up state, job parse and path rules, hash,
+approvals, run files, reminder store. `plugins/schedule`: `vega schedule`, `vega-schedule exec`, `--skill`.
+`plugins/post`: the reminder flags and `reminders` command, and `src/schedule.rs`, the vegad timer thread for
+both kinds.
 
-| Option | For | Against |
-| --- | --- | --- |
-| **vegad scheduler** (chosen) | one place for trust, mail, list and logs; same code on Linux hosts; already running wherever agents work | runs only while vegad runs (after a reboot, from herdr start); EventKit ancestry unproven (step 1) |
-| vega-generated launchd plists | runs without herdr; `StartCalendarInterval` coalesces missed runs on wake; TCC in the GUI domain is known | macOS only (Linux needs systemd timers: a second generator); plists drift from the toml and need install/uninstall; trust, failure mail, list, logs and overlap still have to be built around it; vega removed launchd on purpose (vegad.md) |
-| cron / hand-written plists per project | zero vega code | no catch-up on cron, no UAC view, no failure mail, no trust check: exactly the request's problem |
-| Host-local job config only (`~/.config/vega/schedule.toml`) | no trust problem at all | jobs leave the project; a second host or a fresh clone loses them; the project UAC cannot propose a job by commit |
-| Checked-in file, no approval | simplest | any collaborator push runs code on the host |
+## Why not launchd or cron
 
-Recommendation: the vegad scheduler. Revisit only if a job must run while nobody has started herdr, or if step 1
-shows that EventKit refuses vegad's descendants and `launchctl asuser` does not fix it.
+Generated plists or crontabs are per-OS, drift from the repo, and still need trust, mail, listing, logs and
+overlap built around them; vega left launchd on purpose (vegad.md, Lifecycle). Host-local job config loses the
+jobs on a fresh clone and keeps the UAC from proposing one by commit. A checked-in file without approval lets
+any collaborator run code on the host. Cost of the choice: nothing fires while herdr (and so vegad) is not
+running.
 
-## Implementation plan (beads)
+## Implementation plan (beads, epic vega-lhc.204)
 
-1. **Spike: GUI session on proteus.** Run `just fristen-execute` from a process started like vegad (setsid child of
-   the herdr server) and record whether EventKit works; try `launchctl asuser` if not. Done when the bead notes
-   the result. Decides `session = "gui"`.
-2. **crates/vega-schedule: model.** Parse and validate `schedule.toml` (unknown keys fail), next-slot and
-   latest-slot with DST rules, canonical hash, approvals file, `state.json`. Unit tests for DST, catch-up
-   arithmetic (a skipped slot never runs later; a crash between the steps neither repeats a slot nor
-   ends it silently), hash stability.
-3. **Runner: `vega-schedule exec`.** Lock, hash re-check, default-branch and clean-pin checks, env, log file,
-   timeout with process group kill, run file, pruning. Tests with fake jobs (exit codes, timeout, overlap, a
-   modified pin).
-4. **vegad thread.** Discovery of main checkouts, minute re-read, 30 s tick, catch-up, spawn the runner, read
-   run files and `pending` after restart. Tests with a fake clock and a temp state dir.
-5. **Mail.** Failure, recovered, always and `$VEGA_SCHEDULE_NOTIFY`; registry routing, local-mode delivery, board
-   note without a UAC; one note per new unapproved hash.
-6. **CLI.** `vega schedule` home, `show`, `approve`, `revoke`, `run`, `log`; `--skill` guide (with the trust rules
-   for agents) and `assert_guide` test; doctor conformance.
-7. **brainz rollout.** brainz commits its two jobs (with `pin`), the Slayer approves them on proteus, one real run
-   each; CHANGELOG and vegad.md updated.
-8. Later, each on a consumer's request: KV mirror for a cross-host list, `cron`/`every`, board column.
+1. ~~Spike: EventKit from vegad~~ (vega-lhc.204.1, dropped: the project's business).
+2. **Model** (vega-lhc.204.2): `crates/vega-schedule` slots, DST, catch-up, reminder store, job parse with the
+   repo-bound path rules, hash, approvals, state.
+3. **Reminder CLI** (new): `vega post send --at|--in|--daily|--weekly`, `vega post reminders [cancel]`, the
+   guide lines in `plugins/post/SKILL.md`. Needs 2.
+4. **vegad timer thread with reminder delivery** (new): the 30 s tick, pending/last_slot, publish with
+   dedup id, local mode, undeliverable notes. Needs 2, 3. Reminders ship here, before any job code.
+5. **Runner** (vega-lhc.204.3): `vega-schedule exec`, repo-root cwd, file checks, lock, timeout, run files.
+6. **Jobs in the thread** (vega-lhc.204.4): main checkout discovery, minute re-read, spawn, restart recovery.
+   Needs 4, 5.
+7. **Job mail** (vega-lhc.204.5): failure, recovered, always, notify file, unapproved note. Needs 6.
+8. **`vega schedule` CLI** (vega-lhc.204.6): home, show, approve, revoke, run, log, `--skill`. Needs 2.
+9. **brainz rollout** (vega-lhc.204.7): brainz commits its scripts and jobs, the Slayer approves on proteus,
+   one real run each; CHANGELOG and vegad.md. Needs 7, 8.
+10. Later, on a consumer's request: KV mirror for a cross-host list, `cron`/`every`, a board column.
 
 ## Open questions
 
-- Should `pin` be required (at least the file that defines `cmd`'s target), or stay optional?
-- Is one mail per failed run right for a daily job that stays broken for a week, or one per day at most?
+- Should recurring reminders expire (`--until`), or live until cancelled as in v1?
+- Is one mail per failed run right for a daily job broken for a week, or one per day at most?
