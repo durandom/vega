@@ -76,9 +76,10 @@ ganymede; `hosts` is hashed as well, so adding or removing a host in the file as
   bead when the user is away. No technical agent block (the env markers would also block the user's `!` call).
 - The job definition comes from committed `HEAD`, not the working tree: an uncommitted edit to
   `.vega/schedule.toml` cannot change what runs.
-- The code runs from the working tree, though. Before it starts `cmd`, the runner checks that every `pin` file is
-  unmodified against `HEAD` (`git diff --quiet HEAD -- <pins>`, untracked pins count as modified); otherwise the
-  run is `skipped (pin modified: <path>)` and mails. So the pinned files that run are the approved blobs.
+- The code runs from the working tree, though. Before it starts `cmd`, the runner checks each `pin` path: it must
+  be a regular file in the working tree, and `git hash-object <path>` must equal the blob id at `HEAD` that went
+  into the approved hash (a path missing from `HEAD` has no blob id and never matches). Otherwise the run is
+  `skipped (pin modified: <path>)` and mails. So the pinned files that run are byte for byte the approved blobs.
 - Residual risk, stated in the guide: the hash pins the entrypoint and the named files, not all the code they
   reach. Unpinned files run as they are in the working tree: committed code is as trusted as the project's main
   branch (its review rules decide what lands there), uncommitted edits are local and inside the box (P7). The job
