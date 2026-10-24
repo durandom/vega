@@ -4,6 +4,12 @@ Agent tooling for a small estate of machines: the `vega` CLI, its plugins, shims
 (Claude Code, Codex, Pi) in [herdr](https://github.com/herdrdev/herdr) panes, lets them message each other, and
 keeps their tools, themes and config in sync across hosts.
 
+## Concepts
+
+New here? [docs/concepts.md](docs/concepts.md) explains hosts, panes, agent kinds, the UAC (one coordinator
+per project) and its sentinels, project identity, mail, vegad, beads, the gate and the trust model.
+[docs/README.md](docs/README.md) indexes the how-tos and the design docs.
+
 ## What is in it
 
 | Plugin | Purpose |
