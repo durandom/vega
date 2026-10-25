@@ -245,8 +245,9 @@ locations combine, the earliest claim time stays); lanes take the union of
 their records. The display caches `uac-status`, `badges` and the hygiene day
 mark keep the new ID's record, since vegad recomputes them. Everything else
 fails the preview, naming the path, with no change: a claim by another pane, a
-differing bd record or own pin for the same seat/lane/tier, or a UAC of
-another host for the new ID. Every location registered under the old ID must
+differing bd record or own pin for the same seat/lane/tier, a UAC of
+another host for the new ID, or an own registry UAC of the old ID without a
+local claim file (apply would drop it; re-claim first). Every location registered under the old ID must
 now resolve to the new ID; one that does not is a live clone of the old ID,
 which the rekey would split.
 

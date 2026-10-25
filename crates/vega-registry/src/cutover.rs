@@ -325,6 +325,12 @@ impl Rekey {
         if let Some(claim) = claim {
             plan.projection
                 .insert(uac_key(&host, to), crate::uac_entry(&host, claim)?);
+        } else if plan.backup.contains_key(&uac_key(&host, from)) {
+            // apply would delete the live claim without republishing it.
+            return Err(format!(
+                "registry claim {} has no local UAC claim file; re-claim (`vega uac claim`) before the rekey",
+                uac_key(&host, from)
+            ));
         }
         Ok(plan)
     }
@@ -525,5 +531,10 @@ mod tests {
         assert!(Rekey::prepare("a", &entries, old, &to, None)
             .unwrap_err()
             .contains("claims the new ID"));
+        // An owned registry claim without a local claim file would be dropped.
+        entries.remove(&uac_key("b", &to));
+        assert!(Rekey::prepare("a", &entries, old, &to, None)
+            .unwrap_err()
+            .contains("no local UAC claim"));
     }
 }
