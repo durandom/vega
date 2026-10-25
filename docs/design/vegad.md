@@ -246,8 +246,9 @@ identity and stay off.
 
 - On: herdr status events, sidebar metadata, attention and parent wakes for local panes, parks, the upgrade
   check, git sync, theme follow, the self-exec upgrade (the handoff also carries undelivered tool mail).
-- Off: the mail relay (pointers, `vega post`), the registry, commands, quarantine, beads sync and the CI poller
-  (both deliver by mail). `relay status` says so once: `broker: local (no broker configured: …)` or `local
+- Off: the mail relay (pointers, `vega post`), the registry, commands, quarantine; beads sync and the CI poller
+  (both deliver by mail) when vegad started without a broker. Started by an earlier broker loop, those two
+  keep running through an outage and their mail is typed locally (Broker outage, below). `relay status` says so once: `broker: local (no broker configured: …)` or `local
   (broker <url> unreachable)`, then `off: <jobs>`. The state is `post-relay-<host>.broker` (`connected` or
   `local (…)`); `vega_herdr::state::relay_local` reads it, so `vega mux send` pastes at once instead of
   trying the broker first, and `vega bd` / `vega ci watch` say their job is off.
@@ -276,6 +277,9 @@ channel was full the next broker call waited forever, taking the single-threaded
 - A broker away for `outage::LOST_AFTER` (10 s) ends the broker loop: vegad logs once
   `broker: lost (<url> unreachable for 10 s); switching to local mode` and runs local mode with its
   state. A broker lost during setup (stream or subscription right after the connect) goes the same way.
+  Only a completed setup ends the outage: it writes `connected`, clears the note and resets the probe
+  backoff, so a broker that accepts connections but fails the setup keeps the one note and is probed
+  ever more rarely.
 - The human sees it: `relay status` says `broker: local (broker <url> unreachable)`, and a herdr toast
   plus a host note (`kind: broker`, counted on the vega UAC's badge) say mail, registry and commands are
   off. One note per outage, also across a vegad restart; it resolves when vegad connects again

@@ -1916,10 +1916,6 @@ fn relay(once: bool, wait: bool) -> Result<(), Failure> {
             let (tx, reconnected) = mpsc::unbounded_channel();
             match outage::bounded("connect", connect("relay", Some(tx))).await {
                 Ok(client) => {
-                    service::write_broker("connected");
-                    if outage::cleared((now_ms() / 1000) as i64) {
-                        log("broker: outage note cleared");
-                    }
                     match serve(
                         client,
                         reconnected,
@@ -2019,6 +2015,9 @@ struct Jobs {
         mpsc::UnboundedSender<ci::Event>,
         mpsc::UnboundedSender<bdsync::Event>,
     )>,
+    /// Local mode's probe delays; reset only by a broker that took the
+    /// setup, so a half-working broker is not retried every 2 s.
+    backoff: outage::Backoff,
 }
 
 impl Jobs {
@@ -2060,6 +2059,7 @@ impl Jobs {
             ci,
             bd,
             broker_jobs: (!once).then_some((ctx, btx)),
+            backoff: outage::Backoff::new(PROBE_EVERY),
         }
     }
 
@@ -2321,8 +2321,7 @@ async fn local(
     let mut park_failing: HashSet<String> = HashSet::new();
     let mut live_theme = theme::Live::default();
     let mut live_theme_next = Instant::now();
-    let mut backoff = outage::Backoff::new(PROBE_EVERY);
-    let mut probe_at = Instant::now() + backoff.next();
+    let mut probe_at = Instant::now() + jobs.backoff.next();
     let mut probe: Option<tokio::task::JoinHandle<bool>> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
@@ -2375,7 +2374,7 @@ async fn local(
                 }
             } => {
                 probe = None;
-                probe_at = Instant::now() + backoff.next();
+                probe_at = Instant::now() + jobs.backoff.next();
                 if ok {
                     log("broker: reachable, leaving local mode");
                     return Carry { d, sup, mail };
@@ -2532,6 +2531,12 @@ async fn serve(
                 }
             }
         };
+        // Only a broker that took the setup ends an outage (vega-lhc.205).
+        jobs.backoff = outage::Backoff::new(PROBE_EVERY);
+        service::write_broker("connected");
+        if outage::cleared((now_ms() / 1000) as i64) {
+            log("broker: outage note cleared");
+        }
         log(&format!("relay: {host} watching {filter}"));
 
         // The CI watch (ci.rs): one GitHub poller per host; its mails go to

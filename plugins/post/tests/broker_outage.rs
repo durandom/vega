@@ -225,6 +225,30 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
         || log().contains("bounce: w1:p1 closed with unread mail; bounced once the broker is back"),
     );
 
+    // A broker that accepts the connection but not the setup (no JetStream)
+    // does not end the outage: same note, still local.
+    let bare = home.join("bare.conf");
+    fs::write(&bare, format!("listen: 127.0.0.1:{port}\n")).unwrap();
+    let mut half = broker(&bare);
+    wait_for(
+        &log_file,
+        "the failed setup",
+        Duration::from_secs(40),
+        || log().contains("broker: setup failed"),
+    );
+    wait_for(
+        &log_file,
+        "local mode again",
+        Duration::from_secs(10),
+        || broker_state().starts_with("local"),
+    );
+    let outage = notes();
+    assert_eq!(outage.len(), 1, "one note per outage: {outage:?}");
+    assert!(outage[0]["resolved"].is_null(), "{outage:?}");
+    assert!(!log().contains("outage note cleared"), "{}", log());
+    let _ = half.0.kill();
+    let _ = half.0.wait();
+
     // The broker comes back on the same port.
     let _nats = broker(&conf);
     wait_for(&log_file, "the reconnect", Duration::from_secs(60), || {
