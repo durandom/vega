@@ -2298,14 +2298,15 @@ async fn local(
     carry: Carry,
 ) -> Carry {
     let why = local_reason();
+    // The note first: whoever sees the local state finds it.
+    if broker_configured() {
+        outage::noted(&url());
+    }
     service::write_broker(&why);
     log(&format!(
         "broker: {why}; off: {LOCAL_OFF}; on: herdr metadata, attention, upgrade check, theme; tool mail typed locally; probing with backoff up to every {} s",
         PROBE_EVERY.as_secs()
     ));
-    if broker_configured() {
-        outage::noted(&url());
-    }
     let Carry {
         mut d,
         mut sup,
