@@ -117,6 +117,13 @@ goes there instead, since an override replaces `rows`. Without the snippet `disp
 uncoloured label as before. Board panes that carry the badges when no UAC pane is live keep the
 plain label.
 
+herdr colours its agent status dots from the theme palette: `yellow` working, `teal` done, `green`
+idle, `red` blocked. Catppuccin's pastel yellow and teal read alike at dot size, so
+`config/herdr/config.toml` overrides both under `[theme.custom.light]` and `[theme.custom.dark]`:
+done turns blue (Latte `#1e66f5`, Mocha `#89b4fa`, as on herdr's mobile view) and working a stronger
+amber (`#df8e1d`, `#ffb224`). herdr uses `teal` only for done; `yellow` also colours its
+connecting/reconnecting and update-available notices.
+
 ## Host identity
 
 herdr's combined multi-machine sidebar marks remote panes with its `machine` token, which can be
