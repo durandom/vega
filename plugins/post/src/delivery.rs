@@ -85,6 +85,9 @@ pub struct Bounce {
     pub origins: Vec<Option<Origin>>,
     /// Senders already told, so a retried bounce tells each once.
     pub done: Vec<Origin>,
+    /// When the pane closed (Unix ms): with the pane it names this bounce
+    /// apart from a later close of the same pane id.
+    pub closed_ms: u64,
 }
 
 impl Bounce {
@@ -248,6 +251,7 @@ impl Delivery {
                     pane: pane.to_string(),
                     origins,
                     done: Vec::new(),
+                    closed_ms: now_ms(),
                 });
             }
         }
@@ -1248,13 +1252,10 @@ mod tests {
         let mut b = Delivery::default();
         b.import(&a.export());
         b.gone("w1:p1");
-        assert_eq!(
-            b.take_bounces(),
-            vec![Bounce {
-                pane: "w1:p1".into(),
-                origins: vec![origin("ganymede", "w5S:p1"), None],
-                done: vec![],
-            }]
-        );
+        let got = b.take_bounces();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].pane, "w1:p1");
+        assert_eq!(got[0].origins, vec![origin("ganymede", "w5S:p1"), None]);
+        assert!(got[0].done.is_empty());
     }
 }

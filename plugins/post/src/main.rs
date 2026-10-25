@@ -2996,6 +2996,15 @@ async fn publish_tool_mail(
 /// The sender of a bounce (vega-lhc.129).
 const BOUNCE_AGENT: &str = "tool vega-post";
 
+/// The bounce's Nats-Msg-Id: the same for a retry of one bounce to one
+/// sender, different for another sender or another close of the pane.
+fn bounce_msg_id(host: &str, b: &delivery::Bounce, o: &delivery::Origin) -> String {
+    format!(
+        "bounce:{host}:{}:{}:{}:{}:{}",
+        b.pane, b.closed_ms, o.host, o.pane, o.agent
+    )
+}
+
 /// What a bounce says: which pane closed, and whom to mail instead.
 fn bounce_text(pane: &str, host: &str, hint: &str) -> String {
     format!(
@@ -3069,7 +3078,7 @@ async fn bounce(
         }
         let mut headers = HeaderMap::new();
         // Stable: a retry after a lost ack is deduplicated by the broker.
-        let id = format!("bounce:{host}:{}:{}:{}", b.pane, o.host, o.pane);
+        let id = bounce_msg_id(host, b, &o);
         headers.insert("Nats-Msg-Id", id.as_str());
         headers.insert(h::FROM_AGENT, BOUNCE_AGENT);
         headers.insert(h::FROM_CWD, "vegad");
@@ -5472,6 +5481,25 @@ fn log(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bounce_id_is_stable_per_retry_and_distinct_per_sender_and_close() {
+        let o = |agent: &str| delivery::Origin {
+            host: "h".into(),
+            pane: "w9:p1".into(),
+            agent: agent.into(),
+        };
+        let b = |closed_ms| delivery::Bounce {
+            pane: "w1:p1".into(),
+            origins: vec![Some(o("claude"))],
+            done: vec![],
+            closed_ms,
+        };
+        let id = bounce_msg_id("h", &b(1), &o("claude"));
+        assert_eq!(id, bounce_msg_id("h", &b(1), &o("claude")), "a retry");
+        assert_ne!(id, bounce_msg_id("h", &b(1), &o("codex")), "another agent");
+        assert_ne!(id, bounce_msg_id("h", &b(2), &o("claude")), "another close");
+    }
 
     #[test]
     fn unknown_screen_holds_until_quiet() {
