@@ -2582,7 +2582,7 @@ async fn serve(
             let started = Instant::now();
             // While async-nats reconnects, every broker call would only queue
             // in its command channel: leave the broker alone (vega-lhc.205).
-            let up = client.connection_state() == async_nats::connection::State::Connected;
+            let up = connected(&client);
             if up {
                 away = None;
             } else if away.get_or_insert(started).elapsed() >= outage::LOST_AFTER {
@@ -2629,12 +2629,12 @@ async fn serve(
                 let t = Instant::now();
                 if st::is_inbox_only(&host) {
                     let run = registry.run_theme_only(&client, &theme_remote);
-                    if tokio::time::timeout(REGISTRY_CALL, run).await.is_err() {
+                    if while_up(&client, REGISTRY_CALL, run).await.is_none() {
                         registry.timed_out();
                     }
                 } else {
                     let run = registry.run(&client, &host, &mut sup);
-                    if tokio::time::timeout(REGISTRY_CALL, run).await.is_err() {
+                    if while_up(&client, REGISTRY_CALL, run).await.is_none() {
                         registry.timed_out();
                     }
                     if let (Some(v), Ok(mut r)) = (&registry.view, theme_remote.lock()) {
@@ -2698,10 +2698,7 @@ async fn serve(
                 let mut later = Vec::new();
                 for mut b in std::mem::take(&mut bounces) {
                     let run = bounce(&js, &stream, &host, &mut b, registry.view.as_ref());
-                    if !tokio::time::timeout(outage::CALL, run)
-                        .await
-                        .unwrap_or(false)
-                    {
+                    if !while_up(&client, outage::CALL, run).await.unwrap_or(false) {
                         later.push(b);
                     }
                 }
@@ -2722,7 +2719,11 @@ async fn serve(
                 due_wakes(&mut sup, &d, registry.view.as_ref())
             };
             // Without the broker no count: candidates stay pending.
-            for pane in d.candidates(once).into_iter().filter(|_| up) {
+            for pane in d
+                .candidates(once)
+                .into_iter()
+                .filter(|_| connected(&client))
+            {
                 let (count, floor) =
                     match outage::bounded("count", unread_and_floor(&stream, &host, &pane)).await {
                         Ok(n) => n,
@@ -5193,14 +5194,38 @@ impl Registry {
 /// The longest one registry round may take (it is many broker calls).
 const REGISTRY_CALL: Duration = Duration::from_secs(30);
 
+fn connected(client: &async_nats::Client) -> bool {
+    client.connection_state() == async_nats::connection::State::Connected
+}
+
+/// `fut` while the client stays connected, at most `limit`: a broker that
+/// drops mid-round ends the round within half a second, so the loop sees the
+/// outage within LOST_AFTER (vega-lhc.205). `None` when cut short.
+async fn while_up<T>(
+    client: &async_nats::Client,
+    limit: Duration,
+    fut: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    let down = async {
+        while connected(client) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    };
+    tokio::select! {
+        v = tokio::time::timeout(limit, fut) => v.ok(),
+        _ = down => None,
+    }
+}
+
 impl Registry {
-    /// A round that did not finish within REGISTRY_CALL: off until the retry.
+    /// A round cut short (REGISTRY_CALL, or the broker dropped): off until
+    /// the retry.
     fn timed_out(&mut self) {
         self.kv = None;
         self.view = None;
         self.next = Some(Instant::now() + REGISTRY_RETRY);
         self.note(&format!(
-            "registry: off (no answer within {} s); local state only",
+            "registry: off (round cut short: broker gone or no answer within {} s); local state only",
             REGISTRY_CALL.as_secs()
         ));
     }

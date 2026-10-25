@@ -7,7 +7,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 ## 75 · 2026-10-25
 
-- feature: vegad no longer hangs when the NATS broker goes away. After 10 s
+- feature: vegad no longer hangs when the NATS broker goes away. Within about 10 s
   without the broker it switches to local mode (sidebar labels, badges,
   attention and wakes keep running), logs `broker: lost` once, shows a herdr
   toast and a note on the vega UAC's badge, and reconnects by itself with
