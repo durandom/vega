@@ -27,4 +27,4 @@ after completed identity migration, otherwise in identity quiesce.
 User setup: `vega post keygen` (public key for server); `vega post relay install`
 (herdr starts vegad). Admin: `auth-config`, `provision`; see `--help`.
 
-Flag-day preview/audit/verify/rollback: `vega post identity --help`; UAC deploys.
+Flag-day cutover and rekey after a remote change: `vega post identity --help`.

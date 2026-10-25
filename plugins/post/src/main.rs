@@ -83,7 +83,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Preview, audit and roll back the project identity flag-day cutover
+    /// Preview, audit and roll back the identity flag-day cutover; rekey after a remote change
     #[command(after_help = include_str!("../help/identity.md"))]
     Identity {
         #[command(subcommand)]

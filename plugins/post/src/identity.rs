@@ -10,8 +10,9 @@ use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use vega_herdr::cutover::{Mapping, Snapshot};
+use vega_herdr::project::{ProjectId, RepoLocation};
 use vega_herdr::Failure;
-use vega_registry::cutover::Plan as RegistryPlan;
+use vega_registry::cutover::{Plan as RegistryPlan, Rekey as RegistryRekey};
 
 fn now() -> i64 {
     std::time::SystemTime::now()
@@ -23,6 +24,36 @@ fn now() -> i64 {
 const JOURNAL: &str = "identity-cutover/journal.json";
 const BUNDLE: &str = "identity-cutover/approved.json";
 const MARKER: &str = "identity-cutover/complete.json";
+/// Explicit v2-to-v2 rekeys: one immutable generation `<n>.json` per rekey.
+const REKEY: &str = "identity-cutover/rekey";
+
+/// State the flag-day cutover snapshots and journals.
+const KINDS: [&str; 10] = [
+    "uac",
+    "uac-status",
+    "lanes",
+    "badges",
+    "notes",
+    "hygiene.json",
+    "pagerduty/state.json",
+    "bd/projects",
+    "bd/state",
+    "bd/git",
+];
+/// A rekey also moves project-keyed state created after the flag day.
+const REKEY_KINDS: [&str; 11] = [
+    "uac",
+    "uac-status",
+    "lanes",
+    "badges",
+    "notes",
+    "hygiene.json",
+    "pagerduty/state.json",
+    "bd/projects",
+    "bd/state",
+    "bd/git",
+    "schedule",
+];
 
 #[derive(Subcommand)]
 pub enum Action {
@@ -62,6 +93,50 @@ pub enum Action {
     },
     /// Restore this host's journal; writers must stay stopped until old deploy
     Rollback,
+    /// Move a project's records to its new ID after a remote change (v2 to v2)
+    #[command(after_help = include_str!("../help/identity-rekey.md"))]
+    Rekey {
+        #[command(subcommand)]
+        action: RekeyAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RekeyAction {
+    /// Plan the rekey of this stopped host's records (changes nothing)
+    Preview {
+        /// The registered (old) project ID the identity error names
+        #[arg(long)]
+        from: String,
+        /// The project's checkout (default: the current directory)
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Journal the plan as the next generation and apply it; replays an interrupted one
+    Apply {
+        #[arg(long)]
+        plan: PathBuf,
+    },
+    /// Undo the newest rekey generation not yet rolled back
+    Rollback,
+}
+
+/// One rekey generation, journaled before any change. `original` holds the
+/// prior bytes of every path the rekey writes or removes (absent: new file).
+#[derive(Serialize, Deserialize, PartialEq)]
+pub struct RekeyPlan {
+    schema: u32,
+    host: String,
+    inbox_only: bool,
+    from: String,
+    to: ProjectId,
+    location: RepoLocation,
+    original: Snapshot,
+    writes: Snapshot,
+    remove: BTreeSet<PathBuf>,
+    registry: RegistryRekey,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -176,6 +251,9 @@ fn safe(path: &Path) -> bool {
 }
 
 fn snapshot(root: &Path) -> Result<Snapshot, String> {
+    snapshot_of(root, &KINDS)
+}
+fn snapshot_of(root: &Path, kinds: &[&str]) -> Result<Snapshot, String> {
     fn walk(root: &Path, path: &Path, out: &mut Snapshot) -> Result<(), String> {
         if !path.exists() {
             return Ok(());
@@ -197,18 +275,7 @@ fn snapshot(root: &Path) -> Result<Snapshot, String> {
         Ok(())
     }
     let mut out = Snapshot::new();
-    for kind in [
-        "uac",
-        "uac-status",
-        "lanes",
-        "badges",
-        "notes",
-        "hygiene.json",
-        "pagerduty/state.json",
-        "bd/projects",
-        "bd/state",
-        "bd/git",
-    ] {
+    for kind in kinds {
         walk(root, &root.join(kind), &mut out)?;
     }
     Ok(out)
@@ -309,22 +376,7 @@ fn validate_bundle(bundle: &Bundle, expected: &[String]) -> Result<(), String> {
             .chain(p.writes.keys())
             .chain(p.remove.iter())
         {
-            if !safe(path)
-                || ![
-                    "uac",
-                    "uac-status",
-                    "lanes",
-                    "badges",
-                    "notes",
-                    "hygiene.json",
-                    "pagerduty/state.json",
-                    "bd/projects",
-                    "bd/state",
-                    "bd/git",
-                ]
-                .iter()
-                .any(|kind| path.starts_with(kind))
-            {
+            if !safe(path) || !KINDS.iter().any(|kind| path.starts_with(kind)) {
                 return Err("unsafe journal path".into());
             }
         }
@@ -385,21 +437,27 @@ fn verify_locations(p: &HostPlan) -> Result<(), String> {
 }
 
 fn apply_files(root: &Path, p: &HostPlan) -> Result<(), String> {
-    for (path, bytes) in &p.writes {
+    write_files(root, &p.writes, &p.remove)
+}
+fn write_files(root: &Path, writes: &Snapshot, remove: &BTreeSet<PathBuf>) -> Result<(), String> {
+    for (path, bytes) in writes {
         atomic(&root.join(path), bytes)?;
     }
-    for path in &p.remove {
+    for path in remove {
         delete(&root.join(path))?;
     }
     Ok(())
 }
 fn restore_files(root: &Path, p: &HostPlan) -> Result<(), String> {
-    for path in p.writes.keys() {
-        if !p.original.contains_key(path) {
+    restore(root, &p.original, &p.writes)
+}
+fn restore(root: &Path, original: &Snapshot, writes: &Snapshot) -> Result<(), String> {
+    for path in writes.keys() {
+        if !original.contains_key(path) {
             delete(&root.join(path))?;
         }
     }
-    for (path, bytes) in &p.original {
+    for (path, bytes) in original {
         atomic(&root.join(path), bytes)?;
     }
     Ok(())
@@ -511,6 +569,7 @@ pub fn run(action: Action) -> Result<(), Failure> {
 fn run_inner(action: Action) -> Result<(), String> {
     match action {
         Action::Mappings { .. } => unreachable!("handled at structured-error boundary"),
+        Action::Rekey { action } => rekey(action),
         Action::Audit {
             plan,
             host,
@@ -636,6 +695,13 @@ fn run_inner(action: Action) -> Result<(), String> {
         Action::Rollback => {
             let _lock = crate::service::lock(false).map_err(|e| e.message)?;
             let root = crate::service::state_dir().map_err(|e| e.message)?;
+            // Generations unwind newest first; the flag-day journal is the oldest.
+            if let Some(n) = generations(&root)?
+                .into_iter()
+                .find(|&n| !generation(&root, n, "rolled-back").exists())
+            {
+                return Err(format!("rekey generation {n} is not rolled back; run `vega post identity rekey rollback` first"));
+            }
             let p: HostPlan = read(&root.join(JOURNAL))?;
             if p.host != crate::host() {
                 return Err("foreign host journal".into());
@@ -670,6 +736,322 @@ fn run_inner(action: Action) -> Result<(), String> {
             delete(&root.join(MARKER))?;
             println!("identity: rolled back; retain journal and keep new binaries stopped");
             Ok(())
+        }
+    }
+}
+
+fn generation(root: &Path, n: u32, ext: &str) -> PathBuf {
+    root.join(REKEY).join(format!("{n}.{ext}"))
+}
+
+/// Journaled rekey generations, oldest first.
+fn generations(root: &Path) -> Result<Vec<u32>, String> {
+    let dir = root.join(REKEY);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let name = entry.map_err(|e| e.to_string())?.file_name();
+        if let Some(n) = name
+            .to_str()
+            .and_then(|n| n.strip_suffix(".json"))
+            .and_then(|n| n.parse().ok())
+        {
+            out.push(n);
+        }
+    }
+    out.sort_unstable();
+    Ok(out)
+}
+
+/// A generation whose apply or rollback has not finished: vegad stays
+/// quiesced and only that generation's apply or rollback may continue.
+fn pending(root: &Path) -> Result<Option<u32>, String> {
+    Ok(generations(root)?.into_iter().find(|&n| {
+        !generation(root, n, "rolled-back").exists()
+            && (!generation(root, n, "done").exists() || generation(root, n, "rollback").exists())
+    }))
+}
+
+/// Rekeys follow a completed flag day and never touch its journal or bundle.
+fn rekey_ready(root: &Path) -> Result<(), String> {
+    if root.join("identity-cutover/rollback").exists() || !root.join(MARKER).exists() {
+        return Err(
+            "rekey needs a completed identity cutover on this host (complete.json, no rollback)"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// The pure file plans of both state trees plus every checkout registered
+/// under `from`, which must now resolve to `to`.
+fn rekey_files(
+    snap: &Snapshot,
+    from: &str,
+    to: &ProjectId,
+) -> Result<(Snapshot, BTreeSet<PathBuf>, BTreeSet<PathBuf>), String> {
+    let local: Snapshot = snap
+        .iter()
+        .filter(|(p, _)| !p.starts_with("bd"))
+        .map(|(p, b)| (p.clone(), b.clone()))
+        .collect();
+    let plan = vega_herdr::cutover::rekey(&local, from, to)?;
+    let bd: Snapshot = snap
+        .iter()
+        .filter_map(|(p, b)| p.strip_prefix("bd").ok().map(|p| (p.into(), b.clone())))
+        .collect();
+    let (bd, mut checkouts) = vega_bd_sync::cutover::rekey(&bd, from, to)?;
+    let mut writes = plan.writes;
+    let mut remove = plan.remove;
+    writes.extend(
+        bd.writes
+            .into_iter()
+            .map(|(p, b)| (Path::new("bd").join(p), b)),
+    );
+    remove.extend(bd.remove.into_iter().map(|p| Path::new("bd").join(p)));
+    let claim = Path::new("uac/v2").join(format!(
+        "{}.json",
+        vega_herdr::project::encode_component(from)
+    ));
+    if let Some(bytes) = snap.get(&claim) {
+        let v: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        let locations = v["locations"].as_array().cloned().unwrap_or_default();
+        checkouts.extend(
+            std::iter::once(&v["checkout"])
+                .chain(locations.iter().map(|l| &l["checkout"]))
+                .filter_map(|c| c.as_str().map(PathBuf::from)),
+        );
+    }
+    Ok((writes, remove, checkouts))
+}
+
+fn rekey(action: RekeyAction) -> Result<(), String> {
+    let _lock = crate::service::lock(false).map_err(|e| e.message)?;
+    let root = crate::service::state_dir().map_err(|e| e.message)?;
+    let host = crate::host();
+    rekey_ready(&root)?;
+    match action {
+        RekeyAction::Preview {
+            from,
+            checkout,
+            output,
+        } => {
+            if std::path::absolute(&output)
+                .map_err(|e| e.to_string())?
+                .starts_with(&root)
+            {
+                return Err("rekey plan must be outside the live vega state root".into());
+            }
+            if let Some(n) = pending(&root)? {
+                return Err(format!(
+                    "rekey generation {n} is incomplete; apply or roll it back first"
+                ));
+            }
+            let checkout = match checkout {
+                Some(c) => c,
+                None => std::env::current_dir().map_err(|e| e.to_string())?,
+            };
+            let current = vega_herdr::project::resolve(&checkout, &host)
+                .map_err(|e| format!("{}: {}", e.code, e.message))?;
+            let to = current.id;
+            let snap = snapshot_of(&root, &REKEY_KINDS)?;
+            let (writes, remove, checkouts) = rekey_files(&snap, &from, &to)?;
+            for c in &checkouts {
+                let id = vega_herdr::project::resolve(c, &host)
+                    .map_err(|e| format!("{}: {}: {}", c.display(), e.code, e.message))?
+                    .id;
+                if id != to {
+                    return Err(format!("{} still resolves to {id}: the old ID has another live location; rekey it to {to} first", c.display()));
+                }
+            }
+            let bundle: Bundle = read(&root.join(BUNDLE))?;
+            let hex = vega_herdr::project::encode_component(&from);
+            if bundle
+                .hosts
+                .iter()
+                .flat_map(|p| &p.registry_reads)
+                .chain(bundle.grants.values().flat_map(|g| &g.publish))
+                .any(|key| key.contains(&format!(".v2.{hex}")))
+            {
+                return Err("an inbox-only host has an exact registry read or grant for the old ID: the new key needs an orrery grant change with the Slayer's approval (docs/design/project-identity.md, Rekey after a remote change)".into());
+            }
+            let inbox_only = vega_herdr::state::is_inbox_only(&host);
+            let registry = if inbox_only {
+                RegistryRekey::default()
+            } else {
+                let path = Path::new("uac/v2").join(format!("{}.json", to.encoded()));
+                let claim = writes
+                    .get(&path)
+                    .or(snap.get(&path))
+                    .map(|b| serde_json::from_slice::<Value>(b))
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
+                crate::runtime().map_err(|e| e.message)?.block_on(async {
+                    let c = vega_registry::connect("identity rekey").await?;
+                    let kv = vega_registry::bucket(&c).await?;
+                    let entries = raw_entries(&kv).await?;
+                    RegistryRekey::prepare(&host, &entries, &from, &to, claim.as_ref())
+                })?
+            };
+            if writes.is_empty() && remove.is_empty() && registry.backup.is_empty() {
+                return Err(format!("no records of {from} on this host"));
+            }
+            let original = writes
+                .keys()
+                .chain(remove.iter())
+                .filter_map(|p| snap.get(p).map(|b| (p.clone(), b.clone())))
+                .collect();
+            let plan = RekeyPlan {
+                schema: 2,
+                host,
+                inbox_only,
+                from,
+                to,
+                location: current.location,
+                original,
+                writes,
+                remove,
+                registry,
+            };
+            save(&output, &plan)?;
+            println!(
+                "identity: rekey preview saved\nfrom: {}\nto: {}\nplan: {}\nwrites: {}\nremovals: {}\nregistry: {} replaced, {} published\nhelp: vega post identity rekey apply --plan {}",
+                vega_herdr::cell(&plan.from),
+                vega_herdr::cell(&plan.to),
+                output.display(),
+                plan.writes.len(),
+                plan.remove.len(),
+                plan.registry.backup.len(),
+                plan.registry.projection.len(),
+                output.display()
+            );
+            Ok(())
+        }
+        RekeyAction::Apply { plan } => {
+            let plan: RekeyPlan = read(&plan)?;
+            if plan.schema != 2 || plan.host != host {
+                return Err("foreign or invalid rekey plan".into());
+            }
+            if plan
+                .original
+                .keys()
+                .chain(plan.writes.keys())
+                .chain(plan.remove.iter())
+                .any(|p| !safe(p) || !REKEY_KINDS.iter().any(|kind| p.starts_with(kind)))
+            {
+                return Err("unsafe rekey path".into());
+            }
+            let resume = pending(&root)?;
+            if let Some(n) = resume {
+                if generation(&root, n, "rollback").exists() {
+                    return Err(format!("rollback of rekey generation {n} is in progress; finish it with `vega post identity rekey rollback`"));
+                }
+                if read::<RekeyPlan>(&generation(&root, n, "json"))? != plan {
+                    return Err(format!("rekey generation {n} is incomplete with another plan; apply that plan or roll it back"));
+                }
+            } else {
+                let current = vega_herdr::project::resolve(&plan.location.checkout, &host)
+                    .map_err(|e| format!("{}: {}", e.code, e.message))?;
+                if current.id != plan.to || current.location != plan.location {
+                    return Err(
+                        "identity/location changed since preview; repeat the preview".into(),
+                    );
+                }
+                let live = snapshot_of(&root, &REKEY_KINDS)?;
+                if let Some(p) = plan
+                    .writes
+                    .keys()
+                    .chain(plan.remove.iter())
+                    .find(|p| live.get(*p) != plan.original.get(*p))
+                {
+                    return Err(format!(
+                        "{} changed since preview; stop writers and repeat the preview",
+                        p.display()
+                    ));
+                }
+            }
+            crate::runtime().map_err(|e| e.message)?.block_on(async {
+                let broker = if plan.inbox_only {
+                    None
+                } else {
+                    let c = vega_registry::connect("identity rekey").await?;
+                    let kv = vega_registry::bucket(&c).await?;
+                    if resume.is_none() {
+                        plan.registry.matches(&raw_entries(&kv).await?, false)?;
+                    }
+                    Some((c, kv))
+                };
+                let n = match resume {
+                    Some(n) => n,
+                    None => {
+                        let n = generations(&root)?.last().map_or(1, |n| n + 1);
+                        // The generation is durable before any state or KV change.
+                        save(&generation(&root, n, "json"), &plan)?;
+                        n
+                    }
+                };
+                write_files(&root, &plan.writes, &plan.remove)?;
+                if let Some((c, kv)) = &broker {
+                    plan.registry.apply(kv).await?;
+                    plan.registry.verify(c, kv).await?;
+                }
+                atomic(&generation(&root, n, "done"), b"done\n")?;
+                println!(
+                    "identity: rekeyed {} to {}\ngeneration: {n}\nhelp: vega post relay start",
+                    vega_herdr::cell(&plan.from),
+                    vega_herdr::cell(&plan.to)
+                );
+                Ok::<_, String>(())
+            })
+        }
+        RekeyAction::Rollback => {
+            let n = generations(&root)?
+                .into_iter()
+                .rev()
+                .find(|&n| !generation(&root, n, "rolled-back").exists())
+                .ok_or("no rekey generation to roll back")?;
+            let p: RekeyPlan = read(&generation(&root, n, "json"))?;
+            if p.host != host {
+                return Err("foreign host rekey generation".into());
+            }
+            crate::runtime().map_err(|e| e.message)?.block_on(async {
+                let broker = if p.inbox_only {
+                    None
+                } else {
+                    let c = vega_registry::connect("identity rekey rollback").await?;
+                    Some(vega_registry::bucket(&c).await?)
+                };
+                let intent = generation(&root, n, "rollback");
+                // An applied generation rolls back only while nothing has
+                // changed since: a snapshot restore would drop newer work.
+                if !intent.exists() && generation(&root, n, "done").exists() {
+                    let live = snapshot_of(&root, &REKEY_KINDS)?;
+                    if let Some(path) = p
+                        .writes
+                        .keys()
+                        .chain(p.remove.iter())
+                        .find(|path| live.get(*path) != p.writes.get(*path))
+                    {
+                        return Err(format!("{} changed since rekey generation {n}; rollback would drop newer work", path.display()));
+                    }
+                    if let Some(kv) = &broker {
+                        p.registry.matches(&raw_entries(kv).await?, true)?;
+                    }
+                }
+                atomic(&intent, b"rollback\n")?;
+                if let Some(kv) = &broker {
+                    p.registry.rollback(kv).await?;
+                }
+                restore(&root, &p.original, &p.writes)?;
+                atomic(&generation(&root, n, "rolled-back"), b"rolled back\n")?;
+                println!(
+                    "identity: rekey generation {n} rolled back ({} restored)\nhelp: vega post relay start",
+                    vega_herdr::cell(&p.from)
+                );
+                Ok::<_, String>(())
+            })
         }
     }
 }
@@ -749,6 +1131,9 @@ async fn startup_inner() -> Result<(), String> {
     let root = crate::service::state_dir().map_err(|e| e.message)?;
     if root.join("identity-cutover/rollback").exists() {
         return Err("rollback in progress/completed; new binaries must remain stopped".into());
+    }
+    if let Some(n) = pending(&root)? {
+        return Err(format!("rekey generation {n} is incomplete; writers stay stopped: repeat `vega post identity rekey apply` with its plan, or `vega post identity rekey rollback`"));
     }
     let bundle: Bundle = read(&root.join(BUNDLE))?;
     validate_bundle(

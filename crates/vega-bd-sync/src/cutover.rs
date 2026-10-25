@@ -154,6 +154,58 @@ pub fn prepare(snapshot: &Snapshot, mappings: &[Mapping]) -> Result<Plan, String
     Ok(plan)
 }
 
+/// Explicit v2-to-v2 rekey (vega-lhc.14.7): move every location's records of
+/// `from` to `to`, unchanged apart from the ID. Returns the plan and the
+/// registered checkouts, which the caller must resolve to `to` before
+/// journaling. A differing record of `to` at the same location blocks.
+pub fn rekey(
+    snapshot: &Snapshot,
+    from: &str,
+    to: &ProjectId,
+) -> Result<(Plan, BTreeSet<PathBuf>), String> {
+    let mut plan = Plan {
+        writes: Snapshot::new(),
+        remove: BTreeSet::new(),
+    };
+    let mut checkouts = BTreeSet::new();
+    for kind in ["projects", "state", "git"] {
+        let dir = Path::new(kind)
+            .join("v2")
+            .join(vega_herdr::project::encode_component(from));
+        for (path, bytes) in snapshot.range(dir.clone()..) {
+            if !path.starts_with(&dir) {
+                break;
+            }
+            let mut record: Record<serde_json::Value> = decode(bytes)?;
+            if record.project != from {
+                return Err(format!(
+                    "sync record/filename mismatch at {}",
+                    path.display()
+                ));
+            }
+            record.project = to.to_string();
+            if kind == "projects" {
+                record.value["key"] = to.as_str().into();
+                let p: Project = serde_json::from_value(record.value.clone())
+                    .map_err(|_| "invalid project record")?;
+                checkouts.insert(p.dir);
+            }
+            let dest = store::relative_file(kind, to.as_str(), &record.common_dir)
+                .ok_or("invalid location")?;
+            let output =
+                serde_json::to_vec_pretty(&record).map_err(|_| "cannot encode sync record")?;
+            if let Some(existing) = snapshot.get(&dest) {
+                if decode::<serde_json::Value>(existing)? != decode::<serde_json::Value>(&output)? {
+                    return Err(format!("conflicting join at bd/{}", dest.display()));
+                }
+            }
+            plan.writes.insert(dest, output);
+            plan.remove.insert(path.clone());
+        }
+    }
+    Ok((plan, checkouts))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +305,36 @@ mod tests {
         assert!(prepare(&files, &[a, b])
             .unwrap_err()
             .contains("conflicting"));
+    }
+
+    #[test]
+    fn rekey_keeps_stop_flags_and_blocks_a_differing_join() {
+        let m = mapping("~/r/.git", "/r/.git");
+        let v2 = prepare(&snapshot(&m, 30, 101), std::slice::from_ref(&m))
+            .unwrap()
+            .writes;
+        let to: ProjectId = serde_json::from_value(serde_json::json!("git.example/r")).unwrap();
+        let (plan, checkouts) = rekey(&v2, m.project.as_str(), &to).unwrap();
+        assert_eq!(checkouts, BTreeSet::from([PathBuf::from("/r")]));
+        assert_eq!(plan.remove, v2.keys().cloned().collect());
+        let at = |kind| store::relative_file(kind, to.as_str(), &m.location.common_dir).unwrap();
+        let p: Record<Project> = decode(&plan.writes[&at("projects")]).unwrap();
+        let s: Record<State> = decode(&plan.writes[&at("state")]).unwrap();
+        assert_eq!(
+            (p.project.as_str(), p.value.key.as_str()),
+            (to.as_str(), to.as_str())
+        );
+        assert!(s.value.is_stopped(&p.value));
+        assert_eq!(p.value.database, "ORIGINAL");
+        // Same bytes under the new ID join; a differing record blocks.
+        let mut joined = v2.clone();
+        joined.extend(plan.writes.clone());
+        assert!(rekey(&joined, m.project.as_str(), &to).is_ok());
+        let mut other: Record<serde_json::Value> = decode(&plan.writes[&at("state")]).unwrap();
+        other.value["seen_write"] = 1.into();
+        joined.insert(at("state"), serde_json::to_vec(&other).unwrap());
+        assert!(rekey(&joined, m.project.as_str(), &to)
+            .unwrap_err()
+            .contains("conflicting join"));
     }
 }

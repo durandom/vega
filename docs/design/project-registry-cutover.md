@@ -215,7 +215,8 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    previews and historical bd backups. Never remove intent to resume new code
    or resnapshot partial state. Snapshot rollback is for the quiesced flag-day
    window; after writers resume, recovery needs separate coordination to retain
-   newer work.
+   newer work. A host with rekey generations (vega-lhc.14.7) rolls those back
+   first (`vega post identity rekey rollback`); flag-day rollback refuses until then.
 
 ## Late host rejoin
 

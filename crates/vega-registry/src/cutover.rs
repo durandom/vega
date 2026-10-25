@@ -270,6 +270,144 @@ pub fn validate(plans: &[Plan]) -> Result<(), String> {
     Ok(())
 }
 
+/// One owner's registry part of an explicit v2-to-v2 rekey (vega-lhc.14.7).
+/// `backup` holds every owned UAC/pin of both IDs, expired pins and clears
+/// included; `projection` is what this owner publishes for them afterwards.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Rekey {
+    pub backup: BTreeMap<String, Value>,
+    pub projection: BTreeMap<String, Value>,
+}
+
+impl Rekey {
+    /// `claim` is the owner's local UAC record of `to` after the file rekey.
+    /// Another host's UAC for `to` or a differing own pin blocks: a rekey
+    /// joins identities only where no claim or pin has to lose.
+    pub fn prepare(
+        host: &str,
+        entries: &BTreeMap<String, Value>,
+        from: &str,
+        to: &ProjectId,
+        claim: Option<&Value>,
+    ) -> Result<Self, String> {
+        let host = token(host);
+        let mut plan = Self::default();
+        let ids = [from, to.as_str()];
+        for (key, value) in entries {
+            let parts: Vec<_> = key.split('.').collect();
+            if parts.get(2) != Some(&"v2") || !matches!(parts.get(1), Some(&"uac" | &"lanista")) {
+                continue;
+            }
+            let Some(project) = value["project"].as_str().filter(|p| ids.contains(p)) else {
+                continue;
+            };
+            if parts[0] != host {
+                if parts[1] == "uac" && project == to.as_str() {
+                    return Err(format!("conflicting join: {key} claims the new ID"));
+                }
+                continue;
+            }
+            plan.backup.insert(key.clone(), value.clone());
+            if parts[1] == "lanista" {
+                let pin: pins::Pin =
+                    serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+                let new = pins::key(&host, to, &pin.seat, &pin.lane, &pin.tier);
+                // Keep timestamp, expiry and clears byte for byte; only the ID moves.
+                let mut v = value.clone();
+                v["project"] = serde_json::to_value(to).map_err(|e| e.to_string())?;
+                let prior = entries.get(&new).or(plan.projection.get(&new));
+                if prior.is_some_and(|prior| prior != &v) {
+                    return Err(format!("conflicting join: divergent pin at {new}"));
+                }
+                plan.projection.insert(new, v);
+            }
+        }
+        if let Some(claim) = claim {
+            plan.projection
+                .insert(uac_key(&host, to), crate::uac_entry(&host, claim)?);
+        } else if plan.backup.contains_key(&uac_key(&host, from)) {
+            // apply would delete the live claim without republishing it.
+            return Err(format!(
+                "registry claim {} has no local UAC claim file; re-claim (`vega uac claim`) before the rekey",
+                uac_key(&host, from)
+            ));
+        }
+        Ok(plan)
+    }
+
+    /// Delete the owner's replaced keys, then publish. Replay after interruption.
+    pub async fn apply(&self, kv: &async_nats::jetstream::kv::Store) -> Result<(), String> {
+        for key in self
+            .backup
+            .keys()
+            .filter(|k| !self.projection.contains_key(*k))
+        {
+            kv.delete(key).await.map_err(|e| e.to_string())?;
+        }
+        for (key, value) in &self.projection {
+            kv.put(key, value.to_string().into())
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Restore exactly the backed-up payloads; replay after interruption.
+    pub async fn rollback(&self, kv: &async_nats::jetstream::kv::Store) -> Result<(), String> {
+        for key in self
+            .projection
+            .keys()
+            .filter(|k| !self.backup.contains_key(*k))
+        {
+            kv.delete(key).await.map_err(|e| e.to_string())?;
+        }
+        for (key, value) in &self.backup {
+            kv.put(key, value.to_string().into())
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Do the live owned entries equal the state before (`applied` false) or
+    /// after (`applied` true) this rekey? Keys of neither side are ignored.
+    pub fn matches(&self, entries: &BTreeMap<String, Value>, applied: bool) -> Result<(), String> {
+        let (want, gone) = if applied {
+            (&self.projection, &self.backup)
+        } else {
+            (&self.backup, &self.projection)
+        };
+        for key in want.keys().chain(gone.keys()) {
+            if entries.get(key) != want.get(key) {
+                return Err(format!("owned registry key changed since the plan: {key}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn verify(
+        &self,
+        client: &async_nats::Client,
+        kv: &async_nats::jetstream::kv::Store,
+    ) -> Result<(), String> {
+        for key in self
+            .backup
+            .keys()
+            .filter(|k| !self.projection.contains_key(*k))
+        {
+            if kv.get(key).await.map_err(|e| e.to_string())?.is_some() {
+                return Err(format!("old key remains: {key}"));
+            }
+        }
+        for (key, value) in &self.projection {
+            if crate::get_one(client, key).await?.as_ref() != Some(value) {
+                return Err(format!("direct get mismatch: {key}"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +489,52 @@ mod tests {
             json!({"project":"/b/.bare","pane":"p2"}),
         );
         assert!(Plan::prepare("a", &same, &ids, BTreeMap::new()).is_err());
+    }
+
+    #[test]
+    fn rekey_moves_owned_pins_and_claim_and_blocks_conflicting_joins() {
+        let old = "local:a:/r/.git";
+        let to = id();
+        let pin = json!({"schema":2,"project":old,"seat":"s","lane":"l","tier":"t","model":null,"at":7,"expires":1});
+        let mut entries = BTreeMap::from([
+            (pins::key("a", old, "s", "l", "t"), pin.clone()),
+            (
+                uac_key("a", old),
+                json!({"schema":2,"project":old,"host":"a","pane":"p1","at":3}),
+            ),
+            (pins::key("b", old, "s", "l", "t"), pin.clone()),
+        ]);
+        let claim = json!({"project":to,"pane":"p1","at":3,"folder_name":"r"});
+        let plan = Rekey::prepare("a", &entries, old, &to, Some(&claim)).unwrap();
+        assert_eq!(plan.backup.len(), 2, "owned keys only");
+        let moved = &plan.projection[&pins::key("a", &to, "s", "l", "t")];
+        assert_eq!(
+            (moved["at"].as_i64(), moved["expires"].as_i64()),
+            (Some(7), Some(1))
+        );
+        assert_eq!(plan.projection[&uac_key("a", &to)]["pane"], "p1");
+        plan.matches(&entries, false).unwrap();
+        assert!(plan.matches(&entries, true).is_err());
+        // A differing own pin of the new ID, or another host's UAC for it, blocks.
+        let mut newer = pin.clone();
+        newer["project"] = json!(to);
+        newer["at"] = 8.into();
+        entries.insert(pins::key("a", &to, "s", "l", "t"), newer);
+        assert!(Rekey::prepare("a", &entries, old, &to, None)
+            .unwrap_err()
+            .contains("divergent pin"));
+        entries.remove(&pins::key("a", &to, "s", "l", "t"));
+        entries.insert(
+            uac_key("b", &to),
+            json!({"schema":2,"project":to,"host":"b","pane":"p2","at":1}),
+        );
+        assert!(Rekey::prepare("a", &entries, old, &to, None)
+            .unwrap_err()
+            .contains("claims the new ID"));
+        // An owned registry claim without a local claim file would be dropped.
+        entries.remove(&uac_key("b", &to));
+        assert!(Rekey::prepare("a", &entries, old, &to, None)
+            .unwrap_err()
+            .contains("no local UAC claim"));
     }
 }

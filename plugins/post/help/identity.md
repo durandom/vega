@@ -34,3 +34,4 @@ Examples:
 
 After deployment: vega post identity verify (owning host, all owners fresh v2).
 After a late-host rejoin: vega post identity verify --host io (projection of io only).
+After a remote change (new project ID): vega post identity rekey --help.

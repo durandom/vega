@@ -707,3 +707,352 @@ fn identity_commands_take_host_and_broker_from_vegad_env() {
     assert!(text.contains("broker unreachable"), "{text}");
     assert!(!text.contains("no broker configured"), "{text}");
 }
+
+/// Every file below the vega state root except daemon logs, locks and status.
+fn state_files(state: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Path, dir: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                let rel = path.strip_prefix(root).unwrap().display().to_string();
+                if !rel.starts_with("post-relay") && !rel.starts_with("identity-cutover/rekey") {
+                    out.insert(rel, fs::read(&path).unwrap());
+                }
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(state, state, &mut out);
+    out
+}
+
+#[test]
+fn rekey_journals_a_new_generation_replays_and_rolls_back() {
+    use vega_herdr::project::encode_component as hex;
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().canonicalize().unwrap();
+    let home = home.as_path();
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::write(
+        home.join("bin/herdr"),
+        "#!/bin/sh\necho \"$*\" >> \"$HOME/herdr-calls\"\necho '{\"result\":{\"agents\":[],\"workspaces\":[],\"panes\":[]}}'\n",
+    )
+    .unwrap();
+    fs::set_permissions(home.join("bin/herdr"), fs::Permissions::from_mode(0o755)).unwrap();
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let conf = home.join("nats.conf");
+    fs::write(
+        &conf,
+        format!(
+            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n",
+            home.join("js").display()
+        ),
+    )
+    .unwrap();
+    let _server = Server(
+        Command::new("nats-server")
+            .arg("-c")
+            .arg(conf)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let url = format!("nats://127.0.0.1:{port}");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let kv = rt.block_on(async {
+        let mut client = None;
+        for _ in 0..50 {
+            if let Ok(c) = async_nats::connect(&url).await {
+                client = Some(c);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        async_nats::jetstream::new(client.expect("broker starts"))
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: vega_registry::BUCKET.into(),
+                history: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+    });
+    // The project got its first remote after the flag day.
+    let repo = home.join("repo");
+    let git = |args: &[&str]| {
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .status()
+            .unwrap()
+            .success())
+    };
+    fs::create_dir_all(&repo).unwrap();
+    git(&["init", "-q"]);
+    let common = repo.join(".git");
+    let old = format!("local:a:{}", common.display());
+    git(&["remote", "add", "titan", "ssh://git.example:2222/r.git"]);
+    let new = "git.example:2222/r";
+    let state = home.join("state/vega");
+    let v2 = |kind: &str, id: &str| {
+        state
+            .join(kind)
+            .join("v2")
+            .join(format!("{}.json", hex(id)))
+    };
+    let sync = |kind: &str, id: &str| {
+        state
+            .join("bd")
+            .join(kind)
+            .join("v2")
+            .join(hex(id))
+            .join(format!("{}.json", hex(common.to_str().unwrap())))
+    };
+    let put = |path: &Path, v: Value| {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, v.to_string()).unwrap();
+    };
+    let location = json!({"common_dir":common,"checkout":repo});
+    put(
+        &v2("uac", &old),
+        json!({"schema":2,"project":old,"host":"a","pane":"p1","at":7,"tracker":"task","common_dir":common,"checkout":repo,"locations":[location],"folder_name":"repo"}),
+    );
+    put(
+        &v2("uac-status", &old),
+        json!({"schema":2,"project":old,"at":5}),
+    );
+    put(
+        &v2("badges", &old),
+        json!({"schema":2,"project":old,"at":5,"notes":1,"decisions":0,"waiting":0,"waiting_panes":[]}),
+    );
+    fs::create_dir_all(state.join("lanes/v2")).unwrap();
+    fs::write(
+        v2("lanes", &old),
+        format!(
+            "{}\n",
+            json!({"actor":"a/fix","since":3,"pane":"p1","schema":2,"project":old})
+        ),
+    )
+    .unwrap();
+    put(
+        &state.join("notes/5000.json"),
+        json!({"schema":2,"id":5000,"host":"a","project":old,"cause":"bd-sync:TEST","resolved":null,"title":"t","body":"b"}),
+    );
+    let record =
+        |id: &str, value: Value| json!({"schema":2,"project":id,"common_dir":common,"value":value});
+    put(
+        &sync("projects", &old),
+        record(
+            &old,
+            json!({"key":old,"common":common,"dir":repo,"database":"TEST","remote":"http://remote/TEST","bd":"/bin/bd","data":repo.join(".beads/dolt"),"since":1,"resumed":2}),
+        ),
+    );
+    let stopped = vega_bd_sync::store::State {
+        stopped: Some(30),
+        stop_reason: Some("conflict".into()),
+        ..Default::default()
+    };
+    put(
+        &sync("state", &old),
+        record(&old, serde_json::to_value(&stopped).unwrap()),
+    );
+    put(
+        &sync("git", &old),
+        record(
+            &old,
+            serde_json::to_value(vega_bd_sync::git::GitState::default()).unwrap(),
+        ),
+    );
+    // A completed flag day whose journal and bundle the rekey never touches.
+    let cutover = state.join("identity-cutover");
+    put(
+        &cutover.join("complete.json"),
+        json!({"schema":2,"host":"a"}),
+    );
+    fs::write(cutover.join("journal.json"), "flag-day journal").unwrap();
+    put(
+        &cutover.join("approved.json"),
+        json!({"schema":2,"hosts":[],"grants":{}}),
+    );
+    let pin = json!({"schema":2,"project":old,"seat":"s","lane":"l","tier":"t","model":null,"at":3,"expires":1});
+    let old_pin = vega_registry::pins::key("a", &old, "s", "l", "t");
+    let new_pin = vega_registry::pins::key("a", new, "s", "l", "t");
+    rt.block_on(async {
+        kv.put(&old_pin, pin.to_string().into()).await.unwrap();
+    });
+    let before = state_files(&state);
+    let rekey = |args: &[&str]| {
+        let mut all = vec!["identity", "rekey"];
+        all.extend_from_slice(args);
+        post(home, &url, &all)
+    };
+    let preview = || {
+        rekey(&[
+            "preview",
+            "--from",
+            &old,
+            "--checkout",
+            repo.to_str().unwrap(),
+            "--output",
+            "plan.json",
+        ])
+    };
+    let failed = |out: Output, needle: &str| {
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert_eq!(out.status.code(), Some(1), "{text}");
+        assert!(text.contains(needle), "{needle}: {text}");
+    };
+
+    // Conflicting joins block the preview with no change.
+    put(
+        &v2("uac", new),
+        json!({"schema":2,"project":new,"host":"a","pane":"p9","at":9}),
+    );
+    failed(preview(), "conflicting join");
+    fs::remove_file(v2("uac", new)).unwrap();
+    rt.block_on(async {
+        let mut other = pin.clone();
+        other["project"] = json!(new);
+        other["at"] = 4.into();
+        kv.put(&new_pin, other.to_string().into()).await.unwrap();
+    });
+    failed(preview(), "divergent pin");
+    rt.block_on(async { kv.delete(&new_pin).await.unwrap() });
+    put(
+        &cutover.join("approved.json"),
+        json!({"schema":2,"hosts":[],"grants":{"d":{"publish":[vega_registry::direct_get_subject(&vega_registry::uac_key("a", &old))],"subscribe":[]}}}),
+    );
+    failed(preview(), "Slayer");
+    put(
+        &cutover.join("approved.json"),
+        json!({"schema":2,"hosts":[],"grants":{}}),
+    );
+    assert_eq!(state_files(&state), before);
+    assert!(!home.join("plan.json").exists());
+
+    success(preview());
+    assert_eq!(state_files(&state), before, "preview changes nothing");
+
+    // Power loss after the generation was saved and one file written.
+    let plan: Value = serde_json::from_slice(&fs::read(home.join("plan.json")).unwrap()).unwrap();
+    let rekeys = cutover.join("rekey");
+    fs::create_dir_all(&rekeys).unwrap();
+    fs::copy(home.join("plan.json"), rekeys.join("1.json")).unwrap();
+    let (path, bytes) = plan["writes"].as_object().unwrap().iter().next().unwrap();
+    let bytes: Vec<u8> = serde_json::from_value(bytes.clone()).unwrap();
+    put(&state.join(path), serde_json::from_slice(&bytes).unwrap());
+    drop(quiesced(
+        home,
+        &url,
+        "a",
+        "rekey generation 1 is incomplete",
+    ));
+    // Another plan cannot jump the pending generation; the same one replays.
+    let mut other = plan.clone();
+    other["from"] = json!("local:a:/elsewhere");
+    fs::write(home.join("other.json"), other.to_string()).unwrap();
+    failed(rekey(&["apply", "--plan", "other.json"]), "another plan");
+    success(rekey(&["apply", "--plan", "plan.json"]));
+    assert!(rekeys.join("1.done").exists());
+
+    let read = |p: &Path| serde_json::from_slice::<Value>(&fs::read(p).unwrap()).unwrap();
+    assert_eq!(read(&v2("uac", new))["tracker"], "task");
+    assert_eq!(read(&v2("uac", new))["at"], 7);
+    assert!(!v2("uac", &old).exists() && !v2("badges", &old).exists());
+    assert!(fs::read_to_string(v2("lanes", new))
+        .unwrap()
+        .contains("\"since\":3"));
+    assert_eq!(read(&state.join("notes/5000.json"))["project"], new);
+    assert_eq!(
+        read(&state.join("notes/5000.json"))["cause"],
+        "bd-sync:TEST"
+    );
+    let s: vega_bd_sync::store::State =
+        serde_json::from_value(read(&sync("state", new))["value"].clone()).unwrap();
+    assert_eq!(s.stopped, Some(30));
+    assert_eq!(read(&sync("projects", new))["value"]["key"], new);
+    assert!(!sync("projects", &old).exists());
+    assert_eq!(
+        fs::read(cutover.join("journal.json")).unwrap(),
+        b"flag-day journal"
+    );
+    assert_eq!(
+        state_files(&state)["identity-cutover/approved.json"],
+        before["identity-cutover/approved.json"]
+    );
+    rt.block_on(async {
+        assert!(kv.get(&old_pin).await.unwrap().is_none());
+        let moved: Value =
+            serde_json::from_slice(&kv.get(&new_pin).await.unwrap().unwrap()).unwrap();
+        assert_eq!(
+            (
+                moved["at"].as_i64(),
+                moved["expires"].as_i64(),
+                moved["project"].as_str()
+            ),
+            (Some(3), Some(1), Some(new))
+        );
+        assert!(kv
+            .get(vega_registry::uac_key("a", new))
+            .await
+            .unwrap()
+            .is_some());
+    });
+    // A finished generation is not reapplied; its records are now the new ones.
+    failed(
+        rekey(&["apply", "--plan", "plan.json"]),
+        "changed since preview",
+    );
+
+    // Rollback refuses once a rekeyed record changed after the apply.
+    let note = fs::read(state.join("notes/5000.json")).unwrap();
+    fs::write(state.join("notes/5000.json"), b"{}").unwrap();
+    failed(rekey(&["rollback"]), "drop newer work");
+    fs::write(state.join("notes/5000.json"), &note).unwrap();
+    // Flag-day rollback waits for the rekey generations.
+    failed(
+        post(home, &url, &["identity", "rollback"]),
+        "rekey generation 1",
+    );
+    // An interrupted rollback (intent saved, one file restored) replays.
+    fs::write(rekeys.join("1.rollback"), "rollback\n").unwrap();
+    fs::write(
+        v2("uac", &old),
+        &before[&format!("uac/v2/{}.json", hex(&old))],
+    )
+    .unwrap();
+    failed(
+        rekey(&["apply", "--plan", "plan.json"]),
+        "rollback of rekey generation 1",
+    );
+    success(rekey(&["rollback"]));
+    assert_eq!(state_files(&state), before, "exact original bytes");
+    rt.block_on(async {
+        assert!(kv.get(&new_pin).await.unwrap().is_none());
+        assert!(kv
+            .get(vega_registry::uac_key("a", new))
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&kv.get(&old_pin).await.unwrap().unwrap()).unwrap(),
+            pin
+        );
+    });
+    failed(rekey(&["rollback"]), "no rekey generation");
+    // A new rekey after the rollback becomes generation 2; 1 stays.
+    success(preview());
+    success(rekey(&["apply", "--plan", "plan.json"]));
+    assert!(rekeys.join("1.json").exists() && rekeys.join("2.done").exists());
+}
