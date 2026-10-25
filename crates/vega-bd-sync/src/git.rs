@@ -72,10 +72,10 @@ impl Repo {
         if p.id.as_str() == self.key && p.location.common_dir == self.common {
             Ok(())
         } else {
-            Err(vega_herdr::Failure::new(
-                "project_identity_changed",
-                "A sync location changed project identity",
-                "quiesce writers and perform the journaled rekey",
+            Err(vega_herdr::project::identity_changed(
+                "A sync location",
+                &self.key,
+                &p,
             ))
         }
     }
@@ -102,13 +102,16 @@ pub fn repos(extra: impl IntoIterator<Item = Repo>) -> Vec<Repo> {
         .into_iter()
         .filter(|r| match r.validate_location() {
             Ok(()) => {
-                vega_herdr::project::diagnostic("git sync", &r.common, None);
+                vega_herdr::project::registered_diagnostic("git sync", &r.key, &r.common, None);
                 true
             }
             Err(e) => {
-                if let Some(message) =
-                    vega_herdr::project::diagnostic("git sync", &r.common, Some(&e))
-                {
+                if let Some(message) = vega_herdr::project::registered_diagnostic(
+                    "git sync",
+                    &r.key,
+                    &r.common,
+                    Some(&e),
+                ) {
                     eprintln!("git sync: {message}");
                 }
                 false
@@ -846,6 +849,59 @@ mod tests {
                 .count(),
             2
         );
+    }
+    #[test]
+    fn a_stale_id_beside_its_re_registered_id_logs_once() {
+        const MODE: &str = "VEGA_GIT_REPOS_STALE_FIXTURE";
+        if std::env::var_os(MODE).is_some() {
+            let dir = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("a");
+            std::fs::create_dir(&dir).unwrap();
+            sh(&dir, &["init", "-q"]);
+            let stale = super::repo(dir.to_str().unwrap()).unwrap();
+            sh(
+                &dir,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/team/repo.git",
+                ],
+            );
+            let current = super::repo(dir.to_str().unwrap()).unwrap();
+            assert_ne!(stale.key, current.key);
+            for _ in 0..3 {
+                assert_eq!(
+                    repos([stale.clone(), current.clone()]),
+                    vec![current.clone()]
+                );
+            }
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "git::tests::a_stale_id_beside_its_re_registered_id_logs_once",
+                "--nocapture",
+            ])
+            .env(MODE, "1")
+            .env("HOME", &root)
+            .env("XDG_STATE_HOME", root.join("state"))
+            .env("VEGA_POST_HOST", "fixture")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{}{stderr}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert_eq!(stderr.matches("git sync:").count(), 1, "{stderr}");
+        assert!(stderr.contains("now github.com/team/repo"), "{stderr}");
+        assert!(stderr.contains("vega bd init"), "{stderr}");
     }
     #[test]
     fn failed_claimed_and_provisioned_clones_are_dropped_once_without_hiding_siblings() {

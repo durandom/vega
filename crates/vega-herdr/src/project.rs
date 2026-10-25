@@ -126,23 +126,58 @@ pub fn metadata_path(workspace: Option<&serde_json::Value>, cwd: &str) -> PathBu
 /// Return a diagnostic only when this local path's failure changes. Daemons
 /// skip failed projects; retries should not flood logs. Clear on recovery.
 pub fn diagnostic(scope: &str, path: &Path, error: Option<&Failure>) -> Option<String> {
-    static LAST: std::sync::OnceLock<std::sync::Mutex<BTreeMap<(String, PathBuf), String>>> =
-        std::sync::OnceLock::new();
+    registered_diagnostic(scope, "", path, error)
+}
+
+/// [`diagnostic`] for one registered project ID at the path. A stale record
+/// shares its path with the re-registered one, whose recovery must not clear
+/// the stale record's failure and log it again on every pass.
+pub fn registered_diagnostic(
+    scope: &str,
+    id: &str,
+    path: &Path,
+    error: Option<&Failure>,
+) -> Option<String> {
+    type Last = BTreeMap<(String, String, PathBuf), String>;
+    static LAST: std::sync::OnceLock<std::sync::Mutex<Last>> = std::sync::OnceLock::new();
     let mut last = LAST
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let key = (scope.to_owned(), path.to_path_buf());
+    let key = (scope.to_owned(), id.to_owned(), path.to_path_buf());
     let Some(error) = error else {
         last.remove(&key);
         return None;
     };
-    let message = format!("{}: {}: {}", path.display(), error.code, error.message);
+    let message = format!(
+        "{}: {}: {}; {}",
+        path.display(),
+        error.code,
+        error.message,
+        error.hint
+    );
     if last.get(&key) == Some(&message) {
         return None;
     }
     last.insert(key, message.clone());
     Some(message)
+}
+
+/// A registered location (`what`) now resolves to `current`, another ID or
+/// common dir: workers skip it until the operator re-registers the location
+/// and removes the stale record (docs/design/project-identity.md).
+pub fn identity_changed(what: &str, registered: &str, current: &Project) -> Failure {
+    Failure::new(
+        "project_identity_changed",
+        format!(
+            "{what} changed project identity: registered {registered}, now {} at {}",
+            current.id,
+            current.location.common_dir.display()
+        ),
+        "a remote change needs a rekey: stop writers, re-register under the new ID \
+         (`vega uac claim`, `vega bd init` in the checkout), then remove the stale \
+         records (docs/design/project-identity.md, Rekey after a remote change)",
+    )
 }
 
 fn failure(code: &str, message: &str, hint: &str) -> Failure {
@@ -1134,5 +1169,18 @@ esac
         assert!(diagnostic("bd", path, Some(&error)).is_none());
         diagnostic("bd", path, None);
         assert!(diagnostic("bd", path, Some(&error)).is_some());
+    }
+
+    #[test]
+    fn a_stale_record_beside_a_healthy_one_logs_once() {
+        let path = Path::new("/diagnostic-stale-fixture");
+        let error = failure("project_identity_changed", "changed", "rekey it");
+        let mut logged = Vec::new();
+        for _ in 0..3 {
+            assert!(registered_diagnostic("git", "new", path, None).is_none());
+            logged.extend(registered_diagnostic("git", "old", path, Some(&error)));
+        }
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert!(logged[0].ends_with("changed; rekey it"), "{logged:?}");
     }
 }

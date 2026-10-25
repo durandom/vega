@@ -196,6 +196,28 @@ v2-to-v2 rekeys with retained journal generations are tracked in vega-lhc.14.7;
 keep affected writers stopped after a remote change and retain the original
 cutover journal rather than resnapshotting it.
 
+### Rekey after a remote change
+
+Adding a project's first remote (or changing its selected remote URL) changes
+its ID; every record keyed by the old ID then fails with
+`project_identity_changed` and its worker skips it. vegad's git sync, bd sync
+and decisions log this once per transition and record, not per pass; the line
+names the registered and the current ID and the fix. `vega bd status` and
+`vega uac status` show it on the project's row until it is fixed. Re-claiming
+the UAC alone (vega-lhc.198) leaves the old-ID records behind, so the failure stays.
+
+Until vega-lhc.14.7 ships a journaled v2-to-v2 rekey, the operator step on the
+affected host, with `OLD` the encoded old ID (hex of the ID, the state files'
+directory or file name):
+
+1. `vega post relay stop`; stop the project's writers.
+2. In the checkout: `vega bd init` (an existing database with the same remote is
+   only re-registered under the new ID); in the UAC's pane `vega uac claim`.
+3. Move the `OLD` records out of `$XDG_STATE_HOME/vega` (keep them as a
+   backup): `uac/v2/OLD.json`, `bd/projects/v2/OLD/`, `bd/state/v2/OLD/`,
+   `bd/git/v2/OLD/`.
+4. `vega post relay start`; `vega bd status` lists the project once.
+
 ## Deliberately local
 
 Keep herdr repo_key, cwd/workspace paths, worktree creation/trust/hook approvals,

@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 74 · 2026-10-25
+
+- feature: vegad logs a project whose ID changed (first remote added, remote URL
+  changed) once per transition instead of every pass, naming the registered and
+  the current ID and the fix. A UAC re-claim leaves the old-ID records behind;
+  remove them as in [Rekey after a remote change](docs/design/project-identity.md#rekey-after-a-remote-change).
+
 ## 73 · 2026-10-24
 
 - feature: a host that missed the identity flag day (io) rejoins with a

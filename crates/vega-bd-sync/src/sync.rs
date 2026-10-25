@@ -103,12 +103,14 @@ pub fn cycle(now: i64, ops: &mut dyn Ops) -> Vec<Event> {
     let mut events = Vec::new();
     for p in store::projects() {
         if let Err(e) = p.validate_location() {
-            if let Some(message) = vega_herdr::project::diagnostic("bd sync", &p.common, Some(&e)) {
+            if let Some(message) =
+                vega_herdr::project::registered_diagnostic("bd sync", &p.key, &p.common, Some(&e))
+            {
                 events.push(Event::Log(format!("bd sync: {message}")));
             }
             continue;
         }
-        vega_herdr::project::diagnostic("bd sync", &p.common, None);
+        vega_herdr::project::registered_diagnostic("bd sync", &p.key, &p.common, None);
         let mut s = store::state(&p.key, &p.common);
         let before = s.clone();
         step(now, &p, &mut s, ops, &mut events);
