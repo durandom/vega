@@ -274,10 +274,11 @@ channel was full the next broker call waited forever, taking the single-threaded
 - While the client is not `Connected`, the loop makes no broker call: counts, registry, bounces and tool
   mail wait (mail candidates stay pending). The herdr-side work (sidebar metadata, badges, attention,
   wakes, herdr events, the upgrade check, theme) runs on.
-- A broker away for `outage::LOST_AFTER` (10 s) ends the broker loop. A registry round or bounce in flight
-  is cut short within 0.5 s of the disconnect (`while_up`), and the count loop stops at the next pane, so
-  the switch comes within about 11 s of the disconnect (one count already sent can add its 3 s request
-  timeout). vegad logs once
+- A broker away for `outage::LOST_AFTER` (10 s) ends the broker loop. The clock starts when the loop
+  next sees the client disconnected. A registry round or bounce in flight is cut short within 0.5 s of
+  the disconnect (`while_up`) and the count loop stops at the next pane; any other call in flight (one
+  count, a tool mail, a setup step) ends within `outage::CALL` (10 s). So the switch comes 10 s after the
+  disconnect at best and 20.5 s at worst. vegad logs once
   `broker: lost (<url> unreachable for 10 s); switching to local mode` and runs local mode with its
   state. A broker lost during setup (stream or subscription right after the connect) goes the same way.
   Only a completed setup ends the outage: it writes `connected`, clears the note and resets the probe
