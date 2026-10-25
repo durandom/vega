@@ -11,7 +11,7 @@ Joins keep all data or fail naming the path: a claim merges only with the
 same pane, lanes take the union, caches keep the new ID's record; another
 pane, a differing bd record or own pin, or another host's UAC for the new ID
 block. A location still resolving to the old ID blocks. An exact inbox-only
-registry read of the old ID blocks: that needs orrery and the Slayer.
+registry read or grant of the old ID blocks: that needs orrery and the Slayer.
 
 Apply saves the plan as generation identity-cutover/rekey/<n>.json before any
 change, then writes files, replaces the registry keys and verifies them. Run

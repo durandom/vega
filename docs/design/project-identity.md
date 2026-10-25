@@ -270,11 +270,12 @@ the plan: once writers have resumed, a snapshot rollback would drop newer
 work. The generation files stay.
 
 **Approval.** A rekey needs no new audited bundle and no Slayer approval when
-no inbox-only host's exact registry read (`registry_reads` in `approved.json`)
-names a key of the old ID. It is then a local, journaled, reversible change of
-one owner's state and its own registry keys: no broker permission and no
-other host's plan change, and other hosts read the new key like any new
-claim. Preview fails when such a read exists: it would dangle, and the new
+no inbox-only host has an exact registry read or grant for a key of the old ID
+(`registry_reads` or `grants` in `approved.json`; audit keeps them equal).
+It is then a local, journaled, reversible change of one owner's state and
+its own registry keys: no broker permission and no other host's plan change,
+and other hosts read the new key like any new claim. Preview fails when such
+a read or grant exists: it would dangle, and the new
 key needs an orrery grant change, which only the Slayer approves
 ([project-registry-cutover.md](project-registry-cutover.md)). A host-scoped
 `local:<host>:...` ID is in no other host's plan and has no inbox grant, so it

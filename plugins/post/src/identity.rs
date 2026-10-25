@@ -875,7 +875,7 @@ fn rekey(action: RekeyAction) -> Result<(), String> {
                 .chain(bundle.grants.values().flat_map(|g| &g.publish))
                 .any(|key| key.contains(&format!(".v2.{hex}")))
             {
-                return Err("an inbox-only host has an exact registry read for the old ID: the new key needs an orrery grant change with the Slayer's approval (docs/design/project-identity.md, Rekey after a remote change)".into());
+                return Err("an inbox-only host has an exact registry read or grant for the old ID: the new key needs an orrery grant change with the Slayer's approval (docs/design/project-identity.md, Rekey after a remote change)".into());
             }
             let inbox_only = vega_herdr::state::is_inbox_only(&host);
             let registry = if inbox_only {
