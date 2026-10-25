@@ -66,3 +66,20 @@ fn rendered_matches_proteus_live_config() {
     );
     assert_eq!(semantic(&r.text), semantic(LIVE));
 }
+
+/// Catppuccin's pastel yellow (working) and teal (done) read alike in the
+/// sidebar; the template remaps both per appearance (vega-lhc.207).
+#[test]
+fn status_dot_colours_are_distinct_per_appearance() {
+    let sym = vega_herdr::theme::parse(THEME);
+    let r = render(TEMPLATE, &sym, None).unwrap();
+    let doc = semantic(&r.text);
+    for (mode, done, working) in [
+        ("light", "#1e66f5", "#df8e1d"),
+        ("dark", "#89b4fa", "#ffb224"),
+    ] {
+        let colours = &doc["theme"]["custom"][mode];
+        assert_eq!(colours["teal"], done, "{mode} done");
+        assert_eq!(colours["yellow"], working, "{mode} working");
+    }
+}
