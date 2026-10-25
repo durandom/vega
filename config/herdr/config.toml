@@ -21,11 +21,19 @@ dark_name = "catppuccin"
 
 # The Catppuccin default active_row_bg nearly matches the background, so the
 # selected sidebar row was only visible as bold text. Use surface1 instead.
+# Sidebar status dots: Catppuccin's pastel yellow (working) and teal (done)
+# read alike next to green (idle). herdr uses `teal` only for done and
+# `yellow` for working plus connecting notices: done turns blue (as on
+# herdr's mobile view), working a stronger amber.
 [theme.custom.light]
 active_row_bg = "#bcc0cc"   # Latte surface1
+teal = "#1e66f5"            # Latte blue: done
+yellow = "#df8e1d"          # Latte yellow: working
 
 [theme.custom.dark]
 active_row_bg = "#45475a"   # Mocha surface1
+teal = "#89b4fa"            # Mocha blue: done
+yellow = "#ffb224"          # amber: working
 
 [ui]
 pane_borders = true
