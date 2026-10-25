@@ -20,12 +20,17 @@ impl Drop for Proc {
     }
 }
 
+/// Two claude panes; w1:p1 closes once `$FAKE_LOG/p1-closed` exists.
 const FAKE_HERDR: &str = r#"#!/bin/sh
 echo "$*" >> "$FAKE_LOG/herdr-calls"
+p1='{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/","agent":"claude","agent_status":"idle"},'
+[ -e "$FAKE_LOG/p1-closed" ] && p1=''
+p2='{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/","agent":"claude","agent_status":"working"}'
 case "$1 $2" in
   "api schema") echo '{"error":{"code":"unknown","message":"no socket api"}}'; exit 1 ;;
-  "agent list") echo '{"result":{"agents":[{"pane_id":"w1:p1","agent_status":"idle","agent":"claude"}]}}' ;;
-  "pane list") echo '{"result":{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/","agent":"claude"}]}}' ;;
+  "agent list") echo "{\"result\":{\"agents\":[$p1$p2]}}" ;;
+  "pane list") echo "{\"result\":{\"panes\":[$p1$p2]}}" ;;
+  "pane process-info") echo "{\"result\":{\"process_info\":{\"shell_pid\":${FAKE_SENDER_PID:-0}}}}" ;;
   "workspace list") echo '{"result":{"workspaces":[{"workspace_id":"w1","label":"ws"}]}}' ;;
   *) echo '{"result":{}}' ;;
 esac
@@ -60,7 +65,7 @@ fn metadata_reports(home: &Path) -> usize {
     fs::read_to_string(home.join("herdr-calls"))
         .unwrap_or_default()
         .lines()
-        .filter(|l| l.starts_with("pane report-metadata w1:p1"))
+        .filter(|l| l.starts_with("pane report-metadata w1:p2"))
         .count()
 }
 
@@ -163,6 +168,17 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
         || log().contains("relay: testhost watching"),
     );
     assert_eq!(broker_state().trim(), "connected");
+    // w1:p2 mails w1:p1, which closes unread during the outage.
+    let sent = cmd(&["send", "w1:p1", "hello"])
+        .env("HERDR_PANE_ID", "w1:p2")
+        // The test hosts `send` in w1:p2.
+        .env("FAKE_SENDER_PID", std::process::id().to_string())
+        .output()
+        .unwrap();
+    assert!(sent.status.success(), "{sent:?}");
+    wait_for(&log_file, "the mail", Duration::from_secs(20), || {
+        log().contains("seen: w1:p2 -> w1:p1")
+    });
 
     // The broker goes away.
     let _ = nats.0.kill();
@@ -201,6 +217,13 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
         relay.0.id() > 0 && cmd(&["relay", "status"]).output().is_ok(),
         "vegad answers"
     );
+    fs::write(home.join("p1-closed"), "").unwrap();
+    wait_for(
+        &log_file,
+        "the closed pane",
+        Duration::from_secs(20),
+        || log().contains("bounce: w1:p1 closed with unread mail; bounced once the broker is back"),
+    );
 
     // The broker comes back on the same port.
     let _nats = broker(&conf);
@@ -218,4 +241,8 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     assert_eq!(back.matches("broker: lost").count(), 1, "{back}");
     let outage = notes();
     assert!(outage[0]["resolved"].is_i64(), "{outage:?}");
+    // The sender hears of the closed pane after all.
+    wait_for(&log_file, "the bounce", Duration::from_secs(20), || {
+        log().contains("bounce: w1:p1 unread, mailed w1:p2 on testhost")
+    });
 }

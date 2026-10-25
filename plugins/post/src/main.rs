@@ -2388,9 +2388,11 @@ async fn local(
                         log(&format!("local: pane {p} gone, its tool mail dropped"));
                     }
                 }
+                let before = d.bounces().len();
                 jobs.agent(e, &mut d, &mut sup);
-                for b in d.take_bounces() {
-                    log(&format!("bounce: {} closed with unread mail; not bounced (no broker)", b.pane));
+                // Kept in `d`: the broker loop bounces them once it is back.
+                for b in &d.bounces()[before..] {
+                    log(&format!("bounce: {} closed with unread mail; bounced once the broker is back", b.pane));
                 }
             }
             Some(e) = jobs.up.recv() => match e {
@@ -2567,6 +2569,9 @@ async fn serve(
         // Since when the client is disconnected; LOST_AFTER of it ends the
         // broker loop.
         let mut away: Option<Instant> = None;
+        // Bounces the broker did not take yet (vega-lhc.205).
+        let mut bounces: Vec<delivery::Bounce> = Vec::new();
+        let mut bounce_retry_at = Instant::now();
         loop {
             let started = Instant::now();
             // While async-nats reconnects, every broker call would only queue
@@ -2588,12 +2593,7 @@ async fn serve(
                     ));
                 }
                 log(&why);
-                for b in d.take_bounces() {
-                    log(&format!(
-                        "bounce: {} closed with unread mail; not bounced (no broker)",
-                        b.pane
-                    ));
-                }
+                d.keep_bounces(std::mem::take(&mut bounces));
                 return Ok(Served::Lost(Box::new(Carry {
                     d,
                     sup,
@@ -2686,14 +2686,28 @@ async fn serve(
             for asker in expired_asks() {
                 d.mail(&asker, Sender::Other);
             }
-            for b in d.take_bounces() {
-                let run = bounce(&js, &stream, &host, &b, registry.view.as_ref());
-                if !up || tokio::time::timeout(outage::CALL, run).await.is_err() {
-                    log(&format!(
-                        "bounce: {} not checked, dropped: broker away",
-                        b.pane
-                    ));
+            // A bounce the broker could not check waits for the next try.
+            bounces.extend(d.take_bounces());
+            if up && !bounces.is_empty() && Instant::now() >= bounce_retry_at {
+                let mut later = Vec::new();
+                for mut b in std::mem::take(&mut bounces) {
+                    let run = bounce(&js, &stream, &host, &mut b, registry.view.as_ref());
+                    if !tokio::time::timeout(outage::CALL, run)
+                        .await
+                        .unwrap_or(false)
+                    {
+                        later.push(b);
+                    }
                 }
+                if !later.is_empty() {
+                    log(&format!(
+                        "bounce: {} not checked, retrying in {} s",
+                        later.len(),
+                        CI_RETRY.as_secs()
+                    ));
+                    bounce_retry_at = Instant::now() + CI_RETRY;
+                }
+                bounces = later;
             }
             // Parents to wake now: free, with a new attention (supervise.rs).
             let mut wakes = if once {
@@ -2990,29 +3004,26 @@ async fn bounce(
     js: &jetstream::Context,
     stream: &stream::Stream,
     host: &str,
-    b: &delivery::Bounce,
+    b: &mut delivery::Bounce,
     view: Option<&vega_registry::View>,
-) {
+) -> bool {
     let count = match unread(stream, host, &b.pane).await {
         Ok(n) => n,
         Err(f) => {
-            log(&format!(
-                "bounce: {} not checked, dropped: {}",
-                b.pane, f.message
-            ));
-            return;
+            log(&format!("bounce: {} not checked: {}", b.pane, f.message));
+            return false;
         }
     };
     let senders = b.senders(count);
     if senders.is_empty() {
-        return;
+        return true;
     }
     if local_pane_open(&b.pane) != Some(false) {
         log(&format!(
             "bounce: herdr still lists {} or does not answer; not bounced",
             b.pane
         ));
-        return;
+        return true;
     }
     let project = view
         .and_then(|v| reach::project_of(v, host, &b.pane))
@@ -3024,6 +3035,7 @@ async fn bounce(
         });
     let hint = reach::gone_hint(view, project.as_deref(), (host, &b.pane));
     let text = bounce_text(&b.pane, host, &hint);
+    let mut ok = true;
     for o in senders {
         if o.pane.is_empty() {
             // The user from the board on this host: a note; tools get none.
@@ -3036,10 +3048,13 @@ async fn bounce(
                 );
                 log(&format!("bounce: {} unread, noted for the user", b.pane));
             }
+            b.done.push(o);
             continue;
         }
         let mut headers = HeaderMap::new();
-        headers.insert("Nats-Msg-Id", nuid::next().as_str());
+        // Stable: a retry after a lost ack is deduplicated by the broker.
+        let id = format!("bounce:{host}:{}:{}:{}", b.pane, o.host, o.pane);
+        headers.insert("Nats-Msg-Id", id.as_str());
         headers.insert(h::FROM_AGENT, BOUNCE_AGENT);
         headers.insert(h::FROM_CWD, "vegad");
         headers.insert(h::SENT_MS, now_ms().to_string().as_str());
@@ -3052,16 +3067,23 @@ async fn bounce(
             Err(e) => Err(e.to_string()),
         };
         match sent {
-            Ok(()) => log(&format!(
-                "bounce: {} unread, mailed {} on {}",
-                b.pane, o.pane, o.host
-            )),
-            Err(e) => log(&format!(
-                "bounce: {} to {} on {} failed: {e}",
-                b.pane, o.pane, o.host
-            )),
+            Ok(()) => {
+                log(&format!(
+                    "bounce: {} unread, mailed {} on {}",
+                    b.pane, o.pane, o.host
+                ));
+                b.done.push(o);
+            }
+            Err(e) => {
+                log(&format!(
+                    "bounce: {} to {} on {} failed, retrying: {e}",
+                    b.pane, o.pane, o.host
+                ));
+                ok = false;
+            }
         }
     }
+    ok
 }
 
 /// `vega post log`: the archive of this machine's mail, newest first. It

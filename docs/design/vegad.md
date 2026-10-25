@@ -280,6 +280,10 @@ channel was full the next broker call waited forever, taking the single-threaded
   plus a host note (`kind: broker`, counted on the vega UAC's badge) say mail, registry and commands are
   off. One note per outage, also across a vegad restart; it resolves when vegad connects again
   (`broker: outage note cleared` in the log).
+- Bounces wait: a pane that closes with unread mail while the broker is away (or whose bounce times
+  out) keeps its bounce, through local mode, and the broker loop retries it every 30 s once the broker is
+  back. Each sender is told once: the bounce remembers whom it told, and its `Nats-Msg-Id` is stable so
+  the broker drops a retry whose ack was lost.
 - Recovery: the probe's backoff (above), then `broker: reachable, leaving local mode`, a fresh
   connection and a mail rescan. The CI poller and beads sync, once started by a broker loop, keep running
   through local mode; their mail is typed locally there.
@@ -457,7 +461,7 @@ machines ganymede saved) for "proteus is offline". Who is reachable is vega post
   longer lists it (a restarting herdr may report every pane gone), then mails each sender of the
   unread ones once, as `tool vega-post` without a reply path, with the same hint. Mail from the user
   without a pane (the board) becomes a note on this host; tool mail is not bounced. In local mode
-  (no broker) bounces are logged and dropped.
+  (no broker) bounces wait for the broker (Broker outage, above).
 - **By role**: `vega post send --uac <project> "<text>"` reads beats, agents and UAC registrations
   of every host (one read) and mails the one live UAC: a registration on a fresh host whose pane its
   agent entry still lists. `<project>` is the full project ID (for example
