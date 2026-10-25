@@ -3889,21 +3889,22 @@ impl DecisionCache {
             result => {
                 let error = match result {
                     Err(e) => e,
-                    Ok(_) => Failure::new(
-                        "project_identity_changed",
-                        "Decision location changed project identity",
-                        "perform the journaled rekey",
-                    ),
+                    Ok(current) => {
+                        vega_herdr::project::identity_changed("Decision location", key, &current)
+                    }
                 };
-                if let Some(message) =
-                    vega_herdr::project::diagnostic("decisions", &location.checkout, Some(&error))
-                {
+                if let Some(message) = vega_herdr::project::registered_diagnostic(
+                    "decisions",
+                    key,
+                    &location.checkout,
+                    Some(&error),
+                ) {
                     log(&format!("decisions: {message}"));
                 }
                 return self.0.get(&cache_key).map(|entry| entry.2.clone());
             }
         };
-        vega_herdr::project::diagnostic("decisions", &location.checkout, None);
+        vega_herdr::project::registered_diagnostic("decisions", key, &location.checkout, None);
         let p = projects
             .iter()
             .find(|p| p.key == key && p.common == current.location.common_dir);

@@ -60,10 +60,10 @@ impl Project {
     pub fn validate_location(&self) -> Result<(), vega_herdr::Failure> {
         let current = vega_herdr::project::resolve(&self.common, &vega_herdr::state::post_host())?;
         if current.id.as_str() != self.key || current.location.common_dir != self.common {
-            return Err(vega_herdr::Failure::new(
-                "project_identity_changed",
-                "A provisioned location changed project identity",
-                "quiesce writers and perform the journaled rekey",
+            return Err(vega_herdr::project::identity_changed(
+                "A provisioned location",
+                &self.key,
+                &current,
             ));
         }
         Ok(())
