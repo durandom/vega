@@ -189,12 +189,10 @@ the location. Payloads carry the full ID and schema version for validation.
 Steady-state pins retain greatest `(at, host-token)` selection, including host
 tie-breaking; the stricter divergent-pin check above applies to migration
 collisions. Later explicit URL changes or adding the first remote require the
-same preview, journal/backup and conflict-checked local rekey while affected
-writers are stopped; never silently join identities or retain legacy reads.
-The flag-day commands implement legacy-to-v2 projection only. Explicit later
-v2-to-v2 rekeys with retained journal generations are tracked in vega-lhc.14.7;
-keep affected writers stopped after a remote change and retain the original
-cutover journal rather than resnapshotting it.
+explicit rekey below while affected writers are stopped; never silently join
+identities or retain legacy reads. The flag-day commands implement
+legacy-to-v2 projection only; the original cutover journal is never
+resnapshotted or rewritten.
 
 ### Rekey after a remote change
 
@@ -204,19 +202,87 @@ its ID; every record keyed by the old ID then fails with
 and decisions log this once per transition and record, not per pass; the line
 names the registered and the current ID and the fix. `vega bd status` and
 `vega uac status` show it on the project's row until it is fixed. Re-claiming
-the UAC alone (vega-lhc.198) leaves the old-ID records behind, so the failure stays.
+the UAC alone (vega-lhc.198) leaves the old-ID records behind, so the failure
+stays. Moving files by hand (the interim step of vega-lhc.206) is not enough:
+it misses the UAC status, badge, lane, hygiene, note and PagerDuty records and
+the owned registry UAC and pins, keeps no journal and has no rollback. Use
+`vega post identity rekey` (vega-lhc.14.7) on the affected host:
 
-Until vega-lhc.14.7 ships a journaled v2-to-v2 rekey, the operator step on the
-affected host, with `OLD` the encoded old ID (hex of the ID, the state files'
-directory or file name):
+1. **Stop.** `vega post relay stop` and stop the project's writers (claims,
+   lanes, pins, manual bd/Git writes). The command holds the relay lock, so
+   vegad cannot run meanwhile.
+2. **Preview.** In the checkout:
+   `vega post identity rekey preview --from <old-id> --output <plan.json>`
+   (or `--checkout <path>`). `<old-id>` is the registered ID the error names;
+   the new ID and location come from the local resolver. The output lies
+   outside the vega state root; nothing changes. The plan holds the original
+   bytes of every affected path, the new bytes, the removals and this owner's
+   registry backup and projection.
+3. **Apply.** `vega post identity rekey apply --plan <plan.json>`. It checks
+   that the live files and owned registry keys still equal the preview, saves
+   the plan as the next journal generation `identity-cutover/rekey/<n>.json`
+   (durable, before any change), applies the files, deletes this owner's old
+   registry keys, publishes the new ones, verifies them by direct get and
+   writes `rekey/<n>.done`. After an interruption run the same `apply` again:
+   it replays that generation.
+4. **Start.** `vega post relay start`; `vega bd status` and `vega uac status`
+   list the project once, under the new ID.
 
-1. `vega post relay stop`; stop the project's writers.
-2. In the checkout: `vega bd init` (an existing database with the same remote is
-   only re-registered under the new ID); in the UAC's pane `vega uac claim`.
-3. Move the `OLD` records out of `$XDG_STATE_HOME/vega` (keep them as a
-   backup): `uac/v2/OLD.json`, `bd/projects/v2/OLD/`, `bd/state/v2/OLD/`,
-   `bd/git/v2/OLD/`.
-4. `vega post relay start`; `vega bd status` lists the project once.
+**What moves.** Every owner-local record of the old ID: the UAC claim
+(`uac/v2`), `uac-status/v2`, `badges/v2`, `lanes/v2`, the bd `projects`,
+`state` and `git` records of each location, `project` in notes and in
+PagerDuty delivery receipts, the `hygiene.json` day mark, plus this host's
+registry UAC and pins (`<host>.uac.v2.<hex(old)>`,
+`<host>.lanista.v2.<hex(old)>.*`, expired pins and clears included). Lane
+actors and start times, trackers, pin timestamps and expiry, stop/resume flags
+and timestamps, Dolt databases and remotes, note IDs, read watermarks and note
+causes stay as they were apart from the ID. Dolt data is never touched.
+
+**Conflicting joins.** Records of the new ID may already exist (after a manual
+`vega uac claim` or `vega bd init`). The rekey joins only where no data can be
+lost: a UAC claim merges with one of the same host and pane (aliases and
+locations combine, the earliest claim time stays); lanes take the union of
+their records. The display caches `uac-status`, `badges` and the hygiene day
+mark keep the new ID's record, since vegad recomputes them. Everything else
+fails the preview, naming the path, with no change: a claim by another pane, a
+differing bd record or own pin for the same seat/lane/tier, or a UAC of
+another host for the new ID. Every location registered under the old ID must
+now resolve to the new ID; one that does not is a live clone of the old ID,
+which the rekey would split.
+
+**Journal generations.** The flag-day `journal.json`, `approved.json` and
+`complete.json` stay unchanged. Startup compares the journal with its bundle
+entry and the late-host runbook needs the completed hosts' entries to stay
+identical, so a rekey must not touch them. Nor do they hold a rekey back:
+after completion vegad reads them only for that comparison and for the
+legacy-key and unplanned-host guards, which a v2-to-v2 rekey never trips.
+Each rekey adds generation `rekey/<n>.json` (n = 1, 2, ...), never
+overwritten. While a generation has neither `.done` nor `.rolled-back`, vegad
+stays identity quiesced and `apply` refuses any other plan.
+
+**Rollback.** `vega post identity rekey rollback`, writers stopped, undoes the
+newest generation not yet rolled back, so generations unwind in reverse
+order. It saves `rekey/<n>.rollback` first, deletes the new registry keys,
+restores the old ones and the original file bytes, removes created files and
+writes `rekey/<n>.rolled-back`; after an interruption run it again. Without
+that intent it refuses when a written file or new registry key differs from
+the plan: once writers have resumed, a snapshot rollback would drop newer
+work. The generation files stay.
+
+**Approval.** A rekey needs no new audited bundle and no Slayer approval when
+no inbox-only host's exact registry read (`registry_reads` in `approved.json`)
+names a key of the old ID. It is then a local, journaled, reversible change of
+one owner's state and its own registry keys: no broker permission and no
+other host's plan change, and other hosts read the new key like any new
+claim. Preview fails when such a read exists: it would dangle, and the new
+key needs an orrery grant change, which only the Slayer approves
+([project-registry-cutover.md](project-registry-cutover.md)). A host-scoped
+`local:<host>:...` ID is in no other host's plan and has no inbox grant, so it
+never needs approval. The UAC runs the rekey.
+
+Git sync fetches only a remote named `origin`; a project whose sole remote has
+another name shows git sync state `local` under its correct ID. That is not an
+identity problem and a rekey does not change it (vega-lhc.14.18).
 
 ## Deliberately local
 

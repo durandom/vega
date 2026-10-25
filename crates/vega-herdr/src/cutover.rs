@@ -366,6 +366,156 @@ pub fn prepare_with_aliases(
     Ok(plan)
 }
 
+/// Explicit v2-to-v2 rekey of one ID's owner-local records after a remote
+/// change (vega-lhc.14.7). `snapshot` holds this host's v2 files; the caller
+/// verifies that every old location now resolves to `to`, journals the plan
+/// and applies it while writers are stopped. Joins never drop durable data:
+/// claims merge only for the same pane, lanes take the union, and the derived
+/// caches (uac-status, badges, hygiene day marks) keep the new ID's record.
+pub fn rekey(snapshot: &Snapshot, from: &str, to: &ProjectId) -> Result<Plan, String> {
+    if from == to.as_str() {
+        return Err("old and new project IDs are equal".into());
+    }
+    let mut plan = Plan {
+        writes: Snapshot::new(),
+        remove: BTreeSet::new(),
+    };
+    let conflict = |path: &Path| format!("conflicting join at {}", path.display());
+    for kind in ["uac", "uac-status", "badges", "lanes"] {
+        let source = Path::new(kind)
+            .join("v2")
+            .join(format!("{}.json", encode_component(from)));
+        let Some(bytes) = snapshot.get(&source) else {
+            continue;
+        };
+        let dest = destination(kind, to);
+        let prior = snapshot.get(&dest);
+        plan.remove.insert(source);
+        if kind == "lanes" {
+            let mut text = prior
+                .map(|b| String::from_utf8(b.clone()))
+                .transpose()
+                .map_err(|_| "invalid lane encoding")?
+                .unwrap_or_default();
+            let known: Vec<Value> = text
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| value(l.as_bytes()))
+                .collect::<Result<_, _>>()?;
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            let lines = std::str::from_utf8(bytes).map_err(|_| "invalid lane encoding")?;
+            for line in lines.lines().filter(|l| !l.trim().is_empty()) {
+                let mut v = value(line.as_bytes())?;
+                if !v["actor"].is_string() || !v["since"].is_i64() {
+                    return Err("invalid lane record".into());
+                }
+                v["project"] = json!(to);
+                if !known.contains(&v) {
+                    text.push_str(&v.to_string());
+                    text.push('\n');
+                }
+            }
+            plan.writes.insert(dest, text.into_bytes());
+            continue;
+        }
+        let mut v = value(bytes)?;
+        if v["project"] != from {
+            return Err(format!(
+                "project payload/filename mismatch at {}",
+                dest.display()
+            ));
+        }
+        v["project"] = json!(to);
+        match (kind, prior) {
+            // Derived caches: vegad recomputes the new ID's record.
+            ("uac-status" | "badges", Some(_)) => continue,
+            ("uac", Some(prior)) => merge_claim(&value(prior)?, &mut v)
+                .map_err(|e| format!("{}: {e}", conflict(&dest)))?,
+            _ => {}
+        }
+        plan.writes.insert(
+            dest,
+            serde_json::to_vec_pretty(&v).map_err(|_| "cannot encode local projection")?,
+        );
+    }
+    for (path, bytes) in snapshot {
+        let parts = path.components().count();
+        if path.starts_with("notes")
+            && parts == 2
+            && path.extension().is_some_and(|ext| ext == "json")
+            && path.file_name().is_none_or(|name| name != "seen.json")
+        {
+            let mut v = value(bytes)?;
+            if v["project"] == from {
+                v["project"] = json!(to);
+                if crate::notes::Note::from_json(&v).is_none() {
+                    return Err(format!("invalid note {}", path.display()));
+                }
+                plan.writes.insert(
+                    path.clone(),
+                    serde_json::to_vec_pretty(&v).map_err(|_| "cannot encode note")?,
+                );
+            }
+        }
+        if path == Path::new("hygiene.json") {
+            let mut v = value(bytes)?;
+            let daily = v["daily"]
+                .as_object_mut()
+                .ok_or("invalid hygiene daily records")?;
+            if let Some(record) = daily.remove(from) {
+                daily.entry(to.as_str()).or_insert(record);
+                plan.writes.insert(
+                    path.clone(),
+                    serde_json::to_vec_pretty(&v).map_err(|_| "cannot encode hygiene")?,
+                );
+            }
+        }
+        if path == Path::new("pagerduty/state.json") {
+            let mut v = value(bytes)?;
+            if v["version"] != 2 {
+                return Err("unsupported PagerDuty state version".into());
+            }
+            let mut changed = false;
+            for tracked in v["incidents"]
+                .as_object_mut()
+                .ok_or("invalid PagerDuty state")?
+                .values_mut()
+            {
+                for variant in ["Mail", "Board"] {
+                    // pointer_mut: indexing would insert into undelivered records.
+                    if let Some(project) =
+                        tracked.pointer_mut(&format!("/delivered/to/{variant}/project"))
+                    {
+                        if *project == from {
+                            *project = json!(to);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if changed {
+                plan.writes.insert(
+                    path.clone(),
+                    serde_json::to_vec_pretty(&v).map_err(|_| "cannot encode PagerDuty state")?,
+                );
+            }
+        }
+        // Schedule job state and run files move byte for byte.
+        let old_dir = Path::new("schedule").join(encode_component(from));
+        if let Ok(rest) = path.strip_prefix(&old_dir) {
+            let dest = Path::new("schedule").join(to.encoded()).join(rest);
+            if snapshot.get(&dest).is_some_and(|prior| prior != bytes) {
+                return Err(conflict(&dest));
+            }
+            plan.writes.insert(dest, bytes.clone());
+            plan.remove.insert(path.clone());
+        }
+    }
+    Ok(plan)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,5 +755,177 @@ mod tests {
         let plan = prepare(&files, &[a.clone(), linked], "host").unwrap();
         let projected = value(&plan.writes[&destination("uac", &a.project)]).unwrap();
         assert_eq!(projected["locations"].as_array().unwrap().len(), 2);
+    }
+
+    const OLD: &str = "local:host:/r/.git";
+    fn v2(kind: &str, id: &str) -> PathBuf {
+        Path::new(kind)
+            .join("v2")
+            .join(format!("{}.json", encode_component(id)))
+    }
+    fn rekeyed() -> (Snapshot, ProjectId) {
+        let to: ProjectId = serde_json::from_value(json!("git.example/r")).unwrap();
+        let mut s = Snapshot::new();
+        add(
+            &mut s,
+            v2("uac", OLD),
+            json!({"schema":2,"project":OLD,"host":"host","pane":"p1","at":20,"tracker":"t-1","common_dir":"/r/.git","checkout":"/r","locations":[{"common_dir":"/r/.git","checkout":"/r"}],"folder_name":"r"}),
+        );
+        add(
+            &mut s,
+            v2("uac-status", OLD),
+            json!({"schema":2,"project":OLD,"at":5}),
+        );
+        add(
+            &mut s,
+            v2("badges", OLD),
+            json!({"schema":2,"project":OLD,"at":5,"notes":1}),
+        );
+        s.insert(
+            v2("lanes", OLD),
+            format!(
+                "{}\n",
+                json!({"actor":"host/r","since":3,"pane":"p1","schema":2,"project":OLD})
+            )
+            .into_bytes(),
+        );
+        add(
+            &mut s,
+            "notes/7.json".into(),
+            json!({"schema":2,"id":7,"host":"host","project":OLD,"cause":format!("pagerduty-config:{OLD}"),"resolved":null,"title":"t","body":"b"}),
+        );
+        add(
+            &mut s,
+            "notes/8.json".into(),
+            json!({"schema":2,"id":8,"host":"host","project":"other","title":"t"}),
+        );
+        add(
+            &mut s,
+            "hygiene.json".into(),
+            json!({"schema":2,"daily":{OLD:{"day":"d"}}}),
+        );
+        add(
+            &mut s,
+            "pagerduty/state.json".into(),
+            json!({"version":2,"incidents":{"a":{"delivered":{"to":{"Board":{"project":OLD}}}},"b":{"delivered":null}}}),
+        );
+        s.insert(
+            Path::new("schedule")
+                .join(encode_component(OLD))
+                .join("job/state.json"),
+            b"{}".to_vec(),
+        );
+        (s, to)
+    }
+
+    #[test]
+    fn rekey_moves_every_record_and_keeps_durable_fields() {
+        let (s, to) = rekeyed();
+        let plan = rekey(&s, OLD, &to).unwrap();
+        let claim = value(&plan.writes[&v2("uac", &to)]).unwrap();
+        assert_eq!(
+            (
+                claim["project"].as_str(),
+                claim["tracker"].as_str(),
+                claim["at"].as_i64()
+            ),
+            (Some(to.as_str()), Some("t-1"), Some(20))
+        );
+        assert_eq!(value(&plan.writes[&v2("badges", &to)]).unwrap()["notes"], 1);
+        let lanes = String::from_utf8(plan.writes[&v2("lanes", &to)].clone()).unwrap();
+        assert!(lanes.contains("\"since\":3") && lanes.contains(to.as_str()));
+        let note = value(&plan.writes[Path::new("notes/7.json")]).unwrap();
+        assert_eq!(note["project"], to.as_str());
+        assert_eq!(
+            note["cause"],
+            format!("pagerduty-config:{OLD}"),
+            "cause kept"
+        );
+        assert!(!plan.writes.contains_key(Path::new("notes/8.json")));
+        assert_eq!(
+            value(&plan.writes[Path::new("hygiene.json")]).unwrap()["daily"][to.as_str()]["day"],
+            "d"
+        );
+        let pd = value(&plan.writes[Path::new("pagerduty/state.json")]).unwrap();
+        assert_eq!(
+            pd["incidents"]["a"]["delivered"]["to"]["Board"]["project"],
+            to.as_str()
+        );
+        assert!(
+            pd["incidents"]["b"]["delivered"].is_null(),
+            "undelivered untouched"
+        );
+        assert!(plan.writes.contains_key(
+            &Path::new("schedule")
+                .join(to.encoded())
+                .join("job/state.json")
+        ));
+        for kind in ["uac", "uac-status", "badges", "lanes"] {
+            assert!(plan.remove.contains(&v2(kind, OLD)), "{kind}");
+        }
+        assert!(rekey(&s, OLD, &serde_json::from_value(json!(OLD)).unwrap()).is_err());
+    }
+
+    #[test]
+    fn rekey_joins_only_without_data_loss() {
+        let (mut s, to) = rekeyed();
+        // A manual re-claim by the same pane merges; caches keep the new record.
+        add(
+            &mut s,
+            v2("uac", to.as_str()),
+            json!({"schema":2,"project":to,"host":"host","pane":"p1","at":30,"tracker":"t-1","common_dir":"/r/.git","checkout":"/r","folder_name":"r","aliases":["r2"]}),
+        );
+        add(
+            &mut s,
+            v2("badges", to.as_str()),
+            json!({"schema":2,"project":to,"at":9,"notes":0}),
+        );
+        s.insert(
+            v2("lanes", to.as_str()),
+            format!(
+                "{}\n",
+                json!({"actor":"host/x","since":1,"pane":"p1","schema":2,"project":to})
+            )
+            .into_bytes(),
+        );
+        let plan = rekey(&s, OLD, &to).unwrap();
+        let claim = value(&plan.writes[&v2("uac", &to)]).unwrap();
+        assert_eq!(claim["at"], 20, "earliest claim time");
+        assert!(claim["aliases"].as_array().unwrap().contains(&json!("r2")));
+        assert!(
+            !plan.writes.contains_key(&v2("badges", &to)),
+            "new cache kept"
+        );
+        assert!(plan.remove.contains(&v2("badges", OLD)));
+        assert_eq!(
+            String::from_utf8(plan.writes[&v2("lanes", &to)].clone())
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        // Another pane, another tracker or differing schedule bytes block.
+        add(
+            &mut s,
+            v2("uac", to.as_str()),
+            json!({"schema":2,"project":to,"host":"host","pane":"p9","at":30}),
+        );
+        assert!(rekey(&s, OLD, &to)
+            .unwrap_err()
+            .contains("conflicting join"));
+        add(
+            &mut s,
+            v2("uac", to.as_str()),
+            json!({"schema":2,"project":to,"host":"host","pane":"p1","at":30,"tracker":"t-2"}),
+        );
+        assert!(rekey(&s, OLD, &to).unwrap_err().contains("tracker"));
+        s.remove(&v2("uac", to.as_str()));
+        s.insert(
+            Path::new("schedule")
+                .join(to.encoded())
+                .join("job/state.json"),
+            b"[]".to_vec(),
+        );
+        assert!(rekey(&s, OLD, &to).unwrap_err().contains("schedule"));
     }
 }

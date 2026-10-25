@@ -5,6 +5,17 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 76 · 2026-10-25
+
+- feature: `vega post identity rekey preview|apply|rollback` moves a project's
+  records to its new ID after a remote was added or changed (UAC claim and
+  status, badges, lanes, bd sync records, schedules, notes, PagerDuty receipts,
+  this host's registry UAC and pins), with relay and writers stopped. Each
+  rekey is a new journal generation; the flag-day journal and `approved.json`
+  stay unchanged. No Slayer approval unless an inbox-only host has an exact
+  grant for the old ID. Moving files by hand is not enough; see
+  [Rekey after a remote change](docs/design/project-identity.md#rekey-after-a-remote-change).
+
 ## 75 · 2026-10-25
 
 - feature: vegad no longer hangs when the NATS broker goes away. Within 10 to 20 s
