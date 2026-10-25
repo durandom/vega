@@ -151,6 +151,18 @@ impl Delivery {
         self.mail_from(pane, from, None);
     }
 
+    /// A rescan found mail for `pane` (start, reconnect): pending again. A
+    /// pane with arrivals keeps them: an extra sender-less arrival would
+    /// trim the real sender off a later bounce (`decide` keeps the newest).
+    pub fn rescanned(&mut self, pane: &str) {
+        if self.arrivals.contains_key(pane) {
+            self.pending.insert(pane.to_string());
+            self.touch(pane);
+        } else {
+            self.mail(pane, Sender::Other);
+        }
+    }
+
     /// `mail` with its sender, for a bounce if the pane closes unread.
     pub fn mail_from(&mut self, pane: &str, from: Sender, origin: Option<Origin>) {
         self.arrivals
@@ -1190,6 +1202,25 @@ mod tests {
         assert_eq!(b.senders(1).len(), 1);
         b.done.push(origin("w9:p1"));
         assert!(b.senders(1).is_empty(), "a told sender is not told again");
+    }
+
+    #[test]
+    fn a_rescan_keeps_the_sender_of_unread_mail() {
+        let mut d = Delivery::default();
+        let from = Origin {
+            host: "h".into(),
+            pane: "w9:p1".into(),
+            agent: "claude".into(),
+        };
+        d.mail_from("w1:p1", Sender::Other, Some(from.clone()));
+        d.rescanned("w1:p1"); // the reconnect after an outage
+        d.rescanned("w2:p1"); // mail from before this relay ran
+        d.decide("w1:p1", 1, 0);
+        d.gone("w1:p1");
+        let b = d.take_bounces();
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].senders(1), vec![from]);
+        assert!(d.candidates(true).contains(&"w2:p1".to_string()));
     }
 
     #[test]

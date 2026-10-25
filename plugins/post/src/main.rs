@@ -2607,7 +2607,7 @@ async fn serve(
                         rescan = false;
                         for (subject, _) in subjects {
                             if let Some((pane, _)) = parse_subject(&subject) {
-                                d.mail(pane, Sender::Other);
+                                d.rescanned(pane);
                             }
                         }
                     }
@@ -3018,12 +3018,21 @@ async fn bounce(
     if senders.is_empty() {
         return true;
     }
-    if local_pane_open(&b.pane) != Some(false) {
-        log(&format!(
-            "bounce: herdr still lists {} or does not answer; not bounced",
-            b.pane
-        ));
-        return true;
+    match local_pane_open(&b.pane) {
+        Some(false) => {}
+        // Not closed after all (a restarting herdr reported it gone).
+        Some(true) => {
+            log(&format!(
+                "bounce: herdr still lists {}; not bounced",
+                b.pane
+            ));
+            return true;
+        }
+        // Cannot tell yet: the next round asks again.
+        None => {
+            log(&format!("bounce: {}: herdr does not answer", b.pane));
+            return false;
+        }
     }
     let project = view
         .and_then(|v| reach::project_of(v, host, &b.pane))

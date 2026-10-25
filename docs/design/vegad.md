@@ -281,8 +281,10 @@ channel was full the next broker call waited forever, taking the single-threaded
   off. One note per outage, also across a vegad restart; it resolves when vegad connects again
   (`broker: outage note cleared` in the log).
 - Bounces wait: a pane that closes with unread mail while the broker is away (or whose bounce times
-  out) keeps its bounce, through local mode, and the broker loop retries it every 30 s once the broker is
-  back. Each sender is told once: the bounce remembers whom it told, and its `Nats-Msg-Id` is stable so
+  out, or whose herdr does not answer) keeps its bounce, through local mode, and the broker loop retries
+  it every 30 s once the broker is back. A pane herdr lists again is not bounced. The reconnect's mail
+  rescan only marks known panes pending; it adds no sender-less arrival that would trim the real sender
+  off the bounce. Each sender is told once: the bounce remembers whom it told, and its `Nats-Msg-Id` is stable so
   the broker drops a retry whose ack was lost.
 - Recovery: the probe's backoff (above), then `broker: reachable, leaving local mode`, a fresh
   connection and a mail rescan. The CI poller and beads sync, once started by a broker loop, keep running
