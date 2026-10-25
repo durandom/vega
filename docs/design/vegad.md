@@ -254,10 +254,38 @@ identity and stay off.
 - Local delivery: tool mail for a pane on this host (today only the upgrade proposal) is typed as one line,
   `[<tool>] <text>` with the lines joined by ` | ` (a multi-line paste can stay staged in Claude's input),
   when the agent is `idle`/`done`, behind the draft guard. A closed pane drops its mail.
-- A probe connects every 60 s off the loop; once a broker answers, vegad switches to the broker loop and hands
-  it the delivery and supervision state plus undelivered tool mail (published as mail then). It never goes
-  back: a broker that drops later is the reconnect case above.
+- A probe connects off the loop, bounded by 10 s, with backoff: after 2 s, then doubling up to every 60 s.
+  Once a broker answers, vegad switches to the broker loop and hands it the delivery and supervision state
+  plus undelivered tool mail (published as mail then).
+- A configured broker that is unreachable is noted for the human (below).
 - `--once` still needs a broker.
+
+### Broker outage (vega-lhc.205)
+
+On 2026-10-25 the broker went down and every vegad hung silently for hours: alive, 0 % CPU, no sidebar
+labels, no badges. Cause: async-nats bounds a request's answer, not its queueing. While it reconnects it
+stops reading its command channel (2048 slots); each timed-out count stayed queued there, and once the
+channel was full the next broker call waited forever, taking the single-threaded loop with it. So:
+
+- Every broker call in the broker loop is bounded (`outage::CALL`, 10 s; a registry round 30 s): setup,
+  the rescan, each pane's count, bounces, tool mail, command and quarantine replies. The catalog thread's
+  rounds are bounded too (120 s).
+- While the client is not `Connected`, the loop makes no broker call: counts, registry, bounces and tool
+  mail wait (mail candidates stay pending). The herdr-side work (sidebar metadata, badges, attention,
+  wakes, herdr events, the upgrade check, theme) runs on.
+- A broker away for `outage::LOST_AFTER` (10 s) ends the broker loop: vegad logs once
+  `broker: lost (<url> unreachable for 10 s); switching to local mode` and runs local mode with its
+  state. A broker lost during setup (stream or subscription right after the connect) goes the same way.
+- The human sees it: `relay status` says `broker: local (broker <url> unreachable)`, and a herdr toast
+  plus a host note (`kind: broker`, counted on the vega UAC's badge) say mail, registry and commands are
+  off. One note per outage, also across a vegad restart; it resolves when vegad connects again
+  (`broker: outage note cleared` in the log).
+- Recovery: the probe's backoff (above), then `broker: reachable, leaving local mode`, a fresh
+  connection and a mail rescan. The CI poller and beads sync, once started by a broker loop, keep running
+  through local mode; their mail is typed locally there.
+- The relay's connection pings every 10 s (default 60 s), so a broker host that vanishes without closing
+  the TCP connection is noticed within about 30 s.
+- Test: `plugins/post/tests/broker_outage.rs` kills a local nats-server mid-run and starts it again.
 
 `vega onboard` therefore recommends `vega post relay install` on every host.
 
