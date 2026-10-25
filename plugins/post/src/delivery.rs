@@ -83,6 +83,11 @@ pub struct Bounce {
     pub pane: String,
     /// Senders of the mail still kept, oldest first.
     pub origins: Vec<Option<Origin>>,
+    /// Senders already told, so a retried bounce tells each once.
+    pub done: Vec<Origin>,
+    /// When the pane closed (Unix ms): with the pane it names this bounce
+    /// apart from a later close of the same pane id.
+    pub closed_ms: u64,
 }
 
 impl Bounce {
@@ -91,10 +96,7 @@ impl Bounce {
         let from = self.origins.len().saturating_sub(unread as usize);
         let mut out: Vec<Origin> = Vec::new();
         for o in self.origins[from..].iter().flatten() {
-            if !out
-                .iter()
-                .any(|x| x.host == o.host && x.pane == o.pane && x.agent == o.agent)
-            {
+            if !out.iter().chain(&self.done).any(|x| x == o) {
                 out.push(o.clone());
             }
         }
@@ -150,6 +152,18 @@ pub enum Sender {
 impl Delivery {
     pub fn mail(&mut self, pane: &str, from: Sender) {
         self.mail_from(pane, from, None);
+    }
+
+    /// A rescan found mail for `pane` (start, reconnect): pending again. A
+    /// pane with arrivals keeps them: an extra sender-less arrival would
+    /// trim the real sender off a later bounce (`decide` keeps the newest).
+    pub fn rescanned(&mut self, pane: &str) {
+        if self.arrivals.contains_key(pane) {
+            self.pending.insert(pane.to_string());
+            self.touch(pane);
+        } else {
+            self.mail(pane, Sender::Other);
+        }
     }
 
     /// `mail` with its sender, for a bounce if the pane closes unread.
@@ -236,6 +250,8 @@ impl Delivery {
                 self.bounces.push(Bounce {
                     pane: pane.to_string(),
                     origins,
+                    done: Vec::new(),
+                    closed_ms: now_ms(),
                 });
             }
         }
@@ -245,6 +261,17 @@ impl Delivery {
     /// The closed panes with mail from a sender pane, each once.
     pub fn take_bounces(&mut self) -> Vec<Bounce> {
         std::mem::take(&mut self.bounces)
+    }
+
+    /// Bounces the broker could not take yet, for a later try.
+    pub fn keep_bounces(&mut self, mut later: Vec<Bounce>) {
+        later.append(&mut self.bounces);
+        self.bounces = later;
+    }
+
+    /// The bounces waiting, oldest first.
+    pub fn bounces(&self) -> &[Bounce] {
+        &self.bounces
     }
 
     /// Panes worth a broker call now: urgent ones; pending free ones
@@ -1160,6 +1187,47 @@ mod tests {
     }
 
     #[test]
+    fn a_bounce_the_broker_did_not_take_waits_for_the_next_try() {
+        let mut d = Delivery::default();
+        let origin = |pane: &str| Origin {
+            host: "h".into(),
+            pane: pane.into(),
+            agent: "claude".into(),
+        };
+        d.mail_from("w1:p1", Sender::Other, Some(origin("w9:p1")));
+        d.gone("w1:p1");
+        let first = d.take_bounces();
+        d.mail_from("w2:p1", Sender::Other, Some(origin("w9:p1")));
+        d.gone("w2:p1");
+        d.keep_bounces(first);
+        let panes: Vec<&str> = d.bounces().iter().map(|b| b.pane.as_str()).collect();
+        assert_eq!(panes, ["w1:p1", "w2:p1"], "oldest first");
+        let mut b = d.take_bounces().remove(0);
+        assert_eq!(b.senders(1).len(), 1);
+        b.done.push(origin("w9:p1"));
+        assert!(b.senders(1).is_empty(), "a told sender is not told again");
+    }
+
+    #[test]
+    fn a_rescan_keeps_the_sender_of_unread_mail() {
+        let mut d = Delivery::default();
+        let from = Origin {
+            host: "h".into(),
+            pane: "w9:p1".into(),
+            agent: "claude".into(),
+        };
+        d.mail_from("w1:p1", Sender::Other, Some(from.clone()));
+        d.rescanned("w1:p1"); // the reconnect after an outage
+        d.rescanned("w2:p1"); // mail from before this relay ran
+        d.decide("w1:p1", 1, 0);
+        d.gone("w1:p1");
+        let b = d.take_bounces();
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].senders(1), vec![from]);
+        assert!(d.candidates(true).contains(&"w2:p1".to_string()));
+    }
+
+    #[test]
     fn read_mail_is_not_bounced() {
         let mut d = d("idle");
         d.mail_from("w1:p1", Sender::Other, origin("ganymede", "w5S:p1"));
@@ -1184,12 +1252,10 @@ mod tests {
         let mut b = Delivery::default();
         b.import(&a.export());
         b.gone("w1:p1");
-        assert_eq!(
-            b.take_bounces(),
-            vec![Bounce {
-                pane: "w1:p1".into(),
-                origins: vec![origin("ganymede", "w5S:p1"), None],
-            }]
-        );
+        let got = b.take_bounces();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].pane, "w1:p1");
+        assert_eq!(got[0].origins, vec![origin("ganymede", "w5S:p1"), None]);
+        assert!(got[0].done.is_empty());
     }
 }

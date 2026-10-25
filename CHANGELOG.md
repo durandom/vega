@@ -5,6 +5,17 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 75 · 2026-10-25
+
+- feature: vegad no longer hangs when the NATS broker goes away. Within 10 to 20 s
+  without the broker it switches to local mode (sidebar labels, badges,
+  attention and wakes keep running), logs `broker: lost` once, shows a herdr
+  toast and a note on the vega UAC's badge, and reconnects by itself with
+  backoff (2 s up to 60 s), clearing the note. See
+  [Broker outage](docs/design/vegad.md#broker-outage-vega-lhc205). A vegad
+  already hung by the old bug cannot self-exec; the install restarts it after
+  15 s (`relay status` shows it `stale` until then).
+
 ## 74 · 2026-10-25
 
 - feature: vegad logs a project whose ID changed (first remote added, remote URL

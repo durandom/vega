@@ -32,6 +32,7 @@ mod identity;
 mod identity_mappings;
 mod janitor;
 mod notes;
+mod outage;
 mod pagerduty;
 #[cfg(test)]
 mod project_location_test;
@@ -798,6 +799,13 @@ async fn connect_as(
         })
         .connection_timeout(Duration::from_secs(2))
         .request_timeout(Some(Duration::from_secs(3)))
+        // A broker host that vanishes sends no FIN: vegad's pings notice it
+        // within ~30 s instead of the default ~3 min (vega-lhc.205).
+        .ping_interval(if role == "relay" {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(60)
+        })
         // The server reports a denied publish or subscribe asynchronously; the
         // request itself only times out. Fail fast with the real reason.
         .event_callback(move |event| {
@@ -1906,31 +1914,43 @@ fn relay(once: bool, wait: bool) -> Result<(), Failure> {
         let mut jobs = Jobs::spawn(once);
         loop {
             let (tx, reconnected) = mpsc::unbounded_channel();
-            match connect("relay", Some(tx)).await {
+            match outage::bounded("connect", connect("relay", Some(tx))).await {
                 Ok(client) => {
-                    service::write_broker("connected");
-                    return serve(
+                    match serve(
                         client,
                         reconnected,
                         &lock,
                         &mut upgrade,
                         &host,
                         once,
-                        jobs,
+                        &mut jobs,
                         carry,
                     )
-                    .await;
+                    .await?
+                    {
+                        Served::Done => return Ok(()),
+                        // The broker went away: local mode until a probe
+                        // reaches it again (docs/design/vegad.md).
+                        Served::Lost(c) => carry = *c,
+                    }
                 }
                 // After completed identity migration, an unconfigured or
                 // configured-but-unreachable broker permits local mode
                 // until a probe reaches a configured broker.
-                Err(f) if f.code == "broker_unreachable" && !once => {
-                    carry = local(&lock, &mut upgrade, &mut jobs, carry).await;
-                }
+                Err(f) if f.code == "broker_unreachable" && !once => {}
                 Err(f) => return Err(f),
             }
+            carry = local(&lock, &mut upgrade, &mut jobs, carry).await;
         }
     })
+}
+
+/// How the broker loop ended.
+enum Served {
+    /// `--once` finished, or the inbox subscription closed.
+    Done,
+    /// The broker stayed away LOST_AFTER: the state for local mode.
+    Lost(Box<Carry>),
 }
 
 /// Cutover failure is a quiesced daemon state, not a service crash loop.
@@ -1987,6 +2007,17 @@ struct Jobs {
     waiting: vega_herdr::waiting::Ledger,
     /// The ledger changed since the registry last took it.
     waiting_changed: bool,
+    /// The CI watch and beads sync: started with the first broker loop,
+    /// then kept across outages (their mail waits or is typed locally).
+    ci: mpsc::UnboundedReceiver<ci::Event>,
+    bd: mpsc::UnboundedReceiver<bdsync::Event>,
+    broker_jobs: Option<(
+        mpsc::UnboundedSender<ci::Event>,
+        mpsc::UnboundedSender<bdsync::Event>,
+    )>,
+    /// Local mode's probe delays; reset only by a broker that took the
+    /// setup, so a half-working broker is not retried every 2 s.
+    backoff: outage::Backoff,
 }
 
 impl Jobs {
@@ -2000,6 +2031,8 @@ impl Jobs {
         // control host's mode comes from the registry for headless hosts.
         let (ttx, theme) = mpsc::unbounded_channel();
         let theme_remote: theme::Remote = Default::default();
+        let (ctx, ci) = mpsc::unbounded_channel();
+        let (btx, bd) = mpsc::unbounded_channel();
         if !once {
             agents::spawn(etx);
             // Git sync (gitsync.rs): fetch, fast-forward clean main checkouts.
@@ -2023,6 +2056,18 @@ impl Jobs {
             mode: None,
             waiting: vega_herdr::waiting::read(),
             waiting_changed: false,
+            ci,
+            bd,
+            broker_jobs: (!once).then_some((ctx, btx)),
+            backoff: outage::Backoff::new(PROBE_EVERY),
+        }
+    }
+
+    /// Starts the CI poller and beads sync once (both deliver by mail).
+    fn start_broker_jobs(&mut self) {
+        if let Some((ctx, btx)) = self.broker_jobs.take() {
+            ci::spawn(ctx, self.live.clone());
+            bdsync::spawn(btx);
         }
     }
 
@@ -2224,8 +2269,9 @@ fn type_wakes(
     }
 }
 
-/// Local mode probes for a broker this often (one connect, 2 s timeout, off
-/// the loop).
+/// Local mode probes for a broker at most this far apart (one connect,
+/// bounded, off the loop); the first probe comes after 2 s, then the delay
+/// doubles (outage::Backoff).
 const PROBE_EVERY: Duration = Duration::from_secs(60);
 
 /// The jobs local mode leaves off, for the log and `relay status`.
@@ -2252,9 +2298,13 @@ async fn local(
     carry: Carry,
 ) -> Carry {
     let why = local_reason();
+    // The note first: whoever sees the local state finds it.
+    if broker_configured() {
+        outage::noted(&url());
+    }
     service::write_broker(&why);
     log(&format!(
-        "broker: {why}; off: {LOCAL_OFF}; on: herdr metadata, attention, upgrade check, theme; tool mail typed locally; probing every {} s",
+        "broker: {why}; off: {LOCAL_OFF}; on: herdr metadata, attention, upgrade check, theme; tool mail typed locally; probing with backoff up to every {} s",
         PROBE_EVERY.as_secs()
     ));
     let Carry {
@@ -2271,7 +2321,7 @@ async fn local(
     let mut park_failing: HashSet<String> = HashSet::new();
     let mut live_theme = theme::Live::default();
     let mut live_theme_next = Instant::now();
-    let mut probe_at = Instant::now() + PROBE_EVERY;
+    let mut probe_at = Instant::now() + jobs.backoff.next();
     let mut probe: Option<tokio::task::JoinHandle<bool>> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
@@ -2309,7 +2359,11 @@ async fn local(
         mail = deliver_local(mail, &d, &mut drafts);
         upgrade_if_due(upgrade, lock, drafts.stashed.is_empty(), &d, &sup, &mail);
         if probe.is_none() && Instant::now() >= probe_at {
-            probe = Some(tokio::spawn(async { connect("probe", None).await.is_ok() }));
+            probe = Some(tokio::spawn(async {
+                outage::bounded("probe", connect("probe", None))
+                    .await
+                    .is_ok()
+            }));
         }
         slow("local loop", started);
         tokio::select! {
@@ -2320,7 +2374,7 @@ async fn local(
                 }
             } => {
                 probe = None;
-                probe_at = Instant::now() + PROBE_EVERY;
+                probe_at = Instant::now() + jobs.backoff.next();
                 if ok {
                     log("broker: reachable, leaving local mode");
                     return Carry { d, sup, mail };
@@ -2334,9 +2388,11 @@ async fn local(
                         log(&format!("local: pane {p} gone, its tool mail dropped"));
                     }
                 }
+                let before = d.bounces().len();
                 jobs.agent(e, &mut d, &mut sup);
-                for b in d.take_bounces() {
-                    log(&format!("bounce: {} closed with unread mail; not bounced (no broker)", b.pane));
+                // Kept in `d`: the broker loop bounces them once it is back.
+                for b in &d.bounces()[before..] {
+                    log(&format!("bounce: {} closed with unread mail; bounced once the broker is back", b.pane));
                 }
             }
             Some(e) = jobs.up.recv() => match e {
@@ -2347,6 +2403,15 @@ async fn local(
                 }
             },
             Some(e) = jobs.theme.recv() => theme_event(e, &mut live_theme, &mut live_theme_next),
+            // Started by an earlier broker loop: their mail is typed here.
+            Some(e) = jobs.ci.recv() => match e {
+                ci::Event::Log(l) => log(&l),
+                ci::Event::Mail(pane, text) => mail.push((ci::AGENT.to_string(), pane, text)),
+            },
+            Some(e) = jobs.bd.recv() => match e {
+                bdsync::Event::Log(l) => log(&l),
+                bdsync::Event::Mail(pane, text) => mail.push((bdsync::AGENT.to_string(), pane, text)),
+            },
             _ = tick.tick() => {}
         }
     }
@@ -2412,23 +2477,44 @@ async fn serve(
     upgrade: &mut service::Upgrade,
     host: &str,
     once: bool,
-    mut jobs: Jobs,
+    jobs: &mut Jobs,
     carry: Carry,
-) -> Result<(), Failure> {
+) -> Result<Served, Failure> {
     let host = host.to_string();
     let filter = format!("vega.inbox.{host}.>");
     {
         let js = jetstream::new(client.clone());
-        let stream = inbox_stream(&js, &host).await?;
-        // async-nats re-subscribes by itself after a reconnect.
-        let mut sub = client.subscribe(filter.clone()).await.map_err(broker_err)?;
+        // A broker that drops during setup is an outage, not a crash.
+        let setup = async {
+            let stream = inbox_stream(&js, &host).await?;
+            // async-nats re-subscribes by itself after a reconnect.
+            let sub = client.subscribe(filter.clone()).await.map_err(broker_err)?;
+            Ok((stream, sub))
+        };
+        let (stream, mut sub) = match outage::bounded("relay setup", setup).await {
+            Ok(v) => v,
+            Err(f) if !once && matches!(f.code.as_str(), "broker_unreachable" | "broker_error") => {
+                log(&format!("broker: setup failed ({}); local mode", f.message));
+                return Ok(Served::Lost(Box::new(carry)));
+            }
+            Err(f) => return Err(f),
+        };
+        let subscribe = |subject: String| {
+            let c = client.clone();
+            async move {
+                outage::bounded("subscribe", async {
+                    c.subscribe(subject).await.map_err(broker_err)
+                })
+                .await
+            }
+        };
         // The command channel (cmd.rs): requests for this host. Without the
         // broker right the subscription just stays silent.
-        let mut cmds = match client.subscribe(format!("vega.cmd.{host}.>")).await {
+        let mut cmds = match subscribe(format!("vega.cmd.{host}.>")).await {
             Ok(s) => Some(s),
             Err(e) => {
                 // No broker right yet (titan auth config): mail keeps working.
-                log(&format!("commands: not served ({e})"));
+                log(&format!("commands: not served ({})", e.message));
                 None
             }
         };
@@ -2437,26 +2523,27 @@ async fn serve(
         let mut quarantined = if st::is_inbox_only(&host) {
             None
         } else {
-            match client.subscribe(format!("vega.quarantine.{host}.>")).await {
+            match subscribe(format!("vega.quarantine.{host}.>")).await {
                 Ok(s) => Some(s),
                 Err(e) => {
-                    log(&format!("quarantine: not served ({e})"));
+                    log(&format!("quarantine: not served ({})", e.message));
                     None
                 }
             }
         };
+        // Only a broker that took the setup ends an outage (vega-lhc.205).
+        jobs.backoff = outage::Backoff::new(PROBE_EVERY);
+        service::write_broker("connected");
+        if outage::cleared((now_ms() / 1000) as i64) {
+            log("broker: outage note cleared");
+        }
         log(&format!("relay: {host} watching {filter}"));
 
         // The CI watch (ci.rs): one GitHub poller per host; its mails go to
-        // the watchers' inboxes like any other mail.
-        let (ctx, mut ci_events) = mpsc::unbounded_channel();
-        // Beads sync (bdsync.rs): pull and push of the provisioned projects;
-        // a stopped one mails its UAC.
-        let (btx, mut bd_events) = mpsc::unbounded_channel();
-        if !once {
-            ci::spawn(ctx, jobs.live.clone());
-            bdsync::spawn(btx);
-        }
+        // the watchers' inboxes like any other mail. Beads sync (bdsync.rs):
+        // pull and push of the provisioned projects; a stopped one mails its
+        // UAC.
+        jobs.start_broker_jobs();
         let theme_remote = jobs.theme_remote.clone();
         let mut live_theme = theme::Live::default();
         let mut live_theme_next = Instant::now();
@@ -2485,16 +2572,48 @@ async fn serve(
         let mut notes_at = None;
         let mut decisions = DecisionCache::default();
         let mut hygiene = hygiene::Pass::new(service::state_dir().ok().as_deref());
+        // Since when the client is disconnected; LOST_AFTER of it ends the
+        // broker loop.
+        let mut away: Option<Instant> = None;
+        // Bounces the broker did not take yet (vega-lhc.205).
+        let mut bounces: Vec<delivery::Bounce> = Vec::new();
+        let mut bounce_retry_at = Instant::now();
         loop {
             let started = Instant::now();
-            if rescan {
+            // While async-nats reconnects, every broker call would only queue
+            // in its command channel: leave the broker alone (vega-lhc.205).
+            let up = connected(&client);
+            if up {
+                away = None;
+            } else if away.get_or_insert(started).elapsed() >= outage::LOST_AFTER {
+                let why = format!(
+                    "broker: lost ({} unreachable for {} s); switching to local mode",
+                    url(),
+                    outage::LOST_AFTER.as_secs()
+                );
+                if once {
+                    return Err(Failure::new(
+                        "broker_unreachable",
+                        why,
+                        unreachable_hint(true),
+                    ));
+                }
+                log(&why);
+                d.keep_bounces(std::mem::take(&mut bounces));
+                return Ok(Served::Lost(Box::new(Carry {
+                    d,
+                    sup,
+                    mail: ci_unsent,
+                })));
+            }
+            if rescan && up {
                 // Every pane that ever got mail; `decide` drops the read ones.
-                match subject_counts(&stream, &filter).await {
+                match outage::bounded("rescan", subject_counts(&stream, &filter)).await {
                     Ok(subjects) => {
                         rescan = false;
                         for (subject, _) in subjects {
                             if let Some((pane, _)) = parse_subject(&subject) {
-                                d.mail(pane, Sender::Other);
+                                d.rescanned(pane);
                             }
                         }
                     }
@@ -2506,12 +2625,18 @@ async fn serve(
             if jobs.take_waiting_changed() {
                 registry.soon();
             }
-            if !once && registry.due() {
+            if !once && up && registry.due() {
                 let t = Instant::now();
                 if st::is_inbox_only(&host) {
-                    registry.run_theme_only(&client, &theme_remote).await;
+                    let run = registry.run_theme_only(&client, &theme_remote);
+                    if while_up(&client, REGISTRY_CALL, run).await.is_none() {
+                        registry.timed_out();
+                    }
                 } else {
-                    registry.run(&client, &host, &mut sup).await;
+                    let run = registry.run(&client, &host, &mut sup);
+                    if while_up(&client, REGISTRY_CALL, run).await.is_none() {
+                        registry.timed_out();
+                    }
                     if let (Some(v), Ok(mut r)) = (&registry.view, theme_remote.lock()) {
                         *r = theme::remote_modes(v);
                     }
@@ -2567,8 +2692,25 @@ async fn serve(
             for asker in expired_asks() {
                 d.mail(&asker, Sender::Other);
             }
-            for b in d.take_bounces() {
-                bounce(&js, &stream, &host, &b, registry.view.as_ref()).await;
+            // A bounce the broker could not check waits for the next try.
+            bounces.extend(d.take_bounces());
+            if up && !bounces.is_empty() && Instant::now() >= bounce_retry_at {
+                let mut later = Vec::new();
+                for mut b in std::mem::take(&mut bounces) {
+                    let run = bounce(&js, &stream, &host, &mut b, registry.view.as_ref());
+                    if !while_up(&client, outage::CALL, run).await.unwrap_or(false) {
+                        later.push(b);
+                    }
+                }
+                if !later.is_empty() {
+                    log(&format!(
+                        "bounce: {} not checked, retrying in {} s",
+                        later.len(),
+                        CI_RETRY.as_secs()
+                    ));
+                    bounce_retry_at = Instant::now() + CI_RETRY;
+                }
+                bounces = later;
             }
             // Parents to wake now: free, with a new attention (supervise.rs).
             let mut wakes = if once {
@@ -2576,14 +2718,20 @@ async fn serve(
             } else {
                 due_wakes(&mut sup, &d, registry.view.as_ref())
             };
-            for pane in d.candidates(once) {
-                let (count, floor) = match unread_and_floor(&stream, &host, &pane).await {
-                    Ok(n) => n,
-                    Err(f) => {
-                        log(&format!("count failed for {pane}, retrying: {}", f.message));
-                        continue; // stays pending
-                    }
-                };
+            // Without the broker no count: candidates stay pending.
+            for pane in d
+                .candidates(once)
+                .into_iter()
+                .filter(|_| connected(&client))
+            {
+                let (count, floor) =
+                    match outage::bounded("count", unread_and_floor(&stream, &host, &pane)).await {
+                        Ok(n) => n,
+                        Err(f) => {
+                            log(&format!("count failed for {pane}, retrying: {}", f.message));
+                            continue; // stays pending
+                        }
+                    };
                 if d.decide(&pane, count, floor) != Decision::Type {
                     continue;
                 }
@@ -2684,7 +2832,7 @@ async fn serve(
                             let answer = tokio::task::spawn_blocking(move || store_quarantined(&req, &host))
                                 .await
                                 .unwrap_or_default();
-                            let _ = c.publish(reply, answer.into()).await;
+                            let _ = tokio::time::timeout(outage::CALL, c.publish(reply, answer.into())).await;
                         });
                     }
                 }
@@ -2707,28 +2855,28 @@ async fn serve(
                                 .unwrap_or_default();
                             let v: serde_json::Value = serde_json::from_slice(&answer).unwrap_or_default();
                             log(&format!("cmd: {kind} from {from}: {} {}", v["code"].as_str().unwrap_or("?"), v["message"].as_str().unwrap_or("")));
-                            let _ = c.publish(reply, answer.into()).await;
+                            let _ = tokio::time::timeout(outage::CALL, c.publish(reply, answer.into())).await;
                             busy.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                         });
                     }
                 }
                 Some(e) = jobs.events.recv() => jobs.agent(e, &mut d, &mut sup),
-                Some(e) = ci_events.recv() => match e {
+                Some(e) = jobs.ci.recv() => match e {
                     ci::Event::Log(l) => log(&l),
                     ci::Event::Mail(pane, text) => {
                         ci_unsent.push((ci::AGENT.to_string(), pane, text));
-                        if Instant::now() >= ci_retry_at {
+                        if up && Instant::now() >= ci_retry_at {
                             ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
                             ci_retry_at = Instant::now() + CI_RETRY;
                         }
                     }
                 },
                 Some(e) = jobs.theme.recv() => theme_event(e, &mut live_theme, &mut live_theme_next),
-                Some(e) = bd_events.recv() => match e {
+                Some(e) = jobs.bd.recv() => match e {
                     bdsync::Event::Log(l) => log(&l),
                     bdsync::Event::Mail(pane, text) => {
                         ci_unsent.push((bdsync::AGENT.to_string(), pane, text));
-                        if Instant::now() >= ci_retry_at {
+                        if up && Instant::now() >= ci_retry_at {
                             ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
                             ci_retry_at = Instant::now() + CI_RETRY;
                         }
@@ -2738,25 +2886,28 @@ async fn serve(
                     upstream::Event::Log(l) => log(&l),
                     upstream::Event::Mail(pane, text) => {
                         ci_unsent.push((upstream::AGENT.to_string(), pane, text));
-                        if Instant::now() >= ci_retry_at {
+                        if up && Instant::now() >= ci_retry_at {
                             ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
                             ci_retry_at = Instant::now() + CI_RETRY;
                         }
                     }
                 },
                 Some(()) = reconnected.recv() => {
-                    log("broker: connected, rescanning");
+                    // A late signal of an earlier connect says nothing now.
+                    if client.connection_state() == async_nats::connection::State::Connected {
+                        log("broker: connected, rescanning");
+                    }
                     rescan = true;
                 }
                 _ = tick.tick() => {
-                    if !ci_unsent.is_empty() && Instant::now() >= ci_retry_at {
+                    if up && !ci_unsent.is_empty() && Instant::now() >= ci_retry_at {
                         ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
                         ci_retry_at = Instant::now() + CI_RETRY;
                     }
                 }
             }
         }
-        Ok(())
+        Ok(Served::Done)
     }
 }
 
@@ -2822,13 +2973,18 @@ async fn publish_tool_mail(
         headers.insert(h::FROM_CWD, "vegad");
         headers.insert(h::SENT_MS, now_ms().to_string().as_str());
         let subject = inbox_subject(host, &pane, host);
-        let sent = match js
-            .publish_with_headers(subject, headers, text.clone().into())
-            .await
-        {
-            Ok(ack) => ack.await.map(|_| ()).map_err(|e| e.to_string()),
-            Err(e) => Err(e.to_string()),
+        let publish = async {
+            match js
+                .publish_with_headers(subject, headers, text.clone().into())
+                .await
+            {
+                Ok(ack) => ack.await.map(|_| ()).map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            }
         };
+        let sent = tokio::time::timeout(outage::CALL, publish)
+            .await
+            .unwrap_or_else(|_| Err("no answer from the broker".into()));
         if let Err(e) = sent {
             log(&format!("{agent}: mail to {pane} not sent, retrying: {e}"));
             unsent.push((agent, pane, text));
@@ -2839,6 +2995,15 @@ async fn publish_tool_mail(
 
 /// The sender of a bounce (vega-lhc.129).
 const BOUNCE_AGENT: &str = "tool vega-post";
+
+/// The bounce's Nats-Msg-Id: the same for a retry of one bounce to one
+/// sender, different for another sender or another close of the pane.
+fn bounce_msg_id(host: &str, b: &delivery::Bounce, o: &delivery::Origin) -> String {
+    format!(
+        "bounce:{host}:{}:{}:{}:{}:{}",
+        b.pane, b.closed_ms, o.host, o.pane, o.agent
+    )
+}
 
 /// What a bounce says: which pane closed, and whom to mail instead.
 fn bounce_text(pane: &str, host: &str, hint: &str) -> String {
@@ -2855,29 +3020,35 @@ async fn bounce(
     js: &jetstream::Context,
     stream: &stream::Stream,
     host: &str,
-    b: &delivery::Bounce,
+    b: &mut delivery::Bounce,
     view: Option<&vega_registry::View>,
-) {
+) -> bool {
     let count = match unread(stream, host, &b.pane).await {
         Ok(n) => n,
         Err(f) => {
-            log(&format!(
-                "bounce: {} not checked, dropped: {}",
-                b.pane, f.message
-            ));
-            return;
+            log(&format!("bounce: {} not checked: {}", b.pane, f.message));
+            return false;
         }
     };
     let senders = b.senders(count);
     if senders.is_empty() {
-        return;
+        return true;
     }
-    if local_pane_open(&b.pane) != Some(false) {
-        log(&format!(
-            "bounce: herdr still lists {} or does not answer; not bounced",
-            b.pane
-        ));
-        return;
+    match local_pane_open(&b.pane) {
+        Some(false) => {}
+        // Not closed after all (a restarting herdr reported it gone).
+        Some(true) => {
+            log(&format!(
+                "bounce: herdr still lists {}; not bounced",
+                b.pane
+            ));
+            return true;
+        }
+        // Cannot tell yet: the next round asks again.
+        None => {
+            log(&format!("bounce: {}: herdr does not answer", b.pane));
+            return false;
+        }
     }
     let project = view
         .and_then(|v| reach::project_of(v, host, &b.pane))
@@ -2889,6 +3060,7 @@ async fn bounce(
         });
     let hint = reach::gone_hint(view, project.as_deref(), (host, &b.pane));
     let text = bounce_text(&b.pane, host, &hint);
+    let mut ok = true;
     for o in senders {
         if o.pane.is_empty() {
             // The user from the board on this host: a note; tools get none.
@@ -2901,10 +3073,13 @@ async fn bounce(
                 );
                 log(&format!("bounce: {} unread, noted for the user", b.pane));
             }
+            b.done.push(o);
             continue;
         }
         let mut headers = HeaderMap::new();
-        headers.insert("Nats-Msg-Id", nuid::next().as_str());
+        // Stable: a retry after a lost ack is deduplicated by the broker.
+        let id = bounce_msg_id(host, b, &o);
+        headers.insert("Nats-Msg-Id", id.as_str());
         headers.insert(h::FROM_AGENT, BOUNCE_AGENT);
         headers.insert(h::FROM_CWD, "vegad");
         headers.insert(h::SENT_MS, now_ms().to_string().as_str());
@@ -2917,16 +3092,23 @@ async fn bounce(
             Err(e) => Err(e.to_string()),
         };
         match sent {
-            Ok(()) => log(&format!(
-                "bounce: {} unread, mailed {} on {}",
-                b.pane, o.pane, o.host
-            )),
-            Err(e) => log(&format!(
-                "bounce: {} to {} on {} failed: {e}",
-                b.pane, o.pane, o.host
-            )),
+            Ok(()) => {
+                log(&format!(
+                    "bounce: {} unread, mailed {} on {}",
+                    b.pane, o.pane, o.host
+                ));
+                b.done.push(o);
+            }
+            Err(e) => {
+                log(&format!(
+                    "bounce: {} to {} on {} failed, retrying: {e}",
+                    b.pane, o.pane, o.host
+                ));
+                ok = false;
+            }
         }
     }
+    ok
 }
 
 /// `vega post log`: the archive of this machine's mail, newest first. It
@@ -5018,7 +5200,45 @@ impl Registry {
     }
 }
 
+/// The longest one registry round may take (it is many broker calls).
+const REGISTRY_CALL: Duration = Duration::from_secs(30);
+
+fn connected(client: &async_nats::Client) -> bool {
+    client.connection_state() == async_nats::connection::State::Connected
+}
+
+/// `fut` while the client stays connected, at most `limit`: a broker that
+/// drops mid-round ends the round within half a second, so the loop sees the
+/// outage within LOST_AFTER (vega-lhc.205). `None` when cut short.
+async fn while_up<T>(
+    client: &async_nats::Client,
+    limit: Duration,
+    fut: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    let down = async {
+        while connected(client) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    };
+    tokio::select! {
+        v = tokio::time::timeout(limit, fut) => v.ok(),
+        _ = down => None,
+    }
+}
+
 impl Registry {
+    /// A round cut short (REGISTRY_CALL, or the broker dropped): off until
+    /// the retry.
+    fn timed_out(&mut self) {
+        self.kv = None;
+        self.view = None;
+        self.next = Some(Instant::now() + REGISTRY_RETRY);
+        self.note(&format!(
+            "registry: off (round cut short: broker gone or no answer within {} s); local state only",
+            REGISTRY_CALL.as_secs()
+        ));
+    }
+
     fn due(&self) -> bool {
         self.next.is_none_or(|t| Instant::now() >= t)
     }
@@ -5261,6 +5481,25 @@ fn log(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bounce_id_is_stable_per_retry_and_distinct_per_sender_and_close() {
+        let o = |agent: &str| delivery::Origin {
+            host: "h".into(),
+            pane: "w9:p1".into(),
+            agent: agent.into(),
+        };
+        let b = |closed_ms| delivery::Bounce {
+            pane: "w1:p1".into(),
+            origins: vec![Some(o("claude"))],
+            done: vec![],
+            closed_ms,
+        };
+        let id = bounce_msg_id("h", &b(1), &o("claude"));
+        assert_eq!(id, bounce_msg_id("h", &b(1), &o("claude")), "a retry");
+        assert_ne!(id, bounce_msg_id("h", &b(1), &o("codex")), "another agent");
+        assert_ne!(id, bounce_msg_id("h", &b(2), &o("claude")), "another close");
+    }
 
     #[test]
     fn unknown_screen_holds_until_quiet() {

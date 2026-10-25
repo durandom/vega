@@ -172,12 +172,19 @@ fn receive(st: &mut State, index: &Path, now: i64) -> String {
     }
 }
 
+/// One broker round of the catalog thread, bounded: a broker that goes away
+/// mid-download must not stop the thread (vega-lhc.205).
 fn block_on<T>(f: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    const LIMIT: Duration = Duration::from_secs(120);
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?
-        .block_on(f)
+        .block_on(async {
+            tokio::time::timeout(LIMIT, f)
+                .await
+                .unwrap_or_else(|_| Err(format!("broker: no answer within {} s", LIMIT.as_secs())))
+        })
 }
 
 /// `lanista fetch` with the secrets `vega secrets run --for lanista` would
