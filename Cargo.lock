@@ -3447,6 +3447,7 @@ dependencies = [
  "vega-herdr",
  "vega-plugin",
  "vega-registry",
+ "vega-uber-msg",
 ]
 
 [[package]]
