@@ -506,7 +506,7 @@ identity (`post_host`), while bd actors retain their local host contract.
 
 ## Sidebar
 
-vegad reports herdr pane metadata every 15 s (tokens expire after 60 s without vegad): a sentinel
+vegad reports herdr pane metadata every 15 s (tokens expire after 5 min without vegad; see Sidebar cost): a sentinel
 shows its spawn name, its task or done report as title, `$attention` and `$parent`; the UAC pane
 shows `<atom> UAC` and `$role`, plus its badges (see Badges); a pane
 with unread mail gets `$mail`, and `mail_since` (Unix ms of the
@@ -533,6 +533,41 @@ rows = [
   ["workspace", "tab", "$parent"],
 ]
 ```
+
+### Sidebar cost (vega-lhc.212)
+
+On a loaded host (proteus, load 50–93, 36 panes, 33 checkouts) one metadata refresh took 8 s on
+average and up to 97 s (`slow: metadata took`); loops up to 72 s outlived the old 60 s TTL and the
+sidebar flickered. A read-only replay of one refresh's process work (its `git` and `herdr` calls, in
+order) took 18 s at load 50 and 7.4 s at load 10: project resolution 3.3–7.8 s (four `git` calls per
+path), `git status` 3.3–10 s, one `report-metadata` per pane and workspace 0.8–1.7 s. Now:
+
+- **TTL 5 min** (`sidebar::TTL_MS`), far above the renewal below.
+- **Sidebar thread** (`plugins/post/src/sidebar.rs`): a refresh hands its commands over and goes
+  on. The thread sends a row when it changed and renews unchanged ones every 60 s, so a loop stalled
+  on the registry, the broker or a slow refresh keeps its labels. A row a refresh no longer names is
+  cleared at once (every token, display agent and title it set: herdr has no clear-all), not left to
+  the TTL (a failed clear is retried every 5 s, logged once); a target herdr no longer knows is
+  dropped until a refresh names it again.
+- **Cached project resolution** (`plugins/post/src/probes.rs`): per path, reused while the
+  repository's common `config` is unchanged (10 min at most); a failure is retried after 60 s, or at
+  once when the path changes. It still runs on the loop: a miss (a new path, the first refresh)
+  costs its four `git` calls there.
+- **`git status` off the loop** (`probes.rs`): one thread reads each checkout a refresh asked
+  about, new ones first, then each every 30 s; the refresh takes the last value (no `$git` until the
+  first read). A checkout no refresh named for 2 min is dropped.
+- **Agents below vegad**: `vega mux spawn` renices the pane shell to 10 before the agent starts
+  (local spawns); the agent and its tools inherit it, vegad stays at 0. Not `taskpolicy -b`: it
+  confines builds to the efficiency cores.
+
+Measured in-process against the live herdr at load 10: `Layout::read` with project resolution took
+3.5–4.3 s on the first refresh, 35–154 ms after; `git status` and the reports no longer run on the
+loop. A slow refresh logs `slow: metadata phases: sentinels …, notes …, layout …, uac badges …,
+panes …, hygiene …`; a slow send round logs `slow: sidebar sent N rows in … ms`.
+
+Not changed: a typed pointer costs a constant ~305 ms (p10 304, p90 309) inside herdr's own
+`agent prompt`, independent of load. The registry read gets every key ever written (3731 keys for 95
+live entries: delete markers keep their subjects), 5–15 s under load.
 
 ## Notifications
 

@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+/// A hang, not a slow start: macOS scans a freshly copied binary on its
+/// first run, seconds on a loaded host; a recursing shim never ends.
+const HUNG_AFTER: Duration = Duration::from_secs(30);
+
 // The original failure was an infinite loop: regression tests need their own
 // deadline even when the shim's guard or helper timeout is broken.
 trait BoundedOutput {
@@ -27,7 +31,7 @@ impl BoundedOutput for Command {
             if let Some(status) = child.try_wait()? {
                 break status;
             }
-            if start.elapsed() > Duration::from_secs(5) {
+            if start.elapsed() > HUNG_AFTER {
                 // SAFETY: this child leads its own process group.
                 unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
                 let _ = child.kill();
@@ -212,7 +216,9 @@ fn stuck_metadata_helper_cannot_delay_passthrough_indefinitely() {
         .bounded_output()
         .unwrap();
     assert_eq!(out.status.code(), Some(23));
-    assert!(start.elapsed() < Duration::from_secs(5));
+    // Well under the helper's 30 s: the probe limit cut it short. Not 5 s:
+    // macOS scans each new fixture script on its first run.
+    assert!(start.elapsed() < Duration::from_secs(15));
 }
 
 #[test]

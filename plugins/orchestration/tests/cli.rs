@@ -48,6 +48,9 @@ fn unavailable_sources_are_explicit_and_home_does_not_create_wait_state() {
     let bd = bin_dir.join("bd");
     std::fs::write(&bd, "#!/bin/sh\nprintf '[]\\n'\n").unwrap();
     std::fs::set_permissions(&bd, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // macOS scans a new executable on its first run; keep that out of the
+    // CLI's bounded bd probe.
+    let _ = Command::new(&bd).output();
     let state = dir.path().join("state");
     let out = Command::new(env!("CARGO_BIN_EXE_vega-orchestration"))
         .current_dir(dir.path())
@@ -136,6 +139,9 @@ esac
     )
     .unwrap();
     std::fs::set_permissions(&herdr, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // macOS scans a new executable on its first run, seconds on a loaded
+    // host: run the fake once so the CLI's 2 s herdr bound sees only herdr.
+    let _ = std::process::Command::new(&herdr).output();
     let state = dir.path().join("state");
     let parents = state.join("vega/parents");
     std::fs::create_dir_all(&parents).unwrap();
@@ -170,8 +176,9 @@ esac
     let out = command(&waiting, "s1");
     assert!(
         out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
     let file = state.join("vega/orchestration/waits.sqlite3");
     let first = vega_herdr::waits::Store::read(&file)

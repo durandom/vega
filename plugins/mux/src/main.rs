@@ -1122,6 +1122,48 @@ fn with_env(pane: &str, cwd: &str, env: &[String]) -> Result<String, Failure> {
     Ok(new)
 }
 
+/// Spawned agents run below vegad (nice 0), so the relay keeps its pace on
+/// a loaded host: the pane shell gets nice AGENT_NICE before the agent
+/// starts, and the agent and its tools inherit it. Not macOS `taskpolicy
+/// -b`: it confines builds to the efficiency cores. Best effort, local panes
+/// only.
+const AGENT_NICE: &str = "10";
+
+fn lower_priority(pane: &str) {
+    let info = herdr(&["pane", "process-info", "--pane", pane]).ok();
+    let Some(pid) = info.as_ref().and_then(shell_pid) else {
+        return;
+    };
+    // `renice <priority> -p <pid>`: absolute on BSD and util-linux alike.
+    let _ = Command::new("renice")
+        .args([AGENT_NICE, "-p", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// The pane's shell pid in `herdr pane process-info`.
+fn shell_pid(info: &Value) -> Option<u64> {
+    info["result"]["process_info"]["shell_pid"]
+        .as_u64()
+        .filter(|p| *p > 1)
+}
+
+/// `start_spawn` with the pane shell reniced first on this machine, so the
+/// agent inherits AGENT_NICE; a `--machine` spawn keeps its priority.
+fn start_agent(
+    machine: Option<&str>,
+    pane: &str,
+    name: &str,
+    mode: Mode,
+    start: impl FnMut() -> Result<Value, Failure>,
+) -> Result<Value, Failure> {
+    if machine.is_none() {
+        lower_priority(pane);
+    }
+    start_spawn(pane, name, mode, start)
+}
+
 fn start_spawn(
     pane: &str,
     name: &str,
@@ -1403,7 +1445,7 @@ fn spawn_inner(
         }
     }
     vega_herdr::state::restore_parent(&pane, name, lineage.parent.as_ref());
-    let started = start_spawn(&pane, name, mode, || herdr(&args));
+    let started = start_agent(machine(), &pane, name, mode, || herdr(&args));
     reopen::capture(&mut lineage);
     reopen::save_best_effort(&lineage);
     let record = prompt.map(|text| KeptBrief {
@@ -2144,6 +2186,87 @@ fn confirm_taken(target: &str, body: &str) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_spawn_renices_the_shell_before_the_agent_starts() {
+        // Isolate PATH and state in a subprocess.
+        if env::var_os("VEGA_MUX_NICE_TEST").is_none() {
+            let dir = env::temp_dir().join(format!("vega-mux-nice-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let output = Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::local_spawn_renices_the_shell_before_the_agent_starts",
+                    "--nocapture",
+                ])
+                .env("VEGA_MUX_NICE_TEST", "1")
+                .env("XDG_STATE_HOME", &dir)
+                .output()
+                .unwrap();
+            std::fs::remove_dir_all(dir).unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let dir = PathBuf::from(env::var_os("XDG_STATE_HOME").unwrap());
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let calls = dir.join("calls");
+        for (tool, body) in [
+            (
+                "herdr",
+                r#"echo "herdr $*" >> "$VEGA_MUX_CALLS"
+printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
+            ),
+            ("renice", r#"echo "renice $*" >> "$VEGA_MUX_CALLS""#),
+        ] {
+            let path = bin.join(tool);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut paths = vec![bin];
+        paths.extend(env::split_paths(&env::var_os("PATH").unwrap()));
+        env::set_var("PATH", env::join_paths(paths).unwrap());
+        env::set_var("VEGA_MUX_CALLS", &calls);
+        let log = |line: &str| {
+            let mut all = std::fs::read_to_string(&calls).unwrap_or_default();
+            all.push_str(line);
+            std::fs::write(&calls, all).unwrap();
+        };
+        let started = start_agent(None, "w1:p2", "fix", Mode::Headed, || {
+            log("agent start\n");
+            Ok(json!({}))
+        });
+        assert!(started.is_ok());
+        assert_eq!(
+            std::fs::read_to_string(&calls).unwrap(),
+            "herdr pane process-info --pane w1:p2\nrenice 10 -p 4242\nagent start\n"
+        );
+        std::fs::remove_file(&calls).unwrap();
+        let started = start_agent(Some("io"), "w1:p3", "fix", Mode::Headed, || {
+            log("agent start\n");
+            Ok(json!({}))
+        });
+        assert!(started.is_ok());
+        assert_eq!(std::fs::read_to_string(&calls).unwrap(), "agent start\n");
+    }
+
+    #[test]
+    fn shell_pid_reads_process_info() {
+        let info =
+            serde_json::json!({"result":{"process_info":{"pane_id":"w1:p2","shell_pid":31546}}});
+        assert_eq!(shell_pid(&info), Some(31546));
+        assert_eq!(shell_pid(&serde_json::json!({"result":{}})), None);
+        assert_eq!(
+            shell_pid(&serde_json::json!({"result":{"process_info":{"shell_pid":1}}})),
+            None
+        );
+    }
 
     #[test]
     fn spawn_env_parses_and_builds_herdr_flags() {
