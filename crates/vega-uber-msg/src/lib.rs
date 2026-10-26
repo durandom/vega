@@ -1,10 +1,12 @@
 //! Uber-UAC post messages (docs/design/uber-uac.md §3): plain `vega post`
 //! mail with a `Vega-Kind: uber.*` header and a JSON body.
 //!
-//! `validate` is the one gate: `vega post send --kind` runs it before it
-//! publishes, and receivers parse with it, so an oversized or malformed body
-//! never reaches the broker or the reader. The cap is on the body's bytes,
-//! the field limits on characters. Unknown fields are refused.
+//! `validate` checks one body: `vega post send --kind` runs it before it
+//! publishes, so `send` never stores an oversized or malformed body. Mail
+//! published by other means is not checked on receipt yet; receivers (the
+//! UAC-host vegad, vega-lhc.209.5) are meant to parse with `validate` too.
+//! The cap is on the body's bytes, the field limits on characters. Unknown
+//! fields are refused.
 //!
 //! Semantic checks that need the open ask (tag, pick, epoch, L4 approval)
 //! belong to the UAC-host vegad (§4), not here.
