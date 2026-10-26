@@ -46,7 +46,8 @@ pub(crate) fn targets(view: &View, me: &Here) -> Vec<Target> {
         })
         .filter_map(|(_, v)| {
             Some(Target {
-                host: v["host"].as_str()?.to_lowercase(),
+                // As the UAC's mail carries it (`from_host`), so its reply is stored.
+                host: vega_herdr::state::host_token(v["host"].as_str()?),
                 pane: v["pane"].as_str()?.to_string(),
                 project: v["project"].as_str()?.to_string(),
             })
@@ -209,7 +210,8 @@ mod tests {
         );
         uac(
             &mut view,
-            "titan",
+            // The registry keys a dotted host as titan_local; mail says titan_local.
+            "titan.local",
             "w2:p1",
             "github.com/b4arena/arena",
             true,
@@ -240,7 +242,7 @@ mod tests {
         };
         let t = targets(&view, &me);
         let got: Vec<_> = t.iter().map(|t| format!("{}@{}", t.pane, t.host)).collect();
-        assert_eq!(got, ["w2:p1@titan", "w3V:p1@proteus"]);
+        assert_eq!(got, ["w2:p1@titan_local", "w3V:p1@proteus"]);
     }
 
     #[test]
