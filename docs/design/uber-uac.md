@@ -94,7 +94,7 @@ typed into a pane ([vegad.md](vegad.md) Security).
   limit can still exceed the cap. `urgent` is the reason or `null`; `recommend` is 0-based. Times (`deadline`,
   `capture.at`, `since`) are RFC 3339. `capture.source` is `ask_user_question` or `user_prompt`. Hashes are 64
   lowercase hex digits. A `tag` is `#` plus 1-4 of `[a-z0-9]`. `notes` and `slayer_text` (≤1024 chars each)
-  may span lines; every other text is one line, and only `context`, `detail` and `why` may be empty. A refusal
+  may span lines (line feeds and tabs, no other control characters); every other text is one line, and only `context`, `detail` and `why` may be empty. A refusal
   code in `refused:<code>` is `[a-z0-9_]`. `reason` ≤120. The id's bead must equal `bead`. Checks that need the
   open ask (§4) are vegad's.
 - **`--uber`** resolves through `vega_registry::View::live_uber` (§2) and refuses with `uber_absent` when no

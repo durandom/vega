@@ -205,7 +205,7 @@ fn check_bead(bead: &str) -> Result<(), Refusal> {
 }
 
 /// `field` has 1..=`max` characters (0 allowed when `empty`), no control
-/// characters unless `multiline`.
+/// characters; `multiline` allows line feeds and tabs, nothing else.
 fn text(field: &str, v: &str, max: usize, empty: bool, multiline: bool) -> Result<(), Refusal> {
     let n = v.chars().count();
     if n > max {
@@ -214,9 +214,15 @@ fn text(field: &str, v: &str, max: usize, empty: bool, multiline: bool) -> Resul
     if !empty && v.trim().is_empty() {
         return Err(bad(format!("{field} is empty")));
     }
-    if !multiline && v.chars().any(char::is_control) {
+    let allowed = |c: char| multiline && matches!(c, '\n' | '\t');
+    if v.chars().any(|c| c.is_control() && !allowed(c)) {
         return Err(bad(format!(
-            "{field} contains a line break or control character"
+            "{field} contains a {} control character",
+            if multiline {
+                "non-newline"
+            } else {
+                "line break or"
+            }
         )));
     }
     Ok(())
@@ -558,6 +564,15 @@ mod tests {
             with("slayer_text", json!("")),
             "slayer_text is empty",
         );
+        for c in ["\u{0}", "\u{1b}[2J", "a\r\nb"] {
+            refused(
+                Kind::Answer,
+                with("slayer_text", json!(c)),
+                "non-newline control",
+            );
+            refused(Kind::Answer, with("notes", json!(c)), "non-newline control");
+        }
+        assert!(check(Kind::Answer, &with("notes", json!("a\n\tb"))).is_ok());
         refused(Kind::Answer, with("tag", json!("a7")), "tag");
         refused(Kind::Answer, with("tag", json!("#A7")), "tag");
         refused(Kind::Answer, with("epoch", json!(0)), "epoch is 0");
