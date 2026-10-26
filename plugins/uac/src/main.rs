@@ -1038,7 +1038,7 @@ fn park(target: &str, bead: &str, machine: Option<&str>) -> Result<(), Failure> 
         bead: bead.to_string(),
         title,
         dir: cwd.display().to_string(),
-        bd: beads::bd_path(),
+        bd: vega_plugin::bd_path(),
         closed: false,
     };
     st::save_park(machine, &pane, &p);

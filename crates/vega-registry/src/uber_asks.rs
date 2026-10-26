@@ -55,6 +55,8 @@ pub struct OpenAsk {
     pub uac_host: String,
     /// The project checkout the UAC asked from; bd runs there.
     pub cwd: PathBuf,
+    /// The `bd` binary `vega uber ask` found: vegad's PATH may lack it.
+    pub bd: String,
     pub sent_to: SentTo,
     /// Unix seconds of the last send.
     pub sent_at: i64,
@@ -209,6 +211,7 @@ mod tests {
             uac_pane: "w1:p1".into(),
             uac_host: "proteus".into(),
             cwd: "/src/vega".into(),
+            bd: "bd".into(),
             sent_to: SentTo {
                 host: "ganymede".into(),
                 pane: "w9:p1".into(),

@@ -250,6 +250,7 @@ pub(crate) fn ask_to(
         uac_pane: uac.pane,
         uac_host: uac.host,
         cwd: uac.cwd,
+        bd: vega_plugin::bd_path(),
         sent_to: SentTo::from(&uber),
         sent_at: now,
         state: State::Open,
