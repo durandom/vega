@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+pub mod tag;
+
 /// The mail header that names the kind.
 pub const HEADER: &str = "Vega-Kind";
 
