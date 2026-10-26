@@ -1,6 +1,7 @@
 //! `vega uber`: the Uber-UAC, the Slayer's one channel to every UAC
 //! (docs/design/uber-uac.md). This plugin holds the estate-wide singleton
-//! claim (§2, vega-lhc.209.2): `claim`, `release` and `status`.
+//! claim (§2, vega-lhc.209.2): `claim`, `release` and `status`; and the
+//! UAC side `ask` (§3, vega-lhc.209.4, ask.rs).
 //!
 //! The claim file on its host is the truth; the registry key
 //! `<host>.uber.v1` is its copy (`vega_registry::uber_state`), and
@@ -28,7 +29,7 @@ const TIMEOUT: Duration = Duration::from_secs(6);
     bin_name = "vega uber",
     disable_version_flag = true,
     about = "The Uber-UAC: the Slayer's one channel to every UAC (estate-wide singleton claim)",
-    after_help = "Without a command: status.\n\nExamples:\n  vega uber claim     # this session becomes the Uber-UAC\n  vega uber release   # hand the claim back\n  vega uber status    # live, superseded and gone claims"
+    after_help = "Without a command: status.\n\nExamples:\n  vega uber claim     # this session becomes the Uber-UAC\n  vega uber release   # hand the claim back\n  vega uber status    # live, superseded and gone claims\n  vega uber ask --bead vega-12 --level L3 --deadline no-rush --option \"yes: ship\" --option \"no: wait\" --recommend 0"
 )]
 struct Cli {
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
@@ -49,6 +50,8 @@ enum Cmd {
     Release,
     /// The live claim, superseded and gone claims
     Status,
+    /// UAC side: send a slayer-decision bead to the Uber-UAC (uber_absent: decide through the bead)
+    Ask(ask::AskArgs),
 }
 
 fn main() -> ExitCode {
@@ -86,6 +89,7 @@ fn main() -> ExitCode {
         Some(Cmd::Claim) => claim(),
         Some(Cmd::Release) => release(),
         Some(Cmd::Status) | None => status(),
+        Some(Cmd::Ask(a)) => ask::ask(a),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -393,6 +397,8 @@ fn status() -> Result<(), Failure> {
     }
     Ok(())
 }
+
+mod ask;
 
 #[cfg(test)]
 mod tests;

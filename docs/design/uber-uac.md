@@ -1,6 +1,7 @@
 # Uber-UAC: the Slayer's one channel to every UAC
 
-Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2).
+Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2),
+the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4).
 
 ## Problem and decision
 
@@ -104,10 +105,15 @@ typed into a pane ([vegad.md](vegad.md) Security).
   An answer is always for exactly one ask.
 - **Routing**: the UAC records the question as a `slayer-decision` bead as today, then runs `vega uber ask --bead <id>
   --level L3|L4 [--urgent "<why>"] --deadline <t> --context ... --option "<label>: <detail>" ... --recommend <n>`.
-  The command checks the caps and the 2-3 options, writes the open ask to
-  `$XDG_STATE_HOME/vega/uber/asks/<id>.json` on the UAC host, and sends it. The UAC then parks the
+  `question` is `--question`, else the bead's title; `--why` is optional. The bead must be open and labelled
+  `slayer-decision`, with no open ask yet. The command checks the caps and the 2-3 options, writes the open ask to
+  `$XDG_STATE_HOME/vega/uber/asks/<id>.json` on the UAC host (`vega_registry::uber_asks`: the ask, the UAC's
+  pane, host and checkout, the claim it was sent to, `open|answered|withdrawn`), and sends it to exactly that
+  claim; a failed send removes the file. Each round (15 s) the UAC host's vegad sends `uber.withdraw` for an
+  open ask whose bead closed and resends an open ask whose claim is no longer the live one (New epoch, §2).
+  Closed asks stay 30 days, so a late answer is refused as answered. The UAC then parks the
   waiting sentinel (`vega uac park`) as today. It does not wait in its pane. The bead, the board and the pane
-  still work: an answer given there closes the bead, and the UAC sends `uber.withdraw`.
+  still work: an answer given there closes the bead, and vegad then sends `uber.withdraw`.
 - **Levels**: the UAC assesses reversibility, blast radius, commitment and visibility. All of them low
   (L0-L2): the UAC decides, and only the brief's FYI mentions it. Any of them high: **L3** (the Slayer
   picks an option). Deploy, GitHub settings, broker rights, deletions and anything irreversible:

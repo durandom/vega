@@ -159,18 +159,6 @@ pub fn slayer_answer(cwd: &Path, id: &str) -> Option<String> {
     (last["author"] == "Slayer").then(|| last["text"].as_str().unwrap_or("").trim().to_string())
 }
 
-/// The real `bd` on PATH for vegad, whose own PATH may lack it: shims
-/// (the bd claim shim, vega's agent shims) find it through a PATH vegad
-/// does not have. Plain `bd` if none is found.
-pub fn bd_path() -> String {
-    let path = std::env::var("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
-        .filter(|d| !d.to_string_lossy().contains("shim"))
-        .map(|d| d.join("bd"))
-        .find(|f| f.is_file())
-        .map_or_else(|| "bd".into(), |f| f.display().to_string())
-}
-
 /// Adds a comment by `author`; false if bd refused.
 pub fn comment(cwd: &Path, id: &str, author: &str, text: &str) -> bool {
     run(

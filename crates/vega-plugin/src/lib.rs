@@ -63,6 +63,17 @@ pub fn plugins() -> BTreeSet<String> {
         .collect()
 }
 
+/// The real `bd` on PATH for vegad, whose own PATH may lack it: shims
+/// (the bd claim shim, vega's agent shims) find it through a PATH vegad
+/// does not have. Plain `bd` if none is found.
+pub fn bd_path() -> String {
+    path_dirs()
+        .filter(|d| !d.to_string_lossy().contains("shim"))
+        .map(|d| d.join("bd"))
+        .find(|f| f.is_file())
+        .map_or_else(|| "bd".into(), |f| f.display().to_string())
+}
+
 /// First executable named `bin` on PATH.
 pub fn find_on_path(bin: &str) -> Option<PathBuf> {
     path_dirs().map(|d| d.join(bin)).find(|p| is_executable(p))
