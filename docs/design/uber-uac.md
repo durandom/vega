@@ -71,7 +71,7 @@ typed into a pane ([vegad.md](vegad.md) Security).
 | Kind | Direction | Cap | Body |
 | --- | --- | --- | --- |
 | `uber.ask` | UAC → Uber | 1 KiB | `id, project, bead, level (L3\|L4), urgent, question (≤120), context (≤280), options [2-3 × {label ≤40, detail ≤120}], recommend (index), why (≤120), deadline (RFC 3339 \| "no-rush")` |
-| `uber.answer` | Uber → UAC | 2 KiB | `id, tag, bead, epoch, pick (label \| null), approval, notes, slayer_text, capture {source, at, sha256}` |
+| `uber.answer` | Uber → UAC | 2 KiB | `id, tag, bead, epoch, pick (label \| null), approval, notes, slayer_text, shown_sha256, capture {source, at, sha256}` |
 | `uber.applied` | UAC vegad → Uber | 256 B | `id, result (applied \| refused:<code>)` |
 | `uber.withdraw` | UAC → Uber | 256 B | `id, reason` (answered elsewhere, obsolete) |
 | `uber.brief` | Uber → all live UACs | 128 B | `since`; sent with `vega post ask --within 2m`, so one pointer brings every reply |
@@ -115,7 +115,7 @@ Verification is deterministic, in vegad on the UAC host, before anything reaches
    live any more. An answer that queued while the UAC host slept still applies after a takeover, and a
    resend to a new epoch replaces the recorded claim.
 3. `tag` is the ask's tag. `pick`, if set, equals one of the ask's option labels exactly. `slayer_text` is not
-   empty. On an L4 ask, `approval: true` requires `capture.source = ask_user_question` and a `pick`.
+   empty. `shown_sha256`, if set, matches vegad's own rendering of the ask. On an L4 ask, `approval: true` requires `capture.source = ask_user_question`, a `pick` and `shown_sha256`.
 4. The ask was not answered or withdrawn before. The first verified answer wins; later ones get `refused:answered`.
 
 If the answer passes, vegad adds `slayer_text` as a bead comment by `Slayer` with `via uber <id>` (the
@@ -132,6 +132,11 @@ capture, or with a capture that was already used or is not **bound** to the ask:
 - **Bound by the harness**: every ask shown gets a short tag (`#a7`) in its AskUserQuestion `question`.
   An AskUserQuestion capture holds the tool input and the answers, so it names the ask by that tag and the
   option by its exact label. The model does not choose the binding.
+- **Shown as asked**: `vega uber answer` re-renders the ask the way `vega uber show` does (question,
+  context, option labels, details and order) and compares the result with the captured AskUserQuestion input for that
+  tag. Any difference refuses with `capture_mismatch`, so the model cannot pass reworded options under a
+  valid tag. The answer carries `shown_sha256` of that rendering. The UAC-host vegad renders its own copy of the
+  ask the same way and refuses a hash mismatch, so this check does not depend on the Uber host alone.
 - **Bound by the Slayer's words**: a typed prompt binds only to the asks whose tags it contains
   (`#a7 ja, #b2 nein`). A prompt without a tag, such as "brief", answers no ask.
 - **L4 approvals** need an AskUserQuestion capture whose answer is an exact option label (`capture.source =
