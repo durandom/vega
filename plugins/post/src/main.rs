@@ -34,6 +34,7 @@ mod janitor;
 mod notes;
 mod outage;
 mod pagerduty;
+mod probes;
 #[cfg(test)]
 mod project_location_test;
 mod quarantine;
@@ -42,6 +43,7 @@ mod reach;
 #[cfg(test)]
 mod registry_read_test;
 mod service;
+mod sidebar;
 mod supervise;
 mod theme;
 mod uber;
@@ -2302,7 +2304,7 @@ async fn wait_for_identity(
                     last = Some(reason);
                 }
                 // The sidebar's identity-free tokens; they outlive the 5 s
-                // retry by METADATA_TTL_MS.
+                // retry by sidebar::TTL_MS.
                 report_quiesced();
             }
         }
@@ -4349,10 +4351,6 @@ fn expired_asks() -> Vec<String> {
     released
 }
 
-/// How long herdr keeps vegad's sidebar tokens without a refresh: they
-/// vanish on their own when vegad stops.
-const METADATA_TTL_MS: &str = "60000";
-
 /// herdr pane metadata for the human (zero agent tokens): sentinels show
 /// their spawn name, task or report, `$attention` and `$parent`; the UAC
 /// pane shows VEGA; a pane with unread mail gets `$mail`. Renders where the
@@ -4441,7 +4439,7 @@ impl DecisionCache {
         });
         let location = location?;
         let cache_key = (key.to_owned(), location.common_dir.clone());
-        let current = match vega_herdr::project::resolve(&location.checkout, &st::post_host()) {
+        let current = match probes::resolve(&location.checkout, &st::post_host()) {
             Ok(current)
                 if current.id.as_str() == key
                     && current.location.common_dir == location.common_dir =>
@@ -4581,6 +4579,7 @@ impl Layout {
                 return self;
             }
         };
+        let host = st::post_host();
         let mut paths = HashMap::new();
         let mut resolve = |workspace: Option<&serde_json::Value>, cwd: &str| {
             let path = vega_herdr::project::metadata_path(workspace, cwd);
@@ -4589,18 +4588,20 @@ impl Layout {
             }
             paths
                 .entry(path.clone())
-                .or_insert_with(|| match catalog.resolve(&path) {
-                    Ok(p) => {
-                        vega_herdr::project::diagnostic("layout", &path, None);
-                        Some(p.id.to_string())
-                    }
-                    Err(e) => {
-                        if let Some(message) =
-                            vega_herdr::project::diagnostic("layout", &path, Some(&e))
-                        {
-                            log(&format!("project: {message}"));
+                .or_insert_with(|| {
+                    match probes::resolve(&path, &host).and_then(|p| catalog.add(p)) {
+                        Ok(p) => {
+                            vega_herdr::project::diagnostic("layout", &path, None);
+                            Some(p.id.to_string())
                         }
-                        None
+                        Err(e) => {
+                            if let Some(message) =
+                                vega_herdr::project::diagnostic("layout", &path, Some(&e))
+                            {
+                                log(&format!("project: {message}"));
+                            }
+                            None
+                        }
                     }
                 })
                 .clone()
@@ -4841,6 +4842,7 @@ fn quiesced_metadata(
 /// Reports `quiesced_metadata` to this host's herdr.
 fn report_quiesced() {
     let sym = vega_herdr::theme::symbols();
+    let mut cmds = Vec::new();
     for (pane, args) in quiesced_metadata(&Layout::read_herdr(), sym.as_ref(), &st::post_host()) {
         let mut cmd: Vec<String> = vec![
             "pane".into(),
@@ -4849,17 +4851,12 @@ fn report_quiesced() {
             "--source".into(),
             "vega:vegad".into(),
             "--ttl-ms".into(),
-            METADATA_TTL_MS.into(),
+            sidebar::TTL_MS.into(),
         ];
         cmd.extend(args);
-        let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-        if let Err(f) = vega_herdr::herdr_text(&refs) {
-            log(&format!(
-                "metadata failed for {pane}: {} {}",
-                f.code, f.message
-            ));
-        }
+        cmds.push(cmd);
     }
+    sidebar::submit(cmds);
 }
 
 /// `herdr workspace report-metadata` for workspace `ws`'s count tokens
@@ -4881,7 +4878,7 @@ fn workspace_cmd(
         "--source".into(),
         "vega:vegad".into(),
         "--ttl-ms".into(),
-        METADATA_TTL_MS.into(),
+        sidebar::TTL_MS.into(),
     ];
     cmd.extend(b.count_tokens(sym));
     match badge.filter(|x| !x.is_empty()) {
@@ -4985,6 +4982,9 @@ fn report_metadata(
     decisions: &mut DecisionCache,
     hygiene: &mut hygiene::Pass,
 ) -> Vec<ToolMail> {
+    // Every herdr report-metadata command of this refresh, for sidebar.rs.
+    let mut cmds: Vec<Vec<String>> = Vec::new();
+    let mut phases = Phases::new();
     let mut panes: HashMap<String, Vec<String>> = HashMap::new();
     // Local sentinels by pane, for `$label`.
     let mut sentinels: HashMap<String, String> = HashMap::new();
@@ -5058,6 +5058,7 @@ fn report_metadata(
         }
         panes.insert(c.pane.clone(), args);
     }
+    phases.mark("sentinels");
     let unread = unread_notes(view);
     let uacs = st::project_uac_records();
     let uac_keys: Vec<String> = uacs.iter().map(|(k, _, _)| k.clone()).collect();
@@ -5069,7 +5070,9 @@ fn report_metadata(
             .count()
     };
     let live: Vec<String> = d.panes();
+    phases.mark("notes");
     let layout = Layout::read();
+    phases.mark("layout");
     log_theme_errors(&sym.errors);
     let projects = vega_bd_sync::store::projects();
     let now = vega_ci_watch::unix_now();
@@ -5118,6 +5121,7 @@ fn report_metadata(
         ]);
         args.extend(b.uac_tokens(sym));
     }
+    phases.mark("uac badges");
     // Without a UAC pane on this host, the open board panes carry the badges.
     if !uacs.iter().any(|(_, p, _)| live.contains(p)) {
         for (pane, key) in layout.boards(&uac_keys) {
@@ -5135,15 +5139,14 @@ fn report_metadata(
                 "--source".into(),
                 "vega:vegad".into(),
                 "--ttl-ms".into(),
-                METADATA_TTL_MS.into(),
+                sidebar::TTL_MS.into(),
             ];
             if b.is_zero() {
                 args.push("--clear-display-agent".into());
             } else {
                 args.extend(["--display-agent".into(), b.after("vega board", sym)]);
             }
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            let _ = vega_herdr::herdr_text(&args);
+            cmds.push(args);
         }
     }
     // Each workspace holding a UAC or a local sentinel gets its `$badge`.
@@ -5159,15 +5162,9 @@ fn report_metadata(
             }
         }
     }
-    // Every workspace with a checkout and every agent pane gets its `$git`;
-    // one `git status` per path and refresh.
-    let mut git_cache: HashMap<String, Option<String>> = HashMap::new();
-    let mut git_of = |path: &str| {
-        git_cache
-            .entry(path.to_string())
-            .or_insert_with(|| git_state(path))
-            .clone()
-    };
+    // Every workspace with a checkout and every agent pane gets its `$git`,
+    // as probes.rs last read it off the loop.
+    let git_of = probes::git;
     let mut gits: HashMap<String, String> = HashMap::new();
     for w in &layout.workspaces {
         let (Some(ws), Some(path)) = (
@@ -5201,10 +5198,7 @@ fn report_metadata(
             &kinds,
             sym,
         );
-        let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-        if let Err(f) = vega_herdr::herdr_text(&refs) {
-            log(&format!("inbox failed for {ws}: {} {}", f.code, f.message));
-        }
+        cmds.push(cmd);
     }
     for pane in live.iter().filter(|p| d.has_mail(p)) {
         panes
@@ -5231,7 +5225,7 @@ fn report_metadata(
         args.extend(layout.project_token(pane, parents.get(pane).map(String::as_str)));
         args.extend(label);
         let cwd = layout.pane(pane).and_then(|p| p["cwd"].as_str());
-        match cwd.and_then(&mut git_of) {
+        match cwd.and_then(git_of) {
             Some(g) => args.extend(["--token".into(), format!("git={g}")]),
             None => args.extend(["--clear-token".into(), "git".into()]),
         }
@@ -5253,30 +5247,65 @@ fn report_metadata(
             "--source".into(),
             "vega:vegad".into(),
             "--ttl-ms".into(),
-            METADATA_TTL_MS.into(),
+            sidebar::TTL_MS.into(),
         ];
         cmd.extend(args);
-        let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-        // report-metadata prints nothing on success, not JSON.
-        if let Err(f) = vega_herdr::herdr_text(&refs) {
-            log(&format!(
-                "metadata failed for {pane}: {} {}",
-                f.code, f.message
-            ));
-        }
+        cmds.push(cmd);
     }
-    hygiene
+    // Sent off the loop, only what changed (sidebar.rs).
+    sidebar::submit(cmds);
+    phases.mark("panes");
+    let due = hygiene
         .run(now, &tidy)
         .into_iter()
         .map(|(pane, text)| {
             log(&format!("hygiene: mail for {pane}"));
             (hygiene::AGENT.to_string(), pane, text)
         })
-        .collect()
+        .collect();
+    phases.mark("hygiene");
+    phases.log_if_slow("metadata");
+    due
+}
+
+/// Where a slow step spent its time: `slow: <step> phases: a 12 ms, ...`.
+struct Phases {
+    started: Instant,
+    last: Instant,
+    took: Vec<(&'static str, Duration)>,
+}
+
+impl Phases {
+    fn new() -> Self {
+        let now = Instant::now();
+        Phases {
+            started: now,
+            last: now,
+            took: Vec::new(),
+        }
+    }
+
+    /// Ends phase `name`, begun at the last mark.
+    fn mark(&mut self, name: &'static str) {
+        let now = Instant::now();
+        self.took.push((name, now - self.last));
+        self.last = now;
+    }
+
+    fn log_if_slow(&self, step: &str) {
+        if self.started.elapsed() > SLOW_STEP {
+            let parts: Vec<String> = self
+                .took
+                .iter()
+                .map(|(n, d)| format!("{n} {} ms", d.as_millis()))
+                .collect();
+            log(&format!("slow: {step} phases: {}", parts.join(", ")));
+        }
+    }
 }
 
 /// Logs a step of vegad's loop that took longer than SLOW_STEP: the sidebar
-/// tokens expire after METADATA_TTL_MS, so a stalled loop blanks them.
+/// rows are renewed by sidebar.rs, but a slow loop delays every change.
 fn slow(step: &str, since: Instant) {
     let took = since.elapsed();
     if took > SLOW_STEP {
@@ -6128,7 +6157,7 @@ mod tests {
                 "--source",
                 "vega:vegad",
                 "--ttl-ms",
-                METADATA_TTL_MS,
+                sidebar::TTL_MS,
                 "--clear-token",
                 "notes",
                 "--token",

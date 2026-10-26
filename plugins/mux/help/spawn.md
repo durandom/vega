@@ -23,6 +23,9 @@ Examples:
 require the harness's environment policy to pass the variable through.
 An --env BEADS_ACTOR replaces the lane's. The `env:` line lists the keys, never the values.
 
+A local spawn runs at nice 10 (the pane shell is reniced before the agent starts), so vegad
+keeps its pace on a loaded host; the agent's tools inherit it.
+
 Spawns forward the caller's SSH_AUTH_SOCK when set to the agent process. An explicit
 --env SSH_AUTH_SOCK=... wins, including an empty value. This covers every agent kind and placement, including worktrees. For
 --machine, use --env SSH_AUTH_SOCK=<remote-path> if the socket path differs there.

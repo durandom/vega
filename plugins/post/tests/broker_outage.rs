@@ -205,12 +205,13 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     let outage = notes();
     assert_eq!(outage.len(), 1, "{outage:?}");
     assert!(outage[0]["resolved"].is_null(), "{outage:?}");
-    // The sidebar keeps its labels without the broker.
+    // The sidebar keeps its labels without the broker: unchanged rows are
+    // renewed every 60 s (sidebar.rs).
     let before = metadata_reports(home);
     wait_for(
         &log_file,
         "metadata without the broker",
-        Duration::from_secs(40),
+        Duration::from_secs(75),
         || metadata_reports(home) > before,
     );
     assert!(

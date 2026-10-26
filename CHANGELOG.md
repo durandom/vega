@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 83 · 2026-10-26
+
+- feature: vegad's sidebar no longer flickers on a loaded host: its tokens live 5 min and a thread
+  of their own renews them; project identity and `git status` are cached off vegad's loop. `vega mux
+  spawn` starts agents at nice 10, below vegad. See
+  [Sidebar cost](docs/design/vegad.md#sidebar-cost-vega-lhc212).
+
 ## 82 · 2026-10-26
 
 - feature: on the Uber host, `vega_uber_capture` (Claude Code hook for

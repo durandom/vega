@@ -77,6 +77,11 @@ impl LocationCatalog {
 
     pub fn resolve(&mut self, path: &Path) -> Result<Project, Failure> {
         let project = resolve(path, &self.host)?;
+        self.add(project)
+    }
+
+    /// Catalogs a project resolved earlier (e.g. cached) for this host.
+    pub fn add(&mut self, project: Project) -> Result<Project, Failure> {
         if self.locations.iter().any(|(id, locations)| {
             id != &project.id
                 && locations
