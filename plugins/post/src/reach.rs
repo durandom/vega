@@ -68,10 +68,10 @@ pub async fn fetch(client: &async_nats::Client, host: &str, pane: &str) -> Resul
     Ok(view)
 }
 
-/// Beats, agents and UAC registrations of every host.
+/// Beats, agents, UAC registrations and Uber-UAC claims of every host.
 pub async fn read(client: &async_nats::Client) -> Result<View, String> {
     let kv = reg::bucket(client).await?;
-    reg::read_kinds(client, &kv, Some(&["beat", "agent", "uac"])).await
+    reg::read_kinds(client, &kv, Some(&["beat", "agent", "uac", "uber"])).await
 }
 
 /// A project key's folder name, stripping `/.git` or `/.bare`.

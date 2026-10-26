@@ -88,6 +88,17 @@ typed into a pane ([vegad.md](vegad.md) Security).
 | `uber.withdraw` | UAC → Uber | 256 B | `id, reason` (answered elsewhere, obsolete) |
 | `uber.brief` | Uber → all live UACs | 128 B | `since`; sent with `vega post ask --within 2m`, so one pointer brings every reply |
 
+- **Bodies** (`crates/vega-uber-msg`): `vega post send --kind uber.<kind> [--uber] '<json>'` sets the header and checks
+  the body before it sends: the cap in bytes first (`uber_too_large`), then the shape and the fields
+  (`uber_malformed`; unknown fields are refused too). Field limits count characters, so a body within every field
+  limit can still exceed the cap. `urgent` is the reason or `null`; `recommend` is 0-based. Times (`deadline`,
+  `capture.at`, `since`) are RFC 3339. `capture.source` is `ask_user_question` or `user_prompt`. Hashes are 64
+  lowercase hex digits. A `tag` is `#` plus 1-4 of `[a-z0-9]`. `notes` and `slayer_text` (≤1024 chars each)
+  may span lines; every other text is one line, and only `context`, `detail` and `why` may be empty. A refusal
+  code in `refused:<code>` is `[a-z0-9_]`. `reason` ≤120. The id's bead must equal `bead`. Checks that need the
+  open ask (§4) are vegad's.
+- **`--uber`** resolves through `vega_registry::View::live_uber` (§2) and refuses with `uber_absent` when no
+  claim is live.
 - **Ids**: `id = <bead>~<nuid>`. The bead keeps the record readable and the nuid makes the id unguessable.
   The Uber gives each open ask a short `tag` (`#a7`, unique among its open asks) for the phone.
   An answer is always for exactly one ask.

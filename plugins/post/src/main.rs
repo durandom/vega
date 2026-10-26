@@ -91,8 +91,8 @@ enum Cmd {
     },
     /// Send a message to an agent's inbox; its relay types a pointer into the pane
     #[command(
-        override_usage = "vega post send [OPTIONS] <TARGET> <TEXT>\n       vega post send [OPTIONS] --uac <PROJECT> <TEXT>",
-        after_help = "The relay types the pointer when the target agent is idle or done, one line for all its pending mail. Mail from the target's parent is typed while it works too (queued input), never into a dialog.\nsend checks the target in the registry first: a pane its host no longer lists fails with pane_gone and a hint naming the project's UAC; a host without a fresh registry entry gets the mail with a warning. A pane that closes with mail unread: its vegad bounces it once to each sender.\nWho is reachable: vega post and the registry (`vega uac`), not `herdr machine list` (only the machines this one saved).\n\nExamples:\n  vega post send w3V:p2 \"ping\"\n  vega post send --uac vega \"<text>\"                # the project's UAC, on whichever host\n  vega post send --uac . \"<text>\"                   # the UAC of this checkout's project\n  vega post send --now w3V:p2 \"stop: wrong branch\"   # urgent: pointer at once\n  vega post send --host ganymede w3V:p2 \"ping\"\n  vega post send w3V:p1 --re <thread>/<hop>@<published-ms> \"pong\"   # reply command from `vega post inbox`"
+        override_usage = "vega post send [OPTIONS] <TARGET> <TEXT>\n       vega post send [OPTIONS] --uac <PROJECT> <TEXT>\n       vega post send [OPTIONS] --uber <TEXT>",
+        after_help = "The relay types the pointer when the target agent is idle or done, one line for all its pending mail. Mail from the target's parent is typed while it works too (queued input), never into a dialog.\nsend checks the target in the registry first: a pane its host no longer lists fails with pane_gone and a hint naming the project's UAC; a host without a fresh registry entry gets the mail with a warning. A pane that closes with mail unread: its vegad bounces it once to each sender.\nWho is reachable: vega post and the registry (`vega uac`), not `herdr machine list` (only the machines this one saved).\n\nExamples:\n  vega post send w3V:p2 \"ping\"\n  vega post send --uac vega \"<text>\"                # the project's UAC, on whichever host\n  vega post send --uac . \"<text>\"                   # the UAC of this checkout's project\n  vega post send --uber --kind uber.withdraw '{\"id\":\"<id>\",\"reason\":\"obsolete\"}'   # the live Uber-UAC\n  vega post send --now w3V:p2 \"stop: wrong branch\"   # urgent: pointer at once\n  vega post send --host ganymede w3V:p2 \"ping\"\n  vega post send w3V:p1 --re <thread>/<hop>@<published-ms> \"pong\"   # reply command from `vega post inbox`"
     )]
     Send {
         /// Target pane id (e.g. w3V:p2), then the message text; with --uac only the text
@@ -104,6 +104,13 @@ enum Cmd {
         /// Send to this project's UAC on any host: full project ID, published folder/origin/merged alias, repository name, or . (this checkout)
         #[arg(long, value_name = "PROJECT")]
         uac: Option<String>,
+        /// Send to the live Uber-UAC claim (docs/design/uber-uac.md); uber_absent when none is live
+        #[arg(long, conflicts_with_all = ["host", "uac"])]
+        uber: bool,
+        /// Typed mail: a Vega-Kind header (uber.ask|answer|applied|withdraw|brief) and a JSON
+        /// body as the text, checked against its schema and size cap before sending
+        #[arg(long)]
+        kind: Option<String>,
         /// Reply token of the message you answer; copy it from `vega post inbox`
         #[arg(long)]
         re: Option<String>,
@@ -369,11 +376,23 @@ fn main() -> ExitCode {
             args,
             host,
             uac,
+            uber,
+            kind,
             re,
             now,
             from_tool,
-        }) => send_args(&args, host.as_deref(), uac.as_deref())
-            .and_then(|(to, text)| send(to, text, re.as_deref(), now, None, from_tool.as_deref())),
+        }) => send_args(&args, host.as_deref(), uac.as_deref(), uber).and_then(|(to, text)| {
+            let kind = mail_kind(kind.as_deref(), text)?;
+            send(
+                to,
+                text,
+                re.as_deref(),
+                now,
+                None,
+                kind,
+                from_tool.as_deref(),
+            )
+        }),
         Some(Cmd::Done {
             outcome,
             summary,
@@ -479,6 +498,8 @@ mod h {
     pub const NOW: &str = "Vega-Now";
     /// Set by `done`: the outcome; the parent's relay records it.
     pub const DONE: &str = "Vega-Done";
+    /// Set by `send --kind`: a typed JSON body (vega_uber_msg).
+    pub const KIND: &str = vega_uber_msg::HEADER;
 }
 
 /// `VEGA_NATS_URL`, else the first line of `$XDG_CONFIG_HOME/vega/nats.url`
@@ -1181,6 +1202,7 @@ fn now_ms() -> u128 {
 enum To<'a> {
     Pane(&'a str, Option<&'a str>),
     Uac(&'a str),
+    Uber,
 }
 
 /// `send`'s positionals: target and text, or with `--uac` only the text.
@@ -1188,8 +1210,15 @@ fn send_args<'a>(
     args: &'a [String],
     host: Option<&'a str>,
     uac: Option<&'a str>,
+    uber: bool,
 ) -> Result<(To<'a>, &'a str), Failure> {
     match (uac, args) {
+        (None, [text]) if uber => Ok((To::Uber, text)),
+        (None, _) if uber => Err(Failure::new(
+            "usage",
+            "with --uber give only the text",
+            "vega post send --uber \"<text>\"",
+        )),
         (Some(p), [text]) => Ok((To::Uac(p), text)),
         (None, [target, text]) => Ok((To::Pane(target, host), text)),
         (Some(_), _) => Err(Failure::new(
@@ -1205,6 +1234,21 @@ fn send_args<'a>(
     }
 }
 
+/// `send --kind`: the body must pass its kind's schema and cap, else
+/// nothing is sent (docs/design/uber-uac.md §3).
+fn mail_kind(kind: Option<&str>, text: &str) -> Result<Option<vega_uber_msg::Kind>, Failure> {
+    let Some(k) = kind else { return Ok(None) };
+    vega_uber_msg::validate_kind(k, text.as_bytes())
+        .map(|_| vega_uber_msg::Kind::parse(k))
+        .map_err(|r| {
+            Failure::new(
+                r.code,
+                format!("{}; nothing was sent", r.message),
+                "fix the JSON body; schemas and caps: docs/design/uber-uac.md §3",
+            )
+        })
+}
+
 /// The mail headers `send` sets.
 fn send_headers(
     me: &vega_herdr::Me,
@@ -1212,6 +1256,7 @@ fn send_headers(
     hop: u32,
     now: bool,
     done: Option<Outcome>,
+    kind: Option<vega_uber_msg::Kind>,
 ) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("Nats-Msg-Id", nuid::next().as_str());
@@ -1228,6 +1273,9 @@ fn send_headers(
     }
     if let Some(o) = done {
         headers.insert(h::DONE, o.as_str());
+    }
+    if let Some(k) = kind {
+        headers.insert(h::KIND, k.as_str());
     }
     headers
 }
@@ -1272,6 +1320,26 @@ async fn resolve_target(
             let here = if query == "." { my_project()? } else { None };
             let (h, p, _) = reach::resolve(&view, query, here.as_deref())?;
             return Ok((p, subject_token(&h), None));
+        }
+        To::Uber => {
+            let view = tokio::time::timeout(reach::WAIT, reach::read(client))
+                .await
+                .unwrap_or_else(|_| Err("no answer within 2 s".into()))
+                .map_err(|e| {
+                    Failure::new(
+                        "registry_unavailable",
+                        format!("cannot resolve --uber: registry: {e}"),
+                        "without the registry there is no Uber-UAC; use the bead and the board",
+                    )
+                })?;
+            let c = view.live_uber().ok_or_else(|| {
+                Failure::new(
+                    "uber_absent",
+                    "no live Uber-UAC claim; nothing was sent",
+                    "the Slayer's session runs `vega uber claim`; until then use the bead and the board",
+                )
+            })?;
+            return Ok((c.pane, subject_token(&c.host), None));
         }
         To::Pane(target, host) => (
             target.to_string(),
@@ -1354,6 +1422,7 @@ fn send(
     re: Option<&str>,
     now: bool,
     done: Option<Outcome>,
+    kind: Option<vega_uber_msg::Kind>,
     from_tool: Option<&str>,
 ) -> Result<(), Failure> {
     let (thread, hop) = next_hop(re, now_ms())?;
@@ -1401,13 +1470,13 @@ fn send(
         let to_host = host.map(subject_token).unwrap_or_else(|| my_host.clone());
         self_send(&to_host, target)?;
         if vega_herdr::state::is_inbox_only(&my_host) {
-            let headers = send_headers(&me, &thread, hop, now, done);
+            let headers = send_headers(&me, &thread, hop, now, done, kind);
             return send_quarantine(&to_host, target, headers, text, done);
         }
     } else if vega_herdr::state::is_inbox_only(&my_host) {
         return Err(Failure::new(
             "inbox_only",
-            format!("this host ({my_host}) is inbox-only: it cannot read the registry to find a UAC"),
+            format!("this host ({my_host}) is inbox-only: it cannot read the registry to find a UAC or the Uber-UAC"),
             "reply to the pane from the reply command: vega post send --host <host> <pane> \"<text>\"",
         ));
     }
@@ -1421,7 +1490,7 @@ fn send(
     let target = target.as_str();
     self_send(&to_host, target)?;
     let subject = inbox_subject(&to_host, target, &my_host);
-    let headers = send_headers(&me, &thread, hop, now, done);
+    let headers = send_headers(&me, &thread, hop, now, done, kind);
     let ack = rt.block_on(async {
         let js = jetstream::new(client);
         // No stream lookup: the target host's stream captures the subject. If
@@ -1626,6 +1695,7 @@ fn done(outcome: &str, summary: &str, to: Option<&str>, host: Option<&str>) -> R
         None,
         false,
         Some(outcome),
+        None,
         None,
     )
 }
@@ -6343,23 +6413,23 @@ mod tests {
             Ok::<_, ErrorKind>((args, host, uac))
         };
         let (args, host, uac) = parse(&["w3V:p2", "ping"]).unwrap();
-        let (to, text) = send_args(&args, host.as_deref(), uac.as_deref()).unwrap();
+        let (to, text) = send_args(&args, host.as_deref(), uac.as_deref(), false).unwrap();
         assert!(matches!(to, To::Pane("w3V:p2", None)));
         assert_eq!(text, "ping");
         let (args, host, uac) = parse(&["--uac", "vega", "ping"]).unwrap();
-        let (to, text) = send_args(&args, host.as_deref(), uac.as_deref()).unwrap();
+        let (to, text) = send_args(&args, host.as_deref(), uac.as_deref(), false).unwrap();
         assert!(matches!(to, To::Uac("vega")));
         assert_eq!(text, "ping");
         let (args, host, uac) = parse(&["--uac", "vega", "w3V:p2", "ping"]).unwrap();
         assert_eq!(
-            send_args(&args, host.as_deref(), uac.as_deref())
+            send_args(&args, host.as_deref(), uac.as_deref(), false)
                 .unwrap_err()
                 .code,
             "usage"
         );
         let (args, host, uac) = parse(&["ping"]).unwrap();
         assert_eq!(
-            send_args(&args, host.as_deref(), uac.as_deref())
+            send_args(&args, host.as_deref(), uac.as_deref(), false)
                 .unwrap_err()
                 .code,
             "usage"
@@ -6368,6 +6438,31 @@ mod tests {
             parse(&["--uac", "vega", "--host", "titan", "ping"]).unwrap_err(),
             ErrorKind::ArgumentConflict
         );
+        let one = ["ping".to_string()];
+        let to = send_args(&one, None, None, true).unwrap().0;
+        assert!(matches!(to, To::Uber));
+        let two = ["w3V:p2".to_string(), "ping".to_string()];
+        assert_eq!(send_args(&two, None, None, true).unwrap_err().code, "usage");
+        for conflict in [["--uber", "--uac", "vega"], ["--uber", "--host", "titan"]] {
+            assert_eq!(
+                parse(&[conflict.as_slice(), &["ping"]].concat()).unwrap_err(),
+                ErrorKind::ArgumentConflict
+            );
+        }
+    }
+
+    #[test]
+    fn send_kind_refuses_bad_bodies_before_sending() {
+        assert_eq!(mail_kind(None, "plain text").unwrap(), None);
+        let applied = r#"{"id":"vega-lhc.209~AbCdEfGhIjKlMnOpQrStUv","result":"applied"}"#;
+        assert_eq!(
+            mail_kind(Some("uber.applied"), applied).unwrap(),
+            Some(vega_uber_msg::Kind::Applied)
+        );
+        let refused = |kind, body: &str| mail_kind(Some(kind), body).unwrap_err().code;
+        assert_eq!(refused("uber.tell", "{}"), "uber_kind");
+        assert_eq!(refused("uber.applied", "not json"), "uber_malformed");
+        assert_eq!(refused("uber.brief", &"x".repeat(129)), "uber_too_large");
     }
 
     #[test]
