@@ -3321,6 +3321,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "vega-herdr",
+ "vega-uber-msg",
 ]
 
 [[package]]
