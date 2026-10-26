@@ -65,10 +65,15 @@ Jobs, all in one process:
    a provider abort (below) may drop input typed into it (pi does), so the abort clears the
    pointer and unread mail is pending again. After an exhausted quota vegad types no pointer for
    5 minutes (`STALE`), unless the agent works again first (resumed, or another model) or the mail
-   is `--now`; then one pointer probes, and a further abort holds again. Safety net: mail whose
-   last pointer was typed 5 minutes ago and is still unread gets one more pointer when the agent
-   is `idle` or `done`, at most once per 5 minutes; the log marks it `again`. It also catches
-   aborts vegad does not detect (a child that reported earlier, a pane that is no child).
+   is `--now`; then one pointer probes, and a further abort holds again. After an overload or rate
+   limit the pointer backs off (vega-lhc.208, `delivery::BACKOFF`): it retries after 2, 5 and
+   15 minutes, and a fourth abort in a row holds it until new input; retyping at once only met the
+   next 429 (a Codex pane got a pointer every 5 s). New input resets the count: a turn vegad's
+   pointer did not start (the human typed, `vega mux send`), a read inbox, or a turn that ends
+   without an abort. A working agent lifts any hold; `--now` mail goes through. Safety net: mail
+   whose last pointer was typed 5 minutes ago and is still unread gets one more pointer when the
+   agent is `idle` or `done` and no hold stands, at most once per 5 minutes; the log marks it
+   `again`. It also catches aborts vegad does not detect (a child that reported earlier).
 
    **Draft guard (vega-lhc.194).** Before each pointer (also urgent and parent mail) vegad reads the
    pane's screen (`delivery::draft`): a pointer never joins text the user is typing. It knows three
@@ -385,7 +390,11 @@ Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestrat
   stay `silent`. The `silent/` record keeps it (`quota: {transient, error, resets}`), the registry
   link carries it to the parent's host, and `vega uac` shows the error with the reset and the
   next step: retry (`vega mux send <pane> "continue"`), or move the work to another kind/provider.
-  A child on another machine is confirmed without a screen or log: no quota.
+  A child on another machine is confirmed without a screen or log: no quota. A pane that is no
+  child is checked the same way (screen and log, no `silent/` record) when a turn ends while a
+  pointer it has not read stands. The pointer then backs off (above); when the retries are used
+  up, a child's parent already sees attention `quota`, and a pane without a parent gets a note for
+  the human (`vegad: <pane> keeps hitting the provider limit`).
 - **Stale reports.** The parent's machine records when it last briefed each sentinel (`briefs` state:
   spawn, adopt, or `vega post send` to it). A `done` sent before that brief reports on earlier work: vegad
   does not record it as the outcome, and `vega post inbox` marks it `stale: sent before your newer brief of
