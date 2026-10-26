@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 80 · 2026-10-26
+
+- feature: `vega uber ask --bead <id> ...` sends a UAC's `slayer-decision` bead to the live
+  Uber-UAC and records the open ask in `~/.local/state/vega/uber/asks/`. Without a live Uber
+  it returns `uber_absent` and changes nothing. vegad withdraws an ask when its bead closes and
+  resends it after a new Uber claim. Answers are not applied yet. See
+  [Uber-UAC protocol](docs/design/uber-uac.md#3-protocol-ask-answer-brief-over-vega-post).
+
 ## 79 · 2026-10-26
 
 - feature: `vega post send --uber` mails the live Uber-UAC claim (`uber_absent`

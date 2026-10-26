@@ -37,10 +37,11 @@ Adopt sessions
 Record progress in beads. Questions for the Slayer: `slayer-decision`
 children of the `claim` tracker (options, recommendation, blocks), in the Slayer's language even
 against project rules. Answer an `asking` sentinel yourself if you can; what waits on the Slayer
-over 30 min becomes such a bead, quoting the question. Park a sentinel waiting on one:
+over 30 min becomes such a bead, quoting the question. Park its waiting sentinel:
 `vega uac park <pane> --bead <id>`. Answers by mail: act, close with the answer.
-In chat, record the Slayer's answer, update the decision bead at once;
-board and sidebar must match chat.
+L3/L4: also [`vega uber ask`](uber-uac.md).
+Record chat answers in the decision bead at once;
+board and sidebar match chat.
 Hygiene mail: follow it; ask the Slayer once, batched.
 Follow-up beads: only work the task cannot do, `discovered-from`. No beads: a handover file.
 
