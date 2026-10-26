@@ -11,6 +11,8 @@
 //! Semantic checks that need the open ask (tag, pick, epoch, L4 approval)
 //! belong to the UAC-host vegad (§4), not here.
 
+pub mod shown;
+
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
