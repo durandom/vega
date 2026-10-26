@@ -6,8 +6,7 @@
 //! `answered`; `prune` drops closed asks after `KEEP_CLOSED`.
 //!
 //! `create` and the transitions (`close`, `resend`) run under a lock on the
-//! directory, so the
-//! first one wins.
+//! directory, so the first one wins.
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
