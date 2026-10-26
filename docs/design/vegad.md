@@ -547,7 +547,8 @@ path), `git status` 3.3–10 s, one `report-metadata` per pane and workspace 0.8
   on. The thread sends a row when it changed and renews unchanged ones every 60 s, so a loop stalled
   on the registry, the broker or a slow refresh keeps its labels. A row a refresh no longer names is
   cleared at once (every token, display agent and title it set: herdr has no clear-all), not left to
-  the TTL; a target herdr no longer knows is dropped until a refresh names it again.
+  the TTL (a failed clear is retried every 5 s, logged once); a target herdr no longer knows is
+  dropped until a refresh names it again.
 - **Cached project resolution** (`plugins/post/src/probes.rs`): per path, reused while the
   repository's common `config` is unchanged (10 min at most); a failure is retried after 60 s, or at
   once when the path changes. It still runs on the loop: a miss (a new path, the first refresh)

@@ -32,6 +32,8 @@ pub struct State {
     sent: HashMap<Key, (Vec<Cmd>, Instant)>,
     /// Commands that clear rows a refresh no longer names.
     withdrawn: Vec<(Key, Cmd)>,
+    /// Withdrawals that failed and wait for the next tick, logged once.
+    failing: std::collections::HashSet<Key>,
 }
 
 fn key(cmd: &Cmd) -> Key {
@@ -96,11 +98,28 @@ impl State {
         }
         self.withdrawn
             .retain(|(k, _)| !wanted.iter().any(|(w, _)| w == k));
+        self.failing.retain(|k| !wanted.iter().any(|(w, _)| w == k));
         self.wanted = wanted;
     }
 
     pub fn take_withdrawn(&mut self) -> Vec<(Key, Cmd)> {
         std::mem::take(&mut self.withdrawn)
+    }
+
+    /// A clear herdr refused: tried again next tick unless the target is
+    /// gone. True on its first failure, to log once.
+    pub fn withdraw_failed(&mut self, key: Key, cmd: Cmd, gone: bool) -> bool {
+        if gone {
+            self.failing.remove(&key);
+            return false;
+        }
+        let first = self.failing.insert(key.clone());
+        self.withdrawn.push((key, cmd));
+        first
+    }
+
+    pub fn withdrawn_ok(&mut self, key: &Key) {
+        self.failing.remove(key);
     }
 
     /// The targets to send now: changed, never sent, or due for renewal.
@@ -152,10 +171,21 @@ fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         let started = Instant::now();
-        // A target that is gone needs no clearing: errors are ignored.
-        for (_, cmd) in state.take_withdrawn() {
+        for (k, cmd) in state.take_withdrawn() {
             let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-            let _ = vega_herdr::herdr_text(&refs);
+            match vega_herdr::herdr_text(&refs) {
+                Ok(_) => state.withdrawn_ok(&k),
+                Err(f) => {
+                    // A target that is gone needs no clearing.
+                    let gone = f.code.ends_with("not_found");
+                    if state.withdraw_failed(k.clone(), cmd, gone) {
+                        crate::log(&format!(
+                            "sidebar: clearing {} failed, retrying: {} {}",
+                            k.1, f.code, f.message
+                        ));
+                    }
+                }
+            }
         }
         let due = state.due(started);
         let n = due.len();
@@ -294,6 +324,24 @@ mod tests {
         s.set(vec![p1, cmd("pane", "p2", "a=1")]);
         assert!(s.take_withdrawn().is_empty());
         assert_eq!(s.due(t0).len(), 1);
+    }
+
+    #[test]
+    fn a_failed_clear_is_retried_and_logged_once_until_it_lands() {
+        let k: Key = ("pane".into(), "p1".into());
+        let c = cmd("pane", "p1", "x");
+        let mut s = State::default();
+        assert!(s.withdraw_failed(k.clone(), c.clone(), false));
+        let again = s.take_withdrawn();
+        assert_eq!(again, vec![(k.clone(), c.clone())]);
+        assert!(!s.withdraw_failed(k.clone(), c.clone(), false));
+        s.take_withdrawn();
+        s.withdrawn_ok(&k);
+        assert!(s.withdraw_failed(k.clone(), c.clone(), false));
+        s.take_withdrawn();
+        // A gone target is not retried.
+        assert!(!s.withdraw_failed(k.clone(), c, true));
+        assert!(s.take_withdrawn().is_empty());
     }
 
     #[test]
