@@ -353,12 +353,13 @@ fn fit(lens: [usize; 3], budget: usize, order: [usize; 3]) -> [usize; 3] {
 }
 
 /// The brief: `Decisions (n)`, `FYI (n)`, `Blocked (n)`, one line per item,
-/// then who has not replied; at most `MAX_LINES` lines. A section cut short
-/// ends in `+n more`. `brief` is the last fan-in and its replies.
+/// then who has not replied; at most `max` lines (`MAX_LINES` for the
+/// phone). A section cut short ends in `+n more`. `brief` is the last fan-in and its replies.
 pub fn render(
     decisions: &[Decision],
     brief: Option<(&Request, &[Reply])>,
     now: i64,
+    max: usize,
 ) -> Vec<String> {
     let decided: Vec<String> = ordered(decisions)
         .into_iter()
@@ -398,7 +399,7 @@ pub fn render(
         }
     };
     let sections = [("Decisions", decided), ("FYI", fyi), ("Blocked", blocked)];
-    let budget = MAX_LINES - sections.len() - usize::from(footer.is_some());
+    let budget = max.saturating_sub(sections.len() + usize::from(footer.is_some()));
     let lens = [
         sections[0].1.len(),
         sections[1].1.len(),
@@ -571,7 +572,7 @@ mod tests {
                 at: NOW - 3600,
             },
         ];
-        let out = render(&d, None, NOW);
+        let out = render(&d, None, NOW, MAX_LINES);
         assert_eq!(out[0], "Decisions (3)");
         assert_eq!(out[1], "1 dotfiles · L3 · urgent · push main? · rec: yes");
         assert_eq!(out[2], "2 arena · L3 · push main? · rec: yes · overdue");
@@ -615,7 +616,7 @@ mod tests {
             ),
             (r.targets[2].clone(), None),
         ];
-        let out = render(&d, Some((&r, &replies)), NOW);
+        let out = render(&d, Some((&r, &replies)), NOW, MAX_LINES);
         assert!(
             out.len() <= MAX_LINES,
             "{} lines:\n{}",
@@ -624,6 +625,9 @@ mod tests {
         );
         assert!(out.iter().all(|l| l.chars().count() <= LINE_CHARS));
         assert_eq!(out[0], "Decisions (20)");
+        // `vega uber brief` keeps one line for its help.
+        let fewer = render(&d, Some((&r, &replies)), NOW, MAX_LINES - 1);
+        assert_eq!(fewer.len(), MAX_LINES - 1);
         assert!(out.contains(&"FYI (5)".to_string()));
         assert!(out.contains(&"vega: landed uber-ask".to_string()));
         assert!(out.contains(&"Blocked (1)".to_string()));
@@ -633,7 +637,7 @@ mod tests {
             .any(|l| l.starts_with("+") && l.ends_with(" more")));
         assert_eq!(out.last().unwrap(), "waiting (1): arena (asked 30s ago)");
         // Without the overflow every item shows and nothing is cut.
-        let out = render(&d[..2], Some((&r, &replies)), NOW + 300);
+        let out = render(&d[..2], Some((&r, &replies)), NOW + 300, MAX_LINES);
         assert_eq!(out.len(), 3 + 2 + 5 + 1 + 1);
         assert_eq!(out.last().unwrap(), "no reply (1): arena (asked 5m ago)");
     }
@@ -693,7 +697,7 @@ mod tests {
         let open = open_decisions(d);
         let got: Vec<_> = open.iter().map(|x| (x.ask.bead.as_str(), x.at)).collect();
         assert_eq!(got, [("a", NOW - 600), ("b", NOW - 60)]);
-        assert_eq!(render(&open, None, NOW)[0], "Decisions (2)");
+        assert_eq!(render(&open, None, NOW, MAX_LINES)[0], "Decisions (2)");
     }
 
     #[test]

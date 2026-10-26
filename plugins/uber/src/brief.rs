@@ -90,8 +90,8 @@ fn fan_out(r: &Request, body: &str) -> Result<(), Failure> {
     }
 }
 
-/// Prints the brief over the last request.
-fn print(dir: &Path, now: i64) {
+/// Prints the brief over the last request in at most `max` lines.
+fn print(dir: &Path, now: i64, max: usize) {
     let last = brief::last(dir);
     let replies = last
         .as_ref()
@@ -101,6 +101,7 @@ fn print(dir: &Path, now: i64) {
         &brief::open_decisions(dir),
         last.as_ref().map(|r| (r, replies.as_slice())),
         now,
+        max,
     );
     for l in lines {
         println!("{l}");
@@ -135,7 +136,7 @@ pub(crate) fn brief(a: BriefArgs) -> Result<(), Failure> {
     let dir = uber_dir(&here)?;
     let now = (now_ms() / 1000) as i64;
     if a.show {
-        print(&dir, now);
+        print(&dir, now, brief::MAX_LINES);
         return Ok(());
     }
     let view = with_registry(async |client, kv| {
@@ -168,8 +169,10 @@ pub(crate) fn brief(a: BriefArgs) -> Result<(), Failure> {
         targets,
     };
     ask_brief(&dir, &request, fan_out)?;
-    print(&dir, now);
-    if !request.targets.is_empty() {
+    // The help line counts toward the phone's 25.
+    let help = !request.targets.is_empty();
+    print(&dir, now, brief::MAX_LINES - usize::from(help));
+    if help {
         println!(
             "help: {} UACs asked; their replies come as one pointer within {}, then run vega uber brief --show",
             request.targets.len(),
