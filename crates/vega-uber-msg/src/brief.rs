@@ -121,6 +121,19 @@ pub fn save_request(uber_dir: &Path, r: &Request) -> std::io::Result<()> {
     write_atomic(&request_file(uber_dir, &r.thread), &serde_json::to_vec(r)?)
 }
 
+/// A new thread id for `vega post ask --thread`.
+pub fn new_thread() -> String {
+    nuid::next().to_string()
+}
+
+/// Drops a request and its replies (its ask was not sent).
+pub fn remove(uber_dir: &Path, thread: &str) {
+    if valid_thread(thread) {
+        let _ = std::fs::remove_dir_all(dir(uber_dir).join(thread));
+        let _ = std::fs::remove_file(request_file(uber_dir, thread));
+    }
+}
+
 pub fn load(uber_dir: &Path, thread: &str) -> Option<Request> {
     if !valid_thread(thread) {
         return None;

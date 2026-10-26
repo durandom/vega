@@ -58,17 +58,8 @@ pub(crate) fn targets(view: &View, me: &Here) -> Vec<Target> {
     t
 }
 
-/// The thread id from `vega post ask`'s first line `ask: <thread> to ...`.
-pub(crate) fn thread_of(stdout: &str) -> Option<String> {
-    let rest = stdout.lines().next()?.strip_prefix("ask: ")?;
-    let t = rest.split_whitespace().next()?;
-    t.chars()
-        .all(|c| c.is_ascii_alphanumeric())
-        .then(|| t.to_string())
-}
-
-/// Sends `uber.brief` to `targets` on one gather thread; its id.
-fn fan_out(targets: &[Target], body: &str) -> Result<String, Failure> {
+/// Sends `uber.brief` to the request's targets on its thread.
+fn fan_out(r: &Request, body: &str) -> Result<(), Failure> {
     let mut cmd = Command::new(crate::ask::post_bin());
     cmd.args([
         "ask",
@@ -76,15 +67,16 @@ fn fan_out(targets: &[Target], body: &str) -> Result<String, Failure> {
         Kind::Brief.as_str(),
         "--within",
         brief::WITHIN,
+        "--thread",
+        &r.thread,
     ]);
-    for t in targets {
+    for t in &r.targets {
         cmd.args(["--to", &format!("{}@{}", t.pane, t.host)]);
     }
     cmd.arg(body);
     let failed = |m: String| Failure::new("ask_failed", m, "retry: vega uber brief");
     match vega_herdr::output_within(&mut cmd, ASK_TIMEOUT) {
-        Ok(Some(o)) if o.status.success() => thread_of(&String::from_utf8_lossy(&o.stdout))
-            .ok_or_else(|| failed("vega post ask printed no thread".into())),
+        Ok(Some(o)) if o.status.success() => Ok(()),
         Ok(Some(o)) => {
             let text = String::from_utf8_lossy(&o.stdout).to_string()
                 + &String::from_utf8_lossy(&o.stderr);
@@ -113,6 +105,29 @@ fn print(dir: &Path, now: i64) {
     for l in lines {
         println!("{l}");
     }
+}
+
+/// Records the request, then sends it: a reply that comes back at once
+/// finds the record. A failed send removes it again.
+pub(crate) fn ask_brief(
+    dir: &Path,
+    r: &Request,
+    send: impl FnOnce(&Request, &str) -> Result<(), Failure>,
+) -> Result<(), Failure> {
+    brief::save_request(dir, r)
+        .map_err(|e| Failure::new("state_io", e.to_string(), "check the state dir"))?;
+    if !r.targets.is_empty() {
+        let body = serde_json::to_string(&Brief {
+            since: r.since.clone(),
+        })
+        .expect("a Brief serializes");
+        if let Err(f) = send(r, &body) {
+            brief::remove(dir, &r.thread);
+            return Err(f);
+        }
+    }
+    brief::prune(dir, brief::KEEP);
+    Ok(())
 }
 
 pub(crate) fn brief(a: BriefArgs) -> Result<(), Failure> {
@@ -145,26 +160,14 @@ pub(crate) fn brief(a: BriefArgs) -> Result<(), Failure> {
         .map(|r| r.at)
         .unwrap_or(now - brief::FIRST_SINCE);
     let since = brief::rfc3339(since);
-    let thread = if targets.is_empty() {
-        // Nothing to ask; the record still marks this brief's time.
-        format!("none{now}")
-    } else {
-        let body = serde_json::to_string(&Brief {
-            since: since.clone(),
-        })
-        .expect("a Brief serializes");
-        fan_out(&targets, &body)?
-    };
     let request = Request {
-        thread,
+        thread: brief::new_thread(),
         asker: here.pane.clone(),
         since,
         at: now,
         targets,
     };
-    brief::save_request(&dir, &request)
-        .map_err(|e| Failure::new("state_io", e.to_string(), "check the state dir"))?;
-    brief::prune(&dir, brief::KEEP);
+    ask_brief(&dir, &request, fan_out)?;
     print(&dir, now);
     if !request.targets.is_empty() {
         println!(
@@ -245,11 +248,45 @@ mod tests {
         assert_eq!(got, ["w2:p1@titan_local", "w3V:p1@proteus"]);
     }
 
+    fn request() -> Request {
+        Request {
+            thread: brief::new_thread(),
+            asker: "w1:p1".into(),
+            since: brief::rfc3339(0),
+            at: 1,
+            targets: vec![Target {
+                host: "titan".into(),
+                pane: "w2:p1".into(),
+                project: "arena".into(),
+            }],
+        }
+    }
+
     #[test]
-    fn the_thread_comes_from_the_first_line_of_post_ask() {
-        let out = "ask: phFIPgeIpAQf05sPo6ugsU to 3 agents, answers of 3 held until all answered or 2m\nsent[3]{host,pane,result}:";
-        assert_eq!(thread_of(out).as_deref(), Some("phFIPgeIpAQf05sPo6ugsU"));
-        assert_eq!(thread_of("ask: ../x to 1"), None);
-        assert_eq!(thread_of("sent: w1"), None);
+    fn a_reply_that_comes_back_during_the_send_is_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let r = request();
+        ask_brief(d, &r, |r, body| {
+            assert!(vega_uber_msg::validate(Kind::Brief, body.as_bytes()).is_ok());
+            // The UAC answers before `vega post ask` has returned.
+            assert!(
+                brief::store_reply(d, &r.thread, "w1:p1", "titan", "w2:p1", b"FYI: x").unwrap()
+            );
+            Ok(())
+        })
+        .unwrap();
+        let replies = brief::replies(d, &r);
+        assert_eq!(replies[0].1.as_deref(), Some("FYI: x"));
+    }
+
+    #[test]
+    fn a_failed_send_leaves_no_brief() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let r = request();
+        let f = ask_brief(d, &r, |_, _| Err(Failure::new("ask_failed", "x", ""))).unwrap_err();
+        assert_eq!(f.code, "ask_failed");
+        assert_eq!(brief::last(d), None);
     }
 }

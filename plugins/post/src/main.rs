@@ -177,6 +177,9 @@ enum Cmd {
         /// Typed question: a Vega-Kind header and a JSON body, sent as is (see send --kind)
         #[arg(long)]
         kind: Option<String>,
+        /// Use this thread id (letters and digits): a tool that records the thread before it asks
+        #[arg(long, hide = true)]
+        thread: Option<String>,
         /// The question
         text: String,
     },
@@ -415,8 +418,9 @@ fn main() -> ExitCode {
             to,
             within,
             kind,
+            thread,
             text,
-        }) => ask(&to, &within, kind.as_deref(), &text),
+        }) => ask(&to, &within, kind.as_deref(), thread.as_deref(), &text),
         Some(Cmd::Command { kind, to, timeout }) => send_cmd(&kind, &to, &timeout),
         Some(Cmd::Inbox { keep, max, show }) => match show {
             Some(id) => inbox_show(id),
@@ -4103,11 +4107,36 @@ fn attentions(
     out
 }
 
+/// `ask --thread`, else a new nuid: letters and digits only, as it names
+/// the ask's state file.
+fn ask_thread(given: Option<&str>) -> Result<String, Failure> {
+    match given {
+        None => Ok(nuid::next().to_string()),
+        Some(t)
+            if !t.is_empty() && t.len() <= 64 && t.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            Ok(t.to_string())
+        }
+        Some(t) => Err(Failure::new(
+            "usage",
+            format!("{t:?} is not a thread id"),
+            "--thread takes 1-64 letters and digits",
+        )),
+    }
+}
+
 /// `vega post ask`: records the ask, then sends the question to every
 /// target on one thread (hop 1, so replies carry `--re <thread>/1@<published-ms>`).
-fn ask(to: &[String], within: &str, kind: Option<&str>, text: &str) -> Result<(), Failure> {
+fn ask(
+    to: &[String],
+    within: &str,
+    kind: Option<&str>,
+    thread: Option<&str>,
+    text: &str,
+) -> Result<(), Failure> {
     let wait = parse_duration(within)?;
     let kind = mail_kind(kind, text)?;
+    let thread = ask_thread(thread)?;
     let my_host = host();
     if st::is_inbox_only(&my_host) {
         return Err(Failure::new(
@@ -4139,7 +4168,6 @@ fn ask(to: &[String], within: &str, kind: Option<&str>, text: &str) -> Result<()
             "targets are pane ids like w3V:p2, or w3V:p2@ganymede",
         ));
     }
-    let thread = nuid::next().to_string();
     // Agents on inbox-only hosts get the question, but their answers go into
     // quarantine (a notice for the human), so the fan-in does not wait.
     let awaited: Vec<String> = targets
@@ -6850,6 +6878,15 @@ mod tests {
         assert_eq!(refused("uber.tell", "{}"), "uber_kind");
         assert_eq!(refused("uber.applied", "not json"), "uber_malformed");
         assert_eq!(refused("uber.brief", &"x".repeat(129)), "uber_too_large");
+    }
+
+    #[test]
+    fn ask_takes_a_given_thread_id_only_if_it_names_no_path() {
+        assert_eq!(ask_thread(Some("abc123")).unwrap(), "abc123");
+        assert!(!ask_thread(None).unwrap().is_empty());
+        for bad in ["", "../x", "a/b", &"x".repeat(65)] {
+            assert_eq!(ask_thread(Some(bad)).unwrap_err().code, "usage");
+        }
     }
 
     #[test]

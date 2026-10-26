@@ -172,8 +172,9 @@ typed into a pane ([vegad.md](vegad.md) Security).
   to `uber.brief`: at most 3 lines each, ≤600 chars per UAC. Compress, don't relay: no transcripts and
   no raw sentinel output.
   - `vega uber brief` (the Uber may not run `vega post ask`) sends `uber.brief {since}` with
-    `vega post ask --kind uber.brief --within 2m` to every live UAC (fresh host, pane alive) and records the
-    thread in `uber/briefs/<thread>.json`; `since` is the previous brief's time (first: 24 h back).
+    `vega post ask --kind uber.brief --within 2m` to every live UAC (fresh host, pane alive). It records the
+    thread in `uber/briefs/<thread>.json` before it sends (`--thread`), so a fast reply finds it. `since` is
+    the previous brief's time (first: 24 h back).
   - A UAC replies once with the reply command: at most 3 lines, each `FYI: ...` or `Blocked: ...`; an
     unmarked line counts as FYI. A pending decision is never a brief line: it goes through `vega uber ask`.
   - vegad on the Uber host stores each target's reply on that thread (`uber/briefs/<thread>/`); the reply
