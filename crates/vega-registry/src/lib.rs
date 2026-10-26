@@ -32,6 +32,8 @@
 //!   applied there; headless hosts follow their control host's (vega-lhc.86).
 //! - `<host>.lanista.v2.<project>.<seat>.<lane>.<tier>` = runtime model pins;
 //!   components are hex-encoded, managed by `pins`, independent of vegad.
+//! - `<host>.uber.v1` = {schema: 1, pane, host, at, epoch}: the Uber-UAC claim
+//!   (docs/design/uber-uac.md §2); `View::live_uber` picks the live one.
 //!
 //! Inbox-only hosts may hold a read grant for single keys (`get_one`, one
 //! direct get each, vega-lhc.90) and nothing else.
@@ -40,6 +42,7 @@
 
 pub mod cutover;
 pub mod pins;
+pub mod uber_state;
 
 use std::collections::BTreeMap;
 use std::env;
@@ -125,6 +128,28 @@ pub fn janitor_key(host: &str) -> String {
 /// A host's janitor summary: large and rarely read, so `read` skips it.
 pub fn is_janitor(key: &str) -> bool {
     key.split('.').nth(1) == Some("janitor")
+}
+
+/// The Uber-UAC claim of `host`: one key per host, one live claim estate-wide.
+pub fn uber_key(host: &str) -> String {
+    format!("{}.uber.v1", token(host))
+}
+
+/// One `<host>.uber.v1` record (docs/design/uber-uac.md §2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UberClaim {
+    pub pane: String,
+    pub host: String,
+    /// Claim time in ms; a new claim always gets a new one.
+    pub epoch: u64,
+}
+
+impl UberClaim {
+    /// Winner order: the highest epoch, ties to the lower host name.
+    fn beats(&self, other: &Self) -> bool {
+        (self.epoch, std::cmp::Reverse(token(&self.host)))
+            > (other.epoch, std::cmp::Reverse(token(&other.host)))
+    }
 }
 
 pub fn theme_key(host: &str) -> String {
@@ -260,6 +285,10 @@ pub fn local_entries(
         if let Ok(entry) = uac_entry(host, &record) {
             out.insert(uac_key(host, &project), entry);
         }
+    }
+    // The Uber-UAC claim file (vega uber claim); its absence deletes the key.
+    if let Some(claim) = uber_state::file().and_then(|f| uber_state::local(&f, host)) {
+        out.insert(uber_key(host), claim);
     }
     if let Some(store) = vega_herdr::notes::Store::local() {
         for n in store.list() {
@@ -507,6 +536,37 @@ impl View {
     pub fn wait_source(&self, host: &str) -> Option<&Value> {
         self.fresh(host)
             .then(|| self.entries.get(&format!("{}.orchestration", token(host))))?
+    }
+
+    /// Every well-formed Uber claim, also of stale hosts and gone panes. A
+    /// record counts only under its own host's key.
+    pub fn uber_claims(&self) -> Vec<UberClaim> {
+        self.entries
+            .iter()
+            .filter_map(|(key, v)| {
+                let host = v["host"].as_str()?;
+                let claim = UberClaim {
+                    pane: v["pane"].as_str().filter(|p| !p.is_empty())?.to_string(),
+                    host: host.to_string(),
+                    epoch: v["epoch"].as_u64()?,
+                };
+                (v["schema"] == 1 && *key == uber_key(host)).then_some(claim)
+            })
+            .collect()
+    }
+
+    /// Whether the claim's host beats and still lists its pane.
+    pub fn uber_live(&self, claim: &UberClaim) -> bool {
+        matches!(self.status(&token(&claim.host), &claim.pane), Some(Some(_)))
+    }
+
+    /// The live Uber-UAC: of the live claims, the highest epoch, ties to the
+    /// lower host name. `None` when no claim is live (`uber_absent`).
+    pub fn live_uber(&self) -> Option<UberClaim> {
+        self.uber_claims()
+            .into_iter()
+            .filter(|c| self.uber_live(c))
+            .reduce(|best, c| if c.beats(&best) { c } else { best })
     }
 
     /// UAC registrations of fresh hosts for a full project ID.
@@ -1327,5 +1387,55 @@ esac
         );
         assert_eq!(v.uacs("~/src/x/.git").len(), 1);
         assert!(v.uacs("~/src/y/.git").is_empty());
+    }
+
+    fn uber(v: &mut View, host: &str, pane: &str, epoch: u64, live: bool) {
+        v.entries.insert(beat_key(host), json!({"at": unix_now()}));
+        v.entries.insert(
+            uber_key(host),
+            json!({"schema": 1, "host": host, "pane": pane, "at": 0, "epoch": epoch}),
+        );
+        if live {
+            v.entries.insert(
+                agent_key(host, pane),
+                json!({"pane": pane, "status": "idle"}),
+            );
+        }
+    }
+
+    #[test]
+    fn live_uber_is_the_newest_live_claim() {
+        let mut v = View::default();
+        assert_eq!(uber_key("ganymede"), "ganymede.uber.v1");
+        assert_eq!(v.live_uber(), None);
+        uber(&mut v, "ganymede", "w1:p1", 100, true);
+        uber(&mut v, "proteus", "w2:p1", 200, true);
+        assert_eq!(v.live_uber().unwrap().host, "proteus");
+        // Tie: the lower host name.
+        uber(&mut v, "io", "w3:p1", 200, true);
+        assert_eq!(v.live_uber().unwrap().host, "io");
+        // A gone pane or a stale host is not live; an older live claim wins.
+        uber(&mut v, "titan", "w4:p1", 900, false);
+        v.entries
+            .insert(beat_key("io"), json!({"at": unix_now() - 600}));
+        assert_eq!(v.live_uber().unwrap().host, "proteus");
+        assert_eq!(v.uber_claims().len(), 4);
+    }
+
+    #[test]
+    fn uber_claims_count_only_under_their_own_key() {
+        let mut v = View::default();
+        uber(&mut v, "ganymede", "w1:p1", 100, true);
+        // A record naming another host, or another schema, is ignored.
+        v.entries.insert(
+            uber_key("deimos"),
+            json!({"schema": 1, "host": "ganymede", "pane": "w1:p1", "epoch": 999}),
+        );
+        v.entries
+            .insert(beat_key("deimos"), json!({"at": unix_now()}));
+        uber(&mut v, "io", "w3:p1", 500, true);
+        v.entries.get_mut(&uber_key("io")).unwrap()["schema"] = json!(2);
+        assert_eq!(v.uber_claims().len(), 1);
+        assert_eq!(v.live_uber().unwrap().epoch, 100);
     }
 }

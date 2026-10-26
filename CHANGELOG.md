@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 78 · 2026-10-26
+
+- feature: `vega uber claim|release|status`, the estate-wide singleton claim of
+  the Uber-UAC (registry key `<host>.uber.v1`, claim file
+  `~/.local/state/vega/uber/claim.json`). A live claim elsewhere refuses, a gone
+  one is taken over, and of two racing claims the newest wins; the loser gets
+  `uber_conflict`. Needs the broker. Nothing uses the claim yet. See
+  [Uber-UAC](docs/design/uber-uac.md).
+
 ## 77 · 2026-10-26
 
 - feature: after a rate limit or overload vegad no longer retypes the mail

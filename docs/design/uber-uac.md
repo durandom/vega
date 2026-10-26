@@ -1,6 +1,6 @@
 # Uber-UAC: the Slayer's one channel to every UAC
 
-Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Not built.
+Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2).
 
 ## Problem and decision
 
@@ -48,13 +48,25 @@ broker (local mode) there is no Uber (§2).
 
 - `vega uber claim`: the session becomes the Uber-UAC. Registry key `<host>.uber.v1` = `{schema: 1, pane,
   host, at, epoch}`. This mirrors `<host>.uac.v2.<id>`, with one key for the whole estate, not one per project.
-  `epoch` = claim time in ms; it changes on every claim.
+  `epoch` = claim time in ms, raised above every epoch already in the registry; it changes on every claim
+  (a repeated claim by the live Uber itself is a no-op). The claim lives in `$XDG_STATE_HOME/vega/uber/claim.json`
+  on its host, the source of truth: `vega uber claim` writes the file and the key, and vegad keeps the key
+  equal to the file.
 - **Live** = the host's beat is fresh and the pane is alive (as for `remote_uac`). A live claim elsewhere
   refuses with `uber_exists` and the hint `vega uber release in <pane> on <host>`.
 - **Takeover**: a claim whose pane or host is gone is replaced, and the output prints `took_over: <pane> on <host> (gone)`.
-  Each host writes only its own key, so two claims can race. The lowest `epoch` wins, ties go to the lower
-  host name. The loser sees the conflict on its next read and prints `uber_conflict`. UACs apply the same rule.
-- `vega uber release`: deletes the key. `vega uber` (home): claim, open asks, last brief.
+  Each host writes only its own key, so two claims can race. Of the live claims the highest `epoch` wins
+  (the newest claim), ties go to the lower host name. Only a race or a returning claim reaches this rule (a
+  live claim refuses new ones), and the newer claim must win: a claim whose host slept or whose pane id came
+  back after a takeover is older and stays superseded, so the Uber never flips back. The loser sees the
+  conflict on its next read (`vega uber claim` reads again after writing, `vega uber status` on every call)
+  and prints `uber_conflict` with the winner, plus the hint `vega uber release`. UACs apply the same rule:
+  `vega_registry::View::live_uber` is the one resolver. Asks are resent to the winner (New epoch, below),
+  after which the loser's answers are refused (§4, check 2).
+- `vega uber release`: the Uber itself deletes its file and key; without a broker it deletes the file and
+  vegad deletes the key on reconnect. `vega uber status`: the live claim, superseded and gone claims.
+  `vega uber` (home): claim, open asks, last brief.
+- `vega uber claim` needs the broker: without it there is no estate-wide view, so it refuses with `no_broker`.
 - **Absent** (no live claim, broker down, or local mode): `vega uber ask` returns `uber_absent` and the UAC
   behaves exactly as today: a `slayer-decision` bead, the board, its own pane. Nothing queues for an
   Uber that does not exist.
