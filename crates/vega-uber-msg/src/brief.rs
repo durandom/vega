@@ -423,8 +423,10 @@ pub fn open_decisions(uber_dir: &Path) -> Vec<Decision> {
 }
 
 /// Whether the Slayer is talking to the Uber now (its claim's engaged
-/// window, vega-lhc.209.12). The Uber must not wake him otherwise; until
-/// that window exists it never is.
+/// window). The Uber must not wake him otherwise (the Slayer's rule, uber-uac.md
+/// §3 Batching). Deliberately off: vega-lhc.209.12 replaces this call with
+/// `View::uber_engaged(&claim, now).on()` in vegad's digest; until then no
+/// digest is sent, which the docs say.
 pub fn engaged(_uber_dir: &Path, _now: i64) -> bool {
     false
 }
