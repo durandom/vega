@@ -1,0 +1,27 @@
+[package]
+name = "vega-uber"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The Uber-UAC: the Slayer's one channel to every UAC; estate-wide singleton claim"
+publish = false
+
+[[bin]]
+name = "vega-uber"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+async-nats = "0.50"
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

@@ -26,6 +26,7 @@ cargo install --locked --path "$root/plugins/orchestration" --root "$HOME/.local
 cargo install --locked --path "$root/plugins/uac" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/ci" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/theme" --root "$HOME/.local"
+cargo install --locked --path "$root/plugins/uber" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/config" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/onboard" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/lanista" --root "$HOME/.local"

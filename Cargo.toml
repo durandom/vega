@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/vega-secrets", "plugins/secrets", "plugins/orchestration", "shims/herdr", "shims/gh", "shims/tea", "crates/vega-shim", "crates/vega-build", "crates/vega-ci-watch", "crates/vega-bd-sync", "plugins/bd", "shims/bd", "plugins/ci", "vega", "crates/vega-herdr", "crates/vega-plugin", "crates/vega-transcript", "crates/vega-registry", "plugins/skills", "plugins/mux", "plugins/post", "plugins/open", "plugins/board", "plugins/deploy", "plugins/uac", "plugins/lanista", "plugins/capacity", "plugins/janitor", "plugins/review", "crates/vega-theme-sync", "crates/vega-schedule", "plugins/theme", "plugins/config", "plugins/onboard", "plugins/gate", "shims/git"]
+members = ["crates/vega-secrets", "plugins/secrets", "plugins/orchestration", "shims/herdr", "shims/gh", "shims/tea", "crates/vega-shim", "crates/vega-build", "crates/vega-ci-watch", "crates/vega-bd-sync", "plugins/bd", "shims/bd", "plugins/ci", "vega", "crates/vega-herdr", "crates/vega-plugin", "crates/vega-transcript", "crates/vega-registry", "plugins/skills", "plugins/mux", "plugins/post", "plugins/open", "plugins/board", "plugins/deploy", "plugins/uac", "plugins/lanista", "plugins/capacity", "plugins/janitor", "plugins/review", "crates/vega-theme-sync", "crates/vega-schedule", "plugins/theme", "plugins/uber", "plugins/config", "plugins/onboard", "plugins/gate", "shims/git"]
 
 [profile.release]
 opt-level = 3

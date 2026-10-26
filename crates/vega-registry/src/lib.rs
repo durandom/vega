@@ -42,6 +42,7 @@
 
 pub mod cutover;
 pub mod pins;
+pub mod uber_state;
 
 use std::collections::BTreeMap;
 use std::env;
@@ -284,6 +285,10 @@ pub fn local_entries(
         if let Ok(entry) = uac_entry(host, &record) {
             out.insert(uac_key(host, &project), entry);
         }
+    }
+    // The Uber-UAC claim file (vega uber claim); its absence deletes the key.
+    if let Some(claim) = uber_state::file().and_then(|f| uber_state::local(&f, host)) {
+        out.insert(uber_key(host), claim);
     }
     if let Some(store) = vega_herdr::notes::Store::local() {
         for n in store.list() {

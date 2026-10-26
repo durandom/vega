@@ -17,6 +17,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | [`mux`](plugins/mux/) | Agent-to-agent messaging over herdr; spawn and adopt agents |
 | [`post`](plugins/post/) | Agent mail over a NATS JetStream broker; `vegad`, the per-host daemon |
 | [`uac`](plugins/uac/) | Coordinator mode: the role guide and the home view of the agents a session runs |
+| [`uber`](plugins/uber/) | The Uber-UAC: the Slayer's one channel to every UAC (estate-wide claim) |
 | [`board`](plugins/board/) | The UAC's open decisions and the repo's beads in a herdr pane |
 | [`open`](plugins/open/) | Open a selected path in an editor, or jump to a herdr pane (herdr plugin) |
 | [`review`](plugins/review/) | Live review in the owner's headed browser; notes arrive as mail |
