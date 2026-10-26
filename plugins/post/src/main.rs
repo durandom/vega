@@ -44,6 +44,7 @@ mod registry_read_test;
 mod service;
 mod supervise;
 mod theme;
+mod uber_ask;
 mod upstream;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2740,6 +2741,13 @@ async fn serve(
                 // Published with the CI mail on the next tick.
                 ci_unsent.extend(due);
                 slow("metadata", t);
+                if up {
+                    // Open Uber asks: withdraw on bead close, resend on a new epoch.
+                    let t = Instant::now();
+                    let run = uber_ask::round(&js, &host, registry.view.as_ref());
+                    while_up(&client, outage::CALL, run).await;
+                    slow("uber asks", t);
+                }
                 meta_next = Some(Instant::now() + REGISTRY_EVERY);
             }
             for p in sup.ripe(SILENT_AFTER) {
