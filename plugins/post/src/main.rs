@@ -48,6 +48,7 @@ mod uber;
 mod uber_ask;
 #[cfg(test)]
 mod uber_broker_test;
+mod uber_host;
 mod upstream;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1846,8 +1847,39 @@ async fn uber_drain(
                         ));
                     }
                 }
-                // The Uber host's side (vega-lhc.209.6) plugs in here.
-                Some(_) => {}
+                // The Uber host's side: asks, withdraws and results mailed
+                // to this host's Uber claim pane are recorded (uber_host.rs).
+                Some(k) => {
+                    let (to_pane, from_host) = parse_subject(&m.subject).unwrap_or(("", ""));
+                    let (to_pane, from_host) = (to_pane.to_string(), from_host.to_string());
+                    let from_pane = m
+                        .headers
+                        .as_ref()
+                        .and_then(|hs| hs.get(h::FROM_PANE))
+                        .map(|v| v.as_str().to_string())
+                        .unwrap_or_default();
+                    let body = m.payload.to_vec();
+                    let rec = tokio::task::spawn_blocking(move || {
+                        let file = vega_registry::uber_state::file()?;
+                        let now = uber_host::now();
+                        uber_host::ingest(
+                            &file,
+                            &st::post_host(),
+                            k,
+                            &body,
+                            &from_host,
+                            &from_pane,
+                            &to_pane,
+                            &now,
+                        )
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(l) = rec {
+                        log(&l);
+                    }
+                }
                 None => {}
             }
             m.ack().await.map_err(broker_err)?;

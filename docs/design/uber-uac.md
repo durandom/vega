@@ -2,7 +2,8 @@
 
 Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2),
 the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4),
-the UAC-host check of `uber.answer` (§4, vega-lhc.209.5).
+the UAC-host check of `uber.answer` (§4, vega-lhc.209.5), the Uber host's received asks, captures,
+`vega uber answer` and audit (§4, vega-lhc.209.6).
 
 ## Problem and decision
 
@@ -122,7 +123,13 @@ typed into a pane ([vegad.md](vegad.md) Security).
   picks an option). Deploy, GitHub settings, broker rights, deletions and anything irreversible:
   **L4** (only the Slayer may approve).
 - **Batching**: vegad on the Uber host records every ask it receives, so `vega uber` lists them whatever the
-  model does. The Uber shows asks to the Slayer:
+  model does: `uber.ask`, `uber.withdraw` and `uber.applied` that vegad's `uber-<host>` consumer sees for this host's
+  claim pane go to `vega_uber_msg::received::ingest` (`plugins/post/src/uber_host.rs`), which keeps `$XDG_STATE_HOME/vega/uber/received/<id>.json` (ask, tag,
+  sender host and pane, state `open|sent|applied|refused|withdrawn`) and writes the audit line. The name differs
+  from the UAC host's `asks/`, since one host may hold both. A withdraw or applied from a host other than the
+  ask's sender changes nothing (audited `ignored`). A `refused:<code>` reopens the ask and frees its capture for a retry, except
+  the final codes `answered`, `withdrawn`, `bead_closed` and `no_ask` (state `refused`, tag freed). A resend keeps the
+  tag and reopens even those. The Uber shows asks to the Slayer:
   - **at once**: `urgent` asks (production down, security, data loss, or a deadline under 1 h). The open dialog
     triggers the app's "actions required" push.
   - **batched**: everything else, when the Slayer says "brief" or opens the session, plus a one-line
@@ -168,10 +175,22 @@ an intent (closing again, commenting only if `via uber <id>` is missing) and ski
 
 **What `slayer_text` is.** The model must not write it. Claude Code hooks in the Uber's settings capture
 the Slayer's input: `PostToolUse` on `AskUserQuestion` (the selected labels and notes) and
-`UserPromptSubmit` (typed prompts). Both append to `$XDG_STATE_HOME/vega/uber/captures.jsonl`.
-`vega uber answer <id> --capture <n>` builds `slayer_text` from that record. It refuses an answer with no
-capture, or with a capture that was already used or is not **bound** to the ask:
+`UserPromptSubmit` (typed prompts). Both run `vega_uber_capture`, which appends one line to
+`$XDG_STATE_HOME/vega/uber/captures.jsonl` and prints nothing. It drops the known non-Slayer prompts (§5 spike):
+vegad pointers (`[vega-post] ...`), `<task-notification>` notices and agent mail typed by `vega mux send` (a
+`[vega-mux] from` footer line). `<n>` is the line number (1-based, append-only), and `capture.sha256` is the
+sha256 of that line. `vega uber answer <id|tag> --capture <n>`, run in the live claim's pane, builds `slayer_text`
+from that record, sends the `uber.answer` to the ask's sender pane with the claim's `epoch`, and marks the ask
+`sent`. It refuses an answer with no capture (`no_capture`; the hint lists the captures bound to the ask), with
+a capture written before the ask arrived or already used for it, or one not **bound** to the ask:
 
+- **Logged by the harness**: `vega uber answer` reads the Claude Code session log of the live Uber pane
+  (`herdr pane current` → `agent_session`, `vega_transcript::locate`) and refuses a capture that is not in it
+  (`capture_unverified`). An AskUserQuestion capture needs the assistant's `AskUserQuestion` `tool_use` with the
+  same questions and the user line with its `tool_result` and `toolUseResult.answers` equal to the capture's
+  (main thread only, not `isSidechain`); answers and notes are then taken from the log. A typed prompt needs a
+  user line (not `isMeta`, no `toolUseResult`) with exactly that text. Each JSON line is parsed on its own, so
+  text the model prints or passes to a tool never forms such a line. Shape verified on Claude Code 2.1.310.
 - **Bound by the harness**: every ask shown gets a short tag (`#a7`) in its AskUserQuestion `question`.
   An AskUserQuestion capture holds the tool input and the answers, so it names the ask by that tag and the
   option by its exact label. The model does not choose the binding.
@@ -185,6 +204,7 @@ capture, or with a capture that was already used or is not **bound** to the ask:
 - **L4 approvals** need an AskUserQuestion capture whose answer is an exact option label (`capture.source =
   ask_user_question`, `pick` set). A typed prompt or "Other" text goes to an L4 ask as a comment
   (`approval: false`); the UAC must not treat it as approval and asks again with the options it implies.
+  `approval` is `true` only for such a pick on an L4 ask; an L3 pick carries `approval: false`.
 
 The answer carries `capture.source`, `tag` and `approval`. The UAC-host vegad checks that the tag is the
 ask's (a prefix of the id's hash), and that an L4 answer with `approval: true` has `source = ask_user_question` and a matching
@@ -193,14 +213,22 @@ tags goes in full to each of its asks, and each UAC reads it in its own context.
 the UAC asks again.
 
 **What the Uber-UAC may run.** It runs in Manual mode (Bypass is unavailable from the app anyway).
-`vega uber start` writes its settings, which allow `Bash(vega uber:*)` and `Bash(vega post inbox:*)` only. There is no
+`vega uber start` writes its settings, which allow `Bash(vega uber:*)` and `Bash(vega post inbox:*)` only.
+The capture hook is therefore not a `vega uber` command: it is the binary `vega_uber_capture` (no `vega-`
+prefix, so it is no plugin and the `vega` dispatcher does not reach it), and the model's call to it raises a
+permission prompt. The model must not write the capture file directly either: the settings deny `Write`,
+`Edit` and `Bash` on `$XDG_STATE_HOME/vega/uber/` (`captures.jsonl`, `received/`, `audit.jsonl`) and on
+`~/.claude/projects` (the session logs answers are checked against), and allow `Write`/`Edit` only inside the
+`vega-uber-uac` checkout (vega-lhc.209.7). There is no
 `vega mux send`, no `vega post send`, no transcripts or pane reads, no host actions (deploy, git, bd
 writes, secrets) and no file edits. Any other call raises a permission prompt on the phone, which the
 Slayer can see and refuse.
 
 **Audit**: `$XDG_STATE_HOME/vega/uber/audit.jsonl` on the Uber host records each ask received, shown,
-answered (capture, `slayer_text`), sent, applied or refused. `vega uber audit [--last 10]` prints
-one line per event, short enough for the phone. On the project side, each Slayer comment `via uber` on the
+answered (capture, `slayer_text`), sent, applied or refused, plus `resent`, `withdrawn`, `rejected` (an
+answer `vega uber answer` refused, with the code) and `ignored`. `shown` is written by `vega uber show`
+(vega-lhc.209.7). `vega uber audit [--last 10]` prints one line per event, short enough for the phone
+(`10-26 13:02Z answered #a7 vega-lhc.209: capture 3: yes`; times in UTC). On the project side, each Slayer comment `via uber` on the
 bead is the per-project record.
 
 **A UAC must refuse** (vegad does so mechanically, and the guide says it too): an answer with no open
@@ -214,7 +242,11 @@ cannot check `capture.sha256`; the hash is there for the Uber's own audit. The c
 model to the Slayer's input on ganymede. The UAC host relies on the broker-enforced sender host for the rest.
 
 **Limit, stated plainly.** The pane id is self-asserted, and every agent on the Uber host runs without
-prompts. A rogue agent on ganymede could write a capture and send an answer as the claim's pane. The nonce
+prompts. A capture alone proves nothing (`captures.jsonl` is a plain file, and
+`vega_uber_capture` takes any hook-shaped payload), so `vega uber answer` also needs it in the Uber session's
+log. What remains: a process on ganymede that writes the session log itself (or types into the Uber pane,
+which the log records as typed) and sends an answer as the claim's pane. The UAC host cannot tell, since it
+checks only the answer's self-asserted `capture` fields. The nonce
 stops forgery from other hosts and replays, not an attacker on the Uber host. The Uber host is therefore
 part of the trusted base, as every host's NATS key already is. Recommendation: run no unattended sentinels
 on the Uber host. Whether ganymede runs any today: I don't know. A dedicated OS user is deferred until a threat calls for it.
@@ -231,8 +263,10 @@ looks in the iOS/Android app is not documented; the spike below verified it in t
 Mapping (deterministic; `vega uber show` prints the JSON the model passes to AskUserQuestion):
 
 - One call shows up to 4 asks (the tool's limit), urgent ones first, then the oldest.
-- `header` (≤12 chars) = project short name. `question` = `#a7 <question> · L4 · due 14:00`, with the
-  context on a second line (≤280 chars).
+- `header` (≤12 chars) = project short name (the last path segment, cut to 12). `question` =
+  `#a7 <question> · L4 · due 10-26 14:00`, with the context on a second line (≤280 chars). The due time is the
+  deadline in its own offset, and `no-rush` has no due part: both hosts render and hash it the same
+  (`vega_uber_msg::shown`); `overdue` is not part of the rendering.
 - `options` = the UAC's 2-3 options, the recommended one first with ` (Recommended)`. `description` = its
   detail, plus `why` for the recommended one. The tool adds "Other" for free text.
 - `slayer_text` (built by `vega uber answer` from the capture): the picked label, then ` — <notes>`

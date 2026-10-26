@@ -1,7 +1,10 @@
 //! `vega uber`: the Uber-UAC, the Slayer's one channel to every UAC
 //! (docs/design/uber-uac.md). This plugin holds the estate-wide singleton
-//! claim (§2, vega-lhc.209.2): `claim`, `release` and `status`; and the
-//! UAC side `ask` (§3, vega-lhc.209.4, ask.rs).
+//! claim (§2, vega-lhc.209.2): `claim`, `release` and `status`; the UAC
+//! side `ask` (§3, vega-lhc.209.4, ask.rs); and the Uber host's answer path
+//! (§4-5, vega-lhc.209.6): `answer` and `audit` (`answer.rs`). The capture
+//! hook is a binary of its own, `vega_uber_capture` (`capture_main.rs`),
+//! outside `vega uber`.
 //!
 //! The claim file on its host is the truth; the registry key
 //! `<host>.uber.v1` is its copy (`vega_registry::uber_state`), and
@@ -18,6 +21,8 @@ use serde_json::json;
 use vega_herdr::{herdr_local, print_failure, state as st, Failure};
 use vega_registry::{uber_state, UberClaim, View};
 
+mod answer;
+
 const SKILL: &str = include_str!("../SKILL.md");
 
 /// Connect, read and write within this; the claim needs the broker.
@@ -29,7 +34,7 @@ const TIMEOUT: Duration = Duration::from_secs(6);
     bin_name = "vega uber",
     disable_version_flag = true,
     about = "The Uber-UAC: the Slayer's one channel to every UAC (estate-wide singleton claim)",
-    after_help = "Without a command: status.\n\nExamples:\n  vega uber claim     # this session becomes the Uber-UAC\n  vega uber release   # hand the claim back\n  vega uber status    # live, superseded and gone claims\n  vega uber ask --bead vega-12 --level L3 --deadline no-rush --option \"yes: ship\" --option \"no: wait\" --recommend 0"
+    after_help = "Without a command: status.\n\nExamples:\n  vega uber claim     # this session becomes the Uber-UAC\n  vega uber release   # hand the claim back\n  vega uber status    # live, superseded and gone claims\n  vega uber ask --bead vega-12 --level L3 --deadline no-rush --option \"yes: ship\" --option \"no: wait\" --recommend 0\n  vega uber answer a7 --capture 12   # the Slayer's answer to #a7 from capture 12\n  vega uber audit --last 20"
 )]
 struct Cli {
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
@@ -52,6 +57,20 @@ enum Cmd {
     Status,
     /// UAC side: send a slayer-decision bead to the Uber-UAC (uber_absent: decide through the bead)
     Ask(ask::AskArgs),
+    /// Send the Slayer's answer to an ask, built from one capture (never from model text)
+    Answer {
+        /// The ask: its id, or the tag it holds (a7 or '#a7')
+        ask: String,
+        /// The capture line (1-based) in captures.jsonl; without it: refused, the hint lists the bound ones
+        #[arg(long)]
+        capture: Option<usize>,
+    },
+    /// One line per event: asks received, answered, sent, applied, refused
+    Audit {
+        /// How many events
+        #[arg(long, default_value_t = 10)]
+        last: usize,
+    },
 }
 
 fn main() -> ExitCode {
@@ -90,6 +109,8 @@ fn main() -> ExitCode {
         Some(Cmd::Release) => release(),
         Some(Cmd::Status) | None => status(),
         Some(Cmd::Ask(a)) => ask::ask(a),
+        Some(Cmd::Answer { ask, capture }) => answer::answer(&ask, capture),
+        Some(Cmd::Audit { last }) => answer::audit(last),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

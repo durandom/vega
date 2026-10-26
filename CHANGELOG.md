@@ -5,6 +5,18 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 82 · 2026-10-26
+
+- feature: on the Uber host, `vega_uber_capture` (Claude Code hook for
+  `PostToolUse` AskUserQuestion and `UserPromptSubmit`) records the Slayer's
+  input in `~/.local/state/vega/uber/captures.jsonl`; vegad pointers and task
+  notices are dropped. `vega uber answer <tag> --capture <n>` sends an
+  `uber.answer` built only from that capture, checked against the session's
+  own Claude Code log, and refuses without one;
+  `vega uber audit` prints every ask received, answered, sent, applied or
+  refused. The hooks are not installed yet (`vega uber start`, vega-lhc.209.7).
+  See [Uber-UAC trust rule](docs/design/uber-uac.md#4-trust-rule-and-guards).
+
 ## 81 · 2026-10-26
 
 - feature: vegad verifies each `uber.answer` before the UAC sees it: an open
