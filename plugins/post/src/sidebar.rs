@@ -30,6 +30,8 @@ pub struct State {
     /// The latest refresh's commands by target, in their order.
     wanted: Vec<(Key, Vec<Cmd>)>,
     sent: HashMap<Key, (Vec<Cmd>, Instant)>,
+    /// Commands that clear rows a refresh no longer names.
+    withdrawn: Vec<(Key, Cmd)>,
 }
 
 fn key(cmd: &Cmd) -> Key {
@@ -37,9 +39,41 @@ fn key(cmd: &Cmd) -> Key {
     (at(0), at(2))
 }
 
+/// The command that clears what `cmds` set on their target: each token,
+/// the display agent, title and state labels. herdr has no clear-all.
+fn withdraw(cmds: &[Cmd]) -> Option<Cmd> {
+    let first = cmds.first()?;
+    let source = first
+        .iter()
+        .position(|a| a == "--source")
+        .and_then(|i| first.get(i + 1))?;
+    let mut out: Cmd = first.iter().take(3).cloned().collect();
+    out.extend(["--source".into(), source.clone()]);
+    let mut clears: Vec<Cmd> = Vec::new();
+    for cmd in cmds {
+        for pair in cmd.windows(2) {
+            let clear = match pair[0].as_str() {
+                "--token" | "--clear-token" => {
+                    let name = pair[1].split('=').next().unwrap_or_default();
+                    vec!["--clear-token".to_string(), name.to_string()]
+                }
+                "--display-agent" | "--clear-display-agent" => vec!["--clear-display-agent".into()],
+                "--title" | "--clear-title" => vec!["--clear-title".into()],
+                "--state-label" | "--clear-state-labels" => vec!["--clear-state-labels".into()],
+                _ => continue,
+            };
+            if !clears.contains(&clear) {
+                clears.push(clear);
+            }
+        }
+    }
+    out.extend(clears.into_iter().flatten());
+    Some(out)
+}
+
 impl State {
     /// A new refresh: its commands replace the last ones; targets it no
-    /// longer names are forgotten.
+    /// longer names are withdrawn, not left to the TTL.
     pub fn set(&mut self, cmds: Vec<Cmd>) {
         let mut wanted: Vec<(Key, Vec<Cmd>)> = Vec::new();
         for cmd in cmds {
@@ -49,8 +83,24 @@ impl State {
                 None => wanted.push((k, vec![cmd])),
             }
         }
-        self.sent.retain(|k, _| wanted.iter().any(|(w, _)| w == k));
+        let dropped: Vec<Key> = self
+            .sent
+            .keys()
+            .filter(|k| !wanted.iter().any(|(w, _)| w == *k))
+            .cloned()
+            .collect();
+        for k in dropped {
+            if let Some(c) = self.sent.remove(&k).and_then(|(cmds, _)| withdraw(&cmds)) {
+                self.withdrawn.push((k, c));
+            }
+        }
+        self.withdrawn
+            .retain(|(k, _)| !wanted.iter().any(|(w, _)| w == k));
         self.wanted = wanted;
+    }
+
+    pub fn take_withdrawn(&mut self) -> Vec<(Key, Cmd)> {
+        std::mem::take(&mut self.withdrawn)
     }
 
     /// The targets to send now: changed, never sent, or due for renewal.
@@ -102,6 +152,11 @@ fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         let started = Instant::now();
+        // A target that is gone needs no clearing: errors are ignored.
+        for (_, cmd) in state.take_withdrawn() {
+            let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
+            let _ = vega_herdr::herdr_text(&refs);
+        }
         let due = state.due(started);
         let n = due.len();
         for (k, cmds) in due {
@@ -200,6 +255,45 @@ mod tests {
         let (_, cmds) = &s.due(now + RENEW_AFTER)[0];
         assert_eq!(cmds.len(), 2);
         assert_eq!(cmds[1][4], "git=✓");
+    }
+
+    #[test]
+    fn a_row_a_refresh_drops_is_cleared_at_once() {
+        let t0 = Instant::now();
+        let mut s = State::default();
+        let mut p1 = [
+            "pane",
+            "report-metadata",
+            "p1",
+            "--source",
+            "vega:vegad",
+            "--ttl-ms",
+            TTL_MS,
+            "--display-agent",
+            "x",
+            "--token",
+            "host=h",
+            "--clear-token",
+            "git",
+        ]
+        .map(String::from)
+        .to_vec();
+        s.set(vec![p1.clone(), cmd("pane", "p2", "a=1")]);
+        send_all(&mut s, t0);
+        assert!(s.take_withdrawn().is_empty());
+        s.set(vec![cmd("pane", "p2", "a=1")]);
+        let w = s.take_withdrawn();
+        assert_eq!(w.len(), 1);
+        assert_eq!(
+            w[0].1.join(" "),
+            "pane report-metadata p1 --source vega:vegad --clear-display-agent --clear-token host --clear-token git"
+        );
+        // Named again before the clear went out: no clear, a fresh send.
+        s.set(vec![cmd("pane", "p2", "a=1")]);
+        p1.truncate(9);
+        s.set(vec![p1, cmd("pane", "p2", "a=1")]);
+        assert!(s.take_withdrawn().is_empty());
+        assert_eq!(s.due(t0).len(), 1);
     }
 
     #[test]
