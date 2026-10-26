@@ -336,6 +336,9 @@ An inbox-only host may reply, but its mail never reaches an agent:
 - Trade-off: no archive and no retry for quarantined replies (the sender sees whether it was stored);
   a stream would need admin provisioning and per-host consumer grants.
 - Pointer text is fixed by vegad; message bodies never get typed into a pane.
+- Uber answers (`Vega-Kind: uber.answer`): vegad verifies them before the addressed UAC sees them, through its
+  own durable consumer of the host stream; `inbox` and `log` print them withheld
+  ([uber-uac.md](uber-uac.md) §4).
 
 ## Token budget
 

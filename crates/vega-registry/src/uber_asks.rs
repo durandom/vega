@@ -173,6 +173,20 @@ pub fn close(dir: &Path, id: &str, to: State, now: i64) -> std::io::Result<bool>
     })
 }
 
+/// Answered -> open again: vegad closed the ask for an answer whose bead
+/// comment then failed, so the Uber may send it once more. False when the
+/// ask is not answered (withdrawn meanwhile, or gone).
+pub fn reopen(dir: &Path, id: &str) -> std::io::Result<bool> {
+    let _lock = lock(dir)?;
+    let Some(mut a) = load(dir, id).filter(|a| a.state == State::Answered) else {
+        return Ok(false);
+    };
+    a.state = State::Open;
+    a.closed_at = None;
+    save(dir, &a)?;
+    Ok(true)
+}
+
 /// Records that the open ask `id` went to `to` at `now`; from then on only
 /// that claim's answer counts (§2 New epoch). False when it is not open.
 pub fn resend(dir: &Path, id: &str, to: SentTo, now: i64) -> std::io::Result<bool> {
@@ -284,6 +298,22 @@ mod tests {
             (State::Answered, Some(7), 5)
         );
         assert!(!close(d, ID2, State::Answered, 7).unwrap());
+    }
+
+    #[test]
+    fn only_an_answered_ask_reopens() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        save(d, &sample(ID, 1)).unwrap();
+        assert!(!reopen(d, ID).unwrap(), "open");
+        assert!(close(d, ID, State::Answered, 7).unwrap());
+        assert!(reopen(d, ID).unwrap());
+        let a = load(d, ID).unwrap();
+        assert_eq!((a.state, a.closed_at), (State::Open, None));
+        assert!(close(d, ID, State::Withdrawn, 8).unwrap());
+        assert!(!reopen(d, ID).unwrap(), "withdrawn stays withdrawn");
+        assert_eq!(load(d, ID).unwrap().state, State::Withdrawn);
+        assert!(!reopen(d, ID2).unwrap(), "no such ask");
     }
 
     #[test]

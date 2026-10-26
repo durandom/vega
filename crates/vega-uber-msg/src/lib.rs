@@ -3,17 +3,21 @@
 //!
 //! `validate` checks one body: `vega post send --kind` runs it before it
 //! publishes, so `send` never stores an oversized or malformed body. Mail
-//! published by other means is not checked on receipt yet; receivers (the
-//! UAC-host vegad, vega-lhc.209.5) are meant to parse with `validate` too.
+//! published by other means is checked on receipt where a receiver exists:
+//! the UAC-host vegad parses `uber.answer` with `validate` (vega-lhc.209.5).
 //! The cap is on the body's bytes, the field limits on characters. Unknown
 //! fields are refused.
 //!
 //! Semantic checks that need the open ask (tag, pick, epoch, L4 approval)
 //! belong to the UAC-host vegad (§4), not here.
 
+pub mod shown;
+
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+
+pub mod tag;
 
 /// The mail header that names the kind.
 pub const HEADER: &str = "Vega-Kind";

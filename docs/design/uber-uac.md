@@ -1,7 +1,8 @@
 # Uber-UAC: the Slayer's one channel to every UAC
 
 Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2),
-the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4).
+the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4),
+the UAC-host check of `uber.answer` (§4, vega-lhc.209.5).
 
 ## Problem and decision
 
@@ -101,7 +102,9 @@ typed into a pane ([vegad.md](vegad.md) Security).
 - **`--uber`** resolves through `vega_registry::View::live_uber` (§2) and refuses with `uber_absent` when no
   claim is live.
 - **Ids**: `id = <bead>~<nuid>`. The bead keeps the record readable and the nuid makes the id unguessable.
-  The Uber gives each open ask a short `tag` (`#a7`, unique among its open asks) for the phone.
+  The Uber gives each open ask a short `tag` (`#a7`) for the phone: `#` plus the shortest prefix (1-4 chars) of
+  the id's hash (the first 4 bytes of sha256(id), each mod 36 as `[0-9a-z]`; `vega_uber_msg::tag`) that none of
+  its other open asks uses. The UAC host never learns the tag; it checks that the tag is such a prefix.
   An answer is always for exactly one ask.
 - **Routing**: the UAC records the question as a `slayer-decision` bead as today, then runs `vega uber ask --bead <id>
   --level L3|L4 [--urgent "<why>"] --deadline <t> --context ... --option "<label>: <detail>" ... --recommend <n>`.
@@ -143,14 +146,25 @@ Verification is deterministic, in vegad on the UAC host, before anything reaches
    records that claim's host, pane and `epoch`, and the answer's `epoch` must match it. The claim need not be
    live any more. An answer that queued while the UAC host slept still applies after a takeover, and a
    resend to a new epoch replaces the recorded claim.
-3. `tag` is the ask's tag. `pick`, if set, equals one of the ask's option labels exactly. `slayer_text` is not
-   empty. `shown_sha256`, if set, matches vegad's own rendering of the ask. On an L4 ask, `approval: true` requires `capture.source = ask_user_question`, a `pick` and `shown_sha256`.
+3. `tag` is a prefix of the id's hash (§3 Ids). `pick`, if set, equals one of the ask's option labels exactly. `slayer_text` is not
+   empty. `shown_sha256`, if set, matches vegad's own rendering of the ask with the answer's tag. On an L4 ask, `approval: true` requires `capture.source = ask_user_question`, a `pick` and `shown_sha256`.
 4. The ask was not answered or withdrawn before. The first verified answer wins; later ones get `refused:answered`.
 
 If the answer passes, vegad adds `slayer_text` as a bead comment by `Slayer` with `via uber <id>` (the
 `vega uac answer` path), mails the UAC "The Slayer answered <bead> ...", closes the open ask, and returns
 `uber.applied`. If it fails, nothing reaches the pane: vegad writes a note (kind `uber-refused`, like
 quarantine) and returns `refused:<code>`.
+
+Built (`plugins/post/src/uber.rs`): the answer is inbox mail to the UAC's pane, so it waits in the host's stream
+while the host sleeps. vegad reads it with its own durable consumer (`uber-<host>`, created from the start of the archive and retried until it exists), types no pointer for it,
+and `vega post inbox` and `log` print it withheld. Codes: `no_ask`, `answered`, `withdrawn`, `bead_closed`,
+`bead_unknown` (bd could not tell), `wrong_sender`, `wrong_epoch`, `wrong_tag`, `bad_pick`, `shown_mismatch`,
+`l4_approval`, `malformed`/`too_large` (no reply without a valid id), `bd_failed` (the comment did not land;
+the ask opens again). The ask closes before the comment, under the store's lock, so the first answer wins.
+Each answer gets an outbox entry, `$XDG_STATE_HOME/vega/uber/outbox/<seq>.json`: a verified one first as an
+intent, before the ask closes and the comment is added, then as what vegad owes (the UAC's mail, `uber.applied`, a refusal's note),
+all before the answer is acked. vegad sends the entry with a fixed message id. A redelivery after a crash resumes
+an intent (closing again, commenting only if `via uber <id>` is missing) and skips a handled answer.
 
 **What `slayer_text` is.** The model must not write it. Claude Code hooks in the Uber's settings capture
 the Slayer's input: `PostToolUse` on `AskUserQuestion` (the selected labels and notes) and
@@ -173,7 +187,7 @@ capture, or with a capture that was already used or is not **bound** to the ask:
   (`approval: false`); the UAC must not treat it as approval and asks again with the options it implies.
 
 The answer carries `capture.source`, `tag` and `approval`. The UAC-host vegad checks that the tag is the
-ask's tag, and that an L4 answer with `approval: true` has `source = ask_user_question` and a matching
+ask's (a prefix of the id's hash), and that an L4 answer with `approval: true` has `source = ask_user_question` and a matching
 `pick`. The binding itself is checked on the Uber host, which is the trusted base (below). A prompt with several
 tags goes in full to each of its asks, and each UAC reads it in its own context. If the text is ambiguous,
 the UAC asks again.
