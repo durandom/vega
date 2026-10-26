@@ -112,6 +112,10 @@ fn answers_are_verified_once_and_acknowledged_to_the_uber() {
             let stream = crate::inbox_stream(&p, "proteus").await.unwrap();
             let consumer = crate::uber_consumer(&stream, "proteus").await.unwrap();
 
+            // Without the ask store the answer is not verified, not dropped.
+            let err = crate::uber_pass(&consumer, None).await;
+            assert_eq!(err.map(|f| f.code), Some("no_state_dir".to_string()));
+
             let outbox = crate::uber::outbox(&asks);
             let err = crate::uber_pass(&consumer, Some(asks.clone())).await;
             assert!(err.is_none(), "{err:?}");
@@ -162,10 +166,18 @@ fn answers_are_verified_once_and_acknowledged_to_the_uber() {
             assert_eq!(crate::uber::unsent(&outbox).len(), 2);
 
             // The outbox is sent: mail to the UAC, uber.applied to the Uber.
+            // An outbox that cannot be rewritten is not clear: vegad retries.
+            let mode =
+                |m: u32| std::fs::set_permissions(&outbox, std::fs::Permissions::from_mode(m));
+            mode(0o555).unwrap();
+            let clear = crate::uber_flush(&p, "proteus", &outbox, count_note).await;
+            mode(0o755).unwrap();
+            assert!(!clear);
             assert!(crate::uber_flush(&p, "proteus", &outbox, count_note).await);
             assert!(crate::uber::unsent(&outbox).is_empty());
             let notes = NOTES.load(std::sync::atomic::Ordering::SeqCst);
-            assert_eq!(notes, 1, "the replay's refusal note");
+            // At least once: after the failed rewrite the note is written again.
+            assert!(notes >= 1, "the replay's refusal note");
             let mine = stream.get_info().await.unwrap();
             assert_eq!(mine.state.messages, 4, "plain, two answers, the UAC mail");
             let theirs = crate::inbox_stream(&g, "ganymede").await.unwrap();

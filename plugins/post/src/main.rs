@@ -1744,7 +1744,11 @@ async fn uber_flush(
         }
         clear &= !p.owes();
         if let Err(e) = uber::save(outbox, &p) {
-            log(&format!("uber: outbox {} not updated: {e}", p.seq));
+            log(&format!(
+                "uber: outbox {} not updated, retrying: {e}",
+                p.seq
+            ));
+            clear = false;
         }
     }
     uber::prune(outbox, UBER_ACK_WAIT * 2);
@@ -1792,10 +1796,14 @@ async fn uber_drain(
                 .map(|v| v.as_str().to_string());
             match kind.as_deref().and_then(vega_uber_msg::Kind::parse) {
                 Some(vega_uber_msg::Kind::Answer) => {
+                    // Not acked without the store: nak'd, it waits for a later pass.
                     let Some(asks) = asks.clone() else {
-                        log("uber: answer dropped: no state dir (XDG_STATE_HOME, HOME)");
-                        m.ack().await.map_err(broker_err)?;
-                        continue;
+                        let _ = m.ack_with(jetstream::AckKind::Nak(None)).await;
+                        return Err(Failure::new(
+                            "no_state_dir",
+                            "answer not verified: neither XDG_STATE_HOME nor HOME is set",
+                            "set HOME for vegad",
+                        ));
                     };
                     let seq = m.info().map_err(broker_err)?.stream_sequence;
                     let (to_pane, from_host) = parse_subject(&m.subject).unwrap_or(("", ""));
@@ -1829,7 +1837,8 @@ async fn uber_drain(
                     .map_err(|e| e.to_string())
                     .and_then(|r: Result<(), String>| r);
                     if let Err(e) = saved {
-                        // Not acked: it comes again, and the outbox may work then.
+                        // Nak'd: it comes again, and the outbox may work then.
+                        let _ = m.ack_with(jetstream::AckKind::Nak(None)).await;
                         return Err(Failure::new(
                             "uber_outbox",
                             format!("answer {seq}: outbox not written: {e}"),
