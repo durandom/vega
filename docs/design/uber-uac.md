@@ -52,8 +52,9 @@ broker (local mode) there is no Uber (§2).
 - **Live** = the host's beat is fresh and the pane is alive (as for `remote_uac`). A live claim elsewhere
   refuses with `uber_exists` and the hint `vega uber release in <pane> on <host>`.
 - **Takeover**: a claim whose pane or host is gone is replaced, and the output prints `took_over: <pane> on <host> (gone)`.
-  Each host writes only its own key, so two claims can race. The lowest `epoch` wins, ties go to the lower
-  host name. The loser sees the conflict on its next read and prints `uber_conflict`. UACs apply the same rule.
+  Each host writes only its own key, so two claims can race. Of the live claims the highest `epoch` wins
+  (the newest claim), ties go to the lower host name. The loser sees the conflict on its next read and
+  prints `uber_conflict`. UACs apply the same rule: `vega_registry::View::live_uber` is the one resolver.
 - `vega uber release`: deletes the key. `vega uber` (home): claim, open asks, last brief.
 - **Absent** (no live claim, broker down, or local mode): `vega uber ask` returns `uber_absent` and the UAC
   behaves exactly as today: a `slayer-decision` bead, the board, its own pane. Nothing queues for an
