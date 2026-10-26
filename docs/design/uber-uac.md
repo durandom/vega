@@ -182,8 +182,8 @@ writes those in the project's UAC pane as today. Adding `uber.tell` later would 
 ## 5. Mobile UX: one AskUserQuestion per batch
 
 The docs say Remote Control "keeps permission prompts and `AskUserQuestion` questions open until you
-answer them" ([remote-control](https://code.claude.com/docs/en/remote-control.md)). **How the question
-looks in the iOS/Android app is not documented**: the spike bead verifies it.
+answer them" ([remote-control](https://code.claude.com/docs/en/remote-control.md)). How the question
+looks in the iOS/Android app is not documented; the spike below verified it in the mobile app (OS not recorded).
 
 Mapping (deterministic; `vega uber show` prints the JSON the model passes to AskUserQuestion):
 
@@ -198,10 +198,29 @@ Mapping (deterministic; `vega uber show` prints the JSON the model passes to Ask
 Phone text stays short. A brief has at most 25 lines: `Decisions (n)` with `1 vega · L4 · push main? ·
 rec: yes · due 14:00`, then `FYI (n)` and `Blocked (n)` with one line per item. Ids appear only in `audit`.
 
-**Unknowns the spike must settle**: whether the hook payloads carry phone input; whether the app's pushes
-fire while vegad types pointers into the pane (pushes are skipped "while you are typing in the
-terminal"); and that vegad never types into a pane while an AskUserQuestion dialog is open. vegad
-already types only into `idle`/`done` panes. If that proves false, a pointer could end up in "Other" as the Slayer's text.
+**Spike results** (vega-lhc.209.1, 2026-10-26, Claude Code 2.1.310, `/remote-control` in a herdr pane on
+ganymede, Claude mobile app; captures from project-local hooks, one run per test):
+
+- **AskUserQuestion on the phone: yes.** Native and tappable. Header, full question, 3 options with
+  descriptions and "Other" were all readable, with nothing cut off.
+- **Hook payloads carry phone input: yes.** The `PostToolUse` payload for `AskUserQuestion` holds `tool_input.questions`
+  (exactly as shown) and `tool_response.answers` = `{"<question text>": "<label>"}`. A pick is the exact label,
+  `(Recommended)` suffix included. "Other" is the typed text verbatim (`"Pizza please"`); no field marks it, so
+  `vega uber answer` must classify it as "not equal to any label". The tag is inside the question key (`#t1 ...`).
+  A phone prompt arrives as `UserPromptSubmit` with `prompt` verbatim.
+- **Origin of a prompt: not distinguishable.** `UserPromptSubmit` has no source field. A vegad pointer
+  (`[vega-post] 1 new message for you. Run: vega post inbox`) and harness background-task notices
+  (`<task-notification>...`) produce the same payload shape as the Slayer's typing. The capture must
+  therefore drop these known non-Slayer prompts, and a typed prompt binds only through its tags (as above).
+  `AskUserQuestion` captures are not affected.
+- **vegad never types into an open dialog: yes.** A mail arrived while a question stayed open for 6 min.
+  No `UserPromptSubmit` fired during that time, and the Slayer's answer was clean. Mechanism: herdr reports the
+  pane as `blocked`, and delivery types only into `idle`/`done` panes (`plugins/post/src/delivery.rs`).
+- **Pushes while vegad types: suppressed briefly.** A question opened 10 s after a typed pointer produced
+  no push on the locked phone. The same question opened 70 s after a pointer, or with no pointer, did produce
+  a push. This fits "skipped while you are typing in or focused on the connected terminal": typed pointers count
+  as terminal input. Consequence: the Uber waits until ≥60 s after the last typed pointer before it opens an
+  urgent dialog (`vega uber show` can enforce this). The exact window is not measured.
 
 ## Rejected
 
