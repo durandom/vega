@@ -14,8 +14,8 @@ Prior art: arena (`framework/operating-model.md`: L0-L4, four dimensions, escala
 options, recommendation, deadline; `ludus/agents.md` CoS: compress, don't relay; batch, don't interrupt;
 briefing Decisions/FYI/Blocked; `intercom/coordination.md` `FROM HUMAN:` relayed input) and castra
 (`docs/autopilot-pi.md`: supervisor channel of send/advance/wait/halt, 280 chars). Neither has a layer above
-the coordinators or a rule for relayed authority. vega adds both, and makes the relay mechanical so
-nothing depends on trusting a model.
+the coordinators or a rule for relayed authority. vega adds both. It makes the relay mechanical, so the model never writes the Slayer's words and never
+binds them to an ask. It is trusted only to show asks and to call `vega uber answer` at all.
 
 ## 1. Placement: Remote Control on an always-on host (ganymede)
 
@@ -71,12 +71,13 @@ typed into a pane ([vegad.md](vegad.md) Security).
 | Kind | Direction | Cap | Body |
 | --- | --- | --- | --- |
 | `uber.ask` | UAC → Uber | 1 KiB | `id, project, bead, level (L3\|L4), urgent, question (≤120), context (≤280), options [2-3 × {label ≤40, detail ≤120}], recommend (index), why (≤120), deadline (RFC 3339 \| "no-rush")` |
-| `uber.answer` | Uber → UAC | 2 KiB | `id, bead, epoch, pick (label \| null), notes, slayer_text, capture {source, at, sha256}` |
+| `uber.answer` | Uber → UAC | 2 KiB | `id, tag, bead, epoch, pick (label \| null), approval, notes, slayer_text, capture {source, at, sha256}` |
 | `uber.applied` | UAC vegad → Uber | 256 B | `id, result (applied \| refused:<code>)` |
 | `uber.withdraw` | UAC → Uber | 256 B | `id, reason` (answered elsewhere, obsolete) |
 | `uber.brief` | Uber → all live UACs | 128 B | `since`; sent with `vega post ask --within 2m`, so one pointer brings every reply |
 
 - **Ids**: `id = <bead>~<nuid>`. The bead keeps the record readable and the nuid makes the id unguessable.
+  The Uber gives each open ask a short `tag` (`#a7`, unique among its open asks) for the phone.
   An answer is always for exactly one ask.
 - **Routing**: the UAC records the question as a `slayer-decision` bead as today, then runs `vega uber ask --bead <id>
   --level L3|L4 [--urgent "<why>"] --deadline <t> --context ... --option "<label>: <detail>" ... --recommend <n>`.
@@ -113,7 +114,8 @@ Verification is deterministic, in vegad on the UAC host, before anything reaches
    records that claim's host, pane and `epoch`, and the answer's `epoch` must match it. The claim need not be
    live any more. An answer that queued while the UAC host slept still applies after a takeover, and a
    resend to a new epoch replaces the recorded claim.
-3. `pick`, if set, equals one of the ask's option labels exactly. `slayer_text` is not empty.
+3. `tag` is the ask's tag. `pick`, if set, equals one of the ask's option labels exactly. `slayer_text` is not
+   empty. On an L4 ask, `approval: true` requires `capture.source = ask_user_question` and a `pick`.
 4. The ask was not answered or withdrawn before. The first verified answer wins; later ones get `refused:answered`.
 
 If the answer passes, vegad adds `slayer_text` as a bead comment by `Slayer` with `via uber <id>` (the
@@ -124,10 +126,23 @@ quarantine) and returns `refused:<code>`.
 **What `slayer_text` is.** The model must not write it. Claude Code hooks in the Uber's settings capture
 the Slayer's input: `PostToolUse` on `AskUserQuestion` (the selected labels and notes) and
 `UserPromptSubmit` (typed prompts). Both append to `$XDG_STATE_HOME/vega/uber/captures.jsonl`.
-`vega uber answer <id> --capture <n>` builds `slayer_text` from that record, and it refuses an answer with
-no capture or one that is already used. The model only chooses which ask a capture answers. A prompt
-that answers several asks goes to each of them in full, and each UAC reads it in its own context. If it is
-ambiguous, the UAC asks again.
+`vega uber answer <id> --capture <n>` builds `slayer_text` from that record. It refuses an answer with no
+capture, or with a capture that was already used or is not **bound** to the ask:
+
+- **Bound by the harness**: every ask shown gets a short tag (`#a7`) in its AskUserQuestion `question`.
+  An AskUserQuestion capture holds the tool input and the answers, so it names the ask by that tag and the
+  option by its exact label. The model does not choose the binding.
+- **Bound by the Slayer's words**: a typed prompt binds only to the asks whose tags it contains
+  (`#a7 ja, #b2 nein`). A prompt without a tag, such as "brief", answers no ask.
+- **L4 approvals** need an AskUserQuestion capture whose answer is an exact option label (`capture.source =
+  ask_user_question`, `pick` set). A typed prompt or "Other" text goes to an L4 ask as a comment
+  (`approval: false`); the UAC must not treat it as approval and asks again with the options it implies.
+
+The answer carries `capture.source`, `tag` and `approval`. The UAC-host vegad checks that the tag is the
+ask's tag, and that an L4 answer with `approval: true` has `source = ask_user_question` and a matching
+`pick`. The binding itself is checked on the Uber host, which is the trusted base (below). A prompt with several
+tags goes in full to each of its asks, and each UAC reads it in its own context. If the text is ambiguous,
+the UAC asks again.
 
 **What the Uber-UAC may run.** It runs in Manual mode (Bypass is unavailable from the app anyway).
 `vega uber start` writes its settings, which allow `Bash(vega uber:*)` and `Bash(vega post inbox:*)` only. There is no
@@ -168,7 +183,7 @@ looks in the iOS/Android app is not documented**: the spike bead verifies it.
 Mapping (deterministic; `vega uber show` prints the JSON the model passes to AskUserQuestion):
 
 - One call shows up to 4 asks (the tool's limit), urgent ones first, then the oldest.
-- `header` (≤12 chars) = project short name. `question` = `<question> · L4 · due 14:00`, with the
+- `header` (≤12 chars) = project short name. `question` = `#a7 <question> · L4 · due 14:00`, with the
   context on a second line (≤280 chars).
 - `options` = the UAC's 2-3 options, the recommended one first with ` (Recommended)`. `description` = its
   detail, plus `why` for the recommended one. The tool adds "Other" for free text.
