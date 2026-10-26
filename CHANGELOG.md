@@ -8,8 +8,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 ## 83 · 2026-10-26
 
 - feature: vegad's sidebar no longer flickers on a loaded host: its tokens live 5 min and a thread
-  of their own renews them; project identity and `git status` are cached off vegad's loop. `vega mux
-  spawn` starts agents at nice 10, below vegad. See
+  of their own renews them; project identity is cached between refreshes and `git status` runs off
+  vegad's loop. `vega mux spawn` starts agents at nice 10, below vegad. See
   [Sidebar cost](docs/design/vegad.md#sidebar-cost-vega-lhc212).
 
 ## 82 · 2026-10-26

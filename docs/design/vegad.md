@@ -550,7 +550,8 @@ path), `git status` 3.3–10 s, one `report-metadata` per pane and workspace 0.8
   the TTL; a target herdr no longer knows is dropped until a refresh names it again.
 - **Cached project resolution** (`plugins/post/src/probes.rs`): per path, reused while the
   repository's common `config` is unchanged (10 min at most); a failure is retried after 60 s, or at
-  once when the path changes.
+  once when the path changes. It still runs on the loop: a miss (a new path, the first refresh)
+  costs its four `git` calls there.
 - **`git status` off the loop** (`probes.rs`): one thread reads each checkout a refresh asked
   about, new ones first, then each every 30 s; the refresh takes the last value (no `$git` until the
   first read). A checkout no refresh named for 2 min is dropped.
