@@ -325,7 +325,7 @@ fn resume(
         save(out, &owed).map_err(|e| e.to_string())?;
         Ok(o)
     };
-    let Some(mut a) = uber_asks::load(asks, &p.id) else {
+    let Some(a) = uber_asks::load(asks, &p.id) else {
         return refuse("no_ask", "gone while applying");
     };
     // Under the lock, so a withdraw or a second answer cannot slip between.
@@ -339,10 +339,10 @@ fn resume(
     if !beads.has_comment(&a, &marker) && !beads.comment(&a, &p.comment) {
         // The Slayer's words did not land: the ask opens again, so the
         // Uber, told refused:bd_failed, can send the answer once more.
-        a.state = State::Open;
-        a.closed_at = None;
-        let why = match uber_asks::save(asks, &a) {
-            Ok(()) => "bd did not add the comment".to_string(),
+        // Only from answered: a withdraw meanwhile stays.
+        let why = match uber_asks::reopen(asks, &p.id) {
+            Ok(true) => "bd did not add the comment".to_string(),
+            Ok(false) => "bd did not add the comment; the ask is no longer answered".to_string(),
             Err(e) => format!("bd did not add the comment; reopening the ask failed: {e}"),
         };
         return refuse("bd_failed", &why);
@@ -483,6 +483,8 @@ pub(crate) mod tests {
     struct Fake {
         open: Option<bool>,
         ok: bool,
+        /// Runs inside `comment`: a concurrent writer.
+        during: Option<Box<dyn Fn()>>,
         comments: RefCell<Vec<String>>,
     }
 
@@ -491,6 +493,7 @@ pub(crate) mod tests {
             Fake {
                 open: Some(true),
                 ok: true,
+                during: None,
                 comments: RefCell::new(Vec::new()),
             }
         }
@@ -501,6 +504,9 @@ pub(crate) mod tests {
             self.open
         }
         fn comment(&self, _: &OpenAsk, text: &str) -> bool {
+            if let Some(f) = &self.during {
+                f();
+            }
             if self.ok {
                 self.comments.borrow_mut().push(text.to_string());
             }
@@ -767,6 +773,25 @@ pub(crate) mod tests {
             uber_asks::load(&dir.path().join("asks"), ID).unwrap().state,
             State::Open
         );
+    }
+
+    #[test]
+    fn a_failed_comment_does_not_reopen_an_ask_withdrawn_meanwhile() {
+        let dir = setup(Level::L3);
+        let asks = dir.path().join("asks");
+        let mut beads = Fake::new();
+        beads.ok = false;
+        let during = asks.clone();
+        beads.during = Some(Box::new(move || {
+            // Whatever closed it meanwhile: here a withdraw written over it.
+            let mut a = uber_asks::load(&during, ID).unwrap();
+            a.state = State::Withdrawn;
+            uber_asks::save(&during, &a).unwrap();
+        }));
+        let o = run(&asks, &answer(Level::L3), &beads);
+        refused_with(&o, "bd_failed");
+        assert!(o.log.contains("no longer answered"), "{o:?}");
+        assert_eq!(uber_asks::load(&asks, ID).unwrap().state, State::Withdrawn);
     }
 
     #[test]
