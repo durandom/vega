@@ -166,7 +166,7 @@ fn absent(why: &str) -> Failure {
 }
 
 /// The installed `vega-post` next to this binary, else PATH.
-fn post_bin() -> PathBuf {
+pub(crate) fn post_bin() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|e| Some(e.parent()?.join("vega-post")))

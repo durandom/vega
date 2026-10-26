@@ -74,6 +74,20 @@ with `vega post done`. The UAC lands the work (`vega uac land`); sentinels never
 - Design: [uac-role.md](design/uac-role.md), [uac-rules.md](design/uac-rules.md),
   [orchestration.md](design/orchestration.md).
 
+## Uber-UAC: the owner's one channel
+
+The Uber-UAC is one Claude Code session over all projects and hosts, which the owner drives from the phone
+(Remote Control). One live claim per estate (`vega uber claim`; it needs the broker). It decides nothing: it
+shows the owner the UACs' decisions and relays only what the owner answered. A UAC sends a `slayer-decision`
+bead to it with `vega uber ask` (L3: the owner picks an option; L4: only the owner may approve); without a
+live Uber (`uber_absent`) the bead, the board and the UAC's pane carry the decision as before. An answer
+counts only after the UAC host's vegad verified it against the open ask. A brief (`vega uber brief`)
+shows the open decisions plus each live UAC's FYI and Blocked lines, at most 25 lines; while the owner
+talks to the Uber, vegad wakes it with a digest when an ask has waited 4 h.
+
+- Show: `vega uber status`, `vega uber brief --show`.
+- Design: [uber-uac.md](design/uber-uac.md).
+
 ## Project and project identity
 
 A project is one normalized git fetch remote URL, independent of checkout path and host: clones at different

@@ -21,6 +21,8 @@ pub mod capture;
 pub mod received;
 pub mod shown;
 
+pub mod brief;
+
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;

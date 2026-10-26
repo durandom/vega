@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 86 · 2026-10-27
+
+- feature: `vega uber brief` (on the Uber-UAC) asks every live UAC for its FYI and Blocked lines
+  (`uber.brief`, replies within 2 min) and `vega uber brief --show` renders the open decisions plus
+  those lines in at most 25 lines. A UAC replies once, each line `FYI: ...` or `Blocked: ...`.
+  `vega post ask --kind` sends a typed question. See
+  [Uber-UAC protocol](docs/design/uber-uac.md#3-protocol-ask-answer-brief-over-vega-post).
+
 ## 85 · 2026-10-27
 
 - feature: `vega gate start` skips a reviewer candidate whose harness binary is not on `PATH`

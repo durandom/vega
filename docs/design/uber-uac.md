@@ -3,7 +3,8 @@
 Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2),
 the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4),
 the UAC-host check of `uber.answer` (§4, vega-lhc.209.5), the Uber host's received asks, captures,
-`vega uber answer` and audit (§4, vega-lhc.209.6), the engaged window (§2, vega-lhc.209.12).
+`vega uber answer` and audit (§4, vega-lhc.209.6), the engaged window (§2, vega-lhc.209.12),
+the brief and the digest wake (§3, vega-lhc.209.8).
 
 ## Problem and decision
 
@@ -161,12 +162,24 @@ typed into a pane ([vegad.md](vegad.md) Security).
   - **at once**: `urgent` asks (production down, security, data loss, or a deadline under 1 h). The open dialog
     triggers the app's "actions required" push.
   - **batched**: everything else, when the Slayer says "brief" or opens the session, plus a one-line
-    digest push when the oldest waiting ask is 4 h old (vegad wakes the Uber; one push per 4 h at most),
-    only while the Uber is engaged (§2).
+    digest push when the oldest waiting ask is 4 h old (vegad wakes the Uber; one push per 4 h at most).
+    The Uber must not spam: the digest fires only while the Slayer talks to it (the claim's engaged
+    window, vega-lhc.209.12; until it is built, never). vegad mails the Uber pane (`tool vega-uber`,
+    state `uber/digest.json`); the push comes from the AskUserQuestion the Uber then opens, at least
+    60 s after that pointer (§5).
   - A passed deadline only marks the ask `overdue`. **No default fires on a timeout**; the ask waits.
 - **Brief** (on demand): Decisions = the Uber's own open asks. FYI and Blocked come from each UAC's reply
   to `uber.brief`: at most 3 lines each, ≤600 chars per UAC. Compress, don't relay: no transcripts and
   no raw sentinel output.
+  - `vega uber brief` (the Uber may not run `vega post ask`) sends `uber.brief {since}` with
+    `vega post ask --kind uber.brief --within 2m` to every live UAC (fresh host, pane alive) and records the
+    thread in `uber/briefs/<thread>.json`; `since` is the previous brief's time (first: 24 h back).
+  - A UAC replies once with the reply command: at most 3 lines, each `FYI: ...` or `Blocked: ...`; an
+    unmarked line counts as FYI. A pending decision is never a brief line: it goes through `vega uber ask`.
+  - vegad on the Uber host stores each target's reply on that thread (`uber/briefs/<thread>/`); the reply
+    still reaches the inbox. `vega uber brief --show` renders Decisions/FYI/Blocked from the stored
+    asks and replies, deterministically, within 25 lines (a cut section ends in `+n more`), then who
+    has not replied.
 
 ## 4. Trust rule and guards
 

@@ -11,6 +11,7 @@ vega uber release   # the Uber hands back its claim
 vega uber status    # live claim (engaged or idle), superseded and gone ones (also: vega uber)
 vega uber answer a7 --capture 12   # send the Slayer's answer to #a7, built from capture 12
 vega uber audit [--last 10]        # one line per event: received, answered, sent, applied, refused
+vega uber brief [--show]           # ask live UACs; --show renders it
 ```
 
 - A live claim elsewhere refuses with `uber_exists`; a gone one is taken over (`took_over:`). Racing claims:

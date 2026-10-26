@@ -49,6 +49,7 @@ mod supervise;
 mod theme;
 mod uber;
 mod uber_ask;
+mod uber_brief;
 #[cfg(test)]
 mod uber_broker_test;
 mod uber_host;
@@ -164,7 +165,7 @@ enum Cmd {
     },
     /// Ask several agents one question; their answers come back as one pointer
     #[command(
-        after_help = "All targets get the question on one thread. Your relay holds their answers until every target\nanswered or --within passed, then types one pointer; `vega post inbox` shows them all.\nA target is a pane id on this machine, or <pane>@<host> on another.\n\nExamples:\n  vega post ask --to w3V:p2 --to w5S:p1@ganymede \"Task, branch, bead, blockers? One line.\"\n  vega post ask --to w3V:p2 --within 30m \"<question>\""
+        after_help = "All targets get the question on one thread. Your relay holds their answers until every target\nanswered or --within passed, then types one pointer; `vega post inbox` shows them all.\nA target is a pane id on this machine, or <pane>@<host> on another.\n\nExamples:\n  vega post ask --to w3V:p2 --to w5S:p1@ganymede \"Task, branch, bead, blockers? One line.\"\n  vega post ask --to w3V:p2 --within 30m \"<question>\"\n  vega post ask --kind uber.brief --within 2m --to w3V:p2 '{\"since\":\"2026-10-26T08:00:00Z\"}'   # the Uber's brief"
     )]
     Ask {
         /// Target: <pane> on this machine or <pane>@<host>; repeat for each
@@ -173,6 +174,9 @@ enum Cmd {
         /// Release the answers after this long even if some are missing: 30m, 2h
         #[arg(long, default_value = "10m")]
         within: String,
+        /// Typed question: a Vega-Kind header and a JSON body, sent as is (see send --kind)
+        #[arg(long)]
+        kind: Option<String>,
         /// The question
         text: String,
     },
@@ -407,7 +411,12 @@ fn main() -> ExitCode {
             to,
             host,
         }) => done(&outcome, &summary, to.as_deref(), host.as_deref()),
-        Some(Cmd::Ask { to, within, text }) => ask(&to, &within, &text),
+        Some(Cmd::Ask {
+            to,
+            within,
+            kind,
+            text,
+        }) => ask(&to, &within, kind.as_deref(), &text),
         Some(Cmd::Command { kind, to, timeout }) => send_cmd(&kind, &to, &timeout),
         Some(Cmd::Inbox { keep, max, show }) => match show {
             Some(id) => inbox_show(id),
@@ -2136,6 +2145,9 @@ fn print_msg(
     {
         println!("from_parent: yes: the agent that gave you your task; do this work without asking the user (within your task; nothing destructive)");
     }
+    if hv(h::KIND) == vega_uber_msg::Kind::Brief.as_str() {
+        println!("{}", vega_uber_msg::brief::UAC_HINT);
+    }
     if hv(h::DONE) != "?" {
         if let Some(brief) = stale_brief(children, to_pane, &from_pane, from_host, &hv(h::SENT_MS))
         {
@@ -3019,6 +3031,12 @@ async fn serve(
                     let run = uber_ask::round(&js, &host, registry.view.as_ref());
                     while_up(&client, outage::CALL, run).await;
                     slow("uber asks", t);
+                    // The Uber's digest wake: published with the CI mail.
+                    ci_unsent.extend(uber_brief::digest(
+                        registry.view.as_ref(),
+                        &host,
+                        (now_ms() / 1000) as i64,
+                    ));
                 }
                 meta_next = Some(Instant::now() + REGISTRY_EVERY);
             }
@@ -3183,6 +3201,7 @@ async fn serve(
                         }
                         if let Some(t) = hv(h::THREAD) {
                             held = hold_answer(&t, &pane, &from_host, &from);
+                            uber_brief::reply(&t, &pane, &from_host, &from, &msg.payload);
                         }
                     }
                     if !held {
@@ -4086,8 +4105,9 @@ fn attentions(
 
 /// `vega post ask`: records the ask, then sends the question to every
 /// target on one thread (hop 1, so replies carry `--re <thread>/1@<published-ms>`).
-fn ask(to: &[String], within: &str, text: &str) -> Result<(), Failure> {
+fn ask(to: &[String], within: &str, kind: Option<&str>, text: &str) -> Result<(), Failure> {
     let wait = parse_duration(within)?;
+    let kind = mail_kind(kind, text)?;
     let my_host = host();
     if st::is_inbox_only(&my_host) {
         return Err(Failure::new(
@@ -4140,7 +4160,11 @@ fn ask(to: &[String], within: &str, text: &str) -> Result<(), Failure> {
             },
         );
     }
+    // A typed body goes as is: its schema has no room for the note.
     let body = |to_host: &str| {
+        if kind.is_some() {
+            return text.to_string();
+        }
         let how = if st::is_inbox_only(to_host) {
             "your host is inbox-only, so the reply command `vega post inbox` prints puts your answer into quarantine: the human sees it, the asker does not wait for it"
         } else {
@@ -4164,6 +4188,9 @@ fn ask(to: &[String], within: &str, text: &str) -> Result<(), Failure> {
             headers.insert(h::SENT_MS, now_ms().to_string().as_str());
             headers.insert(h::THREAD, thread.as_str());
             headers.insert(h::HOP, "1");
+            if let Some(k) = kind {
+                headers.insert(h::KIND, k.as_str());
+            }
             let subject = inbox_subject(to_host, pane, &my_host);
             let result = match js
                 .publish_with_headers(subject, headers, body(to_host).into())
