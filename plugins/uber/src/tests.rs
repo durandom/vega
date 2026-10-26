@@ -196,3 +196,174 @@ fn two_hosts_racing_a_claim_converge_on_one_live_uber() {
         assert!(split(&va).1.iter().any(|s| a.mine(s)));
     });
 }
+
+mod answer_path {
+    use super::super::answer::answer_in;
+    use serde_json::json;
+    use std::cell::RefCell;
+    use std::path::Path;
+    use vega_herdr::Failure;
+    use vega_uber_msg::received::{self, State};
+    use vega_uber_msg::{audit, capture, shown, Ask, Level, Msg, Opt};
+
+    const NOW: &str = "2026-10-26T13:00:00Z";
+
+    fn receive(dir: &Path) -> received::Received {
+        let id = vega_uber_msg::new_id("vega-lhc.209").unwrap();
+        let ask = Ask {
+            id: id.clone(),
+            project: "github.com/durandom/vega".into(),
+            bead: "vega-lhc.209".into(),
+            level: Level::L4,
+            urgent: None,
+            question: "Push main?".into(),
+            context: String::new(),
+            options: vec![
+                Opt {
+                    label: "yes".into(),
+                    detail: "push".into(),
+                },
+                Opt {
+                    label: "no".into(),
+                    detail: "wait".into(),
+                },
+            ],
+            recommend: 0,
+            why: String::new(),
+            deadline: "no-rush".into(),
+        };
+        received::ingest(dir, &Msg::Ask(ask), "proteus", "w3V:p1", NOW).unwrap();
+        received::load(dir, &id).unwrap()
+    }
+
+    fn pick(dir: &Path, r: &received::Received, label: &str) -> usize {
+        let s = shown::render(&r.ask, &r.tag);
+        let p = json!({
+            "hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"header": s.header, "question": s.question, "options": s.options}]},
+            "tool_response": {"answers": {s.question.clone(): label}},
+        });
+        let logged = [
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "toolu_x", "name": "AskUserQuestion", "input": p["tool_input"]}]}}),
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_x"}]},
+                "toolUseResult": {"questions": p["tool_input"]["questions"], "answers": p["tool_response"]["answers"]}}),
+        ];
+        LOG.with(|t| {
+            for l in logged {
+                t.borrow_mut().push_str(&format!("{l}\n"));
+            }
+        });
+        capture::append(dir, &capture::from_hook(&p, NOW).unwrap()).unwrap()
+    }
+
+    thread_local! {
+        static LOG: RefCell<String> = const { RefCell::new(String::new()) };
+    }
+
+    /// `answer_in` against the session log of this test's dialogs.
+    fn answer_in_t(
+        d: &Path,
+        key: &str,
+        n: Option<usize>,
+        epoch: u64,
+        at: &str,
+        send: impl FnOnce(&received::Received, &str) -> Result<(), Failure>,
+    ) -> Result<super::super::answer::Sent, Failure> {
+        let t = LOG.with(|t| t.borrow().clone());
+        answer_in(d, key, n, epoch, &t, at, send)
+    }
+
+    fn events(dir: &Path) -> Vec<String> {
+        audit::last(dir, 50).into_iter().map(|e| e.event).collect()
+    }
+
+    #[test]
+    fn without_a_capture_nothing_is_sent_and_the_hint_names_the_bound_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let r = receive(d);
+        let never = |_: &received::Received, _: &str| -> Result<(), Failure> { panic!("sent") };
+        let f = answer_in_t(d, &r.ask.id, None, 7, NOW, never)
+            .err()
+            .unwrap();
+        assert_eq!(f.code, "no_capture");
+        let n = pick(d, &r, "yes (Recommended)");
+        let tag = r.tag.trim_start_matches('#').to_string();
+        let f = answer_in_t(d, &tag, None, 7, NOW, never).err().unwrap();
+        assert!(f.hint.contains(&format!(": {n};")), "{}", f.hint);
+        assert_eq!(events(d), ["received", "rejected", "rejected"]);
+    }
+
+    #[test]
+    fn an_answer_is_sent_once_and_audited() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let r = receive(d);
+        let n = pick(d, &r, "yes (Recommended)");
+        let body = RefCell::new(String::new());
+        let send = |to: &received::Received, b: &str| {
+            assert_eq!(
+                (to.from_host.as_str(), to.from_pane.as_str()),
+                ("proteus", "w3V:p1")
+            );
+            *body.borrow_mut() = b.to_string();
+            Ok(())
+        };
+        let s = answer_in_t(d, &r.tag, Some(n), 7, NOW, send).ok().unwrap();
+        assert!(s.answer.approval);
+        let m = vega_uber_msg::validate(vega_uber_msg::Kind::Answer, body.borrow().as_bytes());
+        assert!(matches!(m, Ok(Msg::Answer(a)) if a.pick.as_deref() == Some("yes")));
+        let rec = received::load(d, &r.ask.id).unwrap();
+        assert_eq!((rec.state, rec.used.clone()), (State::Sent, vec![n]));
+        let again = answer_in_t(d, &r.ask.id, Some(n), 7, NOW, |_, _| Ok(()))
+            .err()
+            .unwrap();
+        assert_eq!(again.code, "not_open");
+        assert_eq!(events(d), ["received", "answered", "sent", "rejected"]);
+        let lines: Vec<String> = audit::last(d, 50).iter().map(|e| e.line()).collect();
+        assert_eq!(
+            lines[1],
+            format!(
+                "10-26 13:00Z answered {} vega-lhc.209: capture {n}: yes",
+                r.tag
+            )
+        );
+    }
+
+    #[test]
+    fn a_failed_send_leaves_the_ask_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let r = receive(d);
+        let n = pick(d, &r, "no");
+        let fail =
+            |_: &received::Received, _: &str| Err(Failure::new("send_failed", "down", "retry"));
+        assert_eq!(
+            answer_in_t(d, &r.ask.id, Some(n), 7, NOW, fail)
+                .err()
+                .unwrap()
+                .code,
+            "send_failed"
+        );
+        let rec = received::load(d, &r.ask.id).unwrap();
+        assert_eq!((rec.state, rec.used.len()), (State::Open, 0));
+        assert!(answer_in_t(d, &r.ask.id, Some(n), 7, NOW, |_, _| Ok(())).is_ok());
+    }
+}
+
+#[test]
+fn capture_is_not_a_vega_uber_command() {
+    use clap::CommandFactory;
+    // The Uber's model may run `vega uber ...` unprompted; it must not
+    // reach the capture hook (docs/design/uber-uac.md §4).
+    assert!(Cli::try_parse_from(["vega uber", "capture"]).is_err());
+    let names: Vec<String> = Cli::command()
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .collect();
+    assert!(!names.iter().any(|n| n.contains("capture")), "{names:?}");
+    let manifest = include_str!("../Cargo.toml");
+    assert!(manifest.contains("name = \"vega_uber_capture\""));
+    assert!(!manifest.contains("name = \"vega-uber-capture\""));
+}

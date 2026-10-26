@@ -10,6 +10,13 @@ publish = false
 name = "vega-uber"
 path = "src/main.rs"
 
+# The capture hook. Not `vega-*`: no plugin, so neither `vega uber ...`
+# nor the `vega` dispatcher reaches it, and the Uber's allowlist
+# (`Bash(vega uber:*)`) does not cover it (docs/design/uber-uac.md §4).
+[[bin]]
+name = "vega_uber_capture"
+path = "src/capture_main.rs"
+
 [dependencies]
 vega-build = { path = "../../crates/vega-build" }
 clap = { version = "4", features = ["derive"] }
@@ -20,6 +27,8 @@ vega-herdr = { path = "../../crates/vega-herdr" }
 vega-registry = { path = "../../crates/vega-registry" }
 vega-uber-msg = { path = "../../crates/vega-uber-msg" }
 vega-plugin = { path = "../../crates/vega-plugin" }
+vega-transcript = { path = "../../crates/vega-transcript" }
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 tempfile = "3"

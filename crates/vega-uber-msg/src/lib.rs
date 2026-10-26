@@ -10,7 +10,15 @@
 //!
 //! Semantic checks that need the open ask (tag, pick, epoch, L4 approval)
 //! belong to the UAC-host vegad (§4), not here.
+//!
+//! Shared by both hosts: `shown` (the AskUserQuestion rendering and
+//! `shown_sha256`) and `tag`. The Uber host's records: `received` (asks it
+//! received), `capture` (the Slayer's input, and the answer built from it)
+//! and `audit`.
 
+pub mod audit;
+pub mod capture;
+pub mod received;
 pub mod shown;
 
 use serde::{Deserialize, Serialize};

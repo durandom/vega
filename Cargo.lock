@@ -3442,11 +3442,13 @@ dependencies = [
  "clap",
  "serde_json",
  "tempfile",
+ "time",
  "tokio",
  "vega-build",
  "vega-herdr",
  "vega-plugin",
  "vega-registry",
+ "vega-transcript",
  "vega-uber-msg",
 ]
 
@@ -3458,6 +3460,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "time",
 ]
 
