@@ -45,7 +45,7 @@ These are reported needs, not reproduced bugs.
 
 Common boundary: no automated approvals, trust answers, relayed “OK”, owner/approach
 choices, unreviewed landing or deletions. A machine message never supplies Slayer
-consent. Demand favors waiting, ownership and landing integration over a new DAG.
+consent; the one exception is a vegad-verified Uber-UAC answer ([uber-uac.md](uber-uac.md)). Demand favors waiting, ownership and landing integration over a new DAG.
 Ship the read-only waiting view first; add minimal explicit wait state next.
 Keep landing in the UAC/mux/gate workflow and CI in `vega ci watch`; this plugin
 links evidence and outstanding actions, rather than implementing merge/push/cleanup.
