@@ -1,7 +1,8 @@
 # Uber-UAC: the Slayer's one channel to every UAC
 
 Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2),
-the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4).
+the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4),
+the UAC-host check of `uber.answer` (§4, vega-lhc.209.5).
 
 ## Problem and decision
 
@@ -153,6 +154,17 @@ If the answer passes, vegad adds `slayer_text` as a bead comment by `Slayer` wit
 `vega uac answer` path), mails the UAC "The Slayer answered <bead> ...", closes the open ask, and returns
 `uber.applied`. If it fails, nothing reaches the pane: vegad writes a note (kind `uber-refused`, like
 quarantine) and returns `refused:<code>`.
+
+Built (`plugins/post/src/uber.rs`): the answer is inbox mail to the UAC's pane, so it waits in the host's stream
+while the host sleeps. vegad reads it with its own durable consumer (`uber-<host>`, created from the start of the archive and retried until it exists), types no pointer for it,
+and `vega post inbox` and `log` print it withheld. Codes: `no_ask`, `answered`, `withdrawn`, `bead_closed`,
+`bead_unknown` (bd could not tell), `wrong_sender`, `wrong_epoch`, `wrong_tag`, `bad_pick`, `shown_mismatch`,
+`l4_approval`, `malformed`/`too_large` (no reply without a valid id), `bd_failed` (the comment did not land;
+the ask opens again). The ask closes before the comment, under the store's lock, so the first answer wins.
+Each answer gets an outbox entry, `$XDG_STATE_HOME/vega/uber/outbox/<seq>.json`: a verified one first as an
+intent, before the ask closes and the comment is added, then as what vegad owes (the UAC's mail, `uber.applied`, a refusal's note),
+all before the answer is acked. vegad sends the entry with a fixed message id. A redelivery after a crash resumes
+an intent (closing again, commenting only if `via uber <id>` is missing) and skips a handled answer.
 
 **What `slayer_text` is.** The model must not write it. Claude Code hooks in the Uber's settings capture
 the Slayer's input: `PostToolUse` on `AskUserQuestion` (the selected labels and notes) and

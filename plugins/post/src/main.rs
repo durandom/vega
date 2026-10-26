@@ -44,7 +44,10 @@ mod registry_read_test;
 mod service;
 mod supervise;
 mod theme;
+mod uber;
 mod uber_ask;
+#[cfg(test)]
+mod uber_broker_test;
 mod upstream;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1646,6 +1649,206 @@ fn store_quarantined(req: &async_nats::Message, my_host: &str) -> Vec<u8> {
     quarantine::answer(true, "stored", "noted for the human")
 }
 
+/// vegad's own consumer of this host's mail (uber.rs). Durable, and created
+/// from the start of the archive, so `uber.*` mail that arrived while this
+/// host slept, or before its vegad had the consumer, is seen too.
+async fn uber_consumer(
+    stream: &stream::Stream,
+    host: &str,
+) -> Result<jetstream::consumer::Consumer<pull::Config>, Failure> {
+    let name = uber::consumer(host);
+    stream
+        .get_or_create_consumer(
+            &name,
+            pull::Config {
+                durable_name: Some(name.clone()),
+                filter_subject: format!("vega.inbox.{}.>", subject_token(host)),
+                deliver_policy: jetstream::consumer::DeliverPolicy::All,
+                ack_policy: jetstream::consumer::AckPolicy::Explicit,
+                ack_wait: UBER_ACK_WAIT,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(broker_err)
+}
+
+/// Longer than a batch's answers' bd calls (uber.rs `BD_TIMEOUT`, twice
+/// each): a redelivered answer would be refused as `answered` after it was
+/// applied. Answers are rare; the rest of a batch is acked at once.
+const UBER_ACK_WAIT: Duration = Duration::from_secs(600);
+/// Messages per fetch: the first pass reads the whole archive.
+const UBER_BATCH: usize = 50;
+
+/// Publishes one message vegad owes for an answer. The id is fixed per
+/// answer and part, so the broker drops a resend after a crash.
+async fn publish_uber(
+    js: &jetstream::Context,
+    subject: String,
+    msg_id: &str,
+    kind: Option<vega_uber_msg::Kind>,
+    body: &str,
+) -> Result<(), String> {
+    let mut headers = HeaderMap::new();
+    headers.insert("Nats-Msg-Id", msg_id);
+    headers.insert(h::FROM_AGENT, uber::AGENT);
+    headers.insert(h::FROM_CWD, "vegad");
+    headers.insert(h::SENT_MS, now_ms().to_string().as_str());
+    if let Some(k) = kind {
+        headers.insert(h::KIND, k.as_str());
+    }
+    let publish = async {
+        match js
+            .publish_with_headers(subject, headers, body.to_string().into())
+            .await
+        {
+            Ok(ack) => ack.await.map(|_| ()).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    };
+    tokio::time::timeout(outage::CALL, publish)
+        .await
+        .unwrap_or_else(|_| Err("no answer from the broker".into()))
+}
+
+/// Sends what the outbox owes: the UAC's mail, the `uber.applied` replies
+/// and refusal notes (`note`: pane, title, body). True when nothing is left.
+async fn uber_flush(
+    js: &jetstream::Context,
+    host: &str,
+    outbox: &std::path::Path,
+    note: UberNote,
+) -> bool {
+    let mut clear = true;
+    for mut p in uber::unsent(outbox) {
+        if let Some((pane, text)) = p.mail.clone() {
+            let id = format!("uber:{host}:{}:mail", p.seq);
+            match publish_uber(js, inbox_subject(host, &pane, host), &id, None, &text).await {
+                Ok(()) => p.mail = None,
+                Err(e) => log(&format!("uber: mail to {pane} not sent, retrying: {e}")),
+            }
+        }
+        if let Some((to_host, to_pane, body)) = p.reply.clone() {
+            let id = format!("uber:{host}:{}:applied", p.seq);
+            let subject = inbox_subject(&to_host, &to_pane, host);
+            let kind = Some(vega_uber_msg::Kind::Applied);
+            match publish_uber(js, subject, &id, kind, &body).await {
+                Ok(()) => p.reply = None,
+                Err(e) => log(&format!(
+                    "uber: applied for {to_pane} on {to_host} not sent, retrying: {e}"
+                )),
+            }
+        }
+        if let Some((pane, title, body)) = p.note.take() {
+            let _ = tokio::task::spawn_blocking(move || note(&pane, &title, &body)).await;
+        }
+        clear &= !p.owes();
+        if let Err(e) = uber::save(outbox, &p) {
+            log(&format!("uber: outbox {} not updated: {e}", p.seq));
+        }
+    }
+    uber::prune(outbox, UBER_ACK_WAIT * 2);
+    clear
+}
+
+/// Reads vegad's consumer until it is empty: each `uber.answer` is verified
+/// and applied or refused (uber.rs), what it owes goes to the outbox, then
+/// the message is acked; `uber_flush` sends it. `asks` is the open-ask
+/// store. The broker error that ended the pass early, if any.
+async fn uber_pass(
+    consumer: &jetstream::consumer::Consumer<pull::Config>,
+    asks: Option<std::path::PathBuf>,
+) -> Option<Failure> {
+    uber_drain(consumer, asks).await.err()
+}
+
+type UberNote = fn(&str, &str, &str);
+
+/// vegad's `UberNote`: toast plus `vega post notes`.
+fn uber_note(pane: &str, title: &str, body: &str) {
+    vega_herdr::notes::notify(uber::NOTE_KIND, Some(pane), title, body);
+}
+
+async fn uber_drain(
+    consumer: &jetstream::consumer::Consumer<pull::Config>,
+    asks: Option<std::path::PathBuf>,
+) -> Result<(), Failure> {
+    loop {
+        let mut batch = consumer
+            .fetch()
+            .max_messages(UBER_BATCH)
+            .expires(Duration::from_millis(300))
+            .messages()
+            .await
+            .map_err(broker_err)?;
+        let mut seen = 0;
+        while let Some(m) = batch.next().await {
+            let m = m.map_err(broker_err)?;
+            seen += 1;
+            let kind = m
+                .headers
+                .as_ref()
+                .and_then(|hs| hs.get(h::KIND))
+                .map(|v| v.as_str().to_string());
+            match kind.as_deref().and_then(vega_uber_msg::Kind::parse) {
+                Some(vega_uber_msg::Kind::Answer) => {
+                    let Some(asks) = asks.clone() else {
+                        log("uber: answer dropped: no state dir (XDG_STATE_HOME, HOME)");
+                        m.ack().await.map_err(broker_err)?;
+                        continue;
+                    };
+                    let seq = m.info().map_err(broker_err)?.stream_sequence;
+                    let (to_pane, from_host) = parse_subject(&m.subject).unwrap_or(("", ""));
+                    let (to_pane, from_host) = (to_pane.to_string(), from_host.to_string());
+                    let from_pane = m
+                        .headers
+                        .as_ref()
+                        .and_then(|hs| hs.get(h::FROM_PANE))
+                        .map(|v| v.as_str().to_string())
+                        .unwrap_or_default();
+                    let body = m.payload.to_vec();
+                    let saved = tokio::task::spawn_blocking(move || {
+                        let now = (now_ms() / 1000) as i64;
+                        let o = uber::receive(
+                            &asks,
+                            seq,
+                            &body,
+                            &from_host,
+                            &from_pane,
+                            &to_pane,
+                            &uber::Bd,
+                            now,
+                        )?;
+                        // None: a redelivery of an answer handled before its ack.
+                        if let Some(o) = o {
+                            log(&o.log);
+                        }
+                        Ok(())
+                    })
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(|r: Result<(), String>| r);
+                    if let Err(e) = saved {
+                        // Not acked: it comes again, and the outbox may work then.
+                        return Err(Failure::new(
+                            "uber_outbox",
+                            format!("answer {seq}: outbox not written: {e}"),
+                            "check the state dir",
+                        ));
+                    }
+                }
+                // The Uber host's side (vega-lhc.209.6) plugs in here.
+                Some(_) => {}
+                None => {}
+            }
+            m.ack().await.map_err(broker_err)?;
+        }
+        if seen == 0 {
+            return Ok(());
+        }
+    }
+}
+
 /// The `Vega-From-Agent` of `--from-tool` mail: `tool vega-<name>`. Only vega
 /// tool names, and always the `tool` prefix, so no caller can pose as a person
 /// or an agent ("the user", "claude").
@@ -1876,7 +2079,12 @@ fn print_msg(
         hv(h::FROM_AGENT),
         cell(&hv(h::FROM_CWD)),
     );
-    for l in String::from_utf8_lossy(&m.payload).lines() {
+    let kind = m
+        .headers
+        .as_ref()
+        .and_then(|hs| hs.get(h::KIND))
+        .map(|v| v.as_str());
+    for l in uber::printable(kind, &m.payload).lines() {
         println!("  {l}");
     }
     if parent
@@ -1891,7 +2099,9 @@ fn print_msg(
             println!("stale: sent before your newer brief of {at}; it reports on earlier work, not on that brief");
         }
     }
-    if from_pane == "?" && hv(h::FROM_AGENT) == ci::AGENT {
+    if uber::hidden(kind) {
+        println!("reply: none (vegad answers the Uber-UAC)");
+    } else if from_pane == "?" && hv(h::FROM_AGENT) == ci::AGENT {
         println!("reply: none (vegad's CI watch; `vega ci` shows the state)");
     } else if from_pane == "?" && hv(h::FROM_AGENT).starts_with("tool vega-") {
         println!("reply: none (sent by a vega tool, not an agent)");
@@ -2600,6 +2810,11 @@ async fn serve(
                 }
             }
         };
+        // Uber answers (uber.rs): vegad's own consumer, so an answer is
+        // verified before the UAC sees it, also after this host slept. It is
+        // made in the loop and retried: until it exists answers wait in the
+        // archive, never shown unverified, and its first pass reads them.
+        let mut uber_in = None;
         // Only a broker that took the setup ends an outage (vega-lhc.205).
         jobs.backoff = outage::Backoff::new(PROBE_EVERY);
         service::write_broker("connected");
@@ -2647,6 +2862,14 @@ async fn serve(
         // Bounces the broker did not take yet (vega-lhc.205).
         let mut bounces: Vec<delivery::Bounce> = Vec::new();
         let mut bounce_retry_at = Instant::now();
+        // A pass over the uber consumer runs in its own task (bd is slow);
+        // due at start, on reconnect and on new uber.* mail.
+        let (uber_tx, mut uber_rx) = mpsc::unbounded_channel();
+        let mut uber_due = true;
+        let mut uber_running = false;
+        // The outbox owes mail and replies; flushed at start too.
+        let mut uber_owed = true;
+        let mut uber_retry_at = Instant::now();
         loop {
             let started = Instant::now();
             // While async-nats reconnects, every broker call would only queue
@@ -2776,6 +2999,37 @@ async fn serve(
                 }
                 bounces = later;
             }
+            let uber_ready = up && uber_due && !uber_running && Instant::now() >= uber_retry_at;
+            if uber_ready && uber_in.is_none() && !st::is_inbox_only(&host) {
+                match outage::bounded("uber consumer", uber_consumer(&stream, &host)).await {
+                    Ok(c) => uber_in = Some(c),
+                    Err(e) => {
+                        log(&format!("uber: consumer not made, retrying: {}", e.message));
+                        uber_retry_at = Instant::now() + CI_RETRY;
+                    }
+                }
+            }
+            if uber_ready && Instant::now() >= uber_retry_at {
+                if let Some(c) = uber_in.clone() {
+                    uber_due = false;
+                    uber_running = true;
+                    let tx = uber_tx.clone();
+                    tokio::spawn(async move {
+                        let dir = vega_registry::uber_asks::dir();
+                        let _ = tx.send(uber_pass(&c, dir).await);
+                    });
+                }
+            }
+            if up && uber_owed && !uber_running && Instant::now() >= uber_retry_at {
+                if let Some(asks) = vega_registry::uber_asks::dir() {
+                    uber_owed = !uber_flush(&js, &host, &uber::outbox(&asks), uber_note).await;
+                    if uber_owed {
+                        uber_retry_at = Instant::now() + CI_RETRY;
+                    }
+                } else {
+                    uber_owed = false;
+                }
+            }
             // Parents to wake now: free, with a new attention (supervise.rs).
             let mut wakes = if once {
                 HashMap::new()
@@ -2863,6 +3117,14 @@ async fn serve(
                         d.status_of(&pane),
                     ));
                     let from_host = parse_subject(&msg.subject).map(|(_, f)| f.to_string()).unwrap_or_default();
+                    let kind = hv(h::KIND);
+                    if kind.is_some() {
+                        uber_due = true;
+                    }
+                    // An uber.answer is vegad's: no pointer, the pass decides.
+                    if uber::hidden(kind.as_deref()) {
+                        continue;
+                    }
                     let mut held = false;
                     let mut sender = if now { Sender::Urgent } else { Sender::Other };
                     if let Some(from) = hv(h::FROM_PANE) {
@@ -2924,6 +3186,15 @@ async fn serve(
                         });
                     }
                 }
+                Some(r) = uber_rx.recv() => {
+                    uber_running = false;
+                    uber_owed = true;
+                    if let Some(f) = r {
+                        log(&format!("uber: pass failed, retrying: {}", f.message));
+                        uber_due = true;
+                        uber_retry_at = Instant::now() + CI_RETRY;
+                    }
+                }
                 Some(e) = jobs.events.recv() => jobs.agent(e, &mut d, &mut sup),
                 Some(e) = jobs.ci.recv() => match e {
                     ci::Event::Log(l) => log(&l),
@@ -2962,6 +3233,7 @@ async fn serve(
                         log("broker: connected, rescanning");
                     }
                     rescan = true;
+                    uber_due = true;
                 }
                 _ = tick.tick() => {
                     if up && !ci_unsent.is_empty() && Instant::now() >= ci_retry_at {
@@ -3246,7 +3518,10 @@ fn log_view(
                 to: to.to_string(),
                 from: format!("{}@{from_host}", hv(h::FROM_PANE)),
                 hop: hv(h::HOP),
-                text: String::from_utf8_lossy(&m.payload).into_owned(),
+                text: uber::printable(
+                    m.headers.as_ref().and_then(|hs| hs.get(h::KIND)).map(|v| v.as_str()),
+                    &m.payload,
+                ),
             });
             if rows.len() > limit {
                 rows.pop_front();

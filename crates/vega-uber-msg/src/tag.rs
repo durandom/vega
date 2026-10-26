@@ -40,7 +40,9 @@ mod tests {
         let id = "vega-lhc.209~AbCdEfGhIjKlMnOpQrStUv";
         let h = hash(id);
         assert_eq!(h.len(), 4);
-        assert!(h.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(h
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
         assert_eq!(hash(id), h, "deterministic");
         let first = of(id, &[]).unwrap();
         assert_eq!(first, format!("#{}", &h[..1]));

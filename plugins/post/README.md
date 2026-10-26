@@ -28,7 +28,8 @@ Uber-UAC mail ([uber-uac.md](../../docs/design/uber-uac.md) §3): `send --uber` 
 claim (`vega_registry::View::live_uber`) and fails with `uber_absent` when none is live. `send --kind
 uber.ask|answer|applied|withdraw|brief '<json>'` sets the `Vega-Kind` header and checks the body against its
 schema and byte cap (`crates/vega-uber-msg`) first: `uber_too_large`, `uber_malformed` or `uber_kind`, and
-nothing is sent. Receivers do not check typed mail yet; vegad's check of `uber.answer` is vega-lhc.209.5.
+nothing is sent. vegad verifies every `uber.answer` before the addressed UAC sees it (uber-uac.md §4); `inbox` and
+`log` print it withheld. Other kinds are not checked on receipt yet.
 
 Design: [vegad.md](../../docs/design/vegad.md), [vega-mux-broker-spike.md](../../docs/design/vega-mux-broker-spike.md).
 

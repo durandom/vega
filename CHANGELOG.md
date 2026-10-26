@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 81 · 2026-10-26
+
+- feature: vegad verifies each `uber.answer` before the UAC sees it: an open
+  ask, the claim it was sent to, the tag, pick and rendering, the L4 approval
+  rule; the first answer wins. A verified one becomes a bead comment by Slayer
+  (`via uber <id>`) and mail to the UAC; a refused one a note (`uber-refused`).
+  `vega post inbox` prints these answers withheld. See
+  [Uber-UAC trust rule](docs/design/uber-uac.md#4-trust-rule-and-guards).
+
 ## 80 · 2026-10-26
 
 - feature: `vega uber ask --bead <id> ...` sends a UAC's `slayer-decision` bead to the live
