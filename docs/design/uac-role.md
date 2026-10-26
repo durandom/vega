@@ -39,7 +39,7 @@ children of the `claim` tracker (options, recommendation, blocks), in the Slayer
 against project rules. Answer an `asking` sentinel yourself if you can; what waits on the Slayer
 over 30 min becomes such a bead, quoting the question. Park its waiting sentinel:
 `vega uac park <pane> --bead <id>`. Answers by mail: act, close with the answer.
-L3/L4: also [`vega uber ask`](uber-uac.md).
+L3/L4: [`vega uber ask`](uber-uac.md); idle: `uber_absent`.
 Record chat answers in the decision bead at once;
 board and sidebar match chat.
 Hygiene mail: follow it; ask the Slayer once, batched.

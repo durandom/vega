@@ -3,7 +3,7 @@
 Status: design, 2026-10-26; vega-lhc.210 for decision vega-lhc.209. Built: the claim (§2, vega-lhc.209.2),
 the messages (§3, vega-lhc.209.3), `vega uber ask` with the open-ask state (§3, vega-lhc.209.4),
 the UAC-host check of `uber.answer` (§4, vega-lhc.209.5), the Uber host's received asks, captures,
-`vega uber answer` and audit (§4, vega-lhc.209.6).
+`vega uber answer` and audit (§4, vega-lhc.209.6), the engaged window (§2, vega-lhc.209.12).
 
 ## Problem and decision
 
@@ -70,9 +70,35 @@ broker (local mode) there is no Uber (§2).
   vegad deletes the key on reconnect. `vega uber status`: the live claim, superseded and gone claims.
   `vega uber` (home): claim, open asks, last brief.
 - `vega uber claim` needs the broker: without it there is no estate-wide view, so it refuses with `no_broker`.
-- **Absent** (no live claim, broker down, or local mode): `vega uber ask` returns `uber_absent` and the UAC
-  behaves exactly as today: a `slayer-decision` bead, the board, its own pane. Nothing queues for an
-  Uber that does not exist.
+- **Absent** (no live claim, broker down, local mode, or a claim that is not engaged): `vega uber ask` returns
+  `uber_absent` and the UAC behaves exactly as today: a `slayer-decision` bead, the board, its own pane.
+  Nothing queues for an Uber that does not exist or that the Slayer is not talking to.
+- **Engaged window** (vega-lhc.209.12): normally the Slayer is at the laptop and talks to the project UACs, so
+  the Uber must not spam. It is active only while the Slayer talks to it. There is no login or logout, only
+  heuristics (`vega_registry::uber_engaged`, `View::uber_engaged`):
+  - **Start**: a Slayer capture on the Uber host (§4: a typed prompt or an AskUserQuestion answer; vegad
+    pointers, task notices and agent mail are not captures). The hook writes its time to
+    `$XDG_STATE_HOME/vega/uber/engaged.json`, and vegad adds it to the claim's key as `engaged_at` (only a
+    capture at or after the claim counts).
+  - **End**, whichever comes first: (a) 2 h without a Slayer capture; (b) human input in a herdr client on
+    any host after the last capture. herdr 0.9.5 reports no keystrokes, so the signal is `pane.focused` (any
+    client, no source field): each host's vegad writes the time to `uber/human.json` and its beat carries it
+    as `human_at`. vega's own focus calls are human commands (`vega mux next`, `vega board`,
+    `vega open --focus`), and `vega mux` spawns with `--no-focus`. A focus within 3 s after a pane closed is
+    ignored, since herdr may move the focus on (whether it does: unknown). Limit: typing into the pane that
+    already has the focus gives no event, so then only (a) ends the window. A prompt in a UAC pane that
+    vegad or mux did not type is not used: a background task notice also turns a pane `working`.
+    There is no explicit idle command.
+  - **While not engaged**: `vega uber ask` returns `uber_absent` (the message says `the Uber-UAC is idle
+    (...)`), vegad resends no open ask to the claim (New epoch, below) and sends no digest wake (§3). Asks
+    already sent stay open at the Uber; withdraws still go out.
+  - **While engaged**: routing, resends and the digest work as designed. When a window opens, the Uber
+    pulls the brief once instead of the UACs pushing their backlog.
+  - **The Uber notices**: `vega uber status` prints `engaged: yes, until 15:02Z (last Slayer input 3m ago)` or
+    `engaged: no (<reason>)`. On a typed prompt that opens a window, the capture hook prints one line (its
+    only stdout): `vega uber: you were idle (<reason>); tell the Slayer so once. Engaged again now: pull the
+    brief once (vega uber).` For the laptop reason it reads `uber/human_seen.json`, the newest `human_at` of
+    any host, which vegad on the Uber host keeps from the registry.
 - **New epoch**: the UAC's state is the source of truth. When a UAC host's vegad sees a new epoch, it
   sends that UAC's open asks again to the new claim. Once an ask is resent, only the new epoch's answer counts.
   An answer from the old claim that arrives before the resend still applies (§4, check 2).
@@ -114,7 +140,8 @@ typed into a pane ([vegad.md](vegad.md) Security).
   `$XDG_STATE_HOME/vega/uber/asks/<id>.json` on the UAC host (`vega_registry::uber_asks`: the ask, the UAC's
   pane, host and checkout, the claim it was sent to, `open|answered|withdrawn`), and sends it to exactly that
   claim; a failed send removes the file. Each round (15 s) the UAC host's vegad sends `uber.withdraw` for an
-  open ask whose bead closed and resends an open ask whose claim is no longer the live one (New epoch, §2).
+  open ask whose bead closed and resends an open ask whose claim is no longer the live one (New epoch, §2),
+  only while the live claim is engaged (§2).
   Closed asks stay 30 days, so a late answer is refused as answered. The UAC then parks the
   waiting sentinel (`vega uac park`) as today. It does not wait in its pane. The bead, the board and the pane
   still work: an answer given there closes the bead, and vegad then sends `uber.withdraw`.
@@ -133,7 +160,8 @@ typed into a pane ([vegad.md](vegad.md) Security).
   - **at once**: `urgent` asks (production down, security, data loss, or a deadline under 1 h). The open dialog
     triggers the app's "actions required" push.
   - **batched**: everything else, when the Slayer says "brief" or opens the session, plus a one-line
-    digest push when the oldest waiting ask is 4 h old (vegad wakes the Uber; one push per 4 h at most).
+    digest push when the oldest waiting ask is 4 h old (vegad wakes the Uber; one push per 4 h at most),
+    only while the Uber is engaged (§2).
   - A passed deadline only marks the ask `overdue`. **No default fires on a timeout**; the ask waits.
 - **Brief** (on demand): Decisions = the Uber's own open asks. FYI and Blocked come from each UAC's reply
   to `uber.brief`: at most 3 lines each, ≤600 chars per UAC. Compress, don't relay: no transcripts and
@@ -176,7 +204,8 @@ an intent (closing again, commenting only if `via uber <id>` is missing) and ski
 **What `slayer_text` is.** The model must not write it. Claude Code hooks in the Uber's settings capture
 the Slayer's input: `PostToolUse` on `AskUserQuestion` (the selected labels and notes) and
 `UserPromptSubmit` (typed prompts). Both run `vega_uber_capture`, which appends one line to
-`$XDG_STATE_HOME/vega/uber/captures.jsonl` and prints nothing. It drops the known non-Slayer prompts (§5 spike):
+`$XDG_STATE_HOME/vega/uber/captures.jsonl`, opens the engaged window (§2), and prints nothing but the
+window's notice. It drops the known non-Slayer prompts (§5 spike):
 vegad pointers (`[vega-post] ...`), `<task-notification>` notices and agent mail typed by `vega mux send` (a
 `[vega-mux] from` footer line). `<n>` is the line number (1-based, append-only), and `capture.sha256` is the
 sha256 of that line. `vega uber answer <id|tag> --capture <n>`, run in the live claim's pane, builds `slayer_text`
@@ -316,3 +345,4 @@ ganymede, Claude mobile app; captures from project-local hooks, one run per test
 6. vega-lhc.209.6: Uber host: capture hooks, `vega uber answer --capture`, audit.jsonl and `vega uber audit`.
 7. vega-lhc.209.7: `vega uber start` and the guide `vega skills uber`: dedicated cwd, allowlist settings, hooks, Remote Control, `vega uber show` mapping.
 8. vega-lhc.209.8: Brief: `uber.brief` fan-in, Decisions/FYI/Blocked rendering, the 4 h digest wake; concepts.md section.
+9. vega-lhc.209.12: the engaged window (§2): `engaged_at` on the claim, `human_at` in the beat, the ask and resend gate.

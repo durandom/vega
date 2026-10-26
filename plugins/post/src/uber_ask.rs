@@ -6,7 +6,8 @@
 //! - resends an open ask to a new live claim (New epoch): `uber.ask` again,
 //!   then records the new claim, so only its answer counts from then on.
 //!
-//! Without a live claim nothing is resent; the asks wait for the next Uber.
+//! Without a live, engaged claim (vega-lhc.209.12) nothing is resent; the
+//! asks wait for the next Uber or its next engaged window.
 //! Mail goes out as the UAC pane that asked, so the Uber's answer reaches it.
 
 use std::time::Duration;
@@ -116,6 +117,11 @@ async fn publish(js: &jetstream::Context, host: &str, a: &OpenAsk, action: &Acti
     sent.is_ok()
 }
 
+/// The live claim while it is engaged: only then are asks resent to it.
+pub fn engaged_uber(view: &vega_registry::View, now: i64) -> Option<UberClaim> {
+    view.live_uber().filter(|c| view.uber_engaged(c, now).on())
+}
+
 /// One round over this host's open asks.
 pub async fn round(js: &jetstream::Context, host: &str, view: Option<&vega_registry::View>) {
     let Some(dir) = uber_asks::dir() else { return };
@@ -125,7 +131,7 @@ pub async fn round(js: &jetstream::Context, host: &str, view: Option<&vega_regis
     if !asks.iter().any(|a| a.state == State::Open) {
         return;
     }
-    let live = view.and_then(|v| v.live_uber());
+    let live = view.and_then(|v| engaged_uber(v, now));
     for action in plan(&asks, live.as_ref(), bead_closed) {
         let (Action::Withdraw { id, to } | Action::Resend { id, to }) = &action;
         let Some(a) = asks.iter().find(|a| a.ask.id == *id) else {
@@ -269,5 +275,26 @@ mod tests {
             );
             assert_eq!(body(&a, &action).2, msg_id);
         }
+    }
+
+    #[test]
+    fn asks_are_resent_only_to_an_engaged_claim() {
+        use serde_json::json;
+        let now = (now_ms() / 1000) as i64;
+        let mut v = vega_registry::View::default();
+        v.entries
+            .insert(vega_registry::beat_key("ganymede"), json!({"at": now}));
+        v.entries.insert(
+            vega_registry::agent_key("ganymede", "w9:p1"),
+            json!({"pane": "w9:p1", "status": "idle"}),
+        );
+        let mut c = vega_registry::uber_state::value("w9:p1", "ganymede", 0, 20);
+        v.entries
+            .insert(vega_registry::uber_key("ganymede"), c.clone());
+        assert!(v.live_uber().is_some());
+        assert_eq!(engaged_uber(&v, now), None);
+        c["engaged_at"] = json!(now - 60);
+        v.entries.insert(vega_registry::uber_key("ganymede"), c);
+        assert_eq!(engaged_uber(&v, now).unwrap().epoch, 20);
     }
 }
