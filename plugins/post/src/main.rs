@@ -2350,9 +2350,7 @@ async fn local(
             meta_next = Some(Instant::now() + REGISTRY_EVERY);
         }
         for p in sup.ripe(SILENT_AFTER) {
-            if let Some(q) = confirm_silent(&p) {
-                d.aborted(&p, !q.transient);
-            }
+            turn_ended(&p, &mut d);
         }
         let wakes = due_wakes(&mut sup, &d, None);
         type_wakes(wakes, &mut sup, &mut drafts);
@@ -2675,19 +2673,7 @@ async fn serve(
                 meta_next = Some(Instant::now() + REGISTRY_EVERY);
             }
             for p in sup.ripe(SILENT_AFTER) {
-                // A pointer typed into the aborted turn may be lost (delivery.rs).
-                if let Some(q) = confirm_silent(&p) {
-                    if d.aborted(&p, !q.transient) {
-                        log(&format!(
-                            "pointer: {p} turn aborted, mail pending again{}",
-                            if q.transient {
-                                ""
-                            } else {
-                                " (held: quota exhausted)"
-                            }
-                        ));
-                    }
-                }
+                turn_ended(&p, &mut d);
             }
             for asker in expired_asks() {
                 d.mail(&asker, Sender::Other);
@@ -5299,16 +5285,100 @@ fn observe_remote(
     }
 }
 
-/// A status for a pane; only children on this machine are supervised.
+/// A status for a pane. Children on this machine are supervised; any other
+/// pane's turn ends are watched too, for a provider abort (`turn_ended`).
 fn observe(sup: &mut Supervisor, pane: &str, status: &str) {
-    if !st::children()
+    let reported =
+        is_local_child(pane) && (st::done_of(None, pane).is_some() || st::has_replied(None, pane));
+    sup.observe(pane, status, reported);
+}
+
+fn is_local_child(pane: &str) -> bool {
+    st::children()
         .iter()
         .any(|c| c.machine.is_none() && c.pane == pane)
-    {
+}
+
+/// A pane went free after a turn a moment ago (`Supervisor::ripe`). A child
+/// is confirmed silent; any other pane is read only while a pointer it has
+/// not read stands. A provider abort holds the pointer (delivery.rs): an
+/// overload backs off, and when the retries are used up the parent sees
+/// attention `quota` (the silent record), a pane without one notifies the
+/// human (vega-lhc.208).
+fn turn_ended(p: &str, d: &mut Delivery) {
+    let child = p.contains('/') || is_local_child(p);
+    let quota = if child {
+        confirm_silent(p)
+    } else if d.repeat(p) {
+        abort_of(p)
+    } else {
         return;
+    };
+    let Some(q) = quota else {
+        d.recovered(p);
+        return;
+    };
+    // A pointer typed into the aborted turn may be lost (delivery.rs).
+    match d.aborted(p, !q.transient) {
+        delivery::Abort::Nothing => {}
+        delivery::Abort::Retry(w) => log(&format!(
+            "pointer: {p} turn aborted, mail pending again (retry in {} min)",
+            w.as_secs() / 60
+        )),
+        delivery::Abort::Exhausted => log(&format!(
+            "pointer: {p} turn aborted, mail pending again (held: quota exhausted)"
+        )),
+        delivery::Abort::GaveUp => {
+            log(&format!(
+                "pointer: {p} turn aborted, retries used up: held until new input"
+            ));
+            if !child {
+                vega_herdr::notes::notify(
+                    "quota",
+                    Some(p),
+                    &format!("vegad: {p} keeps hitting the provider limit"),
+                    &format!(
+                        "{} retries met: {}. Its mail waits: type into it to retry.",
+                        delivery::BACKOFF.len(),
+                        supervise::short(&q.error, 80)
+                    ),
+                );
+            }
+        }
     }
-    let reported = st::done_of(None, pane).is_some() || st::has_replied(None, pane);
-    sup.observe(pane, status, reported);
+}
+
+/// The provider abort a pane without a parent ended its turn on; no silent
+/// record (it has no parent to tell).
+fn abort_of(pane: &str) -> Option<st::Quota> {
+    let screen = turn_screen(pane);
+    if supervise::background_running(&screen) {
+        return None;
+    }
+    let q = provider_abort(pane, &screen)?;
+    log(&format!(
+        "pointer: {pane} idle on a provider abort: {}",
+        supervise::short(&q.summary(), 120)
+    ));
+    Some(q)
+}
+
+/// The visible screen once a turn has ended: right after a turn the agent
+/// may still redraw its input box; without it the status bar would pass
+/// for the turn's last line.
+fn turn_screen(pane: &str) -> String {
+    let read = || {
+        vega_herdr::herdr_text(&["pane", "read", pane, "--source", "visible"]).unwrap_or_default()
+    };
+    let mut screen = read();
+    for _ in 0..3 {
+        if supervise::read_turn_end(&screen).is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(700));
+        screen = read();
+    }
+    screen
 }
 
 /// A suspect went free without a report a moment ago: silent, unless it
@@ -5330,21 +5400,8 @@ fn confirm_silent(key: &str) -> Option<st::Quota> {
     if st::done_of(None, pane).is_some() || st::has_replied(None, pane) {
         return None;
     }
-    let read = || {
-        vega_herdr::herdr_text(&["pane", "read", pane, "--source", "visible"]).unwrap_or_default()
-    };
-    let mut screen = read();
-    // Right after a turn the agent may still redraw its input box; without
-    // it the status bar would pass for the turn's last line.
-    let mut silence = supervise::read_turn_end(&screen);
-    for _ in 0..3 {
-        if silence.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(700));
-        screen = read();
-        silence = supervise::read_turn_end(&screen);
-    }
+    let screen = turn_screen(pane);
+    let silence = supervise::read_turn_end(&screen);
     if supervise::background_running(&screen) {
         log(&format!(
             "sentinel: {pane} idle, background shell running: waiting"

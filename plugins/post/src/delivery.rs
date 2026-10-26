@@ -18,6 +18,10 @@
 //!   for STALE (it would only meet the next 429), unless the agent works
 //!   again first (resumed, or switched to another model) or the mail is
 //!   urgent; then one pointer probes, and a further abort holds it again.
+//!   After an overload or rate limit the pointer waits BACKOFF (2, 5, 15
+//!   min) before it retries; a fourth abort in a row holds it until new
+//!   input (vega-lhc.208). A read inbox or a turn the relay did not start
+//!   (the human typed, `vega mux send`) resets the count.
 //! - Safety net: mail whose last pointer was typed STALE ago and is still
 //!   not read (abort undetected, input dropped, turn taken without reading)
 //!   gets one more pointer when the agent is free, at most once per STALE.
@@ -44,6 +48,15 @@ pub const RECHECK: Duration = Duration::from_secs(10);
 /// two; the stuck panes this guards against waited 15 to 52 minutes.
 pub const STALE: Duration = Duration::from_secs(5 * 60);
 
+/// How long a pointer waits after the n-th overload or rate limit in a row
+/// before it retries; one abort more holds it until new input. Each retry
+/// is a turn, and a turn retyped at once only meets the limit again.
+pub const BACKOFF: [Duration; 3] = [
+    Duration::from_secs(2 * 60),
+    Duration::from_secs(5 * 60),
+    Duration::from_secs(15 * 60),
+];
+
 #[derive(Default)]
 pub struct Delivery {
     status: HashMap<String, String>,
@@ -59,8 +72,11 @@ pub struct Delivery {
     /// Pane -> when its last pointer was typed (Unix ms); outlives `pointed`
     /// until the mail is read, for the safety net.
     typed_at: HashMap<String, u64>,
-    /// Pane -> when its turn aborted on an exhausted quota (Unix ms).
-    exhausted: HashMap<String, u64>,
+    /// Pane -> until when a provider abort holds its pointers (Unix ms;
+    /// `u64::MAX`: until new input).
+    held: HashMap<String, u64>,
+    /// Pane -> overloads or rate limits in a row, for BACKOFF.
+    retries: HashMap<String, usize>,
     /// Pane -> sender of each mail, oldest first, trimmed like `arrivals`;
     /// `None` for mail without a sender pane or from before a restart.
     origins: HashMap<String, Vec<Option<Origin>>>,
@@ -122,6 +138,20 @@ pub enum Decision {
     Read,
     /// Keep waiting (pointed, not yet read).
     Wait,
+}
+
+/// What a provider abort does to the pane's pointer.
+#[derive(Debug, PartialEq)]
+pub enum Abort {
+    /// No mail kept for the pane: nothing to retry.
+    Nothing,
+    /// The pointer is pending again and retries after this wait.
+    Retry(Duration),
+    /// An exhausted quota: held for STALE, then one pointer probes.
+    Exhausted,
+    /// BACKOFF used up: held until new input. The caller tells the parent
+    /// or the human.
+    GaveUp,
 }
 
 pub fn is_free(status: &str) -> bool {
@@ -188,6 +218,15 @@ impl Delivery {
     /// Returns true if the status changed for a pane with pending mail
     /// (worth a log line).
     pub fn status(&mut self, pane: &str, status: &str) -> bool {
+        if status == "working" && self.status_of(pane) != "working" {
+            // A turn no pointer started: the human typed or something
+            // else (`vega mux send`) did, which counts as new input.
+            if !self.pointed.contains_key(pane) {
+                self.retries.remove(pane);
+            }
+            // The provider answers again (resumed, or another model).
+            self.held.remove(pane);
+        }
         if is_free(status) {
             if let Some(p) = self.pointed.get_mut(pane) {
                 p.busy = false;
@@ -195,10 +234,6 @@ impl Delivery {
         } else if status != "unknown" && self.pointed.get(pane).is_some_and(|p| !p.busy) {
             // Working or blocked: the agent took its turn; a new line may follow.
             self.pointed.remove(pane);
-        }
-        if status == "working" {
-            // The provider answers again (resumed, or another model).
-            self.exhausted.remove(pane);
         }
         let old = self.status.insert(pane.to_string(), status.to_string());
         let changed = old.as_deref() != Some(status);
@@ -209,16 +244,34 @@ impl Delivery {
     }
 
     /// The pane's turn ended on a provider abort; `exhausted`: a used-up
-    /// quota, not an overload. Returns true if mail is pending again.
-    pub fn aborted(&mut self, pane: &str, exhausted: bool) -> bool {
+    /// quota, not an overload. Mail not read yet is pending again, held as
+    /// `Abort` says.
+    pub fn aborted(&mut self, pane: &str, exhausted: bool) -> Abort {
         self.pointed.remove(pane);
-        if exhausted {
-            self.exhausted.insert(pane.to_string(), now_ms());
-        }
         if self.arrivals.get(pane).is_some_and(|a| !a.is_empty()) {
             self.pending.insert(pane.to_string());
         }
-        self.pending.contains(pane)
+        if !self.pending.contains(pane) {
+            return Abort::Nothing;
+        }
+        let now = now_ms();
+        if exhausted {
+            self.held
+                .insert(pane.to_string(), now + STALE.as_millis() as u64);
+            return Abort::Exhausted;
+        }
+        let n = self.retries.entry(pane.to_string()).or_default();
+        let wait = BACKOFF.get(*n).copied();
+        *n += 1;
+        let until = wait.map_or(u64::MAX, |w| now + w.as_millis() as u64);
+        self.held.insert(pane.to_string(), until);
+        wait.map_or(Abort::GaveUp, Abort::Retry)
+    }
+
+    /// The pane's turn ended without a provider abort: the next overload
+    /// starts BACKOFF afresh.
+    pub fn recovered(&mut self, pane: &str) {
+        self.retries.remove(pane);
     }
 
     /// Full picture from herdr; returns the gone panes that had mail state.
@@ -242,7 +295,8 @@ impl Delivery {
         self.urgent.remove(pane);
         self.queued.remove(pane);
         self.typed_at.remove(pane);
-        self.exhausted.remove(pane);
+        self.held.remove(pane);
+        self.retries.remove(pane);
         let had = self.pending.remove(pane);
         let unread = self.arrivals.remove(pane).is_some();
         if let Some(origins) = self.origins.remove(pane) {
@@ -276,7 +330,7 @@ impl Delivery {
 
     /// Panes worth a broker call now: urgent ones; pending free ones
     /// (working too for parent mail) unless pointed and checked within
-    /// RECHECK, or held by an exhausted quota; and free ones the safety net
+    /// RECHECK, or held after a provider abort; and free ones the safety net
     /// re-points. `ignore_status` (relay `--once`) treats every pending
     /// pane as free.
     pub fn candidates(&self, ignore_status: bool) -> Vec<String> {
@@ -289,7 +343,7 @@ impl Delivery {
                     return true;
                 }
                 let status = self.status_of(p);
-                let held = self.exhausted.get(*p).is_some_and(|t| !older(*t, now));
+                let held = self.held.get(*p).is_some_and(|t| now < *t);
                 if !self.pending.contains(*p) {
                     return !ignore_status && is_free(status) && !held && self.stale(p, now);
                 }
@@ -319,6 +373,7 @@ impl Delivery {
             self.arrivals.remove(pane);
             self.origins.remove(pane);
             self.typed_at.remove(pane);
+            self.retries.remove(pane);
             return Decision::Read;
         }
         // The inbox reads oldest first: the unread ones are the newest.
@@ -337,6 +392,7 @@ impl Delivery {
         match self.pointed.get_mut(pane) {
             Some(p) if floor > p.floor => {
                 self.pointed.remove(pane); // read since the last pointer
+                self.retries.remove(pane);
                 Decision::Type
             }
             Some(_) if stale => Decision::Type, // the safety net
@@ -354,7 +410,7 @@ impl Delivery {
             self.pending.remove(pane);
             self.urgent.remove(pane);
             self.queued.remove(pane);
-            self.exhausted.remove(pane);
+            self.held.remove(pane);
             self.typed_at.insert(pane.to_string(), now_ms());
             let busy = !is_free(self.status_of(pane));
             self.pointed.insert(
@@ -431,7 +487,8 @@ impl Delivery {
             "pointed": pointed,
             "arrivals": self.arrivals,
             "typed_at": self.typed_at,
-            "exhausted": self.exhausted,
+            "held": self.held,
+            "retries": self.retries,
             "origins": self.origins.iter().map(|(p, os)| {
                 let os: Vec<Value> = os.iter().map(|o| match o {
                     Some(o) => json!({"host": o.host, "pane": o.pane, "agent": o.agent}),
@@ -462,7 +519,14 @@ impl Delivery {
         self.urgent.extend(set("urgent"));
         self.queued.extend(set("queued"));
         self.typed_at.extend(times("typed_at"));
-        self.exhausted.extend(times("exhausted"));
+        self.held.extend(times("held"));
+        // An older image kept when an exhausted quota aborted.
+        for (p, t) in times("exhausted") {
+            self.held.entry(p).or_insert(t + STALE.as_millis() as u64);
+        }
+        for (p, n) in times("retries") {
+            self.retries.insert(p, n as usize);
+        }
         for (p, s) in v["pointed"].as_object().into_iter().flatten() {
             if let Some(floor) = s["floor"].as_u64() {
                 let busy = s["busy"].as_bool().unwrap_or(false);
@@ -986,7 +1050,7 @@ mod tests {
 
     /// Moves the pane's pointer and abort times back by `ms`.
     fn age(d: &mut Delivery, pane: &str, ms: u64) {
-        for t in [d.typed_at.get_mut(pane), d.exhausted.get_mut(pane)]
+        for t in [d.typed_at.get_mut(pane), d.held.get_mut(pane)]
             .into_iter()
             .flatten()
         {
@@ -995,6 +1059,11 @@ mod tests {
     }
 
     const STALE_MS: u64 = STALE.as_millis() as u64;
+    const BACKOFF_MS: [u64; 3] = [
+        BACKOFF[0].as_millis() as u64,
+        BACKOFF[1].as_millis() as u64,
+        BACKOFF[2].as_millis() as u64,
+    ];
 
     #[test]
     fn provider_abort_drops_the_pointer_typed_into_the_turn() {
@@ -1006,19 +1075,21 @@ mod tests {
         d.typed("w1:p1", 0, true);
         d.status("w1:p1", "idle");
         assert!(d.candidates(false).is_empty(), "pointer stands");
-        assert!(d.aborted("w1:p1", false));
+        assert_eq!(d.aborted("w1:p1", false), Abort::Retry(BACKOFF[0]));
+        assert!(d.candidates(false).is_empty(), "backs off");
+        age(&mut d, "w1:p1", BACKOFF_MS[0]);
         assert_eq!(d.candidates(false), vec!["w1:p1"]);
         assert_eq!(d.decide("w1:p1", 1, 0), Decision::Type);
         // Also when the turn's working phase already took the pointer.
         let mut d = d_typed("idle");
         d.status("w1:p1", "working");
         d.status("w1:p1", "idle");
-        assert!(d.aborted("w1:p1", false));
+        assert_eq!(d.aborted("w1:p1", false), Abort::Retry(BACKOFF[0]));
         assert_eq!(d.decide("w1:p1", 1, 0), Decision::Type);
         // Nothing kept for the pane: nothing pending.
         let mut e = Delivery::default();
         e.status("w1:p1", "idle");
-        assert!(!e.aborted("w1:p1", false));
+        assert_eq!(e.aborted("w1:p1", false), Abort::Nothing);
         assert!(e.candidates(false).is_empty());
     }
 
@@ -1032,7 +1103,7 @@ mod tests {
     #[test]
     fn exhausted_quota_holds_pointers_until_working_or_stale() {
         let mut d = d_typed("idle");
-        assert!(d.aborted("w1:p1", true));
+        assert_eq!(d.aborted("w1:p1", true), Abort::Exhausted);
         d.mail("w1:p1", Sender::Parent);
         assert!(d.candidates(false).is_empty(), "held: exhausted");
         // Works again (resumed, another model): parent mail goes in.
@@ -1057,10 +1128,72 @@ mod tests {
         // The probe meets the quota again: held again.
         d.aborted("w1:p1", true);
         assert!(d.candidates(false).is_empty());
-        // An overload does not hold.
-        let mut d = d_typed("idle");
-        d.aborted("w1:p1", false);
+    }
+
+    /// The pointer's retry turn: typed when the hold ends, the agent works,
+    /// and the provider aborts again.
+    fn retry(d: &mut Delivery) -> Abort {
         assert_eq!(d.candidates(false), vec!["w1:p1"]);
+        assert_eq!(d.decide("w1:p1", 1, 0), Decision::Type);
+        d.typed("w1:p1", 0, true);
+        d.status("w1:p1", "working");
+        d.status("w1:p1", "idle");
+        d.aborted("w1:p1", false)
+    }
+
+    #[test]
+    fn overloads_back_off_then_hold_until_new_input() {
+        // The repro (wFS:p2): every pointer met the next 429.
+        let mut d = d_typed("idle");
+        d.status("w1:p1", "working");
+        d.status("w1:p1", "idle");
+        assert_eq!(d.aborted("w1:p1", false), Abort::Retry(BACKOFF[0]));
+        for (i, ms) in BACKOFF_MS.into_iter().enumerate() {
+            age(&mut d, "w1:p1", ms - 1_000);
+            assert!(
+                d.candidates(false).is_empty(),
+                "no retype within backoff {i}"
+            );
+            age(&mut d, "w1:p1", 1_000);
+            let next = BACKOFF
+                .get(i + 1)
+                .copied()
+                .map_or(Abort::GaveUp, Abort::Retry);
+            assert_eq!(retry(&mut d), next);
+        }
+        // Retries used up: held, also past STALE (no safety net).
+        age(&mut d, "w1:p1", 60 * 60 * 1000);
+        assert!(d.candidates(false).is_empty(), "held until new input");
+        // Urgent mail still goes through.
+        let mut u = d_typed("idle");
+        u.aborted("w1:p1", false);
+        for _ in 0..3 {
+            u.held.insert("w1:p1".into(), 0);
+            retry(&mut u);
+        }
+        assert!(u.candidates(false).is_empty());
+        u.mail("w1:p1", Sender::Urgent);
+        assert_eq!(u.candidates(false), vec!["w1:p1"]);
+        // The human types: the turn is new input; the count starts afresh.
+        d.status("w1:p1", "working");
+        d.status("w1:p1", "idle");
+        assert_eq!(d.aborted("w1:p1", false), Abort::Retry(BACKOFF[0]));
+        // A turn that ends without an abort resets the count too.
+        age(&mut d, "w1:p1", BACKOFF_MS[0]);
+        assert_eq!(retry(&mut d), Abort::Retry(BACKOFF[1]));
+        d.recovered("w1:p1");
+        age(&mut d, "w1:p1", BACKOFF_MS[1]);
+        assert_eq!(retry(&mut d), Abort::Retry(BACKOFF[0]));
+        // So does reading the inbox.
+        age(&mut d, "w1:p1", BACKOFF_MS[0]);
+        assert_eq!(retry(&mut d), Abort::Retry(BACKOFF[1]));
+        assert_eq!(d.decide("w1:p1", 0, 2), Decision::Read);
+        d.mail("w1:p1", Sender::Other);
+        assert_eq!(d.decide("w1:p1", 1, 2), Decision::Type);
+        d.typed("w1:p1", 2, true);
+        d.status("w1:p1", "working");
+        d.status("w1:p1", "idle");
+        assert_eq!(d.aborted("w1:p1", false), Abort::Retry(BACKOFF[0]));
     }
 
     #[test]
@@ -1117,6 +1250,23 @@ mod tests {
         c.import(&v);
         c.status("w1:p1", "idle");
         assert!(c.candidates(false).is_empty());
+        // An older image with the exhausted abort time: held STALE from it.
+        let mut v = a.export();
+        let t = v["held"]["w1:p2"].as_u64().unwrap() - STALE_MS;
+        v["held"] = json!({});
+        v["exhausted"] = json!({"w1:p2": t});
+        let mut e = Delivery::default();
+        e.import(&v);
+        e.status("w1:p2", "idle");
+        assert!(!e.candidates(false).contains(&"w1:p2".to_string()));
+        // The backoff count survives too.
+        let mut f = d_typed("idle");
+        f.aborted("w1:p1", false);
+        let mut g = Delivery::default();
+        g.import(&f.export());
+        g.held.clear();
+        g.status("w1:p1", "idle");
+        assert_eq!(retry(&mut g), Abort::Retry(BACKOFF[1]));
     }
 
     #[test]

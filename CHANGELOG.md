@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 77 · 2026-10-26
+
+- feature: after a rate limit or overload vegad no longer retypes the mail
+  pointer every few seconds. It retries after 2, 5 and 15 minutes, then holds
+  the pointer until new input (you type into the pane, or it reads its inbox);
+  a pane without a parent gets a note. Also for panes that are no sentinel. See
+  [Provider aborts](docs/design/vegad.md).
+
 ## 76 · 2026-10-25
 
 - feature: `vega post identity rekey preview|apply|rollback` moves a project's
