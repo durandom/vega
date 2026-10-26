@@ -157,13 +157,6 @@ pub(crate) fn build(a: &AskArgs, bead: &Bead, project: &str, id: String) -> Resu
     Ok(ask)
 }
 
-/// An open ask for `bead` already exists: one ask per decision.
-fn already(dir: &Path, bead: &str) -> Option<OpenAsk> {
-    uber_asks::list(dir)
-        .into_iter()
-        .find(|a| a.state == State::Open && a.ask.bead == bead)
-}
-
 fn absent(why: &str) -> Failure {
     Failure::new(
         "uber_absent",
@@ -257,7 +250,16 @@ pub(crate) fn ask_to(
         closed_at: None,
     };
     let io = |e: std::io::Error| Failure::new("state_io", e.to_string(), "check the state dir");
-    uber_asks::save(dir, &record).map_err(io)?;
+    if let Some(o) = uber_asks::create(dir, &record).map_err(io)? {
+        return Err(Failure::new(
+            "already_asked",
+            format!(
+                "{} is already asked ({}, sent to {} on {})",
+                o.ask.bead, o.ask.id, o.sent_to.pane, o.sent_to.host
+            ),
+            "one ask per decision; it is withdrawn when the bead closes",
+        ));
+    }
     let json = serde_json::to_string(&record.ask).expect("an Ask serializes");
     if let Err(f) = send(&record.sent_to, &json) {
         let _ = uber_asks::remove(dir, &record.ask.id);
@@ -279,16 +281,6 @@ pub(crate) fn ask(a: AskArgs) -> Result<(), Failure> {
     })?;
     let dir = uber_asks::dir()
         .ok_or_else(|| Failure::new("no_home", "no state dir", "set HOME or XDG_STATE_HOME"))?;
-    if let Some(o) = already(&dir, &a.bead) {
-        return Err(Failure::new(
-            "already_asked",
-            format!(
-                "{} is already asked ({}, sent to {} on {})",
-                a.bead, o.ask.id, o.sent_to.pane, o.sent_to.host
-            ),
-            "one ask per decision; it is withdrawn when the bead closes",
-        ));
-    }
     let bead = show_bead(&cwd, &a.bead)?;
     let id = vega_uber_msg::new_id(&a.bead)
         .map_err(|r| Failure::new(r.code, r.message, "pass a bead id"))?;
@@ -465,7 +457,18 @@ mod tests {
         );
         assert!(vega_uber_msg::validate(Kind::Ask, json.as_bytes()).is_ok());
         assert_eq!(uber_asks::load(d, &r.ask.id), Some(r.clone()));
-        assert_eq!(already(d, "vega-12").map(|a| a.ask.id), Some(r.ask.id));
+        // A second ask for the same bead is refused and sends nothing.
+        let never = |_: &SentTo, _: &str| -> Result<(), Failure> { panic!("sent") };
+        let f = ask_to(
+            d,
+            body(),
+            uac(d),
+            Ok(live("ganymede", "w9:p1", 77)),
+            6,
+            never,
+        );
+        assert_eq!(f.unwrap_err().code, "already_asked");
+        assert_eq!(uber_asks::list(d), [r]);
 
         let other = tempfile::tempdir().unwrap();
         let fail = |_: &SentTo, _: &str| Err(Failure::new("send_failed", "x", ""));

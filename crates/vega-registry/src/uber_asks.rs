@@ -5,7 +5,8 @@
 //! (§4) reads it. A closed ask keeps its file, so a late answer is refused as
 //! `answered`; `prune` drops closed asks after `KEEP_CLOSED`.
 //!
-//! Transitions (`close`, `resend`) run under a lock on the directory, so the
+//! `create` and the transitions (`close`, `resend`) run under a lock on the
+//! directory, so the
 //! first one wins.
 
 use std::fs::{File, OpenOptions};
@@ -114,6 +115,20 @@ pub fn save(dir: &Path, a: &OpenAsk) -> std::io::Result<()> {
         serde_json::to_string(a).map_err(std::io::Error::other)?,
     )?;
     std::fs::rename(tmp, file)
+}
+
+/// Stores the new ask `a` unless its bead already has an open ask, which
+/// comes back instead: one ask per decision, also for concurrent askers.
+pub fn create(dir: &Path, a: &OpenAsk) -> std::io::Result<Option<OpenAsk>> {
+    let _lock = lock(dir)?;
+    if let Some(open) = list(dir)
+        .into_iter()
+        .find(|o| o.state == State::Open && o.ask.bead == a.ask.bead)
+    {
+        return Ok(Some(open));
+    }
+    save(dir, a)?;
+    Ok(None)
 }
 
 /// Removes ask `id`'s file (a send that failed); a missing file is fine.
@@ -270,6 +285,19 @@ mod tests {
             (State::Answered, Some(7), 5)
         );
         assert!(!close(d, ID2, State::Answered, 7).unwrap());
+    }
+
+    #[test]
+    fn create_allows_one_open_ask_per_bead() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let again = "vega-1~ZYXWVUTSRQPONMLKJIHGFE";
+        assert_eq!(create(d, &sample(ID, 1)).unwrap(), None);
+        let other = create(d, &sample(again, 2)).unwrap();
+        assert_eq!(other.map(|o| o.ask.id), Some(ID.to_string()));
+        assert_eq!(load(d, again), None);
+        close(d, ID, State::Withdrawn, 3).unwrap();
+        assert_eq!(create(d, &sample(again, 4)).unwrap(), None);
     }
 
     #[test]
