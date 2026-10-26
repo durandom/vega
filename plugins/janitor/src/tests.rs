@@ -389,9 +389,9 @@ fn other_hosts_rows_come_from_peer_files() {
         serde_json::from_slice(&fs::read(dir.join("summary.json")).unwrap()).unwrap();
     assert!(summary.rows.iter().any(|r| r.0.ends_with("a/lanista")));
 
-    // vegad drops ganymede's summary; the next call imports it.
+    // vegad drops peerhost's summary; the next call imports it.
     fs::create_dir_all(dir.join("peers")).unwrap();
-    let ganymede = crate::peers::Summary {
+    let peerhost = crate::peers::Summary {
         at: index::now() - 3 * 86400,
         rows: vec![(
             "~/src/durandom/lanista".into(),
@@ -405,8 +405,8 @@ fn other_hosts_rows_come_from_peer_files() {
         )],
     };
     fs::write(
-        dir.join("peers/ganymede.json"),
-        serde_json::to_vec(&ganymede).unwrap(),
+        dir.join("peers/peerhost.json"),
+        serde_json::to_vec(&peerhost).unwrap(),
     )
     .unwrap();
     let idx = index::load_fresh(&roots, &cache).unwrap();
@@ -414,7 +414,7 @@ fn other_hosts_rows_come_from_peer_files() {
     let mut hits = views::find(&idx.entries, "lanista");
     let local = hits.len();
     hits.extend(views::find(&idx.peers, "lanista"));
-    assert_eq!(hits.len(), local + 1, "ganymede's checkout too");
+    assert_eq!(hits.len(), local + 1, "peerhost's checkout too");
     let out = views::found(
         &idx.entries,
         &hits,
@@ -424,21 +424,21 @@ fn other_hosts_rows_come_from_peer_files() {
         &idx.hosts,
     );
     assert!(
-        out.contains("ganymede,~/src/durandom/lanista,clone,old,?,0,2,1d,"),
+        out.contains("peerhost,~/src/durandom/lanista,clone,old,?,0,2,1d,"),
         "{out}"
     );
     assert!(
-        out.contains("other hosts as of: ganymede 3d ago stale"),
+        out.contains("other hosts as of: peerhost 3d ago stale"),
         "{out}"
     );
     assert!(out.contains("\n  here,"), "{out}");
     let list = views::list(&idx, &Live::default(), Filter::All, 0, index::now(), "here");
-    assert!(list.contains("ganymede,~/src/durandom/lanista"), "{list}");
+    assert!(list.contains("peerhost,~/src/durandom/lanista"), "{list}");
     let report = views::report(&idx, &Live::default(), 6, 0, index::now());
-    assert!(!report.contains("ganymede"), "report stays local");
+    assert!(!report.contains("peerhost"), "report stays local");
 
     // The file is gone (the host's key left the registry): so are its rows.
-    fs::remove_file(dir.join("peers/ganymede.json")).unwrap();
+    fs::remove_file(dir.join("peers/peerhost.json")).unwrap();
     let idx = index::load_fresh(&roots, &cache).unwrap();
     assert!(idx.peers.is_empty() && idx.hosts.is_empty());
 }
