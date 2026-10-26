@@ -65,6 +65,9 @@ pub struct Request {
     pub since: String,
     /// Unix seconds of the fan-in.
     pub at: i64,
+    /// Unix milliseconds of the fan-in: the newest brief wins also within
+    /// one second.
+    pub at_ms: i64,
     pub targets: Vec<Target>,
 }
 
@@ -152,7 +155,7 @@ fn all(uber_dir: &Path) -> Vec<Request> {
         .filter_map(|e| std::fs::read_to_string(e.path()).ok())
         .filter_map(|t| serde_json::from_str(&t).ok())
         .collect();
-    v.sort_by(|a: &Request, b| b.at.cmp(&a.at).then(b.thread.cmp(&a.thread)));
+    v.sort_by(|a: &Request, b| b.at_ms.cmp(&a.at_ms).then(b.thread.cmp(&a.thread)));
     v
 }
 
@@ -527,6 +530,7 @@ mod tests {
             asker: "w1:p1".into(),
             since: rfc3339(at - FIRST_SINCE),
             at,
+            at_ms: at * 1000,
             targets,
         }
     }
@@ -673,6 +677,19 @@ mod tests {
         prune(d, 2);
         assert!(load(d, "A").is_none() && !dir.path().join("briefs/A").exists());
         assert!(load(d, "B").is_some());
+    }
+
+    #[test]
+    fn of_two_briefs_in_one_second_the_later_is_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        for (t, ms) in [("Zolder", 0), ("Anewer", 500)] {
+            let mut r = request(vec![], NOW);
+            r.thread = t.into();
+            r.at_ms = NOW * 1000 + ms;
+            save_request(d, &r).unwrap();
+        }
+        assert_eq!(last(d).unwrap().thread, "Anewer");
     }
 
     #[test]

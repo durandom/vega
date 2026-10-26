@@ -166,6 +166,7 @@ pub(crate) fn brief(a: BriefArgs) -> Result<(), Failure> {
         asker: here.pane.clone(),
         since,
         at: now,
+        at_ms: now_ms() as i64,
         targets,
     };
     ask_brief(&dir, &request, fan_out)?;
@@ -257,6 +258,7 @@ mod tests {
             asker: "w1:p1".into(),
             since: brief::rfc3339(0),
             at: 1,
+            at_ms: 1000,
             targets: vec![Target {
                 host: "titan".into(),
                 pane: "w2:p1".into(),
