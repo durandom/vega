@@ -3307,6 +3307,7 @@ dependencies = [
  "vega-secrets",
  "vega-theme-sync",
  "vega-transcript",
+ "vega-uber-msg",
 ]
 
 [[package]]
@@ -3445,6 +3446,16 @@ dependencies = [
  "vega-herdr",
  "vega-plugin",
  "vega-registry",
+]
+
+[[package]]
+name = "vega-uber-msg"
+version = "0.1.0"
+dependencies = [
+ "nuid",
+ "serde",
+ "serde_json",
+ "time",
 ]
 
 [[package]]

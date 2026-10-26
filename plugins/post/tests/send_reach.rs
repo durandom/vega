@@ -68,26 +68,17 @@ fn post(home: &Path, url: &str, command: &str, args: &[&str]) -> (bool, String) 
     (out.status.success(), text)
 }
 
-#[test]
-fn send_finds_uac_of_plain_clone_by_origin() {
-    check_send("~/src/spellkave/main/.git", Some("spellkave"));
-}
-
-#[test]
-fn send_finds_uac_of_bare_layout_by_folder() {
-    check_send("~/src/spellkave/.bare", None);
-}
-
-fn check_send(local_common: &str, origin_name: Option<&str>) {
-    let project = "github.com/b4arena/spellkave";
-    let tmp = tempfile::tempdir().unwrap();
-    let home = tmp.path();
-    let bin = home.join("bin");
-    fs::create_dir_all(&bin).unwrap();
-    let herdr = bin.join("herdr");
-    fs::write(&herdr, FAKE_HERDR).unwrap();
-    fs::set_permissions(&herdr, fs::Permissions::from_mode(0o755)).unwrap();
-
+/// A local nats-server with every host's inbox stream and the registry
+/// bucket: (server, url, runtime, jetstream, registry).
+fn broker(
+    home: &Path,
+) -> (
+    Server,
+    String,
+    tokio::runtime::Runtime,
+    jetstream::Context,
+    kv::Store,
+) {
     let port = TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -102,7 +93,7 @@ fn check_send(local_common: &str, origin_name: Option<&str>) {
         ),
     )
     .unwrap();
-    let _server = Server(
+    let server = Server(
         Command::new("nats-server")
             .arg("-c")
             .arg(&conf)
@@ -117,7 +108,7 @@ fn check_send(local_common: &str, origin_name: Option<&str>) {
         .enable_all()
         .build()
         .unwrap();
-    let js = rt.block_on(async {
+    let (js, kv) = rt.block_on(async {
         let mut client = None;
         for _ in 0..50 {
             if let Ok(c) = async_nats::connect(&url).await {
@@ -144,6 +135,112 @@ fn check_send(local_common: &str, origin_name: Option<&str>) {
             })
             .await
             .unwrap();
+        (js, kv)
+    });
+    (server, url, rt, js, kv)
+}
+
+/// A fake herdr in `home/bin`.
+fn fake_herdr(home: &Path) -> std::path::PathBuf {
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let herdr = bin.join("herdr");
+    fs::write(&herdr, FAKE_HERDR).unwrap();
+    fs::set_permissions(&herdr, fs::Permissions::from_mode(0o755)).unwrap();
+    herdr
+}
+
+#[test]
+fn send_uber_reaches_the_live_claim_and_checks_typed_bodies() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    fake_herdr(home);
+    let (_server, url, rt, js, kv) = broker(home);
+    let count = |host: &str| {
+        rt.block_on(async {
+            js.get_stream(format!("VEGA_INBOX_{host}"))
+                .await
+                .unwrap()
+                .info()
+                .await
+                .unwrap()
+                .state
+                .messages
+        })
+    };
+    let put = |k: String, v: serde_json::Value| {
+        rt.block_on(async { kv.put(k, v.to_string().into()).await.unwrap() });
+    };
+    let withdraw = r#"{"id":"vega-lhc.209~AbCdEfGhIjKlMnOpQrStUv","reason":"obsolete"}"#;
+
+    // No claim: uber_absent, nothing stored.
+    let (ok, out) = send(home, &url, &["--uber", "hi"]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("uber_absent"), "{out}");
+
+    // io holds an old claim with a gone pane; titan's newer claim is live.
+    let t = now();
+    put(vega_registry::beat_key("io"), json!({"at": t}));
+    put(vega_registry::beat_key("titan"), json!({"at": t}));
+    put(
+        vega_registry::uber_key("io"),
+        json!({"schema": 1, "pane": "w5:p1", "host": "io", "at": t, "epoch": 2_000u64}),
+    );
+    put(
+        vega_registry::uber_key("titan"),
+        json!({"schema": 1, "pane": "w7:p1", "host": "titan", "at": t, "epoch": 1_000u64}),
+    );
+    put(
+        vega_registry::agent_key("titan", "w7:p1"),
+        json!({"pane": "w7:p1", "status": "idle"}),
+    );
+    let (ok, out) = send(home, &url, &["--uber", "--kind", "uber.withdraw", withdraw]);
+    assert!(ok, "{out}");
+    assert!(out.contains("sent: w7:p1 on titan"), "{out}");
+    assert_eq!(count("titan"), 1);
+    rt.block_on(async {
+        let stream = js.get_stream("VEGA_INBOX_titan").await.unwrap();
+        let m = stream.get_raw_message(1).await.unwrap();
+        assert_eq!(
+            m.headers.get("Vega-Kind").unwrap().as_str(),
+            "uber.withdraw"
+        );
+        assert_eq!(&m.payload[..], withdraw.as_bytes());
+    });
+
+    // Oversized, malformed or unknown typed bodies are refused before sending.
+    let big = format!(r#"{{"since":"{}"}}"#, "x".repeat(200));
+    for (args, code) in [
+        (["--kind", "uber.brief", big.as_str()], "uber_too_large"),
+        (["--kind", "uber.ask", "{\"id\":1}"], "uber_malformed"),
+        (["--kind", "uber.applied", withdraw], "uber_malformed"),
+        (["--kind", "uber.tell", "{}"], "uber_kind"),
+    ] {
+        let (ok, out) = send(home, &url, &[&["--uber"], args.as_slice()].concat());
+        assert!(!ok, "{out}");
+        assert!(out.contains(code), "{code}: {out}");
+        assert!(out.contains("nothing was sent"), "{out}");
+    }
+    assert_eq!(count("titan"), 1);
+}
+
+#[test]
+fn send_finds_uac_of_plain_clone_by_origin() {
+    check_send("~/src/spellkave/main/.git", Some("spellkave"));
+}
+
+#[test]
+fn send_finds_uac_of_bare_layout_by_folder() {
+    check_send("~/src/spellkave/.bare", None);
+}
+
+fn check_send(local_common: &str, origin_name: Option<&str>) {
+    let project = "github.com/b4arena/spellkave";
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let herdr = fake_herdr(home);
+    let (_server, url, rt, js, kv) = broker(home);
+    rt.block_on(async {
         let t = now();
         // proteus and io reconcile; titan's vegad stopped 10 minutes ago.
         // spellkave's old UAC w30:p1 on io is closed, its new one runs on
@@ -168,7 +265,6 @@ fn check_send(local_common: &str, origin_name: Option<&str>) {
         for (k, v) in entries {
             kv.put(k, v.to_string().into()).await.unwrap();
         }
-        js
     });
     let count = |host: &str| {
         rt.block_on(async {

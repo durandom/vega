@@ -25,6 +25,7 @@ vega-bd-sync = { path = "../../crates/vega-bd-sync" }
 vega-ci-watch = { path = "../../crates/vega-ci-watch" }
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-registry = { path = "../../crates/vega-registry" }
+vega-uber-msg = { path = "../../crates/vega-uber-msg" }
 vega-transcript = { path = "../../crates/vega-transcript" }
 vega-theme-sync = { path = "../../crates/vega-theme-sync" }
 vega-secrets = { path = "../../crates/vega-secrets" }

@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 79 · 2026-10-26
+
+- feature: `vega post send --uber` mails the live Uber-UAC claim (`uber_absent`
+  when none is live), and `--kind uber.ask|answer|applied|withdraw|brief` sends
+  a typed JSON body after checking its schema and size cap; a bad body is
+  refused and nothing is sent. The Uber-UAC itself is not usable yet; see
+  [Uber-UAC protocol](docs/design/uber-uac.md#3-protocol-ask-answer-brief-over-vega-post).
+
 ## 78 · 2026-10-26
 
 - feature: `vega uber claim|release|status`, the estate-wide singleton claim of
