@@ -42,28 +42,93 @@ fn main() {
         .and_then(|t| t.format(&Rfc3339).ok())
         .unwrap_or_default();
     match vega_uber_msg::capture::hook(&dir, &input, &now) {
-        Ok(Some(_)) => engage(&dir, &input, t.unix_timestamp()),
+        Ok(Some(_)) => {
+            let since = uber_state::file()
+                .and_then(|f| uber_state::local(&f, &vega_herdr::state::post_host()))
+                .and_then(|c| c["at"].as_i64());
+            match engage(&dir, &input, t.unix_timestamp(), since) {
+                Ok(Some(n)) => println!("{n}"),
+                Ok(None) => {}
+                Err(e) => eprintln!("vega_uber_capture: {e}"),
+            }
+        }
         Ok(None) => {}
         Err(e) => eprintln!("vega_uber_capture: {e}"),
     }
 }
 
-/// Opens the engaged window; prints the notice for a typed prompt that
-/// opens a new one.
-fn engage(dir: &Path, input: &str, now: i64) {
+/// Opens the engaged window: writes `now` to `engaged.json`. Returns the
+/// notice when a typed prompt opens a new window (`since`: the claim's
+/// `at`; earlier input does not count), and only after the write.
+fn engage(
+    dir: &Path,
+    input: &str,
+    now: i64,
+    since: Option<i64>,
+) -> std::io::Result<Option<String>> {
     let file = dir.join(uber_engaged::INPUT);
-    let since = uber_state::file()
-        .and_then(|f| uber_state::local(&f, &vega_herdr::state::post_host()))
-        .and_then(|c| c["at"].as_i64());
     let last = uber_engaged::read_at(&file).filter(|at| Some(*at) >= since);
     let seen = uber_engaged::read_seen(&dir.join(uber_engaged::SEEN));
     let before = uber_engaged::decide(last, seen.as_ref().map(|(h, a)| (h.as_str(), *a)), now);
-    if let Err(e) = uber_engaged::write_at(&file, now) {
-        eprintln!("vega_uber_capture: {e}");
-    }
+    uber_engaged::write_at(&file, now)?;
     let typed = serde_json::from_str::<serde_json::Value>(input)
         .is_ok_and(|p| p["hook_event_name"] == "UserPromptSubmit");
-    if let Some(n) = uber_engaged::notice(&before).filter(|_| typed) {
-        println!("{n}");
+    Ok(uber_engaged::notice(&before).filter(|_| typed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PROMPT: &str = r#"{"hook_event_name":"UserPromptSubmit","prompt":"brief"}"#;
+    const PICK: &str = r#"{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion"}"#;
+
+    #[test]
+    fn a_typed_prompt_that_opens_a_window_prints_one_notice() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let n = engage(d, PROMPT, 1000, Some(900)).unwrap().unwrap();
+        assert!(n.contains("first Slayer input"), "{n}");
+        assert_eq!(
+            uber_engaged::read_at(&d.join(uber_engaged::INPUT)),
+            Some(1000)
+        );
+        // While engaged: nothing.
+        assert_eq!(engage(d, PROMPT, 1100, Some(900)).unwrap(), None);
+        assert_eq!(
+            uber_engaged::read_at(&d.join(uber_engaged::INPUT)),
+            Some(1100)
+        );
+        // Laptop input after the last capture: idle again, one notice.
+        uber_engaged::write_seen(&d.join(uber_engaged::SEEN), "proteus", 1200).unwrap();
+        let n = engage(d, PROMPT, 1300, Some(900)).unwrap().unwrap();
+        assert!(
+            n.contains("you were idle (Slayer input in herdr on proteus"),
+            "{n}"
+        );
+        // Input before the claim does not count.
+        let n = engage(d, PROMPT, 1400, Some(1350)).unwrap().unwrap();
+        assert!(n.contains("first Slayer input"), "{n}");
+    }
+
+    #[test]
+    fn an_ask_user_question_capture_opens_the_window_silently() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        assert_eq!(engage(d, PICK, 1000, Some(900)).unwrap(), None);
+        assert_eq!(
+            uber_engaged::read_at(&d.join(uber_engaged::INPUT)),
+            Some(1000)
+        );
+        // A prompt right after it finds the window open.
+        assert_eq!(engage(d, PROMPT, 1010, Some(900)).unwrap(), None);
+    }
+
+    #[test]
+    fn no_notice_without_the_write() {
+        let dir = tempfile::tempdir().unwrap();
+        // engaged.json cannot be written: a directory stands in its way.
+        std::fs::create_dir_all(dir.path().join(uber_engaged::INPUT).join("x")).unwrap();
+        assert!(engage(dir.path(), PROMPT, 1000, None).is_err());
     }
 }

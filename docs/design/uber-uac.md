@@ -50,11 +50,12 @@ broker (local mode) there is no Uber (§2).
 ## 2. Singleton: one estate-wide claim
 
 - `vega uber claim`: the session becomes the Uber-UAC. Registry key `<host>.uber.v1` = `{schema: 1, pane,
-  host, at, epoch}`. This mirrors `<host>.uac.v2.<id>`, with one key for the whole estate, not one per project.
+  host, at, epoch, engaged_at?}`. This mirrors `<host>.uac.v2.<id>`, with one key for the whole estate, not one per project.
   `epoch` = claim time in ms, raised above every epoch already in the registry; it changes on every claim
   (a repeated claim by the live Uber itself is a no-op). The claim lives in `$XDG_STATE_HOME/vega/uber/claim.json`
   on its host, the source of truth: `vega uber claim` writes the file and the key, and vegad keeps the key
-  equal to the file.
+  equal to the file plus `engaged_at`, the last Slayer capture at or after the claim (`uber_state::published`,
+  Engaged window below).
 - **Live** = the host's beat is fresh and the pane is alive (as for `remote_uac`). A live claim elsewhere
   refuses with `uber_exists` and the hint `vega uber release in <pane> on <host>`.
 - **Takeover**: a claim whose pane or host is gone is replaced, and the output prints `took_over: <pane> on <host> (gone)`.
