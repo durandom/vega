@@ -8,8 +8,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 ## 87 · 2026-10-28
 
 - required: with a Dolt remote that has named users, run `vega post relay install` again: it pins
-  `DOLT_REMOTE_USER` in `vegad.env`, and vegad's sync pull and fast-forward heal pass `--user`
-  (they pulled as `root` before). See [Beads sync](docs/design/beads-sync.md). Thanks to goern
+  `DOLT_REMOTE_USER` in `vegad.env`, and vegad's sync pull, fast-forward heal and push pass
+  `--user` (they ran as `root` before). See [Beads sync](docs/design/beads-sync.md). Thanks to goern
   (Christoph Görn).
 
 ## 86 · 2026-10-27

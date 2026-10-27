@@ -227,6 +227,16 @@ fn user_pull_sql(user: &str, ff_only: bool) -> Option<String> {
     ))
 }
 
+/// `DOLT_PUSH` for the sync push, like [`pull_sql`]: `bd dolt push` leaves the remote user at
+/// `root`. `None`: no user, `bd dolt push` as before. The SQL push skips bd's pre-push fsck.
+pub fn push_sql(user: Option<&str>) -> Option<String> {
+    let user = user.filter(|u| !u.is_empty())?;
+    Some(format!(
+        "CALL DOLT_PUSH('--user', '{}', 'origin', 'main')",
+        user.replace('\'', "''")
+    ))
+}
+
 /// Ahead, behind (against the remote-tracking `origin/main`, as of the last
 /// fetch) and the head commit.
 #[derive(Debug, Clone, PartialEq)]
@@ -595,6 +605,20 @@ mod tests {
         assert_eq!(
             fast_forward_sql(Some("o'x")),
             "CALL DOLT_PULL('--user', 'o''x', 'origin', 'main', '--ff-only')"
+        );
+    }
+
+    #[test]
+    fn push_sql_adds_the_user_only_when_set() {
+        assert_eq!(push_sql(None), None);
+        assert_eq!(push_sql(Some("")), None);
+        assert_eq!(
+            push_sql(Some("goern")).as_deref(),
+            Some("CALL DOLT_PUSH('--user', 'goern', 'origin', 'main')")
+        );
+        assert_eq!(
+            push_sql(Some("o'x")).as_deref(),
+            Some("CALL DOLT_PUSH('--user', 'o''x', 'origin', 'main')")
         );
     }
 

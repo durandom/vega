@@ -54,7 +54,10 @@ impl Ops for Bd {
 
     fn push(&mut self, p: &Project) -> Outcome {
         let mut c = bd::bd(p, &self.actor);
-        c.args(["dolt", "push"]);
+        match bd::push_sql(bd::remote_user().as_deref()) {
+            Some(sql) => c.args(["sql", &sql]),
+            None => c.args(["dolt", "push"]),
+        };
         bd::classify(&bd::run(c, NET_LIMIT))
     }
 
