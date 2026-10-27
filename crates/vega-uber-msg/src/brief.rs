@@ -9,7 +9,7 @@
 //! - `<uber_dir>/briefs/<thread>/<host>_<pane>.txt`: one reply per target.
 //!
 //! Also the 4 h digest wake (`digest_due`): while the Slayer talks to the Uber
-//! (`engaged`), vegad mails the Uber pane once the oldest waiting ask is 4 h
+//! (`View::uber_engaged`), vegad mails the Uber pane once the oldest waiting ask is 4 h
 //! old, at most once per 4 h.
 
 use std::path::{Path, PathBuf};
@@ -437,15 +437,6 @@ pub fn open_decisions(uber_dir: &Path) -> Vec<Decision> {
             ask: r.ask,
         })
         .collect()
-}
-
-/// Whether the Slayer is talking to the Uber now (its claim's engaged
-/// window). The Uber must not wake him otherwise (the Slayer's rule, uber-uac.md
-/// §3 Batching). Deliberately off: vega-lhc.209.12 replaces this call with
-/// `View::uber_engaged(&claim, now).on()` in vegad's digest; until then no
-/// digest is sent, which the docs say.
-pub fn engaged(_uber_dir: &Path, _now: i64) -> bool {
-    false
 }
 
 /// The digest mail, while the Uber is `engaged`, when the oldest waiting ask

@@ -164,7 +164,7 @@ typed into a pane ([vegad.md](vegad.md) Security).
   - **batched**: everything else, when the Slayer says "brief" or opens the session, plus a one-line
     digest push when the oldest waiting ask is 4 h old (vegad wakes the Uber; one push per 4 h at most).
     The Uber must not spam: the digest fires only while the Slayer talks to it (the claim's engaged
-    window, vega-lhc.209.12; until it is built, never). vegad mails the Uber pane (`tool vega-uber`,
+    window, §2: `View::uber_engaged(&claim, now).on()`). vegad mails the Uber pane (`tool vega-uber`,
     state `uber/digest.json`); the push comes from the AskUserQuestion the Uber then opens, at least
     60 s after that pointer (§5).
   - A passed deadline only marks the ask `overdue`. **No default fires on a timeout**; the ask waits.

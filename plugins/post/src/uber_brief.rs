@@ -32,13 +32,14 @@ pub fn reply(thread: &str, to: &str, from_host: &str, from: &str, body: &[u8]) {
 
 /// The digest mail for the live Uber on `host`, if one is due now.
 pub fn digest(view: Option<&vega_registry::View>, host: &str, now: i64) -> Option<ToolMail> {
-    let uber = view?.live_uber()?;
+    let view = view?;
+    let uber = view.live_uber()?;
     if vega_registry::token(&uber.host) != vega_registry::token(host) {
         return None;
     }
     let dir = uber_dir()?;
     let waiting: Vec<i64> = brief::open_decisions(&dir).iter().map(|d| d.at).collect();
-    let engaged = brief::engaged(&dir, now);
+    let engaged = view.uber_engaged(&uber, now).on();
     let text = brief::digest_due(&waiting, brief::last_digest(&dir), engaged, now)?;
     if let Err(e) = brief::save_digest(&dir, now) {
         log(&format!("uber: digest not recorded, skipped: {e}"));

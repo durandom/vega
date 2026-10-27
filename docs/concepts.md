@@ -82,8 +82,8 @@ shows the owner the UACs' decisions and relays only what the owner answered. A U
 bead to it with `vega uber ask` (L3: the owner picks an option; L4: only the owner may approve); without a
 live Uber (`uber_absent`) the bead, the board and the UAC's pane carry the decision as before. An answer
 counts only after the UAC host's vegad verified it against the open ask. A brief (`vega uber brief`)
-shows the open decisions plus each live UAC's FYI and Blocked lines, at most 25 lines. A digest wake after
-4 h of waiting is built but off until the Uber knows when the owner talks to it (vega-lhc.209.12).
+shows the open decisions plus each live UAC's FYI and Blocked lines, at most 25 lines. While the owner talks to
+the Uber (its engaged window), vegad wakes it once an ask has waited 4 h, at most once per 4 h.
 
 - Show: `vega uber status`, `vega uber brief --show`.
 - Design: [uber-uac.md](design/uber-uac.md).
