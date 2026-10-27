@@ -142,7 +142,9 @@ pub fn warm_with(
 
 /// Fake bd, vega and herdr writing their argv to `<log>/<tool>.log`.
 /// bd list answers `<log>/bd-list.json` (else `[]`); bd create numbers ids;
-/// vega pins `m-<lane>` and spawns fresh panes starting at w9:p5; herdr's `pane get` answers
+/// vega pins `m-<lane>` and spawns fresh panes starting at w9:p5; a
+/// `<log>/spawn-fail-<kind>` file makes that kind's spawn fail; fake harness binaries
+/// sit in `<log>/harness` (`VEGA_GATE_HARNESS_PATH`); herdr's `pane get` answers
 /// `<log>/herdr-get.json`.
 pub fn fakes(dir: &Path) -> Vec<(String, PathBuf)> {
     let log = dir.display().to_string();
@@ -178,7 +180,7 @@ case "$1 $2" in
       sleep 0.01
     done
   fi ;;
-  "mux spawn") if [ -f {log}/old-pane-alive ]; then echo "error: name_taken"; exit 1; fi; n=$(( $(cat {log}/spawn-n 2>/dev/null || echo 4) + 1 )); echo $n > {log}/spawn-n; echo "spawned: x (codex)"; echo "pane: w9:p$n" ;;
+  "mux spawn") if [ -f {log}/old-pane-alive ]; then echo "error: name_taken"; exit 1; fi; if [ -f {log}/spawn-fail-$5 ]; then printf "error{{code,message,hint}}:\n  timeout,\"last output: zsh: command not found: $5\",\"check --kind\"\n"; exit 1; fi; n=$(( $(cat {log}/spawn-n 2>/dev/null || echo 4) + 1 )); echo $n > {log}/spawn-n; echo "spawned: x (codex)"; echo "pane: w9:p$n" ;;
 esac
 "#
         ),
@@ -196,8 +198,14 @@ esac
 "#
         ),
     );
+    let harness = dir.join("harness");
+    fs::create_dir_all(&harness).unwrap();
+    for kind in ["codex", "claude", "pi", "agy"] {
+        script(&harness, kind, "exit 0\n");
+    }
     vec![
         ("VEGA_GATE_BD".into(), bd),
+        ("VEGA_GATE_HARNESS_PATH".into(), harness),
         ("VEGA_GATE_VEGA".into(), vega),
         ("VEGA_GATE_HERDR".into(), herdr),
     ]

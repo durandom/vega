@@ -462,3 +462,66 @@ fn verdict_from_the_reviewer_closes_beads_and_mails_the_author() {
         "{vega}"
     );
 }
+
+#[test]
+fn a_missing_harness_is_skipped_with_a_hint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    // codex is not installed.
+    let bin = tmp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    for k in ["pi", "claude"] {
+        common::script(&bin, k, "exit 0\n");
+    }
+    let path = bin.to_str().unwrap();
+    let env = [("HERDR_PANE_ID", "w1:p1"), ("VEGA_GATE_HARNESS_PATH", path)];
+    let o = run(&work, tmp.path(), &env, &["start"]);
+    let s = out(&o);
+    assert!(o.status.success(), "{s}");
+    assert!(
+        s.contains("vega gate: reviewer codex skipped: codex not on PATH"),
+        "{s}"
+    );
+    assert!(s.contains("(pi m-xai)"), "{s}");
+    assert!(!log(tmp.path(), "vega").contains("--kind codex"));
+}
+
+#[test]
+fn a_failed_spawn_falls_through_and_the_last_one_shows_its_cause() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    fs::write(tmp.path().join("spawn-fail-codex"), "").unwrap();
+    let o = run(&work, tmp.path(), &[("HERDR_PANE_ID", "w1:p1")], &["start"]);
+    let s = out(&o);
+    assert!(o.status.success(), "{s}");
+    assert!(
+        s.contains("vega gate: reviewer codex did not start (timeout,\"last output: zsh: command not found: codex\""),
+        "{s}"
+    );
+    assert!(s.contains("(pi m-xai)"), "{s}");
+    let bd = log(tmp.path(), "bd");
+    assert!(bd.contains("verdict=spawn-failed"), "{bd}");
+    assert!(!bd.contains("abandoned"), "{bd}");
+
+    // Every candidate fails: the gate fails with each spawn's cause and
+    // records one abandon.
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    for k in ["codex", "pi"] {
+        fs::write(tmp.path().join(format!("spawn-fail-{k}")), "").unwrap();
+    }
+    let o = run(&work, tmp.path(), &[("HERDR_PANE_ID", "w1:p1")], &["start"]);
+    let s = out(&o);
+    assert!(!o.status.success(), "{s}");
+    assert!(
+        s.contains("reviewer spawn failed (codex: spawn failed: timeout,"),
+        "{s}"
+    );
+    assert!(s.contains("command not found: pi"), "{s}");
+    assert!(s.contains("claude: author kind (model uncertain)"), "{s}");
+    let creates = log(tmp.path(), "bd")
+        .lines()
+        .filter(|l| l.starts_with("create") && l.contains("\"verdict\":\"abandoned\""))
+        .count();
+    assert_eq!(creates, 1);
+}

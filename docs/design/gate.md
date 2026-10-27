@@ -150,8 +150,12 @@ The shim calls it (and an agent may, to review before handing work back). Steps:
    no confident run-out within 2 h, unless the Slayer's reset plan or override covers it). A candidate is
    `<kind>` or `<kind>:<lane>` and normally gets its model from `vega lanista pin <lane> --tier <tier>`.
    It may pin a model as `<kind>:<lane>/<model>` (for example `pi:xai/grok-4.7`), which bypasses that
-   lanista lookup; author-model exclusion and capacity checks still use the pinned model. Lanes for the
-   `claude` and `codex` kinds are build step 1. None left: fail open (section 7).
+   lanista lookup; author-model exclusion and capacity checks still use the pinned model. A candidate
+   whose harness binary (its kind: `codex`, `claude`, `pi`, `agy`) is not on the gate's `PATH` is skipped,
+   with a stderr line `vega gate: reviewer <kind> skipped: <kind> not on PATH` and the reason in the
+   no-reviewer list. The check sees the agent's `PATH`, not the login shell's that herdr starts the agent in;
+   a binary only the latter finds is skipped, one only the former finds fails at spawn and falls through
+   (step 5). Lanes for the `claude` and `codex` kinds are build step 1. None left: fail open (section 7).
 3. **Clone, not worktree** (Slayer, 2026-10-19). `git clone --shared --no-checkout <repo>
    ~/.cache/vega/gate/clones/<review-id>`, then `checkout --detach <head>`. A worktree shares refs, config,
    hooks and stash with the author's checkout, so a yolo reviewer could move branches or rewrite
@@ -171,6 +175,12 @@ The shim calls it (and an agent may, to review before handing work back). Steps:
    --dangerously-bypass-approvals-and-sandbox`, pi `--approve`). Model args: claude `--model <id>`, codex
    `-m <id>`, pi `--provider <p> --model <id>`. `VEGA_GATE_ROLE=reviewer` is set with `vega mux spawn
    --env K=V` (build step 2).
+   **A spawn that brings up no pane falls through** to the next eligible candidate (stderr `vega gate:
+   reviewer <spec> did not start (<cause>); trying the next candidate`); its beads close `spawn-failed`.
+   The cause is the spawn's own `error{code,message,hint}` row (for example `timeout,"... last output: zsh:
+   command not found: codex",...`), else its last output lines (vega-lhc.146.18). Only when no candidate is
+   left does the start fail: `reviewer spawn failed (<spec>: spawn failed: <cause>; ...)`, with one
+   `abandoned` bead per segment, so repeated failed starts still reach the abandon rule (section 7).
 6. **Record**: a gate bead, status `in_progress` (section 6); state file
    `~/.local/state/vega/gate/<reviewer pane>.json` (key, bead, repo path, author pane, clone).
 
@@ -247,7 +257,7 @@ seconds, pulled every 60 s), so a pass on one host counts on all.
 | type, label | `task`, label `gate` (not bd's own `gate` issue type, which bd hides as an async wait gate) |
 | title | `gate: <branch>@<head:8> (<reviewer kind>/<model>)` |
 | external_ref | `gate:<key>`: the lookup key |
-| metadata | `head`, `base`, `target`, `diff_sha256`, `key`, `author_kinds`, `author_models`, `reviewer_kind`, `reviewer_model`, `reviewer_pane`, `reviewer_host`, `segment` (`run <a>..<b>`, `branch <P2>`, `merge <M>`), `review` (shared by the beads of one review), `verdict` (`running`, `pass`, `fail`, `skipped`, `unreviewed`, `abandoned`, `superseded`, `no-reviewer`), `started_at` |
+| metadata | `head`, `base`, `target`, `diff_sha256`, `key`, `author_kinds`, `author_models`, `reviewer_kind`, `reviewer_model`, `reviewer_pane`, `reviewer_host`, `segment` (`run <a>..<b>`, `branch <P2>`, `merge <M>`), `review` (shared by the beads of one review), `verdict` (`running`, `pass`, `fail`, `skipped`, `unreviewed`, `abandoned`, `superseded`, `no-reviewer`, `spawn-failed`), `started_at` |
 | notes | findings, one line each: `file:line rubric/principle score: fix` |
 | close reason | verdict, reviewer, findings count, head sha |
 
@@ -260,7 +270,8 @@ closed bead with `verdict=pass`. Only a pass lets the push through; `fail` beads
 |---|---|
 | No capacity / no candidate left after the author exclusion | fail open: push proceeds, stderr line, bead `no-reviewer` (visible in `vega gate log`) |
 | No herdr (no `HERDR_PANE_ID`, socket down) | fail open (Slayer, 2026-10-19): push proceeds, stderr `vega gate: no herdr, push not reviewed, recorded as <bead>`, a closed bead per segment with verdict `unreviewed`. No headless fallback |
-| Spawn fails or stops at a dialog (trust, login) | the push fails once with spawn's error and `vega mux spawn --resume <pane>`; the bead stays `running` until the timeout |
+| Spawn brings up no pane (binary missing, startup timeout) | the next candidate tries (section 4, step 5); none left: the push fails with every spawn's cause and records one `abandoned` bead per segment |
+| Spawn stops at a dialog (trust, login) | the push fails once with `vega mux spawn --resume <pane>`; the bead stays `running` until the timeout |
 | Push again, same head and key, review running | exit 1 at once, `review running in tab gate-<branch> since 6 min`; no second reviewer |
 | Reviewer idle without ever taking its prompt (no prompt in its session log), or at a dialog | `vega gate` and the running line say `stuck` or `blocked` with `vega mux show <pane>`; the timeout still applies |
 | Push again or `vega gate start`, new head, review running | lock the old review, mark its beads `superseded`, revoke its state, close the old pane and start a fresh reviewer bound to the new head/generation. Include unchanged running segments; never re-point a reviewer by mail. A stale verdict cannot apply to the new generation |
