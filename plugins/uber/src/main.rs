@@ -4,7 +4,7 @@
 //! side `ask` (§3, vega-lhc.209.4, ask.rs); and the Uber host's answer path
 //! (§4-5, vega-lhc.209.6): `answer` and `audit` (`answer.rs`). The capture
 //! hook is a binary of its own, `vega_uber_capture` (`capture_main.rs`),
-//! outside `vega uber`.
+//! outside `vega uber`. The Slayer's `brief` (§3, vega-lhc.209.8, brief.rs).
 //!
 //! The engaged window (vega-lhc.209.12, `vega_registry::uber_engaged`):
 //! `status` shows it, and `ask` treats an idle Uber as absent.
@@ -37,7 +37,7 @@ const TIMEOUT: Duration = Duration::from_secs(6);
     bin_name = "vega uber",
     disable_version_flag = true,
     about = "The Uber-UAC: the Slayer's one channel to every UAC (estate-wide singleton claim)",
-    after_help = "Without a command: status.\n\nExamples:\n  vega uber claim     # this session becomes the Uber-UAC\n  vega uber release   # hand the claim back\n  vega uber status    # live, superseded and gone claims\n  vega uber ask --bead vega-12 --level L3 --deadline no-rush --option \"yes: ship\" --option \"no: wait\" --recommend 0\n  vega uber answer a7 --capture 12   # the Slayer's answer to #a7 from capture 12\n  vega uber audit --last 20"
+    after_help = "Without a command: status.\n\nExamples:\n  vega uber claim     # this session becomes the Uber-UAC\n  vega uber release   # hand the claim back\n  vega uber status    # live, superseded and gone claims\n  vega uber brief     # Decisions, FYI, Blocked of every live UAC (--show: the last one)\n  vega uber ask --bead vega-12 --level L3 --deadline no-rush --option \"yes: ship\" --option \"no: wait\" --recommend 0\n  vega uber answer a7 --capture 12   # the Slayer's answer to #a7 from capture 12\n  vega uber audit --last 20"
 )]
 struct Cli {
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
@@ -74,6 +74,11 @@ enum Cmd {
         #[arg(long, default_value_t = 10)]
         last: usize,
     },
+    /// The Slayer's brief: Decisions, FYI, Blocked from every live UAC, at most 25 lines
+    #[command(
+        after_help = "Decisions: your open asks. FYI and Blocked: each live UAC's reply to uber.brief (at most 3 lines).\nThe replies come as one pointer within 2m; then run --show. Show its lines to the Slayer as they are.\n\nExamples:\n  vega uber brief          # ask every live UAC, print Decisions now\n  vega uber brief --show   # the last brief, at most 25 lines"
+    )]
+    Brief(brief::BriefArgs),
 }
 
 fn main() -> ExitCode {
@@ -114,6 +119,7 @@ fn main() -> ExitCode {
         Some(Cmd::Ask(a)) => ask::ask(a),
         Some(Cmd::Answer { ask, capture }) => answer::answer(&ask, capture),
         Some(Cmd::Audit { last }) => answer::audit(last),
+        Some(Cmd::Brief(a)) => brief::brief(a),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -425,6 +431,7 @@ fn status() -> Result<(), Failure> {
 }
 
 mod ask;
+mod brief;
 
 #[cfg(test)]
 mod tests;

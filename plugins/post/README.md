@@ -30,6 +30,8 @@ uber.ask|answer|applied|withdraw|brief '<json>'` sets the `Vega-Kind` header and
 schema and byte cap (`crates/vega-uber-msg`) first: `uber_too_large`, `uber_malformed` or `uber_kind`, and
 nothing is sent. vegad verifies every `uber.answer` before the addressed UAC sees it (uber-uac.md §4); `inbox` and
 `log` print it withheld. Other kinds are not checked on receipt yet.
+`ask --kind uber.brief` sends the Uber's brief the same way (body as is); `inbox` tells the UAC how to reply,
+and vegad on the Uber host stores each reply on a recorded brief thread (`vega_uber_msg::brief`).
 
 Design: [vegad.md](../../docs/design/vegad.md), [vega-mux-broker-spike.md](../../docs/design/vega-mux-broker-spike.md).
 
