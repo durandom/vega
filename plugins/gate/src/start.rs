@@ -2,6 +2,7 @@
 //! the segments without one (gate.md sections 4, 5 and 7).
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -206,11 +207,13 @@ pub fn model_args(c: &Candidate, model: &str) -> Vec<String> {
 }
 
 /// Prefer other harnesses, then a different model on an author harness.
-/// Uncertain author models exclude their whole harness. Capacity still applies.
+/// Uncertain author models exclude their whole harness. A harness whose
+/// binary is not installed is skipped. Capacity still applies.
 pub fn choose(
     reviewers: &[String],
     tier: &str,
     author: &Author,
+    installed: &dyn Fn(&str) -> bool,
     resolve: &dyn Fn(&Candidate, &str) -> Result<String, String>,
     thin: &dyn Fn(&str, &[String]) -> bool,
 ) -> Result<(Candidate, String), Vec<String>> {
@@ -221,6 +224,10 @@ pub fn choose(
         let spec = &c.spec;
         if author.uncertain_kinds.contains(&c.kind) {
             why.push(format!("{spec}: author kind (model uncertain)"));
+            continue;
+        }
+        if !installed(&c.kind) {
+            why.push(format!("{spec}: {} not on PATH", c.kind));
             continue;
         }
         let model = match resolve(&c, tier) {
@@ -256,6 +263,19 @@ fn lanista_pin(lane: &str, tier: &str) -> Result<String, String> {
         .find_map(|l| l.strip_prefix("model: "))
         .map(|m| m.trim().to_string())
         .ok_or(format!("no lanista pin for {lane}"))
+}
+
+/// The harness binary `kind` is on PATH (`VEGA_GATE_HARNESS_PATH` replaces
+/// PATH, for tests): `vega mux spawn` starts the agent by that name.
+fn harness_installed(kind: &str) -> bool {
+    let path = std::env::var_os("VEGA_GATE_HARNESS_PATH")
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    std::env::split_paths(&path).any(|d| {
+        d.join(kind)
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    })
 }
 
 /// The spawn warning's rule (capacity.rs): binding window under 10 % or out
@@ -464,36 +484,76 @@ pub fn start_from(
     }
 
     let thin = |k: &str, a: &[String]| capacity_thin(k, a);
-    let resolve = |c: &Candidate, tier: &str| {
-        let m = c
-            .model
-            .clone()
-            .map(Ok)
-            .unwrap_or_else(|| lanista_pin(&c.lane, tier))?;
-        if skip_reviewers.iter().any(|(_, sm)| sm == &m) {
-            return Err(format!("{m} abandoned this review"));
+    let mut absent: Vec<String> = Vec::new();
+    for c in cfg.reviewers.iter().map(|s| candidate(s)) {
+        if !absent.contains(&c.kind) && !harness_installed(&c.kind) {
+            eprintln!("vega gate: reviewer {0} skipped: {0} not on PATH", c.kind);
+            absent.push(c.kind);
         }
-        Ok(m)
-    };
-    let (cand, model) = match choose(&cfg.reviewers, &cfg.tier, &author, &resolve, &thin) {
-        Ok(c) => c,
-        Err(why) => {
-            let ids = record_closed(
-                dir,
-                plan,
-                &missing,
-                branch,
-                "no-reviewer",
-                &[("author_kinds", author.text())],
-            )?;
-            return Ok(Outcome::FailOpen(format!(
-                "no reviewer ({}), push not reviewed, recorded as {}",
-                why.join("; "),
-                ids.join(", ")
-            )));
+    }
+    let installed = |k: &str| !absent.iter().any(|a| a == k);
+    // A candidate whose spawn failed falls through to the next one.
+    let mut failed: Vec<(String, String)> = Vec::new();
+    loop {
+        let resolve = |c: &Candidate, tier: &str| {
+            if let Some((_, e)) = failed.iter().find(|(s, _)| s == &c.spec) {
+                return Err(format!("spawn failed: {e}"));
+            }
+            let m = c
+                .model
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(|| lanista_pin(&c.lane, tier))?;
+            if skip_reviewers.iter().any(|(_, sm)| sm == &m) {
+                return Err(format!("{m} abandoned this review"));
+            }
+            Ok(m)
+        };
+        let chosen = choose(
+            &cfg.reviewers,
+            &cfg.tier,
+            &author,
+            &installed,
+            &resolve,
+            &thin,
+        );
+        let (cand, model) = match chosen {
+            Ok(c) => c,
+            Err(why) if failed.is_empty() => {
+                let ids = record_closed(
+                    dir,
+                    plan,
+                    &missing,
+                    branch,
+                    "no-reviewer",
+                    &[("author_kinds", author.text())],
+                )?;
+                return Ok(Outcome::FailOpen(format!(
+                    "no reviewer ({}), push not reviewed, recorded as {}",
+                    why.join("; "),
+                    ids.join(", ")
+                )));
+            }
+            Err(why) => {
+                // One abandon per failed start, however many spawns failed.
+                record_closed(dir, plan, &missing, branch, "abandoned", &[])?;
+                return Ok(Outcome::Failed(format!(
+                    "reviewer spawn failed ({})",
+                    why.join("; ")
+                )));
+            }
+        };
+        match spawn_review(dir, plan, cfg, &missing, branch, &author, &cand, &model)? {
+            Ok(outcome) => return Ok(outcome),
+            Err(e) => {
+                eprintln!(
+                    "vega gate: reviewer {} did not start ({e}); trying the next candidate",
+                    cand.spec
+                );
+                failed.push((cand.spec, e));
+            }
         }
-    };
-    spawn_review(dir, plan, cfg, &missing, branch, &author, &cand, &model)
+    }
 }
 
 fn record_abandons(dir: &Path, key: &str) -> usize {
@@ -746,6 +806,27 @@ pub fn spawn_args(
     a
 }
 
+/// The cause of a failed spawn: the rows of its `error{code,message,hint}:`
+/// block (code, message with the agent's last output, hint), else its
+/// last non-empty lines.
+pub fn spawn_error(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let rows: Vec<&str> = match lines.iter().position(|l| l.starts_with("error{")) {
+        Some(i) => lines[i + 1..].to_vec(),
+        None => lines[lines.len().saturating_sub(3)..].to_vec(),
+    };
+    if rows.is_empty() {
+        return lines.first().copied().unwrap_or("no output").to_string();
+    }
+    rows.join(" ")
+}
+
+/// Starts a reviewer. `Ok(Err(cause))`: no pane came up, its beads are
+/// closed `spawn-failed` and the next candidate may try.
 #[allow(clippy::too_many_arguments)]
 fn spawn_review(
     dir: &Path,
@@ -756,7 +837,7 @@ fn spawn_review(
     author: &Author,
     cand: &Candidate,
     model: &str,
-) -> Result<Outcome, String> {
+) -> Result<Result<Outcome, String>, String> {
     let review = review_id(segs);
     let clone = cache_dir().join("clones").join(&review);
     let work = cache_dir().join(&review);
@@ -825,22 +906,13 @@ fn spawn_review(
         .find_map(|l| l.strip_prefix("pane: "))
         .map(|p| p.trim().to_string());
     let Some(pane) = pane else {
+        let e = spawn_error(&text);
         for b in &beads {
-            let _ = record::finish(
-                dir,
-                b,
-                "abandoned",
-                "abandoned: reviewer did not start",
-                None,
-            );
+            let _ = record::finish(dir, b, "spawn-failed", &format!("spawn-failed: {e}"), None);
         }
         let _ = fs::remove_dir_all(&clone);
         let _ = fs::remove_dir_all(&work);
-        let first = text
-            .lines()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("no output");
-        return Ok(Outcome::Failed(format!("reviewer spawn failed: {first}")));
+        return Ok(Err(e));
     };
     for b in &beads {
         let _ = run_ok(
@@ -876,20 +948,20 @@ fn spawn_review(
     };
     r.save()?;
     if text.contains("brief: pasted, not confirmed") {
-        return Ok(Outcome::Failed(format!(
+        return Ok(Ok(Outcome::Failed(format!(
             "reviewer in tab {tab} did not confirm its prompt; vega mux show {pane}: a prompt still in its input box needs Enter in that pane"
-        )));
+        ))));
     }
     if !ok || text.contains("brief: not delivered") {
-        return Ok(Outcome::Failed(format!(
+        return Ok(Ok(Outcome::Failed(format!(
             "reviewer in tab {tab} stopped before its task; answer its dialog, then: vega mux spawn --resume {pane}"
-        )));
+        ))));
     }
-    Ok(Outcome::Running(format!(
+    Ok(Ok(Outcome::Running(format!(
         "review running in tab {tab} ({} {model}); verdict by mail; then {}",
         cand.kind,
         next_step(&r.author_pane)
-    )))
+    ))))
 }
 
 #[cfg(test)]
@@ -915,6 +987,7 @@ mod tests {
 
     #[test]
     fn choose_skips_author_models_and_thin_capacity() {
+        let all = |_: &str| true;
         let reviewers: Vec<String> = ["codex", "pi:xai", "pi:zai", "claude"]
             .iter()
             .map(|s| s.to_string())
@@ -928,11 +1001,11 @@ mod tests {
         let never = |_: &str, _: &[String]| false;
         let mut author = Author::default();
         author.add(Some("claude".into()), Some("claude-opus-5-5".into()));
-        let (c, m) = choose(&reviewers, "budget", &author, &resolve, &never).unwrap();
+        let (c, m) = choose(&reviewers, "budget", &author, &all, &resolve, &never).unwrap();
         assert_eq!((c.spec.as_str(), m.as_str()), ("codex", "gpt-5.6-luna"));
 
         author.add(Some("codex".into()), Some("gpt-5.6-luna".into()));
-        let (c, m) = choose(&reviewers, "budget", &author, &resolve, &never).unwrap();
+        let (c, m) = choose(&reviewers, "budget", &author, &all, &resolve, &never).unwrap();
         assert_eq!((c.spec.as_str(), m.as_str()), ("pi:xai", "grok-4.3"));
         assert_eq!(
             model_args(&c, &m),
@@ -941,7 +1014,7 @@ mod tests {
 
         let xai_thin = |_: &str, a: &[String]| a.contains(&"xai".to_string());
         author.add(None, Some("glm-5.3".into()));
-        let why = choose(&reviewers, "budget", &author, &resolve, &xai_thin).unwrap_err();
+        let why = choose(&reviewers, "budget", &author, &all, &resolve, &xai_thin).unwrap_err();
         assert_eq!(
             why,
             vec![
@@ -955,6 +1028,7 @@ mod tests {
 
     #[test]
     fn known_model_prefers_other_harnesses_then_allows_same_harness() {
+        let all = |_: &str| true;
         let reviewers = vec![
             "codex:codex/other".into(),
             "pi:xai/author".into(),
@@ -965,19 +1039,20 @@ mod tests {
         author.add(Some("codex".into()), Some("author".into()));
         let resolve = |c: &Candidate, _: &str| Ok(c.model.clone().unwrap());
         let never = |_: &str, _: &[String]| false;
-        let (c, _) = choose(&reviewers, "budget", &author, &resolve, &never).unwrap();
+        let (c, _) = choose(&reviewers, "budget", &author, &all, &resolve, &never).unwrap();
         assert_eq!(c.kind, "claude");
         // Capacity rejects both other harnesses; codex with a different model is allowed.
         let thin = |k: &str, _: &[String]| k != "codex";
-        let (c, m) = choose(&reviewers, "budget", &author, &resolve, &thin).unwrap();
+        let (c, m) = choose(&reviewers, "budget", &author, &all, &resolve, &thin).unwrap();
         assert_eq!((c.kind.as_str(), m.as_str()), ("codex", "other"));
         // One bare trailer remains uncertain even with known-model pane evidence.
         author.add(Some("codex".into()), None);
-        assert!(choose(&reviewers, "budget", &author, &resolve, &thin).is_err());
+        assert!(choose(&reviewers, "budget", &author, &all, &resolve, &thin).is_err());
     }
 
     #[test]
     fn choose_uses_a_candidate_model_pin_without_calling_lanista() {
+        let all = |_: &str| true;
         let reviewers = vec!["pi:xai/grok-4.7".to_string(), "claude".to_string()];
         let mut author = Author::default();
         let never = |_: &str, _: &[String]| false;
@@ -986,7 +1061,7 @@ mod tests {
                 .clone()
                 .ok_or("lanista must not be called for a pinned candidate".to_string())
         };
-        let (c, m) = choose(&reviewers, "budget", &author, &resolve_pinned, &never).unwrap();
+        let (c, m) = choose(&reviewers, "budget", &author, &all, &resolve_pinned, &never).unwrap();
 
         assert_eq!(c.lane, "xai");
         assert_eq!(c.model.as_deref(), Some("grok-4.7"));
@@ -998,11 +1073,42 @@ mod tests {
 
         author.add(None, Some("grok-4.7".into()));
         assert_eq!(
-            choose(&reviewers, "budget", &author, &resolve_pinned, &never).unwrap_err(),
+            choose(&reviewers, "budget", &author, &all, &resolve_pinned, &never).unwrap_err(),
             vec![
                 "pi:xai/grok-4.7: author model grok-4.7",
                 "claude: lanista must not be called for a pinned candidate"
             ]
+        );
+    }
+
+    #[test]
+    fn choose_skips_a_harness_that_is_not_installed() {
+        let reviewers = vec!["codex".to_string(), "pi:xai".to_string()];
+        let resolve = |c: &Candidate, _: &str| Ok(format!("m-{}", c.lane));
+        let never = |_: &str, _: &[String]| false;
+        let no_codex = |k: &str| k != "codex";
+        let author = Author::default();
+        let (c, _) = choose(&reviewers, "budget", &author, &no_codex, &resolve, &never).unwrap();
+        assert_eq!(c.spec, "pi:xai");
+        let none = |_: &str| false;
+        assert_eq!(
+            choose(&reviewers, "budget", &author, &none, &resolve, &never).unwrap_err(),
+            vec!["codex: codex not on PATH", "pi:xai: pi not on PATH"]
+        );
+    }
+
+    #[test]
+    fn spawn_error_keeps_the_structured_cause() {
+        let out = "error{code,message,hint}:\n  timeout,\"timed out waiting for agent startup; last output: zsh: command not found: codex\",\"check --kind against `herdr agent`\"\n";
+        let e = spawn_error(out);
+        assert!(e.starts_with("timeout,"), "{e}");
+        assert!(e.contains("command not found: codex"), "{e}");
+        assert!(e.contains("check --kind"), "{e}");
+        assert_eq!(spawn_error("a\nb\nc\nd\n"), "b c d");
+        assert_eq!(spawn_error(""), "no output");
+        assert_eq!(
+            spawn_error("error{code,message,hint}:\n"),
+            "error{code,message,hint}:"
         );
     }
 

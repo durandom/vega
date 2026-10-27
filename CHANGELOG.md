@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 85 · 2026-10-27
+
+- feature: `vega gate start` skips a reviewer candidate whose harness binary is not on `PATH`
+  (stderr names it) and, when a reviewer spawn brings up no pane, tries the next candidate. A
+  failed spawn now shows its own cause (for example `command not found: codex`), not only the
+  error header. See [gate.md section 4](docs/design/gate.md#4-vega-gate-start).
+
 ## 84 · 2026-10-26
 
 - feature: the Uber-UAC is engaged only while the Slayer talks to it: each
