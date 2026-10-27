@@ -106,6 +106,8 @@ Tested: `bd::tests::creates_a_missing_database_with_create_only` runs a local sq
 remotesapi and a CREATE-only `vega` user (probe `Missing`, wrong password `Denied`, create, probe
 `Exists`, create again `Ok`). A full `vega bd init` against such a server, with a throwaway
 secrets store (`XDG_CONFIG_HOME`), created the database, seeded it and reran idempotently.
+`bd::tests::user_sql_syncs_as_the_named_user` runs vegad's pull, fast-forward and push SQL
+against such a server as a named user; a wrong `DOLT_REMOTE_PASSWORD` is denied for that user.
 
 ### The seed race
 

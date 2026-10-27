@@ -657,6 +657,68 @@ mod tests {
         assert_eq!(head(&behind), head(&seed));
     }
 
+    /// vegad's pull, fast-forward and push SQL against a remote with a named user: they
+    /// authenticate as that user (a wrong password is denied for it), the password only in
+    /// `DOLT_REMOTE_PASSWORD`.
+    #[test]
+    fn user_sql_syncs_as_the_named_user() {
+        let Some(dolt) = testsrv::dolt() else {
+            eprintln!("skipped: no dolt on PATH");
+            return;
+        };
+        let s = testsrv::server(&dolt);
+        s.root_sql(
+            &dolt,
+            "CREATE DATABASE NU; CREATE USER 'vega'@'%' IDENTIFIED BY 'pw-test'; \
+             GRANT ALL ON *.* TO 'vega'@'%'; GRANT CLONE_ADMIN ON *.* TO 'vega'@'%';",
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let url = format!("{}/NU", s.remote);
+        let dolt_as = |dir: &Path, pw: &str, args: &[String]| {
+            let mut c = Command::new(&dolt);
+            c.current_dir(dir)
+                .env("DOLT_REMOTE_PASSWORD", pw)
+                .args(args);
+            run(c, Duration::from_secs(60))
+        };
+        let sh = |dir: &Path, args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            let r = dolt_as(dir, "pw-test", &args);
+            assert!(r.ok, "dolt {args:?}: {}", r.out);
+            r.out
+        };
+        let sql = |dir: &Path, q: &str| sh(dir, &["sql", "-q", q]);
+        let user = Some("vega");
+        for name in ["a", "b"] {
+            let args = remote_args(user, "clone", &[&url, name]);
+            let r = dolt_as(tmp.path(), "pw-test", &args);
+            assert!(r.ok, "clone: {}", r.out);
+        }
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        let head = |dir: &Path| sh(dir, &["sql", "-r", "csv", "-q", "select hashof('main')"]);
+        let commit = |q: &str, m: &str| {
+            sql(&a, q);
+            sh(&a, &["commit", "-Am", m, "--author", "t <t@t>"]);
+        };
+
+        commit("create table t (id int primary key)", "one");
+        let push = push_sql(user).unwrap();
+        let denied = dolt_as(&a, "wrong", &["sql".into(), "-q".into(), push.clone()]);
+        assert!(
+            !denied.ok && denied.out.contains("Access denied for user 'vega'"),
+            "{}",
+            denied.out
+        );
+        sql(&a, &push);
+        sql(&b, &pull_sql(user).unwrap());
+        assert_eq!(head(&b), head(&a));
+
+        commit("insert into t values (1)", "two");
+        sql(&a, &push);
+        sql(&b, &fast_forward_sql(user));
+        assert_eq!(head(&b), head(&a));
+    }
+
     #[test]
     fn remote_args_add_the_user_only_when_given() {
         assert_eq!(remote_args(None, "fetch", &["probe"]), ["fetch", "probe"]);
