@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 84 · 2026-10-26
+
+- feature: the Uber-UAC is engaged only while the Slayer talks to it: each
+  Slayer capture on the Uber host opens a 2 h window, and herdr pane focus on
+  any host ends it (vegad publishes it as `human_at` in the beat). Outside the
+  window `vega uber ask` returns `uber_absent` and vegad resends no ask;
+  `vega uber status` prints `engaged: yes|no (reason)`. See
+  [Uber-UAC singleton](docs/design/uber-uac.md#2-singleton-one-estate-wide-claim).
+
 ## 83 · 2026-10-26
 
 - feature: vegad's sidebar no longer flickers on a loaded host: its tokens live 5 min and a thread

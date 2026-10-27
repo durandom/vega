@@ -6,6 +6,9 @@
 //! hook is a binary of its own, `vega_uber_capture` (`capture_main.rs`),
 //! outside `vega uber`.
 //!
+//! The engaged window (vega-lhc.209.12, `vega_registry::uber_engaged`):
+//! `status` shows it, and `ask` treats an idle Uber as absent.
+//!
 //! The claim file on its host is the truth; the registry key
 //! `<host>.uber.v1` is its copy (`vega_registry::uber_state`), and
 //! `View::live_uber` decides which claim is the Uber. This host's herdr
@@ -167,10 +170,8 @@ fn now_ms() -> u64 {
 fn with_local(view: &mut View, here: &Here) {
     let own = format!("{}.agent.", vega_registry::token(&here.host));
     view.entries.retain(|k, _| !k.starts_with(&own));
-    view.entries.insert(
-        vega_registry::beat_key(&here.host),
-        json!({"at": now_ms() / 1000}),
-    );
+    view.entries
+        .insert(vega_registry::beat_key(&here.host), vega_registry::beat());
     for p in &here.panes {
         view.entries.insert(
             vega_registry::agent_key(&here.host, p),
@@ -178,7 +179,7 @@ fn with_local(view: &mut View, here: &Here) {
         );
     }
     let key = vega_registry::uber_key(&here.host);
-    match uber_state::local(&here.file, &here.host) {
+    match uber_state::published(&here.file, &here.host) {
         Some(v) => view.entries.insert(key, v),
         None => view.entries.remove(&key),
     };
@@ -404,7 +405,11 @@ fn status() -> Result<(), Failure> {
     };
     let (winner, superseded, gone) = split(&view);
     match &winner {
-        Some(w) => println!("uber: {}", line(w, &here)),
+        Some(w) => {
+            println!("uber: {}", line(w, &here));
+            let now = (now_ms() / 1000) as i64;
+            println!("engaged: {}", view.uber_engaged(w, now).line(now));
+        }
         None => println!("uber: none (absent; the Uber session runs `vega uber claim`)"),
     }
     for c in &superseded {

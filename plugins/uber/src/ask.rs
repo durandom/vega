@@ -225,6 +225,8 @@ pub(crate) struct Uac {
 
 /// Resolves the live claim in `view` (an error: the registry is away),
 /// stores the open ask and sends it with `send`; a failed send removes it.
+/// A claim that is not engaged counts as absent (vega-lhc.209.12): the
+/// Slayer is not talking to the Uber, so the UAC asks in its own pane.
 pub(crate) fn ask_to(
     dir: &Path,
     body: Ask,
@@ -233,10 +235,13 @@ pub(crate) fn ask_to(
     now: i64,
     send: impl FnOnce(&SentTo, &str) -> Result<(), Failure>,
 ) -> Result<OpenAsk, Failure> {
+    let view = view.map_err(|e| absent(&format!("registry: {e}")))?;
     let uber = view
-        .map_err(|e| absent(&format!("registry: {e}")))?
         .live_uber()
         .ok_or_else(|| absent("no live Uber-UAC claim"))?;
+    if let vega_registry::uber_engaged::Engaged::Off(idle) = view.uber_engaged(&uber, now) {
+        return Err(absent(&format!("the Uber-UAC is idle ({})", idle.reason())));
+    }
     let record = OpenAsk {
         schema: 1,
         ask: body,
@@ -350,15 +355,15 @@ mod tests {
         }
     }
 
+    /// A live claim, engaged since t=1 (the tests ask at t=5).
     fn live(host: &str, pane: &str, epoch: u64) -> View {
         let mut view = View::default();
         let now = crate::now_ms() / 1000;
         view.entries
             .insert(vega_registry::beat_key(host), json!({"at": now}));
-        view.entries.insert(
-            vega_registry::uber_key(host),
-            uber_state::value(pane, host, 0, epoch),
-        );
+        let mut claim = uber_state::value(pane, host, 0, epoch);
+        claim["engaged_at"] = json!(1);
+        view.entries.insert(vega_registry::uber_key(host), claim);
         view.entries.insert(
             vega_registry::agent_key(host, pane),
             json!({"pane": pane, "status": "idle"}),
@@ -430,6 +435,35 @@ mod tests {
         assert_eq!(f.code, "uber_absent");
         let f = ask_to(d, body(), uac(d), Err("broker down".into()), 1, never).unwrap_err();
         assert_eq!(f.code, "uber_absent");
+        assert!(uber_asks::list(d).is_empty());
+    }
+
+    #[test]
+    fn an_idle_uber_is_uber_absent_and_nothing_is_stored_or_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let never = |_: &SentTo, _: &str| -> Result<(), Failure> { panic!("sent") };
+        // Never engaged since the claim.
+        let mut view = live("ganymede", "w9:p1", 77);
+        view.entries
+            .get_mut(&vega_registry::uber_key("ganymede"))
+            .unwrap()["engaged_at"] = serde_json::Value::Null;
+        let f = ask_to(d, body(), uac(d), Ok(view), 5, never).unwrap_err();
+        assert_eq!(f.code, "uber_absent");
+        assert!(f.message.contains("idle (no Slayer input since the claim)"));
+        // The window passed.
+        let view = live("ganymede", "w9:p1", 77);
+        let late = 1 + vega_registry::uber_engaged::WINDOW;
+        let f = ask_to(d, body(), uac(d), Ok(view), late, never).unwrap_err();
+        assert!(f.message.contains("2h without Slayer input"));
+        // The Slayer focused a pane on the laptop after the last capture.
+        let mut view = live("ganymede", "w9:p1", 77);
+        view.entries.insert(
+            vega_registry::beat_key("proteus"),
+            json!({"at": crate::now_ms() / 1000, "human_at": 3}),
+        );
+        let f = ask_to(d, body(), uac(d), Ok(view), 5, never).unwrap_err();
+        assert!(f.message.contains("Slayer input in herdr on proteus"));
         assert!(uber_asks::list(d).is_empty());
     }
 

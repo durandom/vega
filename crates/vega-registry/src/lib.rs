@@ -9,8 +9,9 @@
 //! they fall back to local state and say so.
 //!
 //! Keys (KV allows `[A-Za-z0-9_=/.-]`):
-//! - `<host>.beat` = {"schema": 2, "at": unix}: the host's vegad ran a reconcile; entries
-//!   of a host without a fresh beat are not trusted (absence proves nothing).
+//! - `<host>.beat` = {"schema": 2, "at": unix, human_at?}: the host's vegad ran a reconcile; entries
+//!   of a host without a fresh beat are not trusted (absence proves nothing). `human_at`:
+//!   the host's last herdr pane focus (`uber_engaged`).
 //! - `<host>.agent.<pane>` = {pane, name, kind, status, cwd, repo_key,
 //!   waiting?}: `waiting` = {status, since} while the agent waits for the
 //!   Slayer (vega_herdr::waiting).
@@ -32,8 +33,9 @@
 //!   applied there; headless hosts follow their control host's (vega-lhc.86).
 //! - `<host>.lanista.v2.<project>.<seat>.<lane>.<tier>` = runtime model pins;
 //!   components are hex-encoded, managed by `pins`, independent of vegad.
-//! - `<host>.uber.v1` = {schema: 1, pane, host, at, epoch}: the Uber-UAC claim
-//!   (docs/design/uber-uac.md §2); `View::live_uber` picks the live one.
+//! - `<host>.uber.v1` = {schema: 1, pane, host, at, epoch, engaged_at?}: the Uber-UAC
+//!   claim (docs/design/uber-uac.md §2); `View::live_uber` picks the live one,
+//!   `View::uber_engaged` says whether it is engaged.
 //!
 //! Inbox-only hosts may hold a read grant for single keys (`get_one`, one
 //! direct get each, vega-lhc.90) and nothing else.
@@ -43,6 +45,7 @@
 pub mod cutover;
 pub mod pins;
 pub mod uber_asks;
+pub mod uber_engaged;
 pub mod uber_state;
 
 use std::collections::BTreeMap;
@@ -288,7 +291,7 @@ pub fn local_entries(
         }
     }
     // The Uber-UAC claim file (vega uber claim); its absence deletes the key.
-    if let Some(claim) = uber_state::file().and_then(|f| uber_state::local(&f, host)) {
+    if let Some(claim) = uber_state::file().and_then(|f| uber_state::published(&f, host)) {
         out.insert(uber_key(host), claim);
     }
     if let Some(store) = vega_herdr::notes::Store::local() {
@@ -568,6 +571,24 @@ impl View {
             .into_iter()
             .filter(|c| self.uber_live(c))
             .reduce(|best, c| if c.beats(&best) { c } else { best })
+    }
+
+    /// The newest `human_at` of any host's beat: (host, at).
+    pub fn human_at(&self) -> Option<(&str, i64)> {
+        self.of_kind("beat")
+            .filter_map(|(h, v)| Some((h, v["human_at"].as_i64()?)))
+            .max_by_key(|(_, at)| *at)
+    }
+
+    /// Whether `claim` is engaged (`uber_engaged`): its `engaged_at` and the
+    /// newest `human_at` of any host. While it is not, asks stay with their
+    /// UACs and vegad sends no digest.
+    pub fn uber_engaged(&self, claim: &UberClaim, now: i64) -> uber_engaged::Engaged {
+        let input = self
+            .entries
+            .get(&uber_key(&claim.host))
+            .and_then(|v| v["engaged_at"].as_i64());
+        uber_engaged::decide(input, self.human_at(), now)
     }
 
     /// UAC registrations of fresh hosts for a full project ID.
@@ -892,15 +913,21 @@ pub async fn reconcile(
     Ok(desired)
 }
 
+/// This host's beat: `{schema: 2, at, human_at?}`.
+pub fn beat() -> Value {
+    let mut beat = json!({"schema": 2, "at": unix_now()});
+    if let Some(at) = uber_engaged::human_file().and_then(|f| uber_engaged::read_at(&f)) {
+        beat["human_at"] = json!(at);
+    }
+    beat
+}
+
 /// Refresh a running v2 owner's presence without changing project records.
 /// Used while the cutover guard holds ordinary publication for pending peers.
 pub async fn heartbeat(kv: &async_nats::jetstream::kv::Store, host: &str) -> Result<(), String> {
-    kv.put(
-        beat_key(host),
-        json!({"schema": 2, "at": unix_now()}).to_string().into(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    kv.put(beat_key(host), beat().to_string().into())
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1421,6 +1448,33 @@ esac
             .insert(beat_key("io"), json!({"at": unix_now() - 600}));
         assert_eq!(v.live_uber().unwrap().host, "proteus");
         assert_eq!(v.uber_claims().len(), 4);
+    }
+
+    #[test]
+    fn uber_engaged_reads_the_claims_engaged_at_and_every_hosts_human_at() {
+        use uber_engaged::{Engaged, Idle};
+        let now = unix_now();
+        let mut v = View::default();
+        uber(&mut v, "ganymede", "w1:p1", 100, true);
+        let c = v.live_uber().unwrap();
+        assert_eq!(v.uber_engaged(&c, now), Engaged::Off(Idle::Never));
+        v.entries.get_mut(&uber_key("ganymede")).unwrap()["engaged_at"] = json!(now - 60);
+        assert!(v.uber_engaged(&c, now).on());
+        // Laptop focus before the capture keeps it; on any host after it ends it.
+        v.entries.insert(
+            beat_key("proteus"),
+            json!({"at": now - 600, "human_at": now - 120}),
+        );
+        assert!(v.uber_engaged(&c, now).on());
+        v.entries
+            .insert(beat_key("io"), json!({"at": now, "human_at": now - 10}));
+        assert_eq!(
+            v.uber_engaged(&c, now),
+            Engaged::Off(Idle::Elsewhere {
+                host: "io".into(),
+                at: now - 10
+            })
+        );
     }
 
     #[test]

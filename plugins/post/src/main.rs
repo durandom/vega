@@ -27,6 +27,7 @@ mod cmd;
 mod delivery;
 mod gather;
 mod gitsync;
+mod human;
 mod hygiene;
 mod identity;
 mod identity_mappings;
@@ -2331,6 +2332,8 @@ struct Jobs {
     waiting: vega_herdr::waiting::Ledger,
     /// The ledger changed since the registry last took it.
     waiting_changed: bool,
+    /// Human input in herdr, for the Uber's engaged window.
+    human: human::Human,
     /// The CI watch and beads sync: started with the first broker loop,
     /// then kept across outages (their mail waits or is typed locally).
     ci: mpsc::UnboundedReceiver<ci::Event>,
@@ -2380,6 +2383,7 @@ impl Jobs {
             mode: None,
             waiting: vega_herdr::waiting::read(),
             waiting_changed: false,
+            human: Default::default(),
             ci,
             bd,
             broker_jobs: (!once).then_some((ctx, btx)),
@@ -2451,10 +2455,12 @@ impl Jobs {
                 }
             }
             agents::Event::Focused(p) => {
+                self.human.focused();
                 let changed = self.waiting.focused(&p);
                 self.waiting_save(changed);
             }
             agents::Event::Gone(p) => {
+                self.human.gone(Instant::now());
                 let changed = self.waiting.gone(&p);
                 self.waiting_save(changed);
                 if let Some(l) = self.live.lock().ok().as_mut().and_then(|l| l.as_mut()) {
@@ -5576,6 +5582,7 @@ impl Registry {
         let t = Instant::now();
         self.last = vega_registry::reconcile(kv, host, desired, &self.last, &present).await?;
         slow("registry reconcile", t);
+        human::seen(host, &view);
         self.view = Some(view);
         Ok(RegistryUpdate::Synced(n))
     }

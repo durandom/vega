@@ -30,6 +30,17 @@ pub fn local(file: &Path, host: &str) -> Option<Value> {
     valid.then_some(v)
 }
 
+/// The claim's registry value: `local` plus `engaged_at`, the last Slayer
+/// capture at or after the claim (`engaged.json` next to `file`).
+pub fn published(file: &Path, host: &str) -> Option<Value> {
+    let mut claim = local(file, host)?;
+    let input = crate::uber_engaged::read_at(&file.with_file_name(crate::uber_engaged::INPUT));
+    if let Some(at) = input.filter(|at| Some(*at) >= claim["at"].as_i64()) {
+        claim["engaged_at"] = json!(at);
+    }
+    Some(claim)
+}
+
 /// Writes the claim file atomically.
 pub fn save(file: &Path, claim: &Value) -> std::io::Result<()> {
     if let Some(dir) = file.parent() {
@@ -90,5 +101,24 @@ mod tests {
         remove(&file).unwrap();
         remove(&file).unwrap();
         assert!(!file.exists());
+    }
+
+    #[test]
+    fn published_claims_carry_only_captures_since_the_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("uber/claim.json");
+        save(&file, &value("w1:p1", "ganymede", 100, 1000)).unwrap();
+        let input = file.with_file_name(crate::uber_engaged::INPUT);
+        assert_eq!(
+            published(&file, "ganymede").unwrap()["engaged_at"],
+            Value::Null
+        );
+        crate::uber_engaged::write_at(&input, 99).unwrap();
+        assert_eq!(
+            published(&file, "ganymede").unwrap()["engaged_at"],
+            Value::Null
+        );
+        crate::uber_engaged::write_at(&input, 100).unwrap();
+        assert_eq!(published(&file, "ganymede").unwrap()["engaged_at"], 100);
     }
 }
