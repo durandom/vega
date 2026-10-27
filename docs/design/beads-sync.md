@@ -101,6 +101,12 @@ remotesapi, titan's version): a push to a missing one fails `database not found`
   `root`). That push skips bd's pre-push fsck. Without the variable, `bd dolt pull`/`push` run as
   before. `relay install` pins it in `vegad.env`. The password never goes into argv: the server
   reads `DOLT_REMOTE_PASSWORD` from its environment.
+- Precondition with `DOLT_REMOTE_USER`: those `CALL`s run inside bd's per-project dolt server,
+  which bd starts from whichever process calls bd first (an agent shell or vegad). That process
+  must have `DOLT_REMOTE_PASSWORD` set (e.g. the shell profile); vega does not supply it, and
+  `vegad.env` holds only the user. A server started without it is denied; `bd dolt stop` lets
+  the next bd call start it again. Setups without `DOLT_REMOTE_USER` (titan's remotesapi) are
+  unaffected. Delivering the password from vega's secrets store: vega-lhc.222.
 
 Tested: `bd::tests::creates_a_missing_database_with_create_only` runs a local sql-server with
 remotesapi and a CREATE-only `vega` user (probe `Missing`, wrong password `Denied`, create, probe
