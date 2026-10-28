@@ -1,6 +1,6 @@
 # vega notify: a louder signal when a UAC waits on the Slayer
 
-Status: design, 2026-10-28; vega-lhc.226. Supersedes vega-lhc.71 (operator signal) and vega-lhc.110 (moshi
+Status: agreed, 2026-10-28 (Slayer answers below); vega-lhc.226. Supersedes vega-lhc.71 (operator signal) and vega-lhc.110 (moshi
 phone path); relates to vega-lhc.170.6 (attention reminders) and vega-lhc.65 (approval view). Builds on
 [vegad](vegad.md) (Notifications, registry), [Uber-UAC](uber-uac.md) (engaged window, `human_at`),
 [secrets](secrets.md) and [upgrade](upgrade.md) (moshi-hook).
@@ -67,11 +67,11 @@ does not resend. Inbox-only hosts (deimos) have no registry: their asks reach on
 | Class | Channels | Host |
 | --- | --- | --- |
 | seat | herdr toast, macOS Notification Centre | the **seat**: the host with the newest `human_at` (uber-uac.md engaged window) |
-| remote | ntfy, Pushover, Moshi | the **notifier**: `notifier` in notify.toml, default `proteus`; same value everywhere |
+| remote | ntfy, Pushover, Moshi | the **notifier**: `notifier` in notify.toml, default `ganymede` (runs 24x7); same value everywhere |
 
 Each vegad reads open asks from the registry; only the seat runs seat channels and only the notifier runs
 remote ones. No failover, as for the PagerDuty poller: a notifier that is down sends nothing, and `vega
-notify` prints `notifier proteus offline` when its beat is stale. In local mode (no broker) the origin host is
+notify` prints `notifier ganymede offline` when its beat is stale. In local mode (no broker) the origin host is
 both. This also lifts vegad.md's "not macOS Notification Center" limit: one host shows each ask.
 
 ## Channels
@@ -111,7 +111,7 @@ notifier).
 ## Config: `~/.config/vega/notify.toml`
 
 ```toml
-notifier = "proteus"
+notifier = "ganymede"
 quiet = "22:30-07:30"              # the notifier's local time
 seat_idle = "5m"                   # seat input newer than this: the Slayer is at the desk
 
@@ -143,7 +143,7 @@ every host reads the same values.
 | Level | Raise | Escalate | One reminder |
 | --- | --- | --- | --- |
 | info | toast | never | never |
-| action | toast + macos | after 15 m: phone if the seat is idle, else toast + macos again | 1 h after raise, phone |
+| action | toast + macos | after 15 m: phone, also when the Slayer sits at the seat | 1 h after raise, phone |
 | urgent | toast + macos + phone | none | 15 m after raise, phone |
 
 - After the reminder: nothing more; the ask stays on the board and in `vega notify`. Ack stops both steps.
@@ -167,35 +167,29 @@ Added to [uac-rules.md](uac-rules.md) and the uac guide when `vega notify` ships
 > `urgent` only for production or data at risk. `vega notify resolve` when you continue. Not for FYI,
 > progress or mail. Never put secrets in the line or `--cmd`.
 
-## Build beads (proposed, not filed)
+## Build beads
 
-1. **notify CLI + ask state.** `plugins/notify` (`vega notify` raise, list, resolve, ack, test), ask as a
-   note (`kind: ask`), key dedupe, resolve by command, pane close and bead close, guide via `--skill`. Done
-   when unit tests cover raise/re-raise/level-up/resolve/ack and list across two fake hosts, and `mise run
-   check` exits 0.
-2. **Delivery loop + toast/macos.** vegad thread: seat and notifier roles, `sent.json` / `<host>.notify.sent`,
-   suppression (focus, `seat_idle`, draft), toast and macos channels. Done when fake-clock fixtures cover seat
-   change, restart without resend, two hosts without duplicates, suppression, local mode, and `mise run check`
-   exits 0.
-3. **Routing, escalation, quiet hours.** notify.toml parsing, levels, escalate/remind once, per-project
-   remind, quiet hours with the PagerDuty-high exception, Uber-engaged reroute. Done when fake-clock tests
-   cover every row of Timing, quiet-hour deferral and the exception, ack, and `mise run check` exits 0.
-4. **ntfy channel.** Client with token from `vega secrets`, priorities, `vega notify test ntfy`. Done when a
-   fake ntfy server test checks request shape and that no token appears in argv/logs, a live test on titan
-   reaches the Slayer's iPhone, and `mise run check` exits 0. Prereq (Slayer/titan): ntfy server with
-   `upstream-base-url`, auth, the `ntfy` secret.
-5. **Resolve on typed prompt.** The capture hook resolves the open ask of its pane. Done when hook tests
-   show a typed prompt resolves and a vegad pointer or task notice does not, and `mise run check` exits 0.
-6. **UAC rule.** uac-rules.md and the uac guide carry the rule above; vegad raises PagerDuty-high asks.
-   Done when the guide test checks the rule text, pagerduty tests cover the raise, and `mise run check`
-   exits 0. Then close vega-lhc.71 and vega-lhc.110.
-7. Later: **pushover** and **moshi** channels, each with a fake-server test and `mise run check`.
+Filed 2026-10-28 under vega-lhc.226; each bead's acceptance includes `mise run check`.
+
+| Bead | Scope | After |
+| --- | --- | --- |
+| vega-lhc.226.1 | CLI and ask state (`plugins/notify`, ask as note, dedupe, resolve, ack) | - |
+| vega-lhc.226.2 | vegad delivery loop: seat/notifier, `sent.json`, suppression, toast, macOS | .1 |
+| vega-lhc.226.3 | Routing, escalation, one reminder, quiet hours, Uber reroute | .2 |
+| vega-lhc.226.4 | ntfy channel; prereq: ntfy on titan with `upstream-base-url`, `ntfy` secret | .2 |
+| vega-lhc.226.5 | Resolve on a typed prompt (capture hook) | .1 |
+| vega-lhc.226.6 | UAC rule in uac-rules.md and the uac guide, PagerDuty-high asks; closes .71, .110 | .3, .4 |
+| vega-lhc.226.7 | Pushover channel (P3) | .3 |
+| vega-lhc.226.8 | Moshi channel; first answers the off-host question (P3) | .3 |
+
+## Decisions (Slayer, 2026-10-28)
+
+1. Defaults as written: escalate after 15 m, remind 1 h (orrery 2 h), urgent remind 15 m, quiet 22:30-07:30.
+2. Only a PagerDuty high-urgency incident breaks quiet hours; a UAC-raised `urgent` waits.
+3. At the desk but not reacting: the phone escalation still fires after 15 m.
+4. No ntfy ack in v1; reading the push is not an ack (an action button would need an HTTP endpoint on vegad).
+5. Notifier default `ganymede` (24x7), no failover.
 
 ## Open questions
 
-1. Defaults: escalate after 15 m, remind 1 h (orrery 2 h), urgent remind 15 m, quiet 22:30-07:30. OK?
-2. Does a UAC-raised `urgent` also break quiet hours, or only PagerDuty high (as written)?
-3. At the desk but not reacting: escalate to the phone anyway, or re-toast only (as written)?
-4. Phone ack for ntfy: none in v1 (reading the push is not an ack). Add an ntfy action button later? It
-   would need an HTTP endpoint on vegad, which does not exist.
-5. Notifier failover: none (as PagerDuty). Acceptable when proteus is down?
+- Moshi: its API and what it sends off-host are unknown; answer in the moshi adapter bead before building.
