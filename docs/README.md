@@ -54,6 +54,7 @@ the current reference. Some describe proposals, research or one-time cutovers; c
 | [capacity.md](design/capacity.md) | Subscription headroom from token-burn |
 | [lanista-catalog.md](design/lanista-catalog.md) | The LLM model catalog, built once and distributed by vegad |
 | [pagerduty.md](design/pagerduty.md) | One vegad polls PagerDuty; the owning UAC investigates |
+| [notify.md](design/notify.md) | `vega notify`: escalating operator signal when a UAC waits on the Slayer |
 | [janitor.md](design/janitor.md) | A map of every git checkout on a machine |
 | [theme.md](design/theme.md) | One dark/light mode for every TUI |
 | [theme-symbols.md](design/theme-symbols.md) | Symbols of the UAC pane label and the board |
