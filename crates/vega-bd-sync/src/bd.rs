@@ -203,6 +203,40 @@ pub fn fast_forwardable(msg: &str) -> bool {
 /// fails rather than merge when the branches diverged.
 pub const FAST_FORWARD_SQL: &str = "CALL DOLT_PULL('origin', 'main', '--ff-only')";
 
+/// `DOLT_PULL` for the sync pull, through bd's server. `bd dolt pull` leaves the remote user at
+/// `root`; with a `user` ([`remote_user`]), pull by SQL with `--user` (the server reads the
+/// password from its environment). `None`: no user, `bd dolt pull` as before.
+pub fn pull_sql(user: Option<&str>) -> Option<String> {
+    user_pull_sql(user?, false)
+}
+
+/// [`FAST_FORWARD_SQL`] with `--user` when a `user` is given.
+pub fn fast_forward_sql(user: Option<&str>) -> String {
+    user.and_then(|u| user_pull_sql(u, true))
+        .unwrap_or_else(|| FAST_FORWARD_SQL.to_string())
+}
+
+fn user_pull_sql(user: &str, ff_only: bool) -> Option<String> {
+    if user.is_empty() {
+        return None;
+    }
+    let tail = if ff_only { ", '--ff-only'" } else { "" };
+    Some(format!(
+        "CALL DOLT_PULL('--user', '{}', 'origin', 'main'{tail})",
+        user.replace('\'', "''")
+    ))
+}
+
+/// `DOLT_PUSH` for the sync push, like [`pull_sql`]: `bd dolt push` leaves the remote user at
+/// `root`. `None`: no user, `bd dolt push` as before. The SQL push skips bd's pre-push fsck.
+pub fn push_sql(user: Option<&str>) -> Option<String> {
+    let user = user.filter(|u| !u.is_empty())?;
+    Some(format!(
+        "CALL DOLT_PUSH('--user', '{}', 'origin', 'main')",
+        user.replace('\'', "''")
+    ))
+}
+
 /// Ahead, behind (against the remote-tracking `origin/main`, as of the last
 /// fetch) and the head commit.
 #[derive(Debug, Clone, PartialEq)]
@@ -558,6 +592,36 @@ mod tests {
         assert!(matches!(classify(&conn), Outcome::Retry(ref m) if !fast_forwardable(m)));
     }
 
+    #[test]
+    fn pull_sql_adds_the_user_only_when_set() {
+        assert_eq!(pull_sql(None), None);
+        assert_eq!(pull_sql(Some("")), None);
+        assert_eq!(fast_forward_sql(Some("")), FAST_FORWARD_SQL);
+        assert_eq!(fast_forward_sql(None), FAST_FORWARD_SQL);
+        assert_eq!(
+            pull_sql(Some("goern")).as_deref(),
+            Some("CALL DOLT_PULL('--user', 'goern', 'origin', 'main')")
+        );
+        assert_eq!(
+            fast_forward_sql(Some("o'x")),
+            "CALL DOLT_PULL('--user', 'o''x', 'origin', 'main', '--ff-only')"
+        );
+    }
+
+    #[test]
+    fn push_sql_adds_the_user_only_when_set() {
+        assert_eq!(push_sql(None), None);
+        assert_eq!(push_sql(Some("")), None);
+        assert_eq!(
+            push_sql(Some("goern")).as_deref(),
+            Some("CALL DOLT_PUSH('--user', 'goern', 'origin', 'main')")
+        );
+        assert_eq!(
+            push_sql(Some("o'x")).as_deref(),
+            Some("CALL DOLT_PUSH('--user', 'o''x', 'origin', 'main')")
+        );
+    }
+
     /// [`FAST_FORWARD_SQL`] in a clone behind its remote: at the remote's
     /// tip after it, as the manual `dolt pull origin main` was.
     #[test]
@@ -591,6 +655,68 @@ mod tests {
         assert_ne!(head(&behind), head(&seed));
         sh(&behind, &["sql", "-q", FAST_FORWARD_SQL]);
         assert_eq!(head(&behind), head(&seed));
+    }
+
+    /// vegad's pull, fast-forward and push SQL against a remote with a named user: they
+    /// authenticate as that user (a wrong password is denied for it), the password only in
+    /// `DOLT_REMOTE_PASSWORD`.
+    #[test]
+    fn user_sql_syncs_as_the_named_user() {
+        let Some(dolt) = testsrv::dolt() else {
+            eprintln!("skipped: no dolt on PATH");
+            return;
+        };
+        let s = testsrv::server(&dolt);
+        s.root_sql(
+            &dolt,
+            "CREATE DATABASE NU; CREATE USER 'vega'@'%' IDENTIFIED BY 'pw-test'; \
+             GRANT ALL ON *.* TO 'vega'@'%'; GRANT CLONE_ADMIN ON *.* TO 'vega'@'%';",
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let url = format!("{}/NU", s.remote);
+        let dolt_as = |dir: &Path, pw: &str, args: &[String]| {
+            let mut c = Command::new(&dolt);
+            c.current_dir(dir)
+                .env("DOLT_REMOTE_PASSWORD", pw)
+                .args(args);
+            run(c, Duration::from_secs(60))
+        };
+        let sh = |dir: &Path, args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            let r = dolt_as(dir, "pw-test", &args);
+            assert!(r.ok, "dolt {args:?}: {}", r.out);
+            r.out
+        };
+        let sql = |dir: &Path, q: &str| sh(dir, &["sql", "-q", q]);
+        let user = Some("vega");
+        for name in ["a", "b"] {
+            let args = remote_args(user, "clone", &[&url, name]);
+            let r = dolt_as(tmp.path(), "pw-test", &args);
+            assert!(r.ok, "clone: {}", r.out);
+        }
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        let head = |dir: &Path| sh(dir, &["sql", "-r", "csv", "-q", "select hashof('main')"]);
+        let commit = |q: &str, m: &str| {
+            sql(&a, q);
+            sh(&a, &["commit", "-Am", m, "--author", "t <t@t>"]);
+        };
+
+        commit("create table t (id int primary key)", "one");
+        let push = push_sql(user).unwrap();
+        let denied = dolt_as(&a, "wrong", &["sql".into(), "-q".into(), push.clone()]);
+        assert!(
+            !denied.ok && denied.out.contains("Access denied for user 'vega'"),
+            "{}",
+            denied.out
+        );
+        sql(&a, &push);
+        sql(&b, &pull_sql(user).unwrap());
+        assert_eq!(head(&b), head(&a));
+
+        commit("insert into t values (1)", "two");
+        sql(&a, &push);
+        sql(&b, &fast_forward_sql(user));
+        assert_eq!(head(&b), head(&a));
     }
 
     #[test]

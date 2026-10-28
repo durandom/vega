@@ -95,13 +95,25 @@ remotesapi, titan's version): a push to a missing one fails `database not found`
 - A remote with named users (e.g. a DoltHub-style hub): set `DOLT_REMOTE_USER` and
   `DOLT_REMOTE_PASSWORD`. dolt reads only the password from the environment and defaults the
   user to `root`, so the probe fetch and the `--adopt` fetch and push add `--user
-  $DOLT_REMOTE_USER` (`bd::remote_args`); `bd dolt pull`/`push` read both variables themselves.
-  The password never goes into argv.
+  $DOLT_REMOTE_USER` (`bd::remote_args`). When the variable is set, vegad's pull and
+  fast-forward heal run `CALL DOLT_PULL('--user', ...)` and its push `CALL DOLT_PUSH('--user',
+  ...)` through bd's server (`bd::pull_sql`, `bd::push_sql`; `bd dolt pull`/`push` would use
+  `root`). That push skips bd's pre-push fsck. Without the variable, `bd dolt pull`/`push` run as
+  before. `relay install` pins it in `vegad.env`. The password never goes into argv: the server
+  reads `DOLT_REMOTE_PASSWORD` from its environment.
+- Precondition with `DOLT_REMOTE_USER`: those `CALL`s run inside bd's per-project dolt server,
+  which bd starts from whichever process calls bd first (an agent shell or vegad). That process
+  must have `DOLT_REMOTE_PASSWORD` set (e.g. the shell profile); vega does not supply it, and
+  `vegad.env` holds only the user. A server started without it is denied; `bd dolt stop` lets
+  the next bd call start it again. Setups without `DOLT_REMOTE_USER` (titan's remotesapi) are
+  unaffected. Delivering the password from vega's secrets store: vega-lhc.222.
 
 Tested: `bd::tests::creates_a_missing_database_with_create_only` runs a local sql-server with
 remotesapi and a CREATE-only `vega` user (probe `Missing`, wrong password `Denied`, create, probe
 `Exists`, create again `Ok`). A full `vega bd init` against such a server, with a throwaway
 secrets store (`XDG_CONFIG_HOME`), created the database, seeded it and reran idempotently.
+`bd::tests::user_sql_syncs_as_the_named_user` runs vegad's pull, fast-forward and push SQL
+against such a server as a named user; a wrong `DOLT_REMOTE_PASSWORD` is denied for that user.
 
 ### The seed race
 
