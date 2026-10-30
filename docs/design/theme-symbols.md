@@ -131,7 +131,8 @@ coloured but not given an icon. vegad therefore reports a `$host` token on every
 own herdr, with the same source and TTL as the other tokens: the host's `[symbols.hosts]` label as
 written (e.g. `♃₃` for ganymede, Jupiter III; write `<icon> ganymede` to keep the name), the bare host
 name without an entry (or with `""`). The host name is
-vegad's post host (`VEGA_POST_HOST`, else the hostname; lowercase, `.` as `_`); keys match it
+vegad's post host (`VEGA_POST_HOST` from the process, then vegad.env, else the hostname;
+see [host precedence](../concepts.md)); keys match it
 case-insensitively. Each host labels its own panes: a remote pane's `$host` comes from the remote
 vegad, so every host's theme.toml should carry the same `[symbols.hosts]` table.
 

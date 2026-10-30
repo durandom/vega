@@ -47,7 +47,7 @@ Config (round 3):
 | Broker URL | `VEGA_NATS_URL` | Unconfigured; set the variable or `~/.config/vega/nats.url` |
 | Seed file | `VEGA_NATS_NKEY` | `$XDG_CONFIG_HOME/vega/nats.nk` (`~/.config/vega/nats.nk`) if it exists; otherwise no auth (local dev broker) |
 | Binary name in pointers | `VEGA_POST_CMD` | `vega post`; only for testing a dev build that is not on `PATH` |
-| Host name | `VEGA_POST_HOST` | `hostname -s`, lowercase (round 4; for tests and odd hostnames; the server enforces it via the key) |
+| Host name | `VEGA_POST_HOST` | Process override, then vegad.env, then `hostname -s`; normalized per [host precedence](../concepts.md). The server enforces it via the key. |
 
 Command names below in the round 1 log (`vega mux post`) are the old names of `vega post send`.
 
