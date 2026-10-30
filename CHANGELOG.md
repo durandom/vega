@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 93 · 2026-10-30
+
+- migration: pi now follows vega's mode through `~/.pi/agent/themes/vega-auto.json`, reloaded live
+  without a restart. Existing light/dark pairs move into `[tools.pi]` in theme.toml; the default pair
+  is catppuccin-latte/catppuccin-mocha. Install those source themes or set overrides. Select
+  `vega-auto` once in already running pi sessions. See [theme](docs/design/theme.md).
+
 ## 92 · 2026-10-30
 
 - feature: notify.toml routes asks by level and project, with one phone escalation, one reminder,

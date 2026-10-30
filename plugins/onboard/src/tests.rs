@@ -185,11 +185,7 @@ fn vegad_is_recommended_also_without_a_broker() {
     assert_eq!(vegad_line(true, true), "vegad: installed");
     assert!(vegad_line(true, false).contains("local mode"));
     let d = tempfile::tempdir().unwrap();
-    let env = Env {
-        home: d.path().into(),
-        config: d.path().join(".config"),
-        state: d.path().join(".local/state"),
-    };
+    let env = Env::at(d.path());
     // XDG_DATA_HOME unset in tests that run vega_onboard; the default dir.
     if std::env::var_os("XDG_DATA_HOME").is_none() {
         assert!(!vegad_installed(&env));

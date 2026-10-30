@@ -140,6 +140,44 @@ pub fn set_mode(env: &Env, pref: Pref) -> Result<(), String> {
     files::write_atomic(&p, &doc.to_string())
 }
 
+/// Preserve a pi light/dark pair before settings.json selects vega-auto.
+/// Existing overrides and unrelated TOML (including comments) stay intact.
+pub(crate) fn save_pi_pair(env: &Env, light: &str, dark: &str) -> Result<(), String> {
+    let p = path(env);
+    let text = match fs::read_to_string(&p) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", p.display())),
+    };
+    let mut doc: DocumentMut = text
+        .parse()
+        .map_err(|e| format!("{}: not TOML: {e}", p.display()))?;
+    for (label, item) in [
+        ("tools", doc.get("tools")),
+        ("tools.pi", doc.get("tools").and_then(|t| t.get("pi"))),
+    ] {
+        if item.is_some_and(|t| !t.is_table_like()) {
+            return Err(format!("{}: {label} must be a table", p.display()));
+        }
+    }
+    for (key, name) in [("light", light), ("dark", dark)] {
+        if doc
+            .get("tools")
+            .and_then(|t| t.get("pi"))
+            .and_then(|t| t.get(key))
+            .is_none()
+        {
+            doc["tools"]["pi"][key] = value(name);
+        }
+    }
+    let updated = doc.to_string();
+    if updated != text {
+        fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
+        files::write_atomic(&p, &updated)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
