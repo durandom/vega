@@ -9,7 +9,7 @@ then the embedded global seats (`plugins/lanista/seats.json`). `source` names
 
 ```
 vega lanista pin codex --tier budget --set gpt-6.1-sol
-vega lanista pin xai --tier budget --set grok-4.7 --until 2h
+vega lanista pin zai --tier budget --set glm-5.2 --until 2h
 vega lanista pin codex --tier budget
 vega lanista pin codex --tier budget --clear
 ```

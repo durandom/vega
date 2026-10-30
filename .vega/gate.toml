@@ -4,7 +4,7 @@
 
 timeout = "20m"
 tier = "budget"
-reviewers = ["codex", "pi:xai/grok-4.7", "pi:zai/glm-5.3", "claude:claude/claude-sonnet-5-5"]
+reviewers = ["codex", "pi:zai/glm-5.3", "claude:claude/claude-sonnet-5-5"]
 
 [[review]]
 name = "vega"

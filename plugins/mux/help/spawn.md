@@ -15,7 +15,7 @@ Default agent args (extra args after `--` are appended):
 Examples:
   vega mux spawn rev --kind codex
   vega mux spawn helper --kind claude --headless --at split --prompt "Run the tests and report failures."
-  vega mux spawn api --kind pi --cwd ~/src/api --at workspace -- --model xai/grok-4.7
+  vega mux spawn api --kind pi --cwd ~/src/api --at workspace -- --model zai/glm-5.3
   vega mux spawn fix --kind claude --worktree fix-login --base origin/main --prompt-file /tmp/task.md
   vega mux spawn gate-rev --kind codex --env VEGA_GATE_ROLE=reviewer -- -m gpt-6-luna
 

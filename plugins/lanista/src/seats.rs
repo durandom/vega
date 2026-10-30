@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn repo_copy_has_no_copilot_and_tiers_every_lane() {
         let pins = repo();
-        assert_eq!(providers(&pins), ["xai", "zai", "agy", "claude", "codex"]);
+        assert_eq!(providers(&pins), ["zai", "agy", "claude", "codex"]);
         for prov in providers(&pins) {
             for tier in TIERS {
                 assert!(pick(&pins, &prov, tier).is_some(), "{prov} lacks {tier}");
@@ -158,12 +158,9 @@ mod tests {
     }
 
     #[test]
-    fn pins_pi_xai_and_zai_by_tier() {
+    fn pins_pi_zai_by_tier() {
         let pins = repo();
         let m = |p, t| pick(&pins, p, t).unwrap().model.clone();
-        assert_eq!(m("xai", "flagship"), "grok-4.6");
-        assert_eq!(m("xai", "balanced"), "grok-4.5");
-        assert_eq!(m("xai", "budget"), "grok-4.3");
         assert_eq!(m("zai", "flagship"), "glm-5.3");
         assert_eq!(m("zai", "balanced"), "glm-5.2");
         assert_eq!(m("zai", "budget"), "glm-4.7");
