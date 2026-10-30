@@ -147,7 +147,11 @@ vega review                       # status
   `vega mux mode` headed). `--headless` skips that check for scripted tests and runs the browser headless.
   Writes `$XDG_STATE_HOME/vega/review/<machine>_<pane>/` (0700): `config.json` and `overlay.js` (0600),
   `inbox.log`. Spawns the inbox (`vega-review serve`, own process group), then
-  `agent-browser --session <s> [--headed] --init-script overlay.js open <url>`.
+  `agent-browser --session <s> --headed <bool> --init-script overlay.js open <unique-blank-url>`.
+  The inbox attaches to that tab through the session's CDP endpoint and enables `Page.setBypassCSP`
+  before `start` navigates to the app. The attachment stays alive with the inbox so bypass survives
+  reloads, navigation and renderer changes. It affects only that tab, with no browser profile changes;
+  the overlay still mounts only on the reviewed origin. Startup fails if bypass cannot be enabled.
 - Inbox: std `TcpListener` on `127.0.0.1:0`, a thread per request, 64 KiB body cap. Overlay routes
   (`POST /note`, `POST /state`): Origin must equal the app origin, the secret is in the `text/plain` body, the
   note url must be on that origin. CLI routes (`GET /notes`, `POST /reply`): `X-Vega-Secret` header, no Origin
@@ -302,7 +306,7 @@ vega review shot [--selector <css>] [--out <path>]
 - `shot` hides the overlay (`__vegaReview.hide`) so highlights and the panel do not cover the design, runs
   `agent-browser screenshot [<selector>] [<path>]` (agent-browser crops to the element itself; no `sips`), and
   shows the overlay again. `--out` is made absolute: the agent-browser daemon has its own working directory.
-- Limit: a CSP without `unsafe-eval` blocks `Function`; the patch then reports an `EvalError`.
+- The review tab bypasses CSP, so strict `connect-src` and `unsafe-eval` policies do not block patches.
 
 Verified live (headless, throwaway page on a free port with a `pushState` re-render): a patch without a marker
 was refused (exit 2); the patch ran once, kept one marked node after SPA navigation, a full navigation and a
@@ -316,5 +320,4 @@ after the reload), and with none left.
 - The secret guards against other pages and browsers, not against the reviewed app: its scripts share the page
   and could read what the owner types into the open shadow root.
 - Highlights belong to a page: navigation drops them (pins come back, highlights do not).
-- A strict app CSP (`connect-src`) blocks the overlay's fetch to the inbox; the bar then shows the error.
 - One review per pane, and the agent-browser session must be new: the init script is registered at launch.
