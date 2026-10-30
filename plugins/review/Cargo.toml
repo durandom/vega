@@ -14,9 +14,11 @@ path = "src/main.rs"
 vega-build = { path = "../../crates/vega-build" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
+tungstenite = "0.28"
 vega-herdr = { path = "../../crates/vega-herdr" }
 
 [dev-dependencies]
+tempfile = "3"
 vega-plugin = { path = "../../crates/vega-plugin" }
 
 [build-dependencies]

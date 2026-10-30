@@ -6,6 +6,7 @@
 //! to the agent's pane. The agent shows elements with `highlight` and answers
 //! with `reply`, both rendered in the page.
 
+mod csp;
 mod inbox;
 
 use std::fs;
@@ -378,6 +379,7 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
     let cfg = json!({
         "url": url, "origin": origin, "pane": pane, "session": session, "secret": secret,
         "headed": !headless,
+        "blank": format!("about:blank#vega-review-{}", random_hex(8)?),
     });
     write_private(&dir.join("config.json"), &cfg.to_string())?;
 
@@ -421,12 +423,8 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
     let script_path = dir.join("overlay.js");
     write_private(&script_path, &script)?;
     let script_arg = script_path.display().to_string();
-    let mut args = vec!["--init-script", script_arg.as_str()];
-    if !headless {
-        args.push("--headed");
-    }
-    args.extend(["open", url]);
-    if let Err(f) = agent_browser(&session, &args) {
+    if let Err(f) = open_review(&session, &script_arg, url, headless, &dir, &cfg) {
+        let _ = agent_browser(&session, &["close"]);
         stop_inbox(&dir, &cfg);
         return Err(f);
     }
@@ -445,6 +443,32 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
     print_reset(reset);
     println!("inbox: 127.0.0.1:{port} (notes need the session secret and Origin {origin})");
     println!("help: the owner comments in the page; notes arrive as mail (vega post inbox). Show elements: vega review highlight <selector> --label <text>");
+    Ok(())
+}
+
+/// Launch on a unique blank tab so the inbox can attach CSP bypass before the
+/// app's CSP is initialized. The init script still runs on every navigation.
+fn open_review(
+    session: &str,
+    script: &str,
+    url: &str,
+    headless: bool,
+    dir: &Path,
+    cfg: &Value,
+) -> Result<(), Failure> {
+    agent_browser(
+        session,
+        &[
+            "--init-script",
+            script,
+            "--headed",
+            if headless { "false" } else { "true" },
+            "open",
+            cfg["blank"].as_str().unwrap_or("about:blank"),
+        ],
+    )?;
+    csp::prepare(dir, session)?;
+    agent_browser(session, &["open", url])?;
     Ok(())
 }
 
@@ -979,6 +1003,9 @@ fn serve(dir: &Path) -> Result<(), Failure> {
             }
         });
     }
+    // Keep this attachment alive alongside the inbox, including across renderer
+    // changes. Only the unique tab launched by start receives CSP bypass.
+    let _csp = csp::listen(dir, cfg["blank"].as_str().unwrap_or(""))?;
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
         let inbox = Arc::clone(&inbox);
@@ -1015,6 +1042,9 @@ fn mail(pane: &str, text: &str) -> Result<(), String> {
         Err(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 }
+
+#[cfg(test)]
+mod browser_test;
 
 #[cfg(test)]
 mod tests {

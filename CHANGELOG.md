@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 96 · 2026-10-30
+
+- feature: review overlays can send notes and load patches on local apps with strict Content Security
+  Policy. CSP bypass is enabled only on the review tab before loading the app and lasts with its inbox;
+  browser profile settings are unchanged. Restart an existing review to apply it.
+
 ## 95 · 2026-10-30
 
 - feature: agent mail, notify and mux now use the host pinned in vegad.env when the shell has no
