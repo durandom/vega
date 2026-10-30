@@ -314,6 +314,33 @@ impl Store {
     }
 }
 
+/// Show an existing note without creating another note. A refused toast is not a send.
+pub fn toast(title: &str, body: &str) -> Result<(), crate::Failure> {
+    let v = crate::herdr_on(
+        None,
+        &[
+            "notification",
+            "show",
+            title,
+            "--body",
+            body,
+            "--sound",
+            "request",
+        ],
+        std::time::Duration::from_secs(5),
+    )?;
+    let result = &v["result"];
+    if result["shown"] != true {
+        let reason = result["reason"].as_str().unwrap_or("toast was not shown");
+        return Err(crate::Failure::new(
+            "channel_unavailable",
+            format!("toast: {reason}"),
+            "retry when a herdr client is available",
+        ));
+    }
+    Ok(())
+}
+
 /// A notification for the human: herdr's toast (one slot, gone when the
 /// next arrives) plus a note in this host's store for the board's list.
 /// Host-level: the vega UAC's badge counts it (see `notify_project`).

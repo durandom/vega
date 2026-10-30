@@ -1,5 +1,10 @@
 # vega post
 
+vegad also runs the blocking-ask delivery worker: seat election, durable cross-host receipts,
+focus/draft suppression and toast/macOS adapters shared with `vega notify test`.
+Local mode delivers origin-local asks; inbox-only hosts use toast only. See
+[notify](../../docs/design/notify.md) for the staged channel and routing build.
+
 Agent mail through a NATS broker, also across machines. A message is stored in the broker, not typed into the
 target pane; vegad, the relay on each host, types a one-line pointer into the pane and the target pulls its mail.
 This keeps long messages out of busy panes and lets agents on different machines talk.

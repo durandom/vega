@@ -33,6 +33,7 @@ mod identity;
 mod identity_mappings;
 mod janitor;
 mod notes;
+mod notify_delivery;
 mod notify_state;
 mod outage;
 mod pagerduty;
@@ -2339,6 +2340,7 @@ type ToolMail = (String, String, String);
 
 /// The relay's threads that need no broker, spawned once for both modes.
 struct Jobs {
+    notify_mode: std::sync::Arc<std::sync::atomic::AtomicU8>,
     events: mpsc::UnboundedReceiver<agents::Event>,
     up: mpsc::UnboundedReceiver<upstream::Event>,
     theme: mpsc::UnboundedReceiver<theme::Event>,
@@ -2392,6 +2394,11 @@ impl Jobs {
             theme::spawn(ttx, theme_remote.clone());
         }
         Jobs {
+            notify_mode: if once {
+                Default::default()
+            } else {
+                notify_delivery::spawn()
+            },
             events,
             up,
             theme,
@@ -2644,6 +2651,8 @@ async fn local(
     jobs: &mut Jobs,
     carry: Carry,
 ) -> Carry {
+    jobs.notify_mode
+        .store(1, std::sync::atomic::Ordering::Relaxed);
     let why = local_reason();
     // The note first: whoever sees the local state finds it.
     if broker_configured() {
@@ -2884,6 +2893,8 @@ async fn serve(
         let mut uber_in = None;
         // Only a broker that took the setup ends an outage (vega-lhc.205).
         jobs.backoff = outage::Backoff::new(PROBE_EVERY);
+        jobs.notify_mode
+            .store(2, std::sync::atomic::Ordering::Relaxed);
         service::write_broker("connected");
         if outage::cleared((now_ms() / 1000) as i64) {
             log("broker: outage note cleared");

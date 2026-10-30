@@ -600,7 +600,8 @@ herdr toast is the banner, `vega board`'s Inbox (`N`) the list, the UAC pane's n
   `acked` (Unix seconds). Open asks are exempt from pruning and cannot be hidden by clear watermarks;
   reading still clears their unread badge. Resolve/ack by qualified ID routes to the origin through
   the `notify` command handler. See [notify](notify.md) for dedupe and staged delivery support.
-- Not macOS Notification Center: with a shared store every machine would show each note again.
+- Ordinary notes stay in herdr. Blocking asks also support macOS Notification Centre on the elected
+  seat, with cross-host delivery receipts and suppression; see [notify](notify.md).
 
 ## Badges
 

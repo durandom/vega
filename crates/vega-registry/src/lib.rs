@@ -902,6 +902,7 @@ pub async fn reconcile(
     for k in present {
         if k.starts_with(&prefix)
             && *k != beat_key(host)
+            && *k != format!("{}.notify.sent", token(host))
             && !pins::is_pin(k)
             && !is_legacy_project_key(k)
             && !desired.contains_key(k)

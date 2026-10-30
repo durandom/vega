@@ -64,9 +64,9 @@ does not resend. Inbox-only hosts (deimos) have no registry: their asks reach on
 
 ## CLI/state build (.226.1)
 
-The CLI persists asks without sending. Delivery, channel probes, notifier health and timing output
-land in .226.2-.4; until then raise prints `delivery pending` and `test <channel>` reports
-`channel_unavailable` (exit 1). No channel is silently treated as delivered.
+The CLI persists asks; vegad handles delivery asynchronously. Raise prints `delivery pending`;
+channel probes and notifier health are available in .226.2. Timing output and phone channels
+land in .226.3-.4. No channel is silently treated as delivered.
 
 - IDs are `<host>=<millisecond-id>` to disambiguate hosts. Explicit ID resolve/ack uses the existing
   `vega post cmd` transport (`notify` handler) so only the origin writes its note. `--key` and `--pane`
@@ -92,6 +92,30 @@ land in .226.2-.4; until then raise prints `delivery pending` and `test <channel
   failures remain diagnostic-only and never block the session. Hook installation is unchanged;
   panes without this hook and other harnesses still resolve explicitly.
 - UAC rule installation and PagerDuty asks are .226.6.
+
+## Delivery build (.226.2)
+
+- `plugins/notify` provides the shared Channel API and `Sent` store; a separate vegad worker in
+  `plugins/post/src/notify_delivery.rs` ticks every 30 seconds. Successful sends checkpoint locally,
+  then publish `<host>.notify.sent` before another send. The worker imports all hosts' receipts,
+  including stale hosts, before sending; the ordinary registry reconciler leaves these keys alone.
+  A failed receipt/election read pauses broker delivery; corrupt local receipts also stop it.
+- Seat = greatest `human_at`, even when that beat is stale (no failover). Equal timestamps choose the
+  lexically smaller host; no `human_at` means no seat. Focus and human input use herdr's existing
+  focus-event approximation from uber-uac.md; an ask's pane is considered local only on its origin.
+  A recognized text or opaque draft suppresses both seat channels independently of input age.
+- Baseline raise delivery only: no config means toast; an existing notify.toml additionally enables
+  macos for action/urgent. Only `notifier` and `seat_idle` are consumed here; the `[levels]`, `[projects]`,
+  `[channels]` and quiet-hours routing/timers belong to .226.3-.4. A level increase sends again once
+  per channel; acked/resolved asks are skipped. Ack checkpoints survive a stale origin snapshot.
+- In vegad local mode (unconfigured or unreachable broker), only origin-local asks are read and this
+  host owns both classes. Inbox-only hosts always use local toast only. On broker recovery those
+  receipts publish before further sends. There is no remote-channel failover in broker mode.
+- `test toast|macos` sends directly on the caller's host, bypassing election/suppression and creating
+  no note or receipt. macos uses osascript on macOS and notify-send on Linux; failures are not receipts.
+  Normal sends also reuse the original ask note instead of creating another note.
+- This remains at-least-once: a crash between send/checkpoint can repeat, and registry snapshots
+  are not an atomic cross-host handoff. The same notifier configuration is required everywhere.
 
 ## Who delivers
 

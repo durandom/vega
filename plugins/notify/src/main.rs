@@ -208,11 +208,9 @@ fn gather(store: &Store, host: &str) -> Vec<Note> {
 }
 fn run(cmd: Cmd) -> Result<(), Failure> {
     if let Cmd::Test(channel) = cmd {
-        return Err(Failure::new(
-            "channel_unavailable",
-            format!("{channel} delivery is not implemented yet"),
-            "vega notify list; channel support lands in the delivery beads",
-        ));
+        vega_notify::test(&channel)?;
+        println!("test: {channel} delivered");
+        return Ok(());
     }
     let store = store()?;
     let host = vega_herdr::state::post_host();
@@ -276,10 +274,12 @@ fn run(cmd: Cmd) -> Result<(), Failure> {
                     "updated"
                 }
             );
+            notifier_health();
             Ok(())
         }
         Cmd::List => {
             print_list(&gather(&store, &host), now_ms);
+            notifier_health();
             Ok(())
         }
         Cmd::Resolve(mut sel) | Cmd::Ack(mut sel) => {
@@ -316,6 +316,44 @@ fn run(cmd: Cmd) -> Result<(), Failure> {
             Ok(())
         }
         Cmd::Test(_) => unreachable!(),
+    }
+}
+fn notifier_health() {
+    if vega_herdr::state::is_inbox_only(&vega_herdr::state::post_host()) {
+        return;
+    }
+    let config = match vega_notify::Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("warning: notify config: {}", cell(&e));
+            return;
+        }
+    };
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return;
+    };
+    let online = rt.block_on(async {
+        tokio::time::timeout(TIMEOUT, async {
+            let client = vega_registry::connect("notify").await?;
+            let key = vega_registry::beat_key(&config.notifier);
+            let value = vega_registry::get_one(&client, &key).await?;
+            let mut view = vega_registry::View::default();
+            if let Some(v) = value {
+                view.entries.insert(key, v);
+            }
+            Ok::<_, String>(vega_notify::notifier_online(
+                &view,
+                &config,
+                (notes::now_ms() / 1000) as i64,
+            ))
+        })
+        .await
+    });
+    if !matches!(online, Ok(Ok(true))) {
+        println!("notifier: {} offline", cell(&config.notifier));
     }
 }
 fn label(s: &Selector) -> String {

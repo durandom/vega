@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 91 · 2026-10-30
+
+- feature: vegad delivers blocking asks on the host with the newest human input, with durable
+  cross-host receipts and focus/draft suppression. No config uses toast; notify.toml also enables
+  desktop notifications for action/urgent. `vega notify test toast|macos` probes local delivery.
+  Phone channels, routing and timers follow separately. See [notify](docs/design/notify.md).
+
 ## 90 · 2026-10-30
 
 - feature: the Claude `vega_uber_capture` hook resolves the current pane's open notify asks when

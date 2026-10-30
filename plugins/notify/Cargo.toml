@@ -11,10 +11,12 @@ vega-build = { path = "../../crates/vega-build" }
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-registry = { path = "../../crates/vega-registry" }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+toml_edit = "0.25"
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "time"] }
 
 [dev-dependencies]
-tempfile = "3"
 vega-plugin = { path = "../../crates/vega-plugin" }
 
 [build-dependencies]
