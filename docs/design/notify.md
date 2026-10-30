@@ -104,10 +104,9 @@ land in .226.3-.4. No channel is silently treated as delivered.
   lexically smaller host; no `human_at` means no seat. Focus and human input use herdr's existing
   focus-event approximation from uber-uac.md; an ask's pane is considered local only on its origin.
   A recognized text or opaque draft suppresses both seat channels independently of input age.
-- Baseline raise delivery only: no config means toast; an existing notify.toml additionally enables
-  macos for action/urgent. Only `notifier` and `seat_idle` are consumed here; the `[levels]`, `[projects]`,
-  `[channels]` and quiet-hours routing/timers belong to .226.3-.4. A level increase sends again once
-  per channel; acked/resolved asks are skipped. Ack checkpoints survive a stale origin snapshot.
+- No config means toast only. With a file, the routing defaults below apply; .226.3 consumes levels,
+  projects, channel settings and quiet hours. A level increase sends again once per channel;
+  acked/resolved asks are skipped. Ack checkpoints survive a stale origin snapshot.
 - In vegad local mode (unconfigured or unreachable broker), only origin-local asks are read and this
   host owns both classes. Inbox-only hosts always use local toast only. On broker recovery those
   receipts publish before further sends. There is no remote-channel failover in broker mode.
@@ -116,6 +115,31 @@ land in .226.3-.4. No channel is silently treated as delivered.
   Normal sends also reuse the original ask note instead of creating another note.
 - This remains at-least-once: a crash between send/checkpoint can repeat, and registry snapshots
   are not an atomic cross-host handoff. The same notifier configuration is required everywhere.
+
+## Routing build (.226.3)
+
+- Config is reloaded each delivery round. An existing file gets the Timing defaults, quiet hours
+  22:30–07:30 and seat_idle 5m; omitted level fields retain their defaults. `[levels]` can override
+  initial channels, escalation delay/channels and reminder interval. Per-project `remind` replaces
+  the level interval for both action and urgent. Info has no phone step by default.
+- Phone adapters must have a `[channels.<name>]` table; missing tables produce CLI warnings and are
+  skipped, including for Uber rerouting. Adapter settings are retained for the phone-channel builds;
+  `projects` is an exact project-ID allowlist. No file still means toast only, with no phone timers.
+  Actual ntfy/Pushover/Moshi adapters and onboard findings remain their own builds.
+- One escalation and one reminder use the original ask clock, independently of seat suppression.
+  Successful receipts remain per channel/reason/level. Quiet deferrals persist separately in `sent.json`
+  and are imported/published with receipts. At the first allowed send after a deferral, an already-due
+  reminder is consumed too: one phone notification, rather than an overnight backlog. An urgent
+  deferred raise is that one notification; an action uses its escalation. Failed sends retry.
+- Only note metadata `source = "pagerduty"` AND `urgency = "high"` bypasses quiet hours; urgency alone
+  never does. These optional schema-2 fields are for the .226.6 producer. Local mode uses the local
+  host's wall clock; broker delivery uses the notifier's local wall clock, with timezone/DST conversion.
+- **Agreed implementation adjustment:** `vega uber ask` requires a slayer-decision bead and decision
+  options, which a notify ask need not have. While the live Uber is engaged, the notifier instead sends
+  plain `vega post send --uber --from-tool vega-notify` notification-only mail with qualified ask ID, project, pane, line and
+  command. No typed decision kind, invented options, answer path or approval. Returning to the origin
+  pane is the next step. Quiet hours still apply. A durable Uber receipt stands in for the phone step;
+  a later engagement change cannot redeliver that same step. Failed Uber mail stays pending.
 
 ## Who delivers
 
@@ -209,7 +233,7 @@ every host reads the same values.
   `seat_idle`, or `delivery::draft` sees a draft in that pane: the Slayer is reading or typing there. The
   clock keeps running; the next tick re-checks.
 - **Uber engaged:** while the Uber claim is engaged ([uber-uac.md](uber-uac.md) §2), the phone step goes to
-  the Uber as an ask (`vega uber ask`) instead of ntfy: the Slayer is already in Claude on the phone. Not
+  the Uber as notification-only mail (Routing build above) instead of ntfy: the Slayer is already in Claude on the phone. Not
   engaged: ntfy.
 - vegad ticks every 30 s; at-least-once like PagerDuty: a crash between send and checkpoint may send twice.
 

@@ -163,3 +163,31 @@ fn real_channel_probes_use_adapters_without_creating_notes() {
     assert!(!dir.path().join("vega/notes").exists());
     assert!(!dir.path().join("vega/notify").exists());
 }
+
+#[test]
+fn missing_phone_configuration_warns_without_rejecting_the_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("config/vega");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("notify.toml"),
+        "[levels.action]\nchannels=['toast','macos']",
+    )
+    .unwrap();
+    let out = run(
+        dir.path(),
+        "a",
+        &[
+            "action",
+            "demo: test -> w1:p1",
+            "--pane",
+            "w1:p1",
+            "--project",
+            "demo",
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout)
+        .contains("channel ntfy is named in levels but has no [channels.ntfy] configuration"));
+    assert_eq!(note(dir.path())["kind"], "ask");
+}

@@ -329,6 +329,9 @@ fn notifier_health() {
             return;
         }
     };
+    for warning in config.warnings() {
+        println!("warning: {}", cell(&warning));
+    }
     let Ok(rt) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -567,9 +567,22 @@ impl View {
     /// The live Uber-UAC: of the live claims, the highest epoch, ties to the
     /// lower host name. `None` when no claim is live (`uber_absent`).
     pub fn live_uber(&self) -> Option<UberClaim> {
+        self.live_uber_at(unix_now())
+    }
+
+    /// Clock-injected claim election for scheduled delivery.
+    pub fn live_uber_at(&self, now: i64) -> Option<UberClaim> {
         self.uber_claims()
             .into_iter()
-            .filter(|c| self.uber_live(c))
+            .filter(|c| {
+                self.beat_at(&c.host)
+                    .is_some_and(|at| now.saturating_sub(at) <= FRESH.as_secs() as i64)
+                    && self
+                        .entries
+                        .get(&agent_key(&c.host, &c.pane))
+                        .and_then(|v| v["status"].as_str())
+                        .is_some()
+            })
             .reduce(|best, c| if c.beats(&best) { c } else { best })
     }
 

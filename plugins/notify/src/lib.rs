@@ -1,4 +1,4 @@
-//! Notification delivery primitives shared by the CLI and vegad. Timing/routing is separate.
+//! Notification routing and durable delivery primitives shared by the CLI and vegad.
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -139,81 +139,16 @@ pub fn test(channel: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-#[derive(Clone, Debug)]
-pub struct Config {
-    pub notifier: String,
-    pub seat_idle: i64,
-    pub desktop: bool,
-}
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            notifier: "ganymede".into(),
-            seat_idle: 300,
-            desktop: false,
-        }
-    }
-}
-impl Config {
-    pub fn load() -> Result<Self, String> {
-        let root = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-            .ok_or("no config directory")?;
-        match std::fs::read_to_string(root.join("vega/notify.toml")) {
-            Ok(s) => Self::parse(&s),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-    pub fn parse(s: &str) -> Result<Self, String> {
-        let doc = s
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|e| e.to_string())?;
-        let mut config = Self {
-            desktop: true,
-            ..Self::default()
-        };
-        if let Some(v) = doc.get("notifier") {
-            let h = v
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .ok_or("notifier must be a host name")?;
-            if vega_herdr::state::host_token(h) != h {
-                return Err("notifier must be a host token".into());
-            }
-            config.notifier = h.into();
-        }
-        if let Some(v) = doc.get("seat_idle") {
-            let s = v.as_str().ok_or("seat_idle must be a duration, e.g. 5m")?;
-            let at = s
-                .char_indices()
-                .last()
-                .map(|(i, _)| i)
-                .ok_or("empty seat_idle")?;
-            let (n, unit) = s.split_at(at);
-            let factor = match unit {
-                "s" => 1,
-                "m" => 60,
-                "h" => 3600,
-                _ => return Err("seat_idle must use s, m or h".into()),
-            };
-            config.seat_idle = n
-                .parse::<i64>()
-                .ok()
-                .filter(|n| *n > 0)
-                .and_then(|n| n.checked_mul(factor))
-                .ok_or("invalid seat_idle")?;
-        }
-        Ok(config)
-    }
-}
+mod routing;
+pub use routing::{ChannelConfig, Config, Level};
 
-/// Successful sends, keyed by qualified ask, channel and reason. Never record failures.
+/// Delivery ledger: successful sends by ask/channel/reason, durable acks and quiet deferrals.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Sent {
     pub receipts: BTreeMap<String, Receipt>,
     pub acked: BTreeMap<String, i64>,
+    #[serde(default)]
+    pub deferred: BTreeMap<String, i64>,
 }
 impl Sent {
     pub fn path() -> Option<PathBuf> {
@@ -251,6 +186,12 @@ impl Sent {
             {
                 self.receipts.insert(k, v);
             }
+        }
+        for (k, at) in other.deferred {
+            self.deferred
+                .entry(k)
+                .and_modify(|a| *a = (*a).min(at))
+                .or_insert(at);
         }
         for (k, at) in other.acked {
             self.acked
@@ -336,27 +277,108 @@ impl Round<'_> {
                 if !owner || (self.toast_only && channel.name() != "toast") {
                     continue;
                 }
-                // Baseline raise only. Configurable routing and timers belong to .226.3.
-                if channel.name() == "macos"
-                    && (!self.config.desktop || ask.level.as_deref() == Some("info"))
-                {
-                    continue;
-                }
-                if channel.class() == Class::Seat && suppress(ask) {
-                    continue;
-                }
-                let key = format!("{id}/{}/raise", channel.name());
                 let level = ask.level.as_deref().unwrap_or("info");
-                if sent
-                    .receipts
-                    .get(&key)
-                    .is_some_and(|r| rank(&r.level) >= rank(level))
-                {
+                let policy = self.config.level(level);
+                let age = self.now.saturating_sub(ask.at());
+                let remind = ask
+                    .project
+                    .as_ref()
+                    .and_then(|p| self.config.projects.get(p))
+                    .copied()
+                    .or(policy.remind);
+                let engaged = !self.local
+                    && self
+                        .view
+                        .live_uber_at(self.now)
+                        .is_some_and(|c| self.view.uber_engaged(&c, self.now).on());
+                let remote = channel.class() == Class::Remote;
+                let is_uber = channel.name() == "uber";
+                if !self.config.allowed(channel.name(), ask.project.as_deref()) {
                     continue;
                 }
-                match channel.send(ask, Why::Raise) {
+                if remote && is_uber != engaged {
+                    continue;
+                }
+                if !remote && suppress(ask) {
+                    continue;
+                }
+                let initial = policy.channels.iter().any(|n| n == channel.name());
+                let escalation = policy.escalate.iter().any(|n| n == channel.name());
+                // Uber stands in for any configured phone channel, never a seat channel.
+                let phone_initial = policy.channels.iter().any(|n| {
+                    !matches!(n.as_str(), "toast" | "macos")
+                        && self.config.allowed(n, ask.project.as_deref())
+                });
+                let phone_escalate = policy.escalate.iter().any(|n| {
+                    !matches!(n.as_str(), "toast" | "macos")
+                        && self.config.allowed(n, ask.project.as_deref())
+                });
+                let initial = initial || (is_uber && phone_initial);
+                let escalation = escalation || (is_uber && phone_escalate);
+                let covered = |why: &str, sent: &Sent| {
+                    let own = format!("{id}/{}/{why}", channel.name());
+                    let uber = format!("{id}/uber/{why}");
+                    let valid = |r: &Receipt| rank(&r.level) >= rank(level);
+                    sent.receipts.get(&own).is_some_and(valid)
+                        || (remote && sent.receipts.get(&uber).is_some_and(valid))
+                        || (is_uber
+                            && sent.receipts.iter().any(|(k, r)| {
+                                k.starts_with(&format!("{id}/"))
+                                    && k.ends_with(&format!("/{why}"))
+                                    && !k.contains("/toast/")
+                                    && !k.contains("/macos/")
+                                    && valid(r)
+                            }))
+                };
+                let phase = if initial && !covered("raise", sent) {
+                    Some((Why::Raise, "raise"))
+                } else if escalation && age >= policy.after && !covered("escalate", sent) {
+                    Some((Why::Escalate, "escalate"))
+                } else if remote
+                    && (initial || escalation)
+                    && remind.is_some_and(|t| age >= t)
+                    && !covered("remind", sent)
+                {
+                    Some((Why::Remind, "remind"))
+                } else {
+                    None
+                };
+                let Some((why, reason)) = phase else {
+                    continue;
+                };
+                let deferred = format!("{id}/{}/deferred", channel.name());
+                if remote
+                    && self.config.is_quiet(self.now)
+                    && !(ask.source.as_deref() == Some("pagerduty")
+                        && ask.urgency.as_deref() == Some("high"))
+                {
+                    sent.deferred.entry(deferred).or_insert(self.now);
+                    checkpoint(sent)?;
+                    continue;
+                }
+                let key = format!("{id}/{}/{reason}", channel.name());
+                match channel.send(ask, why) {
                     Ok(mut receipt) => {
                         receipt.at = self.now;
+                        // A quiet-hour backlog collapses to one phone send; consume the
+                        // reminder as well when its deadline already passed.
+                        let deadline = ask.at().saturating_add(match why {
+                            Why::Raise => 0,
+                            Why::Escalate => policy.after,
+                            Why::Remind => remind.unwrap_or(0),
+                        });
+                        // A notifier that slept through the night has no deferral marker.
+                        let due_during_quiet = self.config.is_quiet(deadline)
+                            && !(ask.source.as_deref() == Some("pagerduty")
+                                && ask.urgency.as_deref() == Some("high"));
+                        let was_deferred = due_during_quiet
+                            || sent.deferred.keys().any(|k| {
+                                k.starts_with(&format!("{id}/")) && k.ends_with("/deferred")
+                            });
+                        if remote && was_deferred && remind.is_some_and(|t| age >= t) {
+                            sent.receipts
+                                .insert(format!("{id}/{}/remind", channel.name()), receipt.clone());
+                        }
                         sent.receipts.insert(key, receipt);
                         checkpoint(sent)?;
                     }
@@ -441,7 +463,15 @@ mod tests {
             local,
             toast_only: false,
             view,
-            config: &Config::default(),
+            config: &if channel.class() == Class::Remote {
+                let mut c =
+                    Config::parse("[channels.phone]\n[levels.action]\nchannels = ['phone']")
+                        .unwrap();
+                c.quiet = None;
+                c
+            } else {
+                Config::default()
+            },
             now,
         }
         .deliver(asks, &[channel], sent, |_| suppress, |_| Ok(()))
@@ -726,3 +756,42 @@ mod tests {
         assert_eq!(apple_string("a\"\\\nb"), "\"a\\\"\\\\\\nb\"");
     }
 }
+
+/// Notification-only mail: it cannot enter the Uber decision/approval protocol.
+pub struct Uber;
+impl Channel for Uber {
+    fn name(&self) -> &str {
+        "uber"
+    }
+    fn class(&self) -> Class {
+        Class::Remote
+    }
+    fn send(&self, ask: &Ask, why: Why) -> Result<Receipt, Failure> {
+        let text = uber_text(ask, why);
+        let out = vega_herdr::output_within(
+            std::process::Command::new("vega").args([
+                "post",
+                "send",
+                "--uber",
+                "--from-tool",
+                "vega-notify",
+                &text,
+            ]),
+            Duration::from_secs(10),
+        )
+        .map_err(|e| unavailable("uber", &e.to_string()))?
+        .ok_or_else(|| unavailable("uber", "notification mail timed out"))?;
+        if !out.status.success() {
+            return Err(unavailable("uber", "notification mail failed"));
+        }
+        Ok(receipt(ask))
+    }
+}
+pub fn uber_text(ask: &Ask, why: Why) -> String {
+    format!("Notification only (no decision or approval): {}={} · {:?}\nproject: {}\npane: {}\n{}\ncmd: {}\nReturn to the originating pane for the question; this mail provides no answer path.",
+        ask.host, ask.id, why, ask.project.as_deref().unwrap_or("-"),
+        ask.pane.as_deref().unwrap_or("-"), ask.title, ask.cmd.as_deref().unwrap_or("-"))
+}
+
+#[cfg(test)]
+mod routing_tests;
