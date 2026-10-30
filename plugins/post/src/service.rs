@@ -510,8 +510,13 @@ fn spawn_detached(exe: &Path) -> Result<std::process::Child, Failure> {
         cmd.env_remove(k);
     }
     for (k, v) in read_env_file() {
-        cmd.env(k, v);
+        if k != "VEGA_POST_HOST" {
+            cmd.env(k, v);
+        }
     }
+    // The child must take the same host lock as its starter, including a
+    // shell override that differs from the value pinned at installation.
+    cmd.env("VEGA_POST_HOST", host());
     // SAFETY: setsid is async-signal-safe.
     unsafe {
         cmd.pre_exec(|| {
@@ -1009,6 +1014,61 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn detached_relay_inherits_the_starters_resolved_host() {
+        const TEST: &str = "VEGA_DETACHED_HOST_TEST";
+        if env::var_os(TEST).is_none() {
+            let out = Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "service::tests::detached_relay_inherits_the_starters_resolved_host",
+                    "--nocapture",
+                ])
+                .env(TEST, "1")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        env::set_var("HOME", temp.path());
+        env::remove_var("XDG_STATE_HOME");
+        let state = state_dir().unwrap();
+        fs::create_dir_all(&state).unwrap();
+        fs::write(state.join("vegad.env"), "VEGA_POST_HOST=pinned-host\n").unwrap();
+        let exe = temp.path().join("fake-relay");
+        fs::write(
+            &exe,
+            "#!/bin/sh\nprintf '%s' \"$VEGA_POST_HOST\" > \"$HOME/child-host\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+        for (shell, expected) in [
+            (None, "pinned-host"),
+            (Some(""), "pinned-host"),
+            (Some("shell-host"), "shell-host"),
+        ] {
+            match shell {
+                Some(value) => env::set_var("VEGA_POST_HOST", value),
+                None => env::remove_var("VEGA_POST_HOST"),
+            }
+            load_env_file();
+            assert_eq!(host(), expected);
+            assert!(spawn_detached(&exe).unwrap().wait().unwrap().success());
+            assert_eq!(
+                fs::read_to_string(temp.path().join("child-host")).unwrap(),
+                expected
+            );
+            assert!(state.join(format!("post-relay-{expected}.log")).exists());
+        }
     }
 
     #[test]

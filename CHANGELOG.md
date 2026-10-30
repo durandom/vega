@@ -9,6 +9,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: agent mail, notify and mux now use the host pinned in vegad.env when the shell has no
   VEGA_POST_HOST override. WSL panes use the same broker identity as vegad without shell setup.
+  When that differs from the hostname, respawn existing agents to refresh their saved parent links.
 
 ## 94 · 2026-10-30
 

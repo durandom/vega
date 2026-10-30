@@ -17,3 +17,6 @@ vega-plugin = { path = "../../crates/vega-plugin" }
 
 [build-dependencies]
 vega-build = { path = "../../crates/vega-build" }
+
+[dev-dependencies]
+tempfile = "3"
