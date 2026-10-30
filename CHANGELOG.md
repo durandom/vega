@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 94 · 2026-10-30
+
+- migration: pi built-in themes are now found in standard fnm and npm/Homebrew installations even
+  with vegad’s minimal PATH. Legacy `system/system` uses the default catppuccin pair, which requires
+  `pi-community-themes`; alternatively set `[tools.pi] light/dark`. See [theme](docs/design/theme.md).
+
 ## 93 · 2026-10-30
 
 - migration: pi now follows vega's mode through `~/.pi/agent/themes/vega-auto.json`, reloaded live

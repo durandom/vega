@@ -18,24 +18,62 @@ fn output(env: &Env) -> PathBuf {
     env.home.join(".pi/agent/themes/vega-auto.json")
 }
 
-/// Resolve the actual executable's package, including npm/fnm symlinks.
-/// Tests use Env::at and never consult the process PATH or real HOME.
-pub(crate) fn installed_package() -> Option<PathBuf> {
-    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
+/// Resolve PATH first, then standard installations that a launchd daemon's
+/// minimal PATH misses. Discovery only reads package metadata; it runs no shell.
+pub(crate) fn installed_package(home: &Path) -> Option<PathBuf> {
+    let path: Vec<_> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    discover_package(
+        home,
+        &path,
+        &[
+            PathBuf::from("/opt/homebrew"),
+            PathBuf::from("/usr/local"),
+            PathBuf::from("/usr"),
+        ],
+    )
+}
+
+fn is_pi_package(path: &Path) -> bool {
+    files::read_json(&path.join("package.json"))
+        .ok()
+        .flatten()
+        .is_some_and(|v| v["name"] == "@earendil-works/pi-coding-agent")
+}
+
+/// Explicit inputs keep fixture discovery independent of the real HOME/PATH.
+fn discover_package(home: &Path, path: &[PathBuf], global_prefixes: &[PathBuf]) -> Option<PathBuf> {
+    for dir in path {
         let Ok(exe) = fs::canonicalize(dir.join("pi")) else {
             continue;
         };
-        for parent in exe.ancestors().skip(1) {
-            if files::read_json(&parent.join("package.json"))
-                .ok()
-                .flatten()
-                .is_some_and(|v| v["name"] == "@earendil-works/pi-coding-agent")
-            {
-                return Some(parent.to_path_buf());
-            }
+        if let Some(parent) = exe.ancestors().skip(1).find(|p| is_pi_package(p)) {
+            return Some(parent.to_path_buf());
         }
     }
-    None
+    let mut prefixes = Vec::new();
+    for root in [
+        home.join(".local/share/fnm"),
+        home.join("Library/Application Support/fnm"),
+        home.join(".fnm"),
+    ] {
+        if let Ok(entries) = fs::read_dir(root.join("node-versions")) {
+            let mut versions: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+            versions.sort();
+            prefixes.extend(versions.into_iter().map(|p| p.join("installation")));
+        }
+    }
+    prefixes.extend([
+        home.join(".npm-global"),
+        home.join(".npm"),
+        home.join(".local"),
+    ]);
+    prefixes.extend_from_slice(global_prefixes);
+    prefixes
+        .into_iter()
+        .map(|p| p.join("lib/node_modules/@earendil-works/pi-coding-agent"))
+        .find(|p| is_pi_package(p))
 }
 
 fn pair(raw: &str) -> Option<(&str, &str)> {
@@ -51,7 +89,10 @@ fn names(env: &Env, supplied: &prefs::Prefs, raw: &str) -> Result<(String, Strin
         supplied
             .name("pi", mode)
             .or_else(|| saved.name("pi", mode))
-            .or_else(|| old.map(|(l, d)| if mode == Mode::Light { l } else { d }))
+            .or_else(|| {
+                old.map(|(l, d)| if mode == Mode::Light { l } else { d })
+                    .filter(|name| *name != "system")
+            })
             .unwrap_or(match mode {
                 Mode::Light => "catppuccin-latte",
                 Mode::Dark => "catppuccin-mocha",
@@ -203,6 +244,134 @@ mod tests {
 
     fn theme(env: &Env, rel: &str, name: &str, color: &str) {
         write(env, rel, &serde_json::json!({"name":name, "vars":{"accent":color}, "colors":{"accent":"accent"}, "export":{"pageBg":color}}).to_string());
+    }
+
+    #[test]
+    fn discovers_builtins_without_pi_on_path() {
+        for prefix in [
+            ".local/share/fnm/node-versions/v24.1.0/installation",
+            "Library/Application Support/fnm/node-versions/v24.1.0/installation",
+            ".fnm/node-versions/v24.1.0/installation",
+            ".npm-global",
+            ".npm",
+            ".local",
+            "homebrew",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut env = Env::at(temp.path());
+            let package = format!("{prefix}/lib/node_modules/@earendil-works/pi-coding-agent");
+            write(
+                &env,
+                &format!("{package}/package.json"),
+                r#"{"name":"@earendil-works/pi-coding-agent"}"#,
+            );
+            for (name, color) in [("light", "#fff"), ("dark", "#000")] {
+                theme(
+                    &env,
+                    &format!("{package}/dist/modes/interactive/theme/{name}.json"),
+                    name,
+                    color,
+                );
+            }
+            env.pi_package = discover_package(
+                &env.home,
+                &[env.home.join("empty-bin")],
+                &[env.home.join("homebrew")],
+            );
+            assert_eq!(env.pi_package, Some(env.home.join(&package)));
+            write(&env, ".pi/agent/settings.json", r#"{"theme":"light/dark"}"#);
+            for (mode, color) in [(Mode::Light, "#fff"), (Mode::Dark, "#000")] {
+                assert!(matches!(
+                    apply(&env, &prefs::Prefs::default(), mode),
+                    Outcome::Set { .. }
+                ));
+                assert_eq!(
+                    source(&env, mode.as_str()).unwrap()["vars"]["accent"],
+                    color
+                );
+                assert_eq!(
+                    status(&env, &prefs::Prefs::default()).1,
+                    Current::Mode(mode)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn path_package_wins_over_fallback_and_follows_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let env = Env::at(temp.path());
+        for package in [
+            "selected",
+            ".local/lib/node_modules/@earendil-works/pi-coding-agent",
+        ] {
+            write(
+                &env,
+                &format!("{package}/package.json"),
+                r#"{"name":"@earendil-works/pi-coding-agent"}"#,
+            );
+        }
+        write(&env, "selected/dist/cli.js", "");
+        fs::create_dir(env.home.join("bin")).unwrap();
+        std::os::unix::fs::symlink(
+            env.home.join("selected/dist/cli.js"),
+            env.home.join("bin/pi"),
+        )
+        .unwrap();
+        assert_eq!(
+            discover_package(&env.home, &[env.home.join("bin")], &[]),
+            Some(fs::canonicalize(env.home.join("selected")).unwrap())
+        );
+        write(&env, "selected/package.json", r#"{"name":"unrelated"}"#);
+        assert_eq!(
+            discover_package(&env.home, &[env.home.join("bin")], &[]),
+            Some(
+                env.home
+                    .join(".local/lib/node_modules/@earendil-works/pi-coding-agent")
+            )
+        );
+    }
+
+    #[test]
+    fn system_pair_migrates_defaults_and_preserves_override() {
+        for override_light in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let env = Env::at(temp.path());
+            write(
+                &env,
+                ".pi/agent/settings.json",
+                r#"{"theme":"system/system","model":"keep"}"#,
+            );
+            for name in ["catppuccin-latte", "catppuccin-mocha", "custom"] {
+                theme(&env, &format!(".pi/agent/themes/{name}.json"), name, name);
+            }
+            if override_light {
+                write(
+                    &env,
+                    ".config/vega/theme.toml",
+                    "[tools.pi]\nlight = \"custom\"\n",
+                );
+            }
+            let prefs = prefs::load(&env).unwrap();
+            for mode in [Mode::Light, Mode::Dark] {
+                assert!(matches!(apply(&env, &prefs, mode), Outcome::Set { .. }));
+                assert_eq!(status(&env, &prefs).1, Current::Mode(mode));
+            }
+            let saved = prefs::load(&env).unwrap();
+            assert_eq!(
+                saved.name("pi", Mode::Light),
+                Some(if override_light {
+                    "custom"
+                } else {
+                    "catppuccin-latte"
+                })
+            );
+            assert_eq!(saved.name("pi", Mode::Dark), Some("catppuccin-mocha"));
+            assert_eq!(
+                files::read_json(&settings(&env)).unwrap().unwrap()["model"],
+                "keep"
+            );
+        }
     }
 
     #[test]

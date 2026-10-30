@@ -52,6 +52,12 @@ herdr's config is rendered by `vega config` (unit `herdr`) from `herdr/config.to
 "herdr's config"): the adapter is read-only and reports drift with the fix.
 vega's own board keeps its fixed Catppuccin Macchiato palette (follow-up).
 
+Pi’s default catppuccin-latte/catppuccin-mocha pair requires `pi-community-themes` to be installed.
+If those themes are missing, install that package or set `[tools.pi] light/dark` to installed themes
+(for example, the built-in `light`/`dark`). Built-ins are resolved from pi on PATH, standard fnm
+node-versions directories, or common npm/Homebrew global prefixes, including for vegad’s minimal PATH.
+A legacy `system/system` pair migrates to the defaults; explicit `[tools.pi]` overrides still win.
+
 ## vegad
 
 - A thread reads theme.toml and the OS mode every 3 s and applies when the due mode differs from the one it
@@ -81,7 +87,7 @@ vega's own board keeps its fixed Catppuccin Macchiato palette (follow-up).
   `vega-auto` in settings.json. An existing `light/dark` pair migrates to `[tools.pi] light/dark`
   without replacing explicit overrides. A single theme, `system`, or an unset theme uses the defaults
   above unless `[tools.pi]` overrides them. Sources are resolved from pi's installed built-in light/dark
-  files (the package behind `pi` on PATH), the user's themes directory, and installed git/npm packages
+  files (PATH first, then standard fnm and npm/Homebrew installations), the user's themes directory, and installed git/npm packages
   under `~/.pi/agent/git` and `~/.pi/agent/npm/node_modules`. Custom/package themes match the JSON
   `name`; duplicate package names use deterministic path order. This host-wide adapter does not resolve
   project-local packages or dynamically generated extension themes.
