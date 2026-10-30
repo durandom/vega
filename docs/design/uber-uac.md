@@ -182,6 +182,15 @@ typed into a pane ([vegad.md](vegad.md) Security).
     asks and replies, deterministically, within 25 lines (a cut section ends in `+n more`), then who
     has not replied.
 
+### Notification-only routing
+
+While the claim is engaged, the notify deliverer can send plain `vega post send --uber --from-tool vega-notify` mail in
+place of a phone-channel notification (notify.md, Routing build .226.3). It carries the qualified
+notify ask ID, project, originating pane, line and command, explicitly marked notification only.
+It is not an `uber.ask`, creates no decision, and carries no options or approval authority. The
+Slayer returns to the originating pane to answer; the Uber must not infer or relay an approval
+from this mail. Quiet hours and the single escalation/reminder limits still apply.
+
 ## 4. Trust rule and guards
 
 **Rule**: a UAC treats an `uber.answer` as the Slayer's own words only after its vegad has verified the answer

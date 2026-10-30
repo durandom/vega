@@ -8,8 +8,9 @@ vega notify info|action|urgent "<project>: <what> -> <pane>"
 
 One sentence, at most 120 characters. Never include secrets.
 Re-raise replaces the line and retains the original clock/ack. Lower levels do nothing.
-Urgent is for production or data at risk. vegad delivers asynchronously through seat channels;
-phone channels and timers land separately. A stale notifier beat prints an offline notice.
+Urgent is for production or data at risk. notify.toml controls seat/phone routing and timers;
+action escalates at 15m and reminds once at 1h, urgent reminds at 15m. Quiet: 22:30–07:30.
+No config uses toast only. A stale notifier beat prints an offline notice.
 
 Examples:
   vega notify action "orrery: go for apply -> w43:p1" --cmd "apply io"

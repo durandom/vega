@@ -18,7 +18,10 @@ Key/pane selectors are local to the origin host; qualified ids support remote up
 Pane/bead closure resolves asks on the origin's next metadata refresh.
 
 vegad delivers on the host with the newest human input; failed or suppressed sends retry.
-With no config, delivery uses toast only. With notify.toml, action/urgent also use macos.
+With no config, delivery uses toast only. notify.toml controls levels, channels and project reminders.
+Action escalates to configured phone channels at 15m and reminds once at 1h; urgent reminds at 15m.
+Quiet hours 22:30–07:30 defer phone sends, except PagerDuty high. Ack stops both later steps.
+An engaged Uber receives notification-only mail instead of phone delivery; answer in the origin pane.
 `vega notify test toast|macos` probes the local desktop without creating an ask.
-Phone channels, configurable routing, escalation and reminders land in later beads.
+Actual phone adapters land separately.
 Each command accepts `--help`.

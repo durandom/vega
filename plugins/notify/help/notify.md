@@ -9,7 +9,8 @@ vega notify test <channel>          Probe local toast or macos delivery
 
 Defaults: pane = caller, project = checkout, key = <project>/<pane>.
 One sentence, at most 120 characters. Never include secrets.
-vegad delivers through seat channels; no config uses toast only. Phone routing lands separately.
+notify.toml controls levels, channels, reminders and quiet hours. No config uses toast only.
+Engaged Uber receives notification-only mail for the phone step; answer in the origin pane.
 
 Examples:
   vega notify action "orrery: please test apply -> w43:p1" --bead orrery-1

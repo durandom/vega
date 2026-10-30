@@ -44,6 +44,8 @@ pub struct Note {
     pub key: Option<String>,
     pub cmd: Option<String>,
     pub acked: Option<i64>,
+    pub source: Option<String>,
+    pub urgency: Option<String>,
     pub title: String,
     pub body: String,
 }
@@ -64,6 +66,8 @@ impl Note {
             "key": self.key,
             "cmd": self.cmd,
             "acked": self.acked,
+            "source": self.source,
+            "urgency": self.urgency,
             "title": self.title,
             "body": self.body,
         })
@@ -87,6 +91,8 @@ impl Note {
             key: s("key"),
             cmd: s("cmd"),
             acked: v["acked"].as_i64(),
+            source: s("source"),
+            urgency: s("urgency"),
             title: s("title").unwrap_or_default(),
             body: s("body").unwrap_or_default(),
         })

@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 92 · 2026-10-30
+
+- feature: notify.toml routes asks by level and project, with one phone escalation, one reminder,
+  quiet hours (22:30–07:30; only PagerDuty high breaks them), and notification-only Uber rerouting
+  while engaged. Missing config stays toast-only. Phone adapters follow separately.
+  See [notify](docs/design/notify.md).
+
 ## 91 · 2026-10-30
 
 - feature: vegad delivers blocking asks on the host with the newest human input, with durable

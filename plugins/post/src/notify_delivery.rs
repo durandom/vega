@@ -5,7 +5,7 @@ use std::sync::{
 };
 use std::time::Duration;
 use vega_herdr::{asks, notes::Store};
-use vega_notify::{Channel, Config, Macos, Round, Sent, Toast};
+use vega_notify::{Channel, Config, Macos, Round, Sent, Toast, Uber};
 
 /// 0: startup/quiesced, 1: local mode, 2: broker mode. Inbox-only stays toast-only.
 pub fn spawn() -> Arc<AtomicU8> {
@@ -48,10 +48,14 @@ pub fn spawn() -> Arc<AtomicU8> {
 }
 
 async fn tick(mode: u8) -> Result<(), String> {
-    tick_channels(mode, &[&Toast, &Macos]).await
+    tick_channels(mode, &[&Toast, &Macos, &Uber]).await
 }
 
 async fn tick_channels(mode: u8, channels: &[&dyn Channel]) -> Result<(), String> {
+    tick_channels_at(mode, channels, (vega_herdr::notes::now_ms() / 1000) as i64).await
+}
+
+async fn tick_channels_at(mode: u8, channels: &[&dyn Channel], now: i64) -> Result<(), String> {
     let host = vega_herdr::state::post_host();
     let sent_key = format!("{}.notify.sent", vega_registry::token(&host));
     let inbox_only = vega_herdr::state::is_inbox_only(&host);
@@ -117,7 +121,6 @@ async fn tick_channels(mode: u8, channels: &[&dyn Channel]) -> Result<(), String
         .map_err(|e| e.to_string())?;
         broker = Some(kv);
     }
-    let now = (vega_herdr::notes::now_ms() / 1000) as i64;
     let notes = asks::open(store.list(), remote, &host);
     let focus = vega_herdr::waiting::read().focus;
     // Local input can be newer than the last heartbeat; suppression must not
@@ -224,7 +227,8 @@ mod tests {
             return;
         }
         use serde_json::json;
-        use vega_notify::{Ask, Channel, Class, Receipt, Sent, Why};
+        use vega_herdr::{asks, notes::Store};
+        use vega_notify::{Ask, Channel, Class, Config, Receipt, Sent, Why};
         let dir = tempfile::tempdir().unwrap();
         let (_server, url) = crate::registry_read_test::start(dir.path(), "");
         std::env::set_var("VEGA_NATS_URL", &url);
@@ -331,6 +335,49 @@ mod tests {
             kv.put("test-notify.beat", "corrupt".into()).await.unwrap();
             assert!(super::tick_channels(2, &[&probe]).await.is_err(), "a tolerant beat read could elect the wrong host");
             assert_eq!(probe.calls.get(), 2);
+            // Exercise routing through the production broker worker, not only Round fixtures.
+            kv.put("test-notify.beat", json!({"schema":2,"at":now,"human_at":now}).to_string().into()).await.unwrap();
+            let config_root = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("vega");
+            std::fs::create_dir_all(&config_root).unwrap();
+            let reminder_now = now + 2700;
+            let quiet = ["00:00-01:00","06:00-07:00","12:00-13:00","18:00-19:00"].into_iter().find(|q| {
+                let c = Config::parse(&format!("quiet='{q}'")).unwrap();
+                !c.is_quiet(now) && !c.is_quiet(reminder_now)
+            }).unwrap();
+            asks::change(&Store::local().unwrap(), "test-notify", now, true, |_| true).unwrap();
+            for id in [2000, 3000] { kv.delete(format!("other.note.{id}")).await.unwrap(); }
+            let base = ((now-900)*1000) as u64;
+            Store::local().unwrap().add(Ask { host:"test-notify".into(),kind:"ask".into(),level:Some("action".into()),..Default::default() },base).unwrap();
+            for id in [base+1,base+2] {
+                let ask = Ask { host:"other".into(),id,kind:"ask".into(),level:Some("action".into()),..Default::default() };
+                kv.put(format!("other.note.{id}"),ask.to_json().to_string().into()).await.unwrap();
+            }
+            std::fs::write(config_root.join("notify.toml"),format!("notifier='test-notify'\nquiet='{quiet}'\n[channels.ntfy]" )).unwrap();
+            struct RouteProbe(&'static str, std::cell::RefCell<Vec<Why>>);
+            impl Channel for RouteProbe {
+                fn name(&self) -> &str { self.0 }
+                fn class(&self) -> Class { Class::Remote }
+                fn send(&self, a: &Ask, why: Why) -> Result<Receipt, vega_herdr::Failure> {
+                    self.1.borrow_mut().push(why);
+                    Ok(Receipt { at:0,level:a.level.clone().unwrap() })
+                }
+            }
+            let phone = RouteProbe("ntfy",Default::default());
+            let uber = RouteProbe("uber",Default::default());
+            super::tick_channels_at(2,&[&phone,&uber],now).await.unwrap();
+            assert_eq!(*phone.1.borrow(),vec![Why::Escalate;3]);
+            let mut claim = vega_registry::uber_state::value("w9:p1","test-notify",0,20);
+            claim["engaged_at"] = json!(reminder_now);
+            kv.put("test-notify.beat", json!({"schema":2,"at":reminder_now,"human_at":now}).to_string().into()).await.unwrap();
+            kv.put(vega_registry::uber_key("test-notify"),claim.to_string().into()).await.unwrap();
+            kv.put(vega_registry::agent_key("test-notify","w9:p1"),json!({"status":"idle"}).to_string().into()).await.unwrap();
+            super::tick_channels_at(2,&[&phone,&uber],reminder_now).await.unwrap();
+            assert_eq!(*uber.1.borrow(),vec![Why::Remind;3]);
+            assert_eq!(phone.1.borrow().len(),3,"engaged phone steps go to Uber");
+            claim["engaged_at"] = json!(0);
+            kv.put(vega_registry::uber_key("test-notify"),claim.to_string().into()).await.unwrap();
+            super::tick_channels_at(2,&[&phone,&uber],reminder_now).await.unwrap();
+            assert_eq!(phone.1.borrow().len(),3,"Uber receipts prevent a later phone repeat");
         });
     }
 
@@ -426,6 +473,127 @@ mod tests {
             "{}\n{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[cfg(test)]
+mod routing_worker_tests {
+    use super::*;
+    #[test]
+    fn configured_worker_routes_phone_retries_quiet_and_honors_ack() {
+        const CHILD: &str = "VEGA_NOTIFY_ROUTE_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "notify_delivery::routing_worker_tests::configured_worker_routes_phone_retries_quiet_and_honors_ack", "--nocapture"])
+                .env(CHILD,"1").env("XDG_STATE_HOME",dir.path())
+                .env("XDG_CONFIG_HOME",dir.path().join("config")).env("VEGA_POST_HOST","route-test")
+                .output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        use vega_notify::{Ask, Class, Receipt, Why};
+        struct Phone(std::cell::RefCell<Vec<Why>>);
+        impl Channel for Phone {
+            fn name(&self) -> &str {
+                "ntfy"
+            }
+            fn class(&self) -> Class {
+                Class::Remote
+            }
+            fn send(&self, ask: &Ask, why: Why) -> Result<Receipt, vega_herdr::Failure> {
+                self.0.borrow_mut().push(why);
+                Ok(Receipt {
+                    at: 0,
+                    level: ask.level.clone().unwrap(),
+                })
+            }
+        }
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let phone = Phone(Default::default());
+        let store = Store::local().unwrap();
+        let n = store
+            .add(
+                Ask {
+                    host: "route-test".into(),
+                    kind: "ask".into(),
+                    level: Some("action".into()),
+                    ..Default::default()
+                },
+                1000000,
+            )
+            .unwrap();
+        let root =
+            std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("vega");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("notify.toml");
+        // Obtain a quiet interval covering fake time 1900 independently of the machine TZ.
+        let covering = ["00:00-12:00", "12:00-00:00"]
+            .into_iter()
+            .find(|q| {
+                Config::parse(&format!("quiet='{q}'"))
+                    .unwrap()
+                    .is_quiet(1900)
+            })
+            .unwrap();
+        std::fs::write(&file, format!("quiet='{covering}'\n[channels.ntfy]")).unwrap();
+        rt.block_on(super::tick_channels_at(1, &[&phone], 1899))
+            .unwrap();
+        assert!(phone.0.borrow().is_empty());
+        rt.block_on(super::tick_channels_at(1, &[&phone], 1900))
+            .unwrap();
+        assert!(phone.0.borrow().is_empty());
+        assert_eq!(
+            Sent::load(&Sent::path().unwrap()).unwrap().deferred.len(),
+            1
+        );
+        // Reload config on the next tick, then verify the successful receipt survives restart.
+        let other = if covering == "00:00-12:00" {
+            "12:00-00:00"
+        } else {
+            "00:00-12:00"
+        };
+        std::fs::write(&file, format!("quiet='{other}'\n[channels.ntfy]")).unwrap();
+        rt.block_on(super::tick_channels_at(1, &[&phone], 1900))
+            .unwrap();
+        rt.block_on(super::tick_channels_at(1, &[&phone], 1900))
+            .unwrap();
+        assert_eq!(*phone.0.borrow(), vec![Why::Escalate]);
+        vega_herdr::asks::change(&store, "route-test", 2000, true, |a| a.id == n.id).unwrap();
+        rt.block_on(super::tick_channels_at(1, &[&phone], 4600))
+            .unwrap();
+        assert_eq!(phone.0.borrow().len(), 1);
+        std::fs::write(&file, format!("quiet='{covering}'\n[channels.ntfy]")).unwrap();
+        for (id, urgency) in [(1001000, "low"), (1002000, "high")] {
+            store
+                .add(
+                    Ask {
+                        host: "route-test".into(),
+                        kind: "ask".into(),
+                        level: Some("urgent".into()),
+                        source: Some("pagerduty".into()),
+                        urgency: Some(urgency.into()),
+                        ..Default::default()
+                    },
+                    id,
+                )
+                .unwrap();
+        }
+        rt.block_on(super::tick_channels_at(1, &[&phone], 1900))
+            .unwrap();
+        assert_eq!(
+            *phone.0.borrow(),
+            vec![Why::Escalate, Why::Raise],
+            "only persisted PagerDuty high breaks quiet"
         );
     }
 }
