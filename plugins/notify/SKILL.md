@@ -17,6 +17,8 @@ Key/pane selectors are local to the origin host; qualified ids support remote up
 `vega notify ack <host>=<id>` records that it was seen, keeping it open.
 Pane/bead closure resolves asks on the origin's next metadata refresh.
 
-Delivery, escalation and reminders land in later beads. This build stores asks only;
-`vega notify test <channel>` reports `channel_unavailable` until channel support lands.
+vegad delivers on the host with the newest human input; failed or suppressed sends retry.
+With no config, delivery uses toast only. With notify.toml, action/urgent also use macos.
+`vega notify test toast|macos` probes the local desktop without creating an ask.
+Phone channels, configurable routing, escalation and reminders land in later beads.
 Each command accepts `--help`.

@@ -392,7 +392,12 @@ fn project_pins_cross_hosts_under_rendered_grants() {
             let migrated = std::collections::BTreeMap::from([(uk.clone(), json!({"schema":2,"host":"proteus","pane":"w1:p1","project":project,"at":1,"folder_name":"vega"}))]);
             let owned_old_uac = "proteus.uac.old";
             kv.put(owned_old_uac, json!({"project":old_project,"pane":"old"}).to_string().into()).await.unwrap();
-            vega_registry::reconcile(&kv,"proteus",Default::default(),&Default::default(),&[legacy.into(),owned_old_uac.into()]).await.unwrap();
+            // Notify's worker owns its receipts independently of the metadata clock.
+            let sent_key = "proteus.notify.sent";
+            let sent = json!({"receipts":{"ganymede=123/toast/raise":{"at":100,"level":"action"}},"acked":{}});
+            kv.put(sent_key, sent.to_string().into()).await.unwrap();
+            vega_registry::reconcile(&kv,"proteus",Default::default(),&Default::default(),&[legacy.into(),owned_old_uac.into(),sent_key.into()]).await.unwrap();
+            assert_eq!(vega_registry::get_one(&p,sent_key).await.unwrap(),Some(sent));
             assert!(vega_registry::get_one(&p,legacy).await.unwrap().is_some());
             assert!(vega_registry::get_one(&p,owned_old_uac).await.unwrap().is_some());
             let plan = vega_registry::cutover::Plan::prepare("proteus", &snapshot, &ids, migrated).unwrap();

@@ -4,12 +4,23 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 fn command(state: &Path, host: &str) -> Command {
+    let bin = state.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    if !bin.join("herdr").exists() {
+        script(&bin.join("herdr"), "#!/bin/sh\nprintf '%s\\n' '{\"result\":{\"shown\":false,\"reason\":\"no_foreground_client\"}}'\n");
+    }
     let mut c = Command::new(env!("CARGO_BIN_EXE_vega-notify"));
-    c.env("XDG_STATE_HOME", state)
+    c.env("PATH", &bin)
+        .env("XDG_STATE_HOME", state)
         .env("VEGA_POST_HOST", host)
         .env("XDG_CONFIG_HOME", state.join("config"))
         .env("VEGA_NATS_URL", "nats://127.0.0.1:1");
     c
+}
+fn script(path: &Path, content: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, content).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 fn run(state: &Path, host: &str, args: &[&str]) -> Output {
     command(state, host).args(args).output().unwrap()
@@ -64,6 +75,7 @@ fn separate_origins_keep_asks_and_command_updates_origin_only() {
         let out = run(dir, host, &args);
         assert!(out.status.success(), "{out:?}");
         assert!(String::from_utf8_lossy(&out.stdout).contains("delivery pending"));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("notifier: ganymede offline"));
     }
     let first = note(a.path());
     let id = first["id"].as_u64().unwrap();
@@ -105,6 +117,9 @@ fn probes_help_and_usage_do_not_need_context_or_write_state() {
     let out = run(dir.path(), "a", &["test", "toast"]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stdout).contains("channel_unavailable"));
+    let out = run(dir.path(), "a", &["test", "ntfy"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("phone channels land in a later build"));
     let out = run(
         dir.path(),
         "a",
@@ -112,4 +127,39 @@ fn probes_help_and_usage_do_not_need_context_or_write_state() {
     );
     assert_eq!(out.status.code(), Some(2));
     assert!(!dir.path().join("vega/notes").exists());
+}
+
+#[test]
+fn real_channel_probes_use_adapters_without_creating_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    script(&bin.join("herdr"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$XDG_STATE_HOME/args\"\nprintf '%s\\n' '{\"result\":{\"shown\":true,\"reason\":\"shown\"}}'\n");
+    let out = run(dir.path(), "a", &["test", "toast"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("toast delivered"));
+    let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
+    assert!(args.starts_with("notification\nshow\n"));
+    assert!(args.contains("--sound\nrequest"));
+    let desktop = if cfg!(target_os = "macos") {
+        "osascript"
+    } else {
+        "notify-send"
+    };
+    script(
+        &bin.join(desktop),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$XDG_STATE_HOME/desktop-args\"\n",
+    );
+    let out = run(dir.path(), "a", &["test", "macos"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(std::fs::read_to_string(dir.path().join("desktop-args"))
+        .unwrap()
+        .contains("test notification"));
+    script(&bin.join(desktop), "#!/bin/sh\nexit 1\n");
+    assert_eq!(
+        run(dir.path(), "a", &["test", "macos"]).status.code(),
+        Some(1)
+    );
+    assert!(!dir.path().join("vega/notes").exists());
+    assert!(!dir.path().join("vega/notify").exists());
 }
