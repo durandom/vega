@@ -43,5 +43,5 @@ vega review patch --clear [hero.js]  # remove, reload the page
 
 Gotchas: Tailwind JIT lacks classes the app does not use: style new pieces inline. Reloads and
 Vite HMR (a builder in the same worktree) re-run the patch; `patch --list` shows runs and errors.
-Data missing from the DOM must be fetched elsewhere and hard-coded: tell the owner. A CSP without
-`unsafe-eval` blocks patches.
+Data missing from the DOM must be fetched elsewhere and hard-coded: tell the owner.
+CSP does not block patches in the review tab.
