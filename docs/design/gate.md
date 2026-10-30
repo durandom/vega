@@ -69,7 +69,7 @@ input 3). Adding a gate.toml therefore takes effect after it lands.
 ```toml
 timeout = "20m"                 # reviewer silent longer -> abandoned (section 7)
 tier = "budget"                 # lanista tier for the reviewer model
-reviewers = ["codex", "pi:xai/grok-4.7", "pi:zai/glm-5.3", "claude"] # candidates, in order (section 4)
+reviewers = ["codex", "pi:zai/glm-5.3", "claude"] # candidates, in order (section 4)
 
 [[review]]
 name = "code"
@@ -149,7 +149,7 @@ The shim calls it (and an agent may, to review before handing work back). Steps:
    the same rule as the spawn warning (`capacity.rs`: binding window ≥ 10 % left and
    no confident run-out within 2 h, unless the Slayer's reset plan or override covers it). A candidate is
    `<kind>` or `<kind>:<lane>` and normally gets its model from `vega lanista pin <lane> --tier <tier>`.
-   It may pin a model as `<kind>:<lane>/<model>` (for example `pi:xai/grok-4.7`), which bypasses that
+   It may pin a model as `<kind>:<lane>/<model>` (for example `pi:zai/glm-5.3`), which bypasses that
    lanista lookup; author-model exclusion and capacity checks still use the pinned model. A candidate
    whose harness binary (its kind: `codex`, `claude`, `pi`, `agy`) is not on the gate's `PATH` is skipped,
    with a stderr line `vega gate: reviewer <kind> skipped: <kind> not on PATH` and the reason in the
@@ -321,7 +321,7 @@ Each step a bead under vega-lhc.146, after this design lands.
 
 1. **Seats lanes:** `plugins/lanista/seats.json` gets lanes `claude` (engine claude, e.g. `sonnet` budget,
    `opus` flagship) and `codex` (engine codex, the codex CLI's model ids) with tiers, so `vega lanista pin
-   claude|codex --tier budget` answers. Pi uses only its xai and zai providers; Anthropic and OpenAI use
+   claude|codex --tier budget` answers. Pi uses only its zai provider; Anthropic and OpenAI use
    their native claude and codex harnesses.
 2. **`vega mux spawn --env K=V`** (repeatable): env for the agent process and its tool shells. Verify how
    herdr starts the agent with env; else per harness (claude `--settings '{"env":{...}}'`, codex `-c

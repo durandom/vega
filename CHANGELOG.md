@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 88 · 2026-10-30
+
+- required: xai (Grok) is gone: the subscription was cancelled. The gate's reviewers are now codex,
+  `pi:zai/glm-5.3` and claude, and the lanista seats drop the xai lane. Run `vega lanista install` to
+  rewrite `~/.config/lanista/seats.json`, and clear any `vega lanista pin xai` override.
+
 ## 87 · 2026-10-28
 
 - required: with a Dolt remote that has named users, run `vega post relay install` again: it pins

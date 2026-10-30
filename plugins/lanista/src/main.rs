@@ -28,7 +28,7 @@ use vega_herdr::catalog;
     bin_name = "vega lanista",
     disable_version_flag = true,
     about = "Install, configure and use lanista, the LLM model catalog",
-    after_help = "Examples:\n  vega lanista                    # install, catalog, seats (read-only)\n  vega lanista install            # from git main, seats from the vega repo\n  vega lanista pin xai --tier budget"
+    after_help = "Examples:\n  vega lanista                    # install, catalog, seats (read-only)\n  vega lanista install            # from git main, seats from the vega repo\n  vega lanista pin zai --tier budget"
 )]
 struct Cli {
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
@@ -62,7 +62,7 @@ enum Cmd {
         after_help = include_str!("../help/pin.md")
     )]
     Pin {
-        /// Provider lane, as in the seats file (xai, zai, agy, claude, codex)
+        /// Provider lane, as in the seats file (zai, agy, claude, codex)
         provider: String,
         #[arg(long, default_value = "balanced", value_parser = seats::TIERS)]
         tier: String,

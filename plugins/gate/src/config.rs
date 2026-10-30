@@ -5,7 +5,7 @@ use toml_edit::{DocumentMut, Item};
 pub const PATH: &str = ".vega/gate.toml";
 
 /// Reviewer candidates when the config names none.
-const DEFAULT_REVIEWERS: [&str; 4] = ["codex", "pi:xai", "pi:zai", "claude"];
+const DEFAULT_REVIEWERS: [&str; 3] = ["codex", "pi:zai", "claude"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Review {
@@ -142,7 +142,7 @@ mod tests {
         let c = parse(include_str!("../../../.vega/gate.toml")).unwrap();
         assert_eq!(c.timeout_secs, 1200);
         assert_eq!(c.tier, "budget");
-        assert_eq!(c.reviewers[1], "pi:xai/grok-4.7");
+        assert_eq!(c.reviewers[1], "pi:zai/glm-5.3");
         assert_eq!(c.reviews.len(), 1);
         assert_eq!(
             c.reviews[0].rubric.as_deref(),
@@ -159,7 +159,7 @@ mod tests {
     fn defaults_and_errors() {
         let c = parse("[[review]]\npaths = [\"src/**\"]\n").unwrap();
         assert_eq!(c.timeout_secs, 1200);
-        assert_eq!(c.reviewers.len(), 4);
+        assert_eq!(c.reviewers.len(), 3);
         assert_eq!(c.reviews[0].name, "review1");
         assert_eq!(c.reviews[0].rubric, None);
         assert!(parse("timeout = \"20m\"\n").is_err());

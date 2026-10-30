@@ -171,7 +171,7 @@ pub fn skip(dir: &Path, plan: &Plan, branch: &str) -> Result<Vec<String>, String
 }
 
 /// A reviewer candidate of `reviewers`: `codex`, `claude`, `pi:<provider>`,
-/// or a candidate-pinned model such as `pi:xai/grok-4.7`.
+/// or a candidate-pinned model such as `pi:zai/glm-5.3`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
     pub spec: String,

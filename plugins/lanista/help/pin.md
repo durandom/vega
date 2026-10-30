@@ -15,5 +15,5 @@ Unavailable registry reads fall back to global seats and say so. Writes fail.
 
 Examples:
   vega lanista pin codex --tier budget
-  vega lanista pin xai --tier budget --set grok-4.7 --until 2h
-  vega lanista pin xai --tier budget --clear
+  vega lanista pin zai --tier budget --set glm-5.2 --until 2h
+  vega lanista pin zai --tier budget --clear
