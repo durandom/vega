@@ -48,6 +48,10 @@ pub fn spawn() -> Arc<AtomicU8> {
 }
 
 async fn tick(mode: u8) -> Result<(), String> {
+    tick_channels(mode, &[&Toast, &Macos]).await
+}
+
+async fn tick_channels(mode: u8, channels: &[&dyn Channel]) -> Result<(), String> {
     let host = vega_herdr::state::post_host();
     let inbox_only = vega_herdr::state::is_inbox_only(&host);
     let local = mode == 1 || inbox_only;
@@ -153,10 +157,10 @@ async fn tick(mode: u8) -> Result<(), String> {
         now,
     };
     // Each successful send is durable locally and on the broker before the next send.
-    let channels: [&dyn Channel; 2] = [&Toast, &Macos];
     let mut failures = vec![];
     for note in &notes {
-        for channel in &channels {
+        for channel in channels {
+            let before = sent.clone();
             failures.extend(round.deliver(
                 std::slice::from_ref(note),
                 &[*channel],
@@ -164,7 +168,7 @@ async fn tick(mode: u8) -> Result<(), String> {
                 suppress,
                 |s| s.save(&path),
             )?);
-            if let Some(kv) = &broker {
+            if let Some(kv) = broker.as_ref().filter(|_| sent != before) {
                 kv.put(
                     format!("{host}.notify.sent"),
                     serde_json::to_vec(&sent).map_err(|e| e.to_string())?.into(),
@@ -199,6 +203,136 @@ fn screen(pane: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn broker_worker_imports_before_send_checkpoints_each_send_and_fails_closed() {
+        const CHILD: &str = "VEGA_NOTIFY_BROKER_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "notify_delivery::tests::broker_worker_imports_before_send_checkpoints_each_send_and_fails_closed", "--nocapture"])
+                .env(CHILD, "1").env("XDG_STATE_HOME", dir.path())
+                .env("XDG_CONFIG_HOME", dir.path().join("config"))
+                .env("VEGA_POST_HOST", "test-notify").env_remove("VEGA_NATS_NKEY")
+                .output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        use serde_json::json;
+        use vega_notify::{Ask, Channel, Class, Receipt, Sent, Why};
+        let dir = tempfile::tempdir().unwrap();
+        let (_server, url) = crate::registry_read_test::start(dir.path(), "");
+        std::env::set_var("VEGA_NATS_URL", &url);
+        let root = crate::service::state_dir()
+            .unwrap()
+            .join("identity-cutover");
+        std::fs::create_dir_all(&root).unwrap();
+        let plans: Vec<_> = ["test-notify", "other"].into_iter().map(|host| json!({
+            "schema":2,"host":host,"inbox_only":false,"mappings":[],"original":{},"writes":{},"remove":[],
+            "registry":{"host":host,"backup":{},"projection":{}},"registry_reads":[],"owned":{}
+        })).collect();
+        std::fs::write(
+            root.join("approved.json"),
+            json!({"schema":2,"hosts":plans,"grants":{}}).to_string(),
+        )
+        .unwrap();
+        struct Probe {
+            url: String,
+            calls: std::cell::Cell<usize>,
+        }
+        impl Channel for Probe {
+            fn name(&self) -> &str {
+                "toast"
+            }
+            fn class(&self) -> Class {
+                Class::Seat
+            }
+            fn send(&self, _: &Ask, _: Why) -> Result<Receipt, vega_herdr::Failure> {
+                let url = self.url.clone();
+                let count = self.calls.get();
+                // A separate connection/runtime observes the real broker while the
+                // worker is inside its synchronous Channel callback.
+                std::thread::spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(async {
+                            let c = async_nats::connect(url).await.unwrap();
+                            let v = vega_registry::get_one(&c, "test-notify.notify.sent")
+                                .await
+                                .unwrap()
+                                .unwrap();
+                            assert!(
+                                v["receipts"]["test-notify=1000/toast/raise"].is_object(),
+                                "foreign receipt must publish before the first send"
+                            );
+                            if count > 0 {
+                                let previous = format!("other={}/toast/raise", (count + 1) * 1000);
+                                assert!(
+                                    v["receipts"][previous].is_object(),
+                                    "previous send must publish before the next send"
+                                );
+                            }
+                        });
+                })
+                .join()
+                .unwrap();
+                self.calls.set(count + 1);
+                Ok(Receipt {
+                    at: 0,
+                    level: "action".into(),
+                })
+            }
+        }
+        let probe = Probe {
+            url: url.clone(),
+            calls: std::cell::Cell::new(0),
+        };
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let mut client = None;
+            for _ in 0..50 {
+                if let Ok(c) = async_nats::connect(&url).await { client = Some(c); break; }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            let client = client.unwrap();
+            let kv = async_nats::jetstream::new(client.clone()).create_key_value(async_nats::jetstream::kv::Config {
+                bucket:vega_registry::BUCKET.into(), history:1, ..Default::default()
+            }).await.unwrap();
+            let now = (vega_herdr::notes::now_ms()/1000) as i64;
+            for (h, input) in [("test-notify", now), ("other", now-10)] {
+                kv.put(format!("{h}.beat"), json!({"schema":2,"at":now,"human_at":input}).to_string().into()).await.unwrap();
+            }
+            let own = Ask { host:"test-notify".into(),kind:"ask".into(),level:Some("action".into()),..Default::default() };
+            vega_herdr::notes::Store::local().unwrap().add(own, 1000).unwrap();
+            for id in [2000, 3000] {
+                let ask = Ask { host:"other".into(), id,kind:"ask".into(),level:Some("action".into()),..Default::default() };
+                kv.put(format!("other.note.{id}"), ask.to_json().to_string().into()).await.unwrap();
+            }
+            let imported = json!({"receipts":{"test-notify=1000/toast/raise":{"at":now-10,"level":"action"}},"acked":{}});
+            kv.put("other.notify.sent", imported.to_string().into()).await.unwrap();
+            super::tick_channels(2, &[&probe]).await.unwrap();
+            assert_eq!(probe.calls.get(), 2, "imported ask is never sent again");
+            let published = vega_registry::get_one(&client, "test-notify.notify.sent").await.unwrap().unwrap();
+            assert_eq!(published["receipts"].as_object().unwrap().len(), 3);
+            assert_eq!(Sent::load(&Sent::path().unwrap()).unwrap().receipts.len(), 3);
+            assert_eq!(vega_registry::get_one(&client, "other.notify.sent").await.unwrap(), Some(imported.clone()));
+            // A fresh worker invocation loads the checkpoint; default adapters have nothing to send.
+            super::tick(2).await.unwrap();
+            kv.put("other.notify.sent", "corrupt".into()).await.unwrap();
+            assert!(super::tick_channels(2, &[&probe]).await.unwrap_err().contains("invalid other receipts"));
+            assert_eq!(probe.calls.get(), 2);
+            kv.put("other.notify.sent", imported.to_string().into()).await.unwrap();
+            kv.put("test-notify.beat", "corrupt".into()).await.unwrap();
+            assert!(super::tick_channels(2, &[&probe]).await.is_err(), "a tolerant beat read could elect the wrong host");
+            assert_eq!(probe.calls.get(), 2);
+        });
+    }
+
     #[test]
     fn local_worker_checkpoints_and_restarts_without_a_second_toast() {
         const CHILD: &str = "VEGA_NOTIFY_LOCAL_TEST";

@@ -19,7 +19,7 @@ pub enum Why {
     Escalate,
     Remind,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Receipt {
     pub at: i64,
     pub level: String,
@@ -204,7 +204,7 @@ impl Config {
 }
 
 /// Successful sends, keyed by qualified ask, channel and reason. Never record failures.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Sent {
     pub receipts: BTreeMap<String, Receipt>,
     pub acked: BTreeMap<String, i64>,
