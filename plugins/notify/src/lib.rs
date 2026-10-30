@@ -311,10 +311,9 @@ impl Round<'_> {
         mut checkpoint: impl FnMut(&Sent) -> Result<(), String>,
     ) -> Result<Vec<String>, String> {
         let mut failures = vec![];
-        for ask in asks
-            .iter()
-            .filter(|a| a.kind == "ask" && a.resolved.is_none())
-        {
+        for ask in asks.iter().filter(|a| {
+            a.kind == "ask" && a.resolved.is_none() && (!self.local || a.host == self.host)
+        }) {
             let id = format!("{}={}", ask.host, ask.id);
             if let Some(at) = ask.acked {
                 sent.acked.insert(id.clone(), at);
@@ -606,6 +605,12 @@ mod tests {
         run("a", &v, false, &mut sent, &c, &[ask()], 100, false);
         assert_eq!(c.calls.get(), 0);
         run("a", &v, true, &mut sent, &c, &[ask()], 130, false);
+        assert_eq!(c.calls.get(), 0, "local mode ignores foreign asks");
+        let own = Ask {
+            host: "a".into(),
+            ..ask()
+        };
+        run("a", &v, true, &mut sent, &c, &[own], 160, false);
         assert_eq!(c.calls.get(), 1);
         let config = Config {
             notifier: "b".into(),
@@ -684,6 +689,7 @@ mod tests {
         };
         let mut n = ask();
         n.id += 1;
+        n.host = "a".into();
         assert!(round
             .deliver(
                 &[n],
