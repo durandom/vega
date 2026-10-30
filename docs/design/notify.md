@@ -27,9 +27,9 @@ pane. Decision beads have a board; inline asks have nothing.
 ```
 vega notify <info|action|urgent> "<line>" [--bead <id>] [--cmd "<cmd>"] [--key <k>]
             [--pane <pane>] [--project <key>]
-vega notify                      # open asks of every host: id, level, age, project, pane, line, next step
-vega notify resolve [<id> | --key <k> | --pane <pane>]
-vega notify ack <id>             # the Slayer saw it: stop escalation and reminder, keep it open
+vega notify [list]               # open asks of every host: id, level, age, project, pane, line, next step
+vega notify resolve [<host>=<id> | --key <k> | --pane <pane>]
+vega notify ack <host>=<id>             # the Slayer saw it: stop escalation and reminder, keep it open
 vega notify test <channel>       # one test message through a channel
 ```
 
@@ -61,6 +61,28 @@ Resolve, whichever comes first:
 Delivery state (which channel sent what, ack, reminder done) lives with the deliverer, in
 `$XDG_STATE_HOME/vega/notify/sent.json`, published as `<host>.notify.sent`, so a restart or a new deliverer
 does not resend. Inbox-only hosts (deimos) have no registry: their asks reach only the local toast.
+
+## CLI/state build (.226.1)
+
+The CLI persists asks without sending. Delivery, channel probes, notifier health and timing output
+land in .226.2-.4; until then raise prints `delivery pending` and `test <channel>` reports
+`channel_unavailable` (exit 1). No channel is silently treated as delivered.
+
+- IDs are `<host>=<millisecond-id>` to disambiguate hosts. Explicit ID resolve/ack uses the existing
+  `vega post cmd` transport (`notify` handler) so only the origin writes its note. `--key` and `--pane`
+  select asks on the local host; bare resolve selects the caller's default project/pane key.
+- `acked` (Unix seconds) is stored on the origin note, independent of read/clear watermarks. The
+  delivery loop must honor it when maintaining its per-deliverer receipts in `sent.json`.
+- A same-level re-raise replaces line, command, bead and target metadata, retaining ID/clock and ack;
+  a higher level does the same and records the new level for delivery; a lower level changes nothing.
+  Dedupe is origin-local: two hosts can have the same key, with independent qualified IDs.
+- Open asks are exempt from note retention limits: they stay on the board until resolved. Resolved
+  asks follow ordinary note pruning. Read/clear watermarks do not hide open asks from the board
+  or `vega notify list` (reading can still clear the unread badge).
+- Origin vegad resolves pane/bead closure on the metadata clock, including local-only mode. Unknown
+  pane status or a failed bead query keeps the ask open. Bead queries use a verified owner-local
+  project checkout and configured bd binary; without one, explicit resolve still works.
+- The typed-prompt hook is .226.5; UAC rule installation and PagerDuty asks are .226.6.
 
 ## Who delivers
 

@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 89 · 2026-10-30
+
+- feature: `vega notify info|action|urgent` stores blocking operator asks; `list`, `resolve` and `ack`
+  manage them across hosts with qualified IDs. Re-raising a key keeps its clock; pane/bead closure
+  resolves on the origin. This build persists state only; delivery channels land separately. See
+  [notify](docs/design/notify.md).
+
 ## 88 · 2026-10-30
 
 - required: xai (Grok) is gone: the subscription was cancelled. The gate's reviewers are now codex,

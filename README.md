@@ -15,6 +15,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | Plugin | Purpose |
 | --- | --- |
 | [`mux`](plugins/mux/) | Agent-to-agent messaging over herdr; spawn and adopt agents |
+| [`notify`](plugins/notify/) | Raise and settle blocking operator asks |
 | [`post`](plugins/post/) | Agent mail over a NATS JetStream broker; `vegad`, the per-host daemon |
 | [`uac`](plugins/uac/) | Coordinator mode: the role guide and the home view of the agents a session runs |
 | [`uber`](plugins/uber/) | The Uber-UAC: the Slayer's one channel to every UAC (estate-wide claim) |

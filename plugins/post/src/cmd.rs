@@ -20,6 +20,7 @@ pub const HANDLER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Allowed kinds and their handler argv; the relay appends `<from host>`.
 pub const HANDLERS: &[(&str, &[&str])] = &[
+    ("notify", &["vega-notify", "remote-update", "--from"]),
     ("open", &["vega-open", "remote-open", "--from"]),
     (
         "orchestration",

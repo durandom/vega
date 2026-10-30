@@ -575,7 +575,7 @@ herdr keeps one toast and no history, so vega keeps its own (vega-pqr). The mode
 herdr toast is the banner, `vega board`'s Inbox (`N`) the list, the UAC pane's name the badge.
 
 - Writer: `vega_herdr::notes::notify` shows the toast and writes a note to this host's store
-  (`$XDG_STATE_HOME/vega/notes/<id>.json`, id = Unix ms; 7 days, at most 200). vegad uses it for
+  (`$XDG_STATE_HOME/vega/notes/<id>.json`, id = Unix ms; 7 days, at most 200, except open asks). vegad uses it for
   draft and lost-draft notices; other events can follow.
 - Store: local state is the truth, as for agents. vegad reconciles the notes into the registry as
   `<host>.note.<id>` and deletes pruned ones; no auth change, each host writes only its keys. An
@@ -594,7 +594,12 @@ herdr toast is the banner, `vega board`'s Inbox (`N`) the list, the UAC pane's n
   that record or a UAC for it, every UAC counts them.
 - Self-resolving: a note may carry `cause`; the source host's vegad sets `resolved` (Unix s) when the
   cause clears, and a resolved note is read for every viewer (still listed, `unread: resolved`). Causes:
-  `bd-sync:<DB>`, cleared when the project's beads sync completes after the note.
+  `bd-sync:<DB>`, cleared when the project's beads sync completes after the note;
+  `ask:<key>`, cleared by explicit resolve or pane/bead closure (origin metadata refresh).
+- Blocking asks: `vega notify` stores `kind: ask` notes with `level`, `key`, `cmd`, `bead` and
+  `acked` (Unix seconds). Open asks are exempt from pruning and cannot be hidden by clear watermarks;
+  reading still clears their unread badge. Resolve/ack by qualified ID routes to the origin through
+  the `notify` command handler. See [notify](notify.md) for dedupe and staged delivery support.
 - Not macOS Notification Center: with a shared store every machine would show each note again.
 
 ## Badges
