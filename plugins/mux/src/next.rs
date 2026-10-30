@@ -86,8 +86,9 @@ fn candidates(
     registry: Vec<Candidate>,
 ) -> (String, Vec<Candidate>) {
     let here = vega_herdr::state::post_host();
+    let registry_host = vega_registry::token(&here);
     let mut all = local_candidates(&here, ledger, agents);
-    all.extend(registry.into_iter().filter(|c| c.host != here));
+    all.extend(registry.into_iter().filter(|c| c.host != registry_host));
     (here, all)
 }
 
@@ -194,7 +195,7 @@ mod tests {
             std::fs::create_dir_all(&state).unwrap();
             std::fs::write(
                 state.join("vegad.env"),
-                "VEGA_POST_HOST=mux-pinned-fixture\n",
+                "VEGA_POST_HOST=mux:pinned-fixture\n",
             )
             .unwrap();
             let out = std::process::Command::new(std::env::current_exe().unwrap())
@@ -220,7 +221,7 @@ mod tests {
         let mut ledger = waiting::Ledger::default();
         ledger.status("w1:p1", "done", 5);
         let own = Candidate {
-            host: "mux-pinned-fixture".into(),
+            host: "mux_pinned-fixture".into(),
             pane: "w1:p1".into(),
             name: "registry copy".into(),
             status: "done".into(),
@@ -234,7 +235,7 @@ mod tests {
             since: 10,
         };
         let (here, all) = candidates(&ledger, &[], vec![own, remote]);
-        assert_eq!(here, "mux-pinned-fixture");
+        assert_eq!(here, "mux:pinned-fixture");
         assert_eq!(all.len(), 2, "own registry duplicate must be excluded");
         let picked = waiting::pick(&all, &["done".into()]).unwrap();
         assert_eq!(

@@ -667,6 +667,43 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn pinned_host_names_catalog_identity() {
+        const TEST: &str = "VEGA_LANISTA_PINNED_HOST_TEST";
+        if env::var_os(TEST).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let state = home.path().join(".local/state/vega");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(
+                state.join("vegad.env"),
+                "VEGA_POST_HOST=lanista-pinned-fixture\n",
+            )
+            .unwrap();
+            let out = Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::pinned_host_names_catalog_identity",
+                    "--nocapture",
+                ])
+                .env(TEST, "1")
+                .env("HOME", home.path())
+                .env_remove("XDG_STATE_HOME")
+                .env_remove("VEGA_POST_HOST")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        assert_eq!(host(), "lanista-pinned-fixture");
+        env::set_var("VEGA_POST_HOST", "shell-host");
+        assert_eq!(host(), "shell-host");
+    }
+
+    #[test]
     fn skill_has_valid_frontmatter() {
         vega_plugin::assert_guide(SKILL, "lanista");
     }

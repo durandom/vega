@@ -1982,16 +1982,7 @@ fn deliver(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
 
     // Across machines the reply goes through the broker (`vega post`), not
     // back over ssh: other machines may not reach this one (tailnet policy).
-    let (origin, reply_cmd) = match machine() {
-        Some(_) => {
-            let host = vega_herdr::state::post_host();
-            (
-                format!("{me} on {host}"),
-                format!("vega post send --host {host} {me}"),
-            )
-        }
-        None => (me.clone(), format!("vega mux send {me}")),
-    };
+    let (origin, reply_cmd, host) = reply_origin(&me, machine().is_some());
     // The time is for the human reading the transcript later.
     let sent = local_time(None)
         .map(|t| format!(", {t}"))
@@ -2000,7 +1991,6 @@ fn deliver(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
     // cannot mail agents: its replies go into quarantine, a note for the human
     // (vega-lhc.83), so the footer says where they end up.
     let quarantined = machine().is_some_and(vega_herdr::state::is_inbox_only);
-    let host = machine().map(|_| vega_herdr::state::post_host());
     let footer = footer_text(footer, &me, &reply_cmd, host.as_deref(), quarantined);
     let body = format!("{text}\n\n---\n[vega-mux] from {origin} ({kind} in {cwd}){sent}{footer}");
     herdr(&["agent", "prompt", target, &body])?;
@@ -2009,6 +1999,20 @@ fn deliver(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
         supervise(&me, target);
     }
     Ok(())
+}
+
+/// Mail replies from another machine must use this machine's broker identity.
+fn reply_origin(pane: &str, remote: bool) -> (String, String, Option<String>) {
+    if remote {
+        let host = vega_herdr::state::post_host();
+        (
+            format!("{pane} on {host}"),
+            format!("vega post send --host {host} {pane}"),
+            Some(host),
+        )
+    } else {
+        (pane.into(), format!("vega mux send {pane}"), None)
+    }
 }
 
 /// What a spawn's brief carries and whether the spawner becomes the agent's
@@ -2185,6 +2189,51 @@ fn confirm_taken(target: &str, body: &str) -> Result<(), Failure> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pinned_host_names_remote_reply_origin() {
+        const TEST: &str = "VEGA_REPLY_ORIGIN_TEST";
+        if std::env::var_os(TEST).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let state = home.path().join(".local/state/vega");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(
+                state.join("vegad.env"),
+                "VEGA_POST_HOST=mux-reply-fixture\n",
+            )
+            .unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::pinned_host_names_remote_reply_origin",
+                    "--nocapture",
+                ])
+                .env(TEST, "1")
+                .env("HOME", home.path())
+                .env_remove("XDG_STATE_HOME")
+                .env_remove("VEGA_POST_HOST")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        assert_eq!(
+            super::reply_origin("w1:p1", true),
+            (
+                "w1:p1 on mux-reply-fixture".into(),
+                "vega post send --host mux-reply-fixture w1:p1".into(),
+                Some("mux-reply-fixture".into()),
+            )
+        );
+        assert_eq!(
+            super::reply_origin("w1:p1", false),
+            ("w1:p1".into(), "vega mux send w1:p1".into(), None)
+        );
+    }
     use super::*;
 
     #[test]
