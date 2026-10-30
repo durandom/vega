@@ -3229,6 +3229,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vega-notify"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "vega-build",
+ "vega-herdr",
+ "vega-plugin",
+ "vega-registry",
+]
+
+[[package]]
 name = "vega-onboard"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,21 @@
+[package]
+name = "vega-notify"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Raise and settle blocking asks for the operator"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-registry = { path = "../../crates/vega-registry" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+vega-plugin = { path = "../../crates/vega-plugin" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

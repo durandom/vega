@@ -2,6 +2,7 @@
 //! contract, running herdr (locally or on a `--machine`), and finding the pane
 //! that hosts this process.
 
+pub mod asks;
 pub mod badges;
 pub mod capacity;
 pub mod catalog;

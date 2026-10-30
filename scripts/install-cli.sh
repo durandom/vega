@@ -15,6 +15,7 @@ export CARGO_TARGET_DIR="$root/target"
 cargo install --locked --path "$root/vega" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/mux" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/post" --root "$HOME/.local"
+cargo install --locked --path "$root/plugins/notify" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/deploy" --root "$HOME/.local"
 cargo install --locked --path "$root/plugins/skills" --root "$HOME/.local"
 # vega-skill was renamed vega-skills and `vega skill` is gone; a stale binary

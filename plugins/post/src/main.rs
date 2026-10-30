@@ -33,6 +33,7 @@ mod identity;
 mod identity_mappings;
 mod janitor;
 mod notes;
+mod notify_state;
 mod outage;
 mod pagerduty;
 mod probes;
@@ -150,7 +151,7 @@ enum Cmd {
     },
     /// Send a command to another machine's vegad and wait for its answer (JSON on stdin)
     #[command(
-        after_help = "Core NATS request/reply on vega.cmd.<to>.<kind>.<this host>; the target's vegad runs the\nhandler for <kind> with the JSON on stdin (max 4 KiB). Kinds served: open, orchestration (authenticated wait updates).\nErrors: no_responder (no vegad there), timeout, denied (kind or payload refused, or no broker\nright), broker_unreachable, handler_failed.\n\nExamples:\n  echo '{\"kind\":\"open\",\"choice\":\"vscode\",\"path\":\"/Users/me/src/x/README.md\"}' | vega post cmd open --to proteus",
+        after_help = "Core NATS request/reply on vega.cmd.<to>.<kind>.<this host>; the target's vegad runs the\nhandler for <kind> with the JSON on stdin (max 4 KiB). Kinds served: open, orchestration (authenticated wait updates), notify (origin ask ack/resolve).\nErrors: no_responder (no vegad there), timeout, denied (kind or payload refused, or no broker\nright), broker_unreachable, handler_failed.\n\nExamples:\n  echo '{\"kind\":\"open\",\"choice\":\"vscode\",\"path\":\"/Users/me/src/x/README.md\"}' | vega post cmd open --to proteus",
         name = "cmd"
     )]
     Command {
@@ -221,7 +222,7 @@ enum Cmd {
     },
     /// List the notifications vega showed the human (all hosts), newest first
     #[command(
-        after_help = "vegad keeps each toast it shows (drafts it held or could not restore) as a note: this host's store\n($XDG_STATE_HOME/vega/notes, 7 days, at most 200), published to the registry as <host>.note.<id>.\nEach UAC pane shows its project's unread count as \u{1f514}<n> (notes without a project, such as quarantine and\ndrafts, on the vega UAC); `vega board` lists them (N) and marks them read. A note with a cause (bd-sync:<DB>)\nresolves by itself when the cause clears (the project syncs again): read everywhere, still listed.\nread / clear move this host's watermarks per source host; without --upto, to the newest note.\n\nExamples:\n  vega post notes\n  vega post notes read\n  vega post notes clear --upto proteus=1791000000000\n  vega post notes --json --all"
+        after_help = "vegad keeps each toast it shows (drafts it held or could not restore) as a note: this host's store\n($XDG_STATE_HOME/vega/notes, 7 days, at most 200; open asks exempt), published to the registry as <host>.note.<id>.\nEach UAC pane shows its project's unread count as \u{1f514}<n> (notes without a project, such as quarantine and\ndrafts, on the vega UAC); `vega board` lists them (N) and marks them read. A note with a cause (bd-sync:<DB>)\nresolves by itself when the cause clears (the project syncs again): read everywhere, still listed.\nread / clear move this host's watermarks per source host; without --upto, to the newest note.\nOpen asks stay visible after clear; use vega notify resolve.\n\nExamples:\n  vega post notes\n  vega post notes read\n  vega post notes clear --upto proteus=1791000000000\n  vega post notes --json --all"
     )]
     Notes {
         /// read: mark read (the badge clears); clear: also hide from the list
@@ -2683,6 +2684,7 @@ async fn local(
         }
         if meta_next.is_none_or(|t| Instant::now() >= t) {
             check_parks(&mut park_failing);
+            notify_state::refresh(&sup);
             if let Some(s) = &notes_store {
                 s.prune((vega_herdr::notes::now_ms() / 1000) as i64);
             }
@@ -3015,6 +3017,7 @@ async fn serve(
             // The sidebar on its own clock: the registry may be off.
             if !once && meta_next.is_none_or(|t| Instant::now() >= t) {
                 check_parks(&mut park_failing);
+                notify_state::refresh(&sup);
                 if let Some(s) = &notes_store {
                     s.prune((vega_herdr::notes::now_ms() / 1000) as i64);
                 }

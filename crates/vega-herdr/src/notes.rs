@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-/// A host keeps at most this many notes, none older than KEEP_SECS.
+/// Retention for note history; unresolved asks are exempt.
 pub const KEEP: usize = 200;
 pub const KEEP_SECS: i64 = 7 * 24 * 3600;
 
@@ -40,6 +40,10 @@ pub struct Note {
     pub project: Option<String>,
     pub cause: Option<String>,
     pub resolved: Option<i64>,
+    pub level: Option<String>,
+    pub key: Option<String>,
+    pub cmd: Option<String>,
+    pub acked: Option<i64>,
     pub title: String,
     pub body: String,
 }
@@ -56,6 +60,10 @@ impl Note {
             "project": self.project,
             "cause": self.cause,
             "resolved": self.resolved,
+            "level": self.level,
+            "key": self.key,
+            "cmd": self.cmd,
+            "acked": self.acked,
             "title": self.title,
             "body": self.body,
         })
@@ -75,6 +83,10 @@ impl Note {
             project: s("project"),
             cause: s("cause"),
             resolved: v["resolved"].as_i64(),
+            level: s("level"),
+            key: s("key"),
+            cmd: s("cmd"),
+            acked: v["acked"].as_i64(),
             title: s("title").unwrap_or_default(),
             body: s("body").unwrap_or_default(),
         })
@@ -111,7 +123,8 @@ impl Seen {
     }
 
     pub fn is_cleared(&self, n: &Note) -> bool {
-        n.id <= self.cleared.get(&n.host).copied().unwrap_or(0)
+        !(n.kind == "ask" && n.resolved.is_none())
+            && n.id <= self.cleared.get(&n.host).copied().unwrap_or(0)
     }
 
     /// A note known only by key (host, id), as vegad sees other hosts' notes.
@@ -196,6 +209,16 @@ impl Store {
         Ok(note)
     }
 
+    /// Atomically replace an existing note; callers serialize ask mutations.
+    pub fn save(&self, note: &Note) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new_in(&self.dir)?;
+        tmp.write_all(note.to_json().to_string().as_bytes())?;
+        tmp.persist(self.dir.join(format!("{}.json", note.id)))
+            .map_err(|e| e.error)?;
+        Ok(())
+    }
+
     /// Every note here, oldest first.
     pub fn list(&self) -> Vec<Note> {
         let mut out: Vec<Note> = std::fs::read_dir(&self.dir)
@@ -211,11 +234,15 @@ impl Store {
         out
     }
 
-    /// Drops notes older than KEEP_SECS and all but the newest KEEP.
+    /// Drops history older than KEEP_SECS and all but the newest KEEP;
+    /// unresolved asks remain until resolved.
     pub fn prune(&self, now: i64) {
         let notes = self.list();
         let excess = notes.len().saturating_sub(KEEP);
         for (i, n) in notes.iter().enumerate() {
+            if n.kind == "ask" && n.resolved.is_none() {
+                continue;
+            }
             if i < excess || now - n.at() > KEEP_SECS {
                 let _ = std::fs::remove_file(self.dir.join(format!("{}.json", n.id)));
             }

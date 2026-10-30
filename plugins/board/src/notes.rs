@@ -162,9 +162,11 @@ impl Notes {
         mark("clear", self.forget(r));
     }
 
-    /// Drops what `clear_through` hides; the watermark to send.
+    /// Drops what `clear_through` hides; asks stay until the reload checks their
+    /// resolved state on the origin. The watermark to send.
     fn forget(&mut self, r: &NoteRow) -> Vec<String> {
-        self.rows.retain(|x| x.host != r.host || x.id > r.id);
+        self.rows
+            .retain(|x| x.kind == "ask" || x.host != r.host || x.id > r.id);
         vec![format!("{}={}", r.host, r.id)]
     }
 }
@@ -213,6 +215,17 @@ mod tests {
         assert_eq!(n.forget(&r), vec!["a=5"]);
         let left: Vec<(&str, u64)> = n.rows.iter().map(|r| (r.host.as_str(), r.id)).collect();
         assert_eq!(left, vec![("a", 9), ("b", 4)]);
+    }
+
+    #[test]
+    fn clearing_history_keeps_asks_until_origin_resolution() {
+        let mut notes = Notes {
+            rows: vec![row("a", "ask", 1), row("a", "draft", 2)],
+            ..Default::default()
+        };
+        let target = notes.rows[1].clone();
+        assert_eq!(notes.forget(&target), vec!["a=2"]);
+        assert_eq!(notes.rows, vec![row("a", "ask", 1)]);
     }
 
     #[test]
