@@ -1,6 +1,6 @@
 //! Integrations keep their existing owners: gate, bd, mux and Worktrunk.
 use super::*;
-use vega_herdr::{agent_name, herdr, lanes, local_host, me, state as st};
+use vega_herdr::{agent_name, herdr, lanes, me, state as st};
 
 pub(super) struct Live;
 fn pane_absent_in(inventory: &Value, pane: &str) -> Result<bool> {
@@ -163,7 +163,7 @@ pub(super) fn identity_matches(s: &Sentinel, a: &Value) -> bool {
 fn verified(s: &Sentinel, a: &Value, parent: &str) -> bool {
     identity_matches(s, a)
         && st::parent_of_on(None, &s.pane, &s.name)
-            .is_some_and(|p| p.pane == parent && p.host == local_host())
+            .is_some_and(|p| p.pane == parent && p.host == st::post_host())
         && st::brief_of(None, &s.pane) == Some(s.brief)
         && st::done_of(None, &s.pane).is_some_and(|d| d.outcome == st::Outcome::Succeeded)
 }

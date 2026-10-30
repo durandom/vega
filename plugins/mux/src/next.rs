@@ -11,13 +11,13 @@ use std::time::Duration;
 use serde_json::Value;
 use vega_herdr::pane::{self, Hit};
 use vega_herdr::waiting::{self, Candidate};
-use vega_herdr::{agent_name, herdr_local, local_host, Failure};
+use vega_herdr::{agent_name, herdr_local, Failure};
 
 /// Statuses `--status` accepts.
 pub const STATUSES: [&str; 2] = ["done", "blocked"];
 
 pub fn run(statuses: &[String]) -> Result<(), Failure> {
-    let here = vega_registry::token(&local_host().to_lowercase());
+    let here = vega_herdr::state::post_host();
     let agents = herdr_local(&["agent", "list"])
         .ok()
         .and_then(|v| v["result"]["agents"].as_array().cloned())

@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 95 · 2026-10-30
+
+- feature: agent mail, notify and mux now use the host pinned in vegad.env when the shell has no
+  VEGA_POST_HOST override. WSL panes use the same broker identity as vegad without shell setup.
+
 ## 94 · 2026-10-30
 
 - migration: pi built-in themes are now found in standard fnm and npm/Homebrew installations even

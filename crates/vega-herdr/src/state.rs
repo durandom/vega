@@ -78,14 +78,14 @@ impl Parent {
 /// Records `parent` for the agent `name` in `pane`; replaces a stale record.
 /// Best effort: a missing record only hides the parent.
 pub fn save_parent(pane: &str, name: &str, parent: &str) {
-    let record = json!({"name": name, "parent": parent, "host": local_host()});
+    let record = json!({"name": name, "parent": parent, "host": post_host()});
     write(&state_file("parents", pane), &record.to_string());
     save_brief(machine(), pane);
 }
 
 /// `save_parent` for a child on an explicit machine (`None`: this one).
 pub fn save_parent_on(machine: Option<&str>, pane: &str, name: &str, parent: &str) {
-    let record = json!({"name": name, "parent": parent, "host": local_host()});
+    let record = json!({"name": name, "parent": parent, "host": post_host()});
     write(
         &state_file_on("parents", machine, pane),
         &record.to_string(),
@@ -248,12 +248,21 @@ pub fn uac_of(key: &str) -> Option<(String, String)> {
     })
 }
 
-/// This machine's host token in vega post subjects: `VEGA_POST_HOST`, else
-/// the short host name, lowercase, without `.`, `*`, `>` or whitespace.
+/// This machine's mail identity: process `VEGA_POST_HOST`, then vegad.env,
+/// then the short hostname. Empty overrides fall through. The result is
+/// lowercase, without `.`, `*`, `>` or whitespace.
 pub fn post_host() -> String {
     let h = env::var("VEGA_POST_HOST")
         .ok()
         .filter(|h| !h.is_empty())
+        .or_else(|| {
+            crate::vegad_env::read()
+                .into_iter()
+                .rev()
+                .find(|(k, _)| k == "VEGA_POST_HOST")
+                .map(|(_, v)| v)
+                .filter(|h| !h.is_empty())
+        })
         .unwrap_or_else(local_host);
     host_token(&h)
 }

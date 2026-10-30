@@ -28,9 +28,9 @@ use vega_herdr::state::{
     KeptBrief, Mode,
 };
 use vega_herdr::{
-    agent_name, cell, collapse_home, herdr, herdr_local, herdr_text, local_host, local_time,
-    machine, me, me_line, mflag, print_failure, qualify, set_machine, status_counts, status_rank,
-    str_of, Failure, Me,
+    agent_name, cell, collapse_home, herdr, herdr_local, herdr_text, local_time, machine, me,
+    me_line, mflag, print_failure, qualify, set_machine, status_counts, status_rank, str_of,
+    Failure, Me,
 };
 
 #[derive(Parser)]
@@ -676,7 +676,7 @@ fn set_mode(target: &str, mode: Option<ModeArg>) -> Result<(), Failure> {
         }
         (Some(p), Mode::Headless) => println!(
             "questions: to its parent {} (ask-parent hook)",
-            p.label(&local_host())
+            p.label(&vega_herdr::state::post_host())
         ),
         (Some(_), Mode::Headed) => println!("questions: stay in its pane (the user answers)"),
     }
@@ -750,7 +750,7 @@ fn show(target: &str, lines: u32) -> Result<(), Failure> {
     println!("status: {}", str_of(a, "agent_status"));
     println!(
         "parent: {}",
-        parent_of(pane, &name).map_or("-".into(), |p| p.label(&local_host()))
+        parent_of(pane, &name).map_or("-".into(), |p| p.label(&vega_herdr::state::post_host()))
     );
     println!("mode: {}", mode_of(machine(), pane, &name).as_str());
     println!("cwd: {}", cell(&collapse_home(str_of(a, "cwd"))));
@@ -1428,7 +1428,7 @@ fn spawn_inner(
                 .filter(|_| !no_parent)
                 .map(|m| vega_herdr::state::Parent {
                     pane: m.pane,
-                    host: local_host(),
+                    host: vega_herdr::state::post_host(),
                 }),
             mode: mode.as_str().into(),
             task: prompt.and_then(task_label),
@@ -1984,7 +1984,7 @@ fn deliver(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
     // back over ssh: other machines may not reach this one (tailnet policy).
     let (origin, reply_cmd) = match machine() {
         Some(_) => {
-            let host = local_host();
+            let host = vega_herdr::state::post_host();
             (
                 format!("{me} on {host}"),
                 format!("vega post send --host {host} {me}"),
@@ -2000,7 +2000,7 @@ fn deliver(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
     // cannot mail agents: its replies go into quarantine, a note for the human
     // (vega-lhc.83), so the footer says where they end up.
     let quarantined = machine().is_some_and(vega_herdr::state::is_inbox_only);
-    let host = machine().map(|_| local_host());
+    let host = machine().map(|_| vega_herdr::state::post_host());
     let footer = footer_text(footer, &me, &reply_cmd, host.as_deref(), quarantined);
     let body = format!("{text}\n\n---\n[vega-mux] from {origin} ({kind} in {cwd}){sent}{footer}");
     herdr(&["agent", "prompt", target, &body])?;

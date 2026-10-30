@@ -298,14 +298,9 @@ fn aa_key_label(here: Option<vega_secrets::Here>) -> String {
     }
 }
 
-/// This host, as vegad names it (`VEGA_POST_HOST`, else the hostname).
+/// This host's shared mail identity, as vegad names it.
 fn host() -> String {
-    vega_herdr::state::host_token(
-        &env::var("VEGA_POST_HOST")
-            .ok()
-            .filter(|h| !h.is_empty())
-            .unwrap_or_else(vega_herdr::local_host),
-    )
+    vega_herdr::state::post_host()
 }
 
 /// `3526 models, 2 days old, from ganymede`, from `lanista --json` (its

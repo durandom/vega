@@ -392,28 +392,29 @@ fn env_file() -> Result<PathBuf, Failure> {
     Ok(state_dir()?.join("vegad.env"))
 }
 
+#[cfg(test)]
 fn parse_env(text: &str) -> Vec<(String, String)> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .filter_map(|l| l.split_once('='))
-        .filter(|(k, _)| PINNED_ENV.contains(k))
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+    vega_herdr::vegad_env::parse(text)
+        .into_iter()
+        .filter(|(k, _)| PINNED_ENV.contains(&k.as_str()))
         .collect()
 }
 
 fn read_env_file() -> Vec<(String, String)> {
-    env_file()
-        .ok()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .map(|t| parse_env(&t))
-        .unwrap_or_default()
+    vega_herdr::vegad_env::read()
+        .into_iter()
+        .filter(|(k, _)| PINNED_ENV.contains(&k.as_str()))
+        .collect()
 }
 
 /// Applies `vegad.env` to this process, so `relay start|stop|status` find
 /// the same lock (VEGA_POST_HOST) as the vegad they start.
 pub fn load_env_file() {
+    let shell_host = env::var("VEGA_POST_HOST").is_ok_and(|h| !h.is_empty());
     for (k, v) in read_env_file() {
+        if k == "VEGA_POST_HOST" && shell_host {
+            continue;
+        }
         env::set_var(k, v);
     }
 }
