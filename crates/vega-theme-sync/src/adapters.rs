@@ -3,6 +3,7 @@
 //! writes only its own key and writes only on a change, so `apply` is
 //! idempotent. A missing config file means the tool is not set up on this
 //! host: skipped, never created.
+//! pi additionally creates a managed custom theme file for live reload.
 //!
 //! Running Claude panes switch only when vegad types `/config theme=<mode>`
 //! into them (plugins/post/src/theme.rs); the file here is for new sessions.
@@ -134,6 +135,9 @@ pub fn status(env: &Env, prefs: &Prefs, tool: &'static str) -> Status {
 }
 
 pub fn apply(env: &Env, prefs: &Prefs, tool: &'static str, mode: Mode) -> Outcome {
+    if tool == "pi" {
+        return crate::pi::apply(env, prefs, mode);
+    }
     let st = status(env, prefs, tool);
     match &st.current {
         Current::Native => return Outcome::Native,
@@ -152,7 +156,6 @@ pub fn apply(env: &Env, prefs: &Prefs, tool: &'static str, mode: Mode) -> Outcom
     let res = match tool {
         "claude" => files::set_json_key(&claude_path(env), "theme", &to),
         "openusage" => files::set_json_key(&openusage_path(env), "theme", &to),
-        "pi" => files::set_json_key(&pi_path(env), "theme", &to),
         "codex" => codex_set(env, &to),
         "delta" => delta_set(env, prefs, &st.value, &to),
         "gh-dash" => ghdash_set(env, &to),
@@ -167,8 +170,8 @@ pub fn apply(env: &Env, prefs: &Prefs, tool: &'static str, mode: Mode) -> Outcom
 /// Built-in names per tool; theme.toml `[tools.<tool>]` overrides them.
 fn default_name(tool: &str, mode: Mode) -> &'static str {
     match (tool, mode) {
-        ("codex", Mode::Light) => "catppuccin-latte",
-        ("codex", Mode::Dark) => "catppuccin-mocha",
+        ("codex" | "pi", Mode::Light) => "catppuccin-latte",
+        ("codex" | "pi", Mode::Dark) => "catppuccin-mocha",
         ("delta", Mode::Light) => "mirthful-willow",
         ("delta", Mode::Dark) => "weeping-willow",
         ("openusage", Mode::Light) => "Bluloco Light",
@@ -194,7 +197,7 @@ fn names(prefs: &Prefs, tool: &str) -> (String, String) {
     )
 }
 
-fn by_name(v: &str, (light, dark): &(String, String)) -> Current {
+pub(crate) fn by_name(v: &str, (light, dark): &(String, String)) -> Current {
     if v == light {
         Current::Mode(Mode::Light)
     } else if v == dark {
@@ -239,21 +242,8 @@ fn claude_get(env: &Env) -> (String, Current) {
 
 // --- pi: ~/.pi/agent/settings.json .theme ------------------------------------
 
-fn pi_path(env: &Env) -> PathBuf {
-    env.home.join(".pi/agent/settings.json")
-}
-
-/// pi follows the terminal by itself with `system` (its default) or a
-/// `light/dark` pair; only a single fixed theme needs switching.
 fn pi_get(env: &Env, prefs: &Prefs) -> (String, Current) {
-    let n = names(prefs, "pi");
-    json_get(&pi_path(env), |v| {
-        if v.is_empty() || v == "system" || v.contains('/') {
-            Current::Native
-        } else {
-            by_name(v, &n)
-        }
-    })
+    crate::pi::status(env, prefs)
 }
 
 // --- openusage: ~/.config/openusage/settings.json .theme ---------------------
@@ -546,6 +536,14 @@ mod tests {
             ".config/herdr/config.toml",
             "[theme]\nname = \"catppuccin-latte\"\nauto_switch = false\nlight_name = \"tokyo-night-day\"\ndark_name = \"tokyo-night\"\n",
         );
+        w(
+            ".pi/agent/themes/catppuccin-latte.json",
+            r##"{"name":"catppuccin-latte","colors":{"accent":"#abc"}}"##,
+        );
+        w(
+            ".pi/agent/themes/catppuccin-mocha.json",
+            r##"{"name":"catppuccin-mocha","colors":{"accent":"#def"}}"##,
+        );
         (dir, env)
     }
 
@@ -637,7 +635,7 @@ mod tests {
         .unwrap();
         let out: std::collections::HashMap<_, _> =
             apply_all(&env, &p, Mode::Dark).into_iter().collect();
-        assert_eq!(out["pi"], Outcome::Native);
+        assert!(matches!(out["pi"], Outcome::Failed(_)));
         assert_eq!(out["herdr"], Outcome::Native);
         assert!(matches!(out["openusage"], Outcome::Skipped(_)));
         assert!(matches!(out["delta"], Outcome::Skipped(_)));

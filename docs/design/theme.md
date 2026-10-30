@@ -20,8 +20,8 @@ have no appearance of their own.
 
 - `~/.config/vega/theme.toml` (`$XDG_CONFIG_HOME`): what the user wants. `mode = "auto"|"dark"|"light"`
   (default auto), `control` (default `proteus`), `headless` (default: detected), `live_claude` (default true),
-  `[tools.<tool>] light/dark/enabled` for theme names and opt-out. vega writes only `mode` (`vega theme
-  dark|light|auto`, via toml_edit: comments and other keys stay).
+  `[tools.<tool>] light/dark/enabled` for theme names and opt-out. vega writes `mode` (`vega theme
+  dark|light|auto`) and migrates pi theme pairs into `[tools.pi]` (via toml_edit: comments and other keys stay).
 - `$XDG_STATE_HOME/vega/theme.json`: the mode last applied, its source (`fixed`, `os`, `registry:<host>`) and
   time. State, not config.
 - Due mode (`resolve`): a fixed mode wins; `auto` follows the OS; on a headless host it follows the control
@@ -35,12 +35,14 @@ have no appearance of their own.
 Each reads and writes only its own key, writes only on a change (so `apply` is idempotent) and skips a tool
 whose config file is missing (never creates one). JSON edits keep key order; files are replaced atomically,
 through symlinks, with their mode kept.
+Pi additionally creates its managed custom theme file and saves an existing pair in theme.toml;
+its settings.json must already exist.
 
 | Tool | Setting | Light / dark default | Native auto |
 |---|---|---|---|
 | claude | `~/.claude.json` `.theme` | `light` / `dark` (variants like `light-daltonized` count and stay) | `auto` exists but does not work (Slayer): no |
 | codex | `~/.codex/config.toml` `[tui] theme` (syntax theme) | `catppuccin-latte` / `catppuccin-mocha` | no |
-| pi | `~/.pi/agent/settings.json` `.theme` | `light` / `dark` | yes: `system` or a `light/dark` pair; then left alone |
+| pi | `~/.pi/agent/settings.json` `.theme = "vega-auto"`, `~/.pi/agent/themes/vega-auto.json` | `catppuccin-latte` / `catppuccin-mocha` | no; vega replaces the active custom theme file for live reload |
 | delta | `~/.gitconfig.local` `delta.features` (swaps the theme feature, keeps others) | `mirthful-willow` / `weeping-willow` | no |
 | openusage | `~/.config/openusage/settings.json` `.theme` | `Bluloco Light` / `Bluloco Dark` | no |
 | gh-dash | `~/.config/gh-dash/config.yml` `theme.colors` ← `theme-<mode>.yml` (yq) | recognized by `text.primary` | no |
@@ -74,7 +76,22 @@ vega's own board keeps its fixed Catppuccin Macchiato palette (follow-up).
   cadence), feeding the thread as above; a failure is logged once per state change and retried every 120 s.
   `vega theme` reads the same key. Trade-off: without `<control>.beat` the entry's freshness is unknown, so an
   inbox-only host follows the last mode the control host published, also when its vegad is down.
-- Codex: `/theme` is an interactive picker, no argument form; no live switch. pi needs none (native).
+- **Live pi switch.** The adapter copies the selected source theme into
+  `~/.pi/agent/themes/vega-auto.json`, with only its `name` changed to `vega-auto`, then selects
+  `vega-auto` in settings.json. An existing `light/dark` pair migrates to `[tools.pi] light/dark`
+  without replacing explicit overrides. A single theme, `system`, or an unset theme uses the defaults
+  above unless `[tools.pi]` overrides them. Sources are resolved from pi's installed built-in light/dark
+  files (the package behind `pi` on PATH), the user's themes directory, and installed git/npm packages
+  under `~/.pi/agent/git` and `~/.pi/agent/npm/node_modules`. Custom/package themes match the JSON
+  `name`; duplicate package names use deterministic path order. This host-wide adapter does not resolve
+  project-local packages or dynamically generated extension themes.
+  Missing sources are reported and leave settings, preferences and the last working file alone.
+  The file is replaced atomically only when its contents differ. Pi watches its custom themes directory
+  and reloads the active file on replacement, so sessions already using `vega-auto` follow mode changes
+  without a restart, including headless hosts following the control host. During deployment, switch
+  existing sessions to `vega-auto` once with pi's theme picker; changing settings.json alone cannot
+  change an already running session's selection.
+- Codex: `/theme` is an interactive picker, no argument form; no live switch.
 
 ## Risks
 

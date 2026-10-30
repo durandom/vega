@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 pub mod adapters;
 pub mod files;
 pub mod os;
+mod pi;
 pub mod prefs;
 pub mod state;
 
@@ -153,6 +154,8 @@ impl Watcher {
 #[derive(Debug, Clone)]
 pub struct Env {
     pub home: PathBuf,
+    /// Installed pi package root, resolved only for the real environment.
+    pub pi_package: Option<PathBuf>,
     /// `$XDG_CONFIG_HOME` (default `~/.config`).
     pub config: PathBuf,
     /// `$XDG_STATE_HOME` (default `~/.local/state`).
@@ -169,6 +172,7 @@ impl Env {
                 .map(PathBuf::from)
         };
         Some(Env {
+            pi_package: pi::installed_package(),
             config: var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config")),
             state: var("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")),
             home,
@@ -178,6 +182,7 @@ impl Env {
     /// Everything under `home`, XDG defaults (tests).
     pub fn at(home: &Path) -> Env {
         Env {
+            pi_package: None,
             home: home.to_path_buf(),
             config: home.join(".config"),
             state: home.join(".local/state"),
