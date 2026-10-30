@@ -172,7 +172,7 @@ impl Env {
                 .map(PathBuf::from)
         };
         Some(Env {
-            pi_package: pi::installed_package(),
+            pi_package: pi::installed_package(&home),
             config: var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config")),
             state: var("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")),
             home,
