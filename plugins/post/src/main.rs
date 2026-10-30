@@ -71,7 +71,7 @@ use futures_util::StreamExt;
 use supervise::{Attentions, Supervisor};
 use tokio::sync::mpsc;
 use vega_herdr::state::{self as st, Outcome};
-use vega_herdr::{cell, collapse_home, herdr, local_host, local_time, me, print_failure, Failure};
+use vega_herdr::{cell, collapse_home, herdr, local_time, me, print_failure, Failure};
 
 #[derive(Parser)]
 #[command(
@@ -650,15 +650,9 @@ fn broker_err(e: impl std::fmt::Display) -> Failure {
     )
 }
 
-/// The host token in subjects: short hostname, lowercase, no dots.
-/// `VEGA_POST_HOST` overrides it (tests, odd hostnames); the server still
-/// enforces it through the key's permissions.
+/// The shared mail identity (process env, vegad.env, then hostname).
 fn host() -> String {
-    let h = env::var("VEGA_POST_HOST")
-        .ok()
-        .filter(|h| !h.is_empty())
-        .unwrap_or_else(local_host);
-    subject_token(&h.to_lowercase())
+    vega_herdr::state::post_host()
 }
 
 /// NATS subject tokens must not contain `.`, `*`, `>` or whitespace.

@@ -688,6 +688,13 @@ fn identity_commands_take_host_and_broker_from_vegad_env() {
         .collect();
     assert_eq!(locks, ["post-relay-io.lock"]);
 
+    // Loading the service environment must preserve an explicit shell host.
+    let mut cmd = post_command(&home, "", "shell-host", &["identity", "rollback"]);
+    cmd.env_remove("VEGA_NATS_URL");
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "no journal to roll back");
+    assert!(state.join("post-relay-shell-host.lock").exists());
+
     // verify reaches the broker from vegad.env, not from this shell.
     fs::create_dir_all(state.join("identity-cutover")).unwrap();
     fs::write(

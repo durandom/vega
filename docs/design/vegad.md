@@ -156,9 +156,13 @@ plugin pane is no host either: a PTY, closed by the user, gone after a server re
 `vega-post relay` in a new session (setsid), stdin from /dev/null, stdout and stderr appended to
 `$XDG_STATE_HOME/vega/post-relay-<host>.log` (moved to `.log.1` above 10 MB at start), and waits
 up to 3 s for the lock. Env: the starter's, minus pane variables (`HERDR_PANE_ID`, ...) and the
-agent shims on PATH, plus `vegad.env` (`$XDG_STATE_HOME/vega/vegad.env`: `VEGA_NATS_URL`,
-`VEGA_NATS_NKEY`, `VEGA_POST_HOST`, `HERDR_SOCKET_PATH`, `DOLT_REMOTE_USER` as `relay install` found them, the values
-the unit used to pin). The pinned socket keeps a named herdr session from binding vegad to itself.
+agent shims on PATH, plus the broker, socket and Dolt values from `vegad.env`
+(`$XDG_STATE_HOME/vega/vegad.env`: `VEGA_NATS_URL`, `VEGA_NATS_NKEY`, `HERDR_SOCKET_PATH`,
+`DOLT_REMOTE_USER` as `relay install` found them, the values the unit used to pin).
+The child always receives `VEGA_POST_HOST` set to the starter's resolved host: a non-empty
+process override, then the pinned file value, then the short hostname, normalized as in
+[host precedence](../concepts.md). This keeps the starter and child's lock and log names aligned.
+The pinned socket keeps a named herdr session from binding vegad to itself.
 
 **One instance**: the existing lock (`post-relay-<host>.lock`). Two racing starts each spawn; the
 loser fails on the lock and exits.

@@ -56,7 +56,6 @@ fn post(home: &Path, url: &str, command: &str, args: &[&str]) -> (bool, String) 
         .env("XDG_CONFIG_HOME", home.join("config"))
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("VEGA_NATS_URL", url)
-        .env("VEGA_POST_HOST", "ganymede")
         .current_dir(home)
         .output()
         .unwrap();
@@ -142,12 +141,58 @@ fn broker(
 
 /// A fake herdr in `home/bin`.
 fn fake_herdr(home: &Path) -> std::path::PathBuf {
+    // A WSL shell without VEGA_POST_HOST must use vegad's registry identity
+    // for send subjects and inbox subscriptions alike.
+    fs::create_dir_all(home.join("state/vega")).unwrap();
+    fs::write(
+        home.join("state/vega/vegad.env"),
+        "VEGA_POST_HOST=ganymede\n",
+    )
+    .unwrap();
     let bin = home.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let herdr = bin.join("herdr");
     fs::write(&herdr, FAKE_HERDR).unwrap();
     fs::set_permissions(&herdr, fs::Permissions::from_mode(0o755)).unwrap();
     herdr
+}
+
+#[test]
+fn done_uses_the_pinned_host_without_a_shell_override() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let herdr = fake_herdr(home);
+    fs::write(
+        &herdr,
+        format!(
+            r#"#!/bin/sh
+case "$1 $2" in
+  "pane list") echo '{{"result":{{"panes":[{{"pane_id":"w1:pR","agent":"claude"}}]}}}}' ;;
+  "pane process-info") echo '{{"result":{{"process_info":{{"shell_pid":{}}}}}}}' ;;
+  *) echo '{{"result":{{}}}}' ;;
+esac
+"#,
+            std::process::id()
+        ),
+    )
+    .unwrap();
+    let (_server, url, rt, js, _kv) = broker(home);
+    let (ok, out) = post(
+        home,
+        &url,
+        "done",
+        &["--to", "w1:p1", "--outcome", "succeeded", "fixed"],
+    );
+    assert!(ok, "{out}");
+    rt.block_on(async {
+        let stream = js.get_stream("VEGA_INBOX_ganymede").await.unwrap();
+        let message = stream.get_raw_message(1).await.unwrap();
+        assert_eq!(
+            message.subject.as_str(),
+            "vega.inbox.ganymede.w1:p1.ganymede"
+        );
+        assert_eq!(&message.payload[..], b"done (succeeded): fixed");
+    });
 }
 
 #[test]

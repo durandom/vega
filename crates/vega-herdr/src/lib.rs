@@ -18,6 +18,7 @@ pub mod resets;
 pub mod service_config;
 pub mod state;
 pub mod theme;
+pub mod vegad_env;
 pub mod waiting;
 pub mod waits;
 

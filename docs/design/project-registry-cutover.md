@@ -241,7 +241,9 @@ unchanged plus the late host's preview. No completed host re-migrates:
   owners and the projection check only for the named host.
 - Identity subcommands load `vegad.env` like `relay`: a host whose
   `hostname -s` differs from its registry host (io-wsl vs `VEGA_POST_HOST=io`)
-  previews under vegad's host token and holds vegad's relay lock.
+  previews under vegad's pinned host token and holds its relay lock unless a
+  non-empty process `VEGA_POST_HOST` selects another host
+  ([host precedence](../concepts.md)).
 
 Keep the late host's old vegad stopped. Its herdr plugin `vega.vegad` runs
 `vega-post relay start` whenever herdr starts, so install the new binary

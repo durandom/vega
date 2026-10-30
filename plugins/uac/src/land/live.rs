@@ -1,6 +1,6 @@
 //! Integrations keep their existing owners: gate, bd, mux and Worktrunk.
 use super::*;
-use vega_herdr::{agent_name, herdr, lanes, local_host, me, state as st};
+use vega_herdr::{agent_name, herdr, lanes, me, state as st};
 
 pub(super) struct Live;
 fn pane_absent_in(inventory: &Value, pane: &str) -> Result<bool> {
@@ -163,7 +163,7 @@ pub(super) fn identity_matches(s: &Sentinel, a: &Value) -> bool {
 fn verified(s: &Sentinel, a: &Value, parent: &str) -> bool {
     identity_matches(s, a)
         && st::parent_of_on(None, &s.pane, &s.name)
-            .is_some_and(|p| p.pane == parent && p.host == local_host())
+            .is_some_and(|p| p.pane == parent && p.host == st::post_host())
         && st::brief_of(None, &s.pane) == Some(s.brief)
         && st::done_of(None, &s.pane).is_some_and(|d| d.outcome == st::Outcome::Succeeded)
 }
@@ -588,6 +588,66 @@ impl Services for Live {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pinned_host_verifies_saved_parent_identity() {
+        const TEST: &str = "VEGA_UAC_PINNED_PARENT_TEST";
+        if std::env::var_os(TEST).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let state = home.path().join(".local/state/vega");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(
+                state.join("vegad.env"),
+                "VEGA_POST_HOST=uac-pinned-fixture\n",
+            )
+            .unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "land::live::tests::pinned_host_verifies_saved_parent_identity",
+                    "--nocapture",
+                ])
+                .env(TEST, "1")
+                .env("HOME", home.path())
+                .env_remove("XDG_STATE_HOME")
+                .env_remove("VEGA_POST_HOST")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let mut s = Sentinel {
+            pane: "w1:p2".into(),
+            name: "feature".into(),
+            session: "session".into(),
+            worktree: PathBuf::from("/repo/worker"),
+            actor: "host/worker".into(),
+            brief: 0,
+        };
+        let agent = json!({"pane_id": s.pane, "name": s.name, "cwd": s.worktree, "agent_session": {"value": s.session}, "agent_status": "idle"});
+        assert!(!verified(&s, &agent, "w1:p1"));
+        st::save_parent_on(None, &s.pane, &s.name, "w1:p1");
+        s.brief = st::brief_of(None, &s.pane).unwrap();
+        st::save_done(
+            None,
+            &s.pane,
+            &st::Done {
+                outcome: st::Outcome::Succeeded,
+                summary: "fixed".into(),
+            },
+        );
+        assert!(verified(&s, &agent, "w1:p1"));
+        assert!(!verified(&s, &agent, "another-parent"));
+        std::env::set_var("VEGA_POST_HOST", "another-host");
+        assert!(
+            !verified(&s, &agent, "w1:p1"),
+            "a parent from another host must not verify"
+        );
+    }
     #[test]
     fn closed_bead_requires_latest_closer_and_unambiguous_audit_evidence() {
         let old = json!({"issue_id":"v-1","event_type":"closed","actor":"sentinel","created_at":"2026-10-20T00:00:00Z"});

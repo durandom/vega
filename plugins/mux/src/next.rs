@@ -11,22 +11,24 @@ use std::time::Duration;
 use serde_json::Value;
 use vega_herdr::pane::{self, Hit};
 use vega_herdr::waiting::{self, Candidate};
-use vega_herdr::{agent_name, herdr_local, local_host, Failure};
+use vega_herdr::{agent_name, herdr_local, Failure};
 
 /// Statuses `--status` accepts.
 pub const STATUSES: [&str; 2] = ["done", "blocked"];
 
 pub fn run(statuses: &[String]) -> Result<(), Failure> {
-    let here = vega_registry::token(&local_host().to_lowercase());
     let agents = herdr_local(&["agent", "list"])
         .ok()
         .and_then(|v| v["result"]["agents"].as_array().cloned())
         .unwrap_or_default();
-    let mut all = local_candidates(&here, &waiting::read(), &agents);
-    match vega_registry::read_blocking(Duration::from_secs(3)) {
-        Ok(view) => all.extend(view.waiting().into_iter().filter(|c| c.host != here)),
-        Err(why) => eprintln!("warning: registry: {why}; this host's agents only"),
-    }
+    let registry = match vega_registry::read_blocking(Duration::from_secs(3)) {
+        Ok(view) => view.waiting(),
+        Err(why) => {
+            eprintln!("warning: registry: {why}; this host's agents only");
+            Vec::new()
+        }
+    };
+    let (here, all) = candidates(&waiting::read(), &agents, registry);
     let Some(c) = waiting::pick(&all, statuses) else {
         let what = statuses.join(" or ");
         toast(&format!("No {what} agent"), None);
@@ -75,6 +77,19 @@ pub fn run(statuses: &[String]) -> Result<(), Failure> {
         c.pane, c.host, c.status
     );
     Ok(())
+}
+
+/// Merge local waiters with other hosts' registry entries using mail identity.
+fn candidates(
+    ledger: &waiting::Ledger,
+    agents: &[Value],
+    registry: Vec<Candidate>,
+) -> (String, Vec<Candidate>) {
+    let here = vega_herdr::state::post_host();
+    let registry_host = vega_registry::token(&here);
+    let mut all = local_candidates(&here, ledger, agents);
+    all.extend(registry.into_iter().filter(|c| c.host != registry_host));
+    (here, all)
 }
 
 /// This host's waiting panes that herdr still lists, named as herdr names
@@ -169,6 +184,70 @@ mod tests {
         assert_eq!(machine_for("titan", &m).as_deref(), Some("Build box"));
         assert_eq!(machine_for("deimos", &m), None);
         assert_eq!(machine_for("io", &Value::Null), None);
+    }
+
+    #[test]
+    fn pinned_host_keeps_own_registry_waiters_local() {
+        const TEST: &str = "VEGA_NEXT_PINNED_HOST_TEST";
+        if std::env::var_os(TEST).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let state = home.path().join(".local/state/vega");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(
+                state.join("vegad.env"),
+                "VEGA_POST_HOST=mux:pinned-fixture\n",
+            )
+            .unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "next::tests::pinned_host_keeps_own_registry_waiters_local",
+                    "--nocapture",
+                ])
+                .env(TEST, "1")
+                .env("HOME", home.path())
+                .env_remove("XDG_STATE_HOME")
+                .env_remove("VEGA_POST_HOST")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let mut ledger = waiting::Ledger::default();
+        ledger.status("w1:p1", "done", 5);
+        let own = Candidate {
+            host: "mux_pinned-fixture".into(),
+            pane: "w1:p1".into(),
+            name: "registry copy".into(),
+            status: "done".into(),
+            since: 1,
+        };
+        let remote = Candidate {
+            host: "another-host".into(),
+            pane: "w2:p1".into(),
+            name: "remote".into(),
+            status: "done".into(),
+            since: 10,
+        };
+        let (here, all) = candidates(&ledger, &[], vec![own, remote]);
+        assert_eq!(here, "mux:pinned-fixture");
+        assert_eq!(all.len(), 2, "own registry duplicate must be excluded");
+        let picked = waiting::pick(&all, &["done".into()]).unwrap();
+        assert_eq!(
+            picked.host, here,
+            "the oldest local waiter must focus locally"
+        );
+        assert_eq!(picked.pane, "w1:p1");
+        assert_eq!(
+            picked.since, 5,
+            "use the local ledger, not its registry copy"
+        );
+        assert_eq!(all[1].host, "another-host");
     }
 
     #[test]

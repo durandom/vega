@@ -30,7 +30,9 @@ The guides call the human owner **the Slayer**; this page says "the owner".
 
 ## Host (machine) and herdr
 
-A host is one machine running vega; its name is `hostname -s`, lowercased (override: `VEGA_POST_HOST`).
+A host is one machine running vega; its name is `VEGA_POST_HOST` from the process environment, then from
+`$XDG_STATE_HOME/vega/vegad.env` (default `~/.local/state/vega/vegad.env`), then `hostname -s`.
+Empty overrides fall through; the result is lowercased and NATS subject separators become underscores.
 [herdr](https://github.com/herdrdev/herdr) is the terminal manager the agents run in; vega drives it through
 its CLI and socket and never forks it. herdr also knows other machines (`herdr machine list`), which is how
 `vega mux --machine <label>` acts on agents elsewhere. Each host runs its own [vegad](#vegad-the-relay-daemon).

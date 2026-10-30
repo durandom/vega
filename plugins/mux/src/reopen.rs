@@ -180,6 +180,12 @@ mod tests {
         if env::var_os("VEGA_REOPEN_TEST").is_none() {
             let dir = env::temp_dir().join(format!("vega-reopen-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
+            std::fs::create_dir_all(dir.join("vega")).unwrap();
+            std::fs::write(
+                dir.join("vega/vegad.env"),
+                "VEGA_POST_HOST=reopen-registry-host\n",
+            )
+            .unwrap();
             let out = Command::new(env::current_exe().unwrap())
                 .args([
                     "--exact",
@@ -188,6 +194,7 @@ mod tests {
                 ])
                 .env("VEGA_REOPEN_TEST", "1")
                 .env("XDG_STATE_HOME", &dir)
+                .env_remove("VEGA_POST_HOST")
                 .output()
                 .unwrap();
             std::fs::remove_dir_all(dir).unwrap();
@@ -202,6 +209,7 @@ mod tests {
         let dir = PathBuf::from(env::var_os("XDG_STATE_HOME").unwrap())
             .canonicalize()
             .unwrap();
+        assert_eq!(vega_herdr::state::post_host(), "reopen-registry-host");
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let fake = bin.join("herdr");
@@ -228,7 +236,7 @@ mod tests {
                 env::set_var("VEGA_TEST_DIALOG", if no_parent { "1" } else { "0" });
                 let expected = (!no_parent).then(|| vega_herdr::state::Parent {
                     pane: "w0:p1".into(),
-                    host: local_host(),
+                    host: "reopen-registry-host".into(),
                 });
                 env::set_var(
                     "VEGA_TEST_PARENT",

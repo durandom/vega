@@ -56,6 +56,36 @@ fn remote(state: &Path, host: &str, id: u64, ack: bool) {
     assert!(out.status.success(), "{out:?}");
 }
 #[test]
+fn asks_use_the_host_pinned_under_temp_home() {
+    let home = tempfile::tempdir().unwrap();
+    let state = home.path().join(".local/state");
+    std::fs::create_dir_all(state.join("vega")).unwrap();
+    std::fs::write(state.join("vega/vegad.env"), "VEGA_POST_HOST=io\n").unwrap();
+    let output = command(&state, "unused")
+        .env("HOME", home.path())
+        .env_remove("VEGA_POST_HOST")
+        .env_remove("XDG_STATE_HOME")
+        .args([
+            "info",
+            "demo: hello -> w1:p1",
+            "--key",
+            "pinned-host",
+            "--pane",
+            "w1:p1",
+            "--project",
+            "demo",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(note(&state)["host"], "io");
+}
+
+#[test]
 fn separate_origins_keep_asks_and_command_updates_origin_only() {
     let a = tempfile::tempdir().unwrap();
     let b = tempfile::tempdir().unwrap();

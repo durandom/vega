@@ -21,7 +21,7 @@ use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
 use vega_herdr::state::{mode_of, parent_of, redirects_questions, Mode, Parent};
-use vega_herdr::{agent_name, herdr_local, local_host, machine, me};
+use vega_herdr::{agent_name, herdr_local, machine, me};
 
 /// The dialog tools the hook intercepts, also the hook's matcher.
 const CLAUDE_TOOL: &str = "AskUserQuestion";
@@ -55,7 +55,7 @@ pub fn ask_parent() {
         tool,
         parent.as_ref(),
         mode,
-        &local_host(),
+        &vega_herdr::state::post_host(),
         &me.pane,
         &v["tool_input"],
     ) {
