@@ -82,7 +82,16 @@ land in .226.2-.4; until then raise prints `delivery pending` and `test <channel
 - Origin vegad resolves pane/bead closure on the metadata clock, including local-only mode. Unknown
   pane status or a failed bead query keeps the ask open. Bead queries use a verified owner-local
   project checkout and configured bd binary; without one, explicit resolve still works.
-- The typed-prompt hook is .226.5; UAC rule installation and PagerDuty asks are .226.6.
+- The typed-prompt hook (.226.5) reuses capture classification and `asks::change`, the same origin-local
+  resolve path as `vega notify resolve --pane`. Every open ask in the current pane resolves, including
+  custom keys; other panes and hosts stay open. Pane identity is verified through `vega_herdr::me`,
+  rather than trusting `HERDR_PANE_ID`; unknown identity keeps asks open.
+- Resolution runs only when the existing `vega_uber_capture` hook receives a Slayer `UserPromptSubmit`.
+  Vegad pointers, task notices, mux-typed mail and AskUserQuestion captures do not resolve asks.
+  No live Uber claim is required, and resolution is independent of writing the Uber capture. Hook
+  failures remain diagnostic-only and never block the session. Hook installation is unchanged;
+  panes without this hook and other harnesses still resolve explicitly.
+- UAC rule installation and PagerDuty asks are .226.6.
 
 ## Who delivers
 

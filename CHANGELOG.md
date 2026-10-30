@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 90 · 2026-10-30
+
+- feature: the Claude `vega_uber_capture` hook resolves the current pane's open notify asks when
+  the Slayer submits a typed prompt. Vegad pointers, task notices and mux mail keep asks open.
+  Panes without the hook still use `vega notify resolve`. See [notify](docs/design/notify.md).
+
 ## 89 · 2026-10-30
 
 - feature: `vega notify info|action|urgent` stores blocking operator asks; `list`, `resolve` and `ack`

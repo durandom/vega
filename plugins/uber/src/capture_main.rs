@@ -16,6 +16,7 @@
 use std::io::Read;
 use std::path::Path;
 
+use vega_herdr::{asks, notes::Store};
 use vega_registry::{uber_engaged, uber_state};
 
 use time::format_description::well_known::Rfc3339;
@@ -41,6 +42,17 @@ fn main() {
         .ok()
         .and_then(|t| t.format(&Rfc3339).ok())
         .unwrap_or_default();
+    // Resolution is independent of capture persistence and the Uber claim.
+    // Unknown pane identity leaves asks open; never trust a stale env hint.
+    if let Err(e) = resolve_prompt(&input, t.unix_timestamp(), || {
+        Some((
+            Store::local()?,
+            vega_herdr::state::post_host(),
+            vega_herdr::me().ok()?.pane,
+        ))
+    }) {
+        eprintln!("vega_uber_capture: resolve ask: {e}");
+    }
     match vega_uber_msg::capture::hook(&dir, &input, &now) {
         Ok(Some(_)) => {
             let since = uber_state::file()
@@ -55,6 +67,27 @@ fn main() {
         Ok(None) => {}
         Err(e) => eprintln!("vega_uber_capture: {e}"),
     }
+}
+
+/// Reuse capture classification before looking up the pane or touching notes.
+/// Like `notify resolve --pane`, resolve every local open ask for that pane.
+fn resolve_prompt(
+    input: &str,
+    now: i64,
+    context: impl FnOnce() -> Option<(Store, String, String)>,
+) -> std::io::Result<usize> {
+    let payload = serde_json::from_str(input).unwrap_or_default();
+    let typed = vega_uber_msg::capture::from_hook(&payload, "")
+        .is_some_and(|rec| rec["source"] == "user_prompt");
+    if !typed {
+        return Ok(0);
+    }
+    let Some((store, host, pane)) = context() else {
+        return Ok(0);
+    };
+    asks::change(&store, &host, now, false, |n| {
+        n.pane.as_deref() == Some(pane.as_str())
+    })
 }
 
 /// Opens the engaged window: writes `now` to `engaged.json`. Returns the
@@ -82,6 +115,75 @@ mod tests {
 
     const PROMPT: &str = r#"{"hook_event_name":"UserPromptSubmit","prompt":"brief"}"#;
     const PICK: &str = r#"{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion"}"#;
+
+    #[test]
+    fn typed_prompt_resolves_only_its_panes_local_asks() {
+        use vega_herdr::notes::Note;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store {
+            dir: dir.path().into(),
+        };
+        for (host, pane, key, kind) in [
+            ("here", "w1:p1", "default", "ask"),
+            ("here", "w1:p1", "custom", "ask"),
+            ("here", "w1:p2", "other-pane", "ask"),
+            ("remote", "w1:p1", "other-host", "ask"),
+            ("here", "w1:p1", "ordinary", "info"),
+        ] {
+            store
+                .add(
+                    Note {
+                        host: host.into(),
+                        pane: Some(pane.into()),
+                        key: Some(key.into()),
+                        kind: kind.into(),
+                        level: Some("action".into()),
+                        ..Default::default()
+                    },
+                    1000,
+                )
+                .unwrap();
+        }
+        let context = || {
+            Some((
+                Store {
+                    dir: store.dir.clone(),
+                },
+                "here".into(),
+                "w1:p1".into(),
+            ))
+        };
+        for prompt in [
+            "[vega-post] 1 new message for you. Run: vega post inbox",
+            "<task-notification>done</task-notification>",
+            "Please proceed.\n---\n[vega-mux] from w2:p1 (claude)",
+        ] {
+            let input = serde_json::json!({"hook_event_name":"UserPromptSubmit", "prompt":prompt});
+            assert_eq!(
+                resolve_prompt(&input.to_string(), 10, || panic!(
+                    "non-Slayer prompt looked up pane"
+                ))
+                .unwrap(),
+                0
+            );
+            assert!(store.list().iter().all(|n| n.resolved.is_none()));
+        }
+        assert_eq!(resolve_prompt(PROMPT, 11, context).unwrap(), 2);
+        for n in store.list() {
+            let expected =
+                (n.host == "here" && n.pane.as_deref() == Some("w1:p1") && n.kind == "ask")
+                    .then_some(11);
+            assert_eq!(n.resolved, expected, "{n:?}");
+        }
+        assert_eq!(resolve_prompt(PROMPT, 12, context).unwrap(), 0);
+        assert_eq!(resolve_prompt(PROMPT, 12, || None).unwrap(), 0);
+        for input in [PICK, "{", r#"{"hook_event_name":"UserPromptSubmit"}"#] {
+            assert_eq!(
+                resolve_prompt(input, 12, || panic!("non-prompt looked up pane")).unwrap(),
+                0
+            );
+        }
+    }
 
     #[test]
     fn a_typed_prompt_that_opens_a_window_prints_one_notice() {
