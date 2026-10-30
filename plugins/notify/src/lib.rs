@@ -120,7 +120,13 @@ pub fn test(channel: &str) -> Result<(), Failure> {
     let channel: Box<dyn Channel> = match channel {
         "toast" => Box::new(Toast),
         "macos" => Box::new(Macos),
-        other => return Err(unavailable(other, "channel support is not installed")),
+        other => {
+            return Err(Failure::new(
+                "channel_unavailable",
+                format!("{other}: channel support is not installed"),
+                "phone channels land in a later build; vega notify test toast|macos",
+            ))
+        }
     };
     channel.send(
         &Ask {

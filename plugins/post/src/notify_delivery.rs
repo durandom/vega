@@ -53,6 +53,7 @@ async fn tick(mode: u8) -> Result<(), String> {
 
 async fn tick_channels(mode: u8, channels: &[&dyn Channel]) -> Result<(), String> {
     let host = vega_herdr::state::post_host();
+    let sent_key = format!("{}.notify.sent", vega_registry::token(&host));
     let inbox_only = vega_herdr::state::is_inbox_only(&host);
     let local = mode == 1 || inbox_only;
     let config = Config::load()?;
@@ -109,7 +110,7 @@ async fn tick_channels(mode: u8, channels: &[&dyn Channel]) -> Result<(), String
         // Publish imported and local-mode receipts before any new delivery.
         sent.save(&path)?;
         kv.put(
-            format!("{host}.notify.sent"),
+            sent_key.clone(),
             serde_json::to_vec(&sent).map_err(|e| e.to_string())?.into(),
         )
         .await
@@ -170,7 +171,7 @@ async fn tick_channels(mode: u8, channels: &[&dyn Channel]) -> Result<(), String
             )?);
             if let Some(kv) = broker.as_ref().filter(|_| sent != before) {
                 kv.put(
-                    format!("{host}.notify.sent"),
+                    sent_key.clone(),
                     serde_json::to_vec(&sent).map_err(|e| e.to_string())?.into(),
                 )
                 .await
@@ -338,6 +339,13 @@ mod tests {
         const CHILD: &str = "VEGA_NOTIFY_LOCAL_TEST";
         if std::env::var_os(CHILD).is_some() {
             let store = vega_herdr::notes::Store::local().unwrap();
+            let root = std::path::PathBuf::from(std::env::var_os("XDG_STATE_HOME").unwrap());
+            std::fs::write(root.join("calls"), "").unwrap();
+            std::fs::write(
+                root.join("screen"),
+                "answer\n────────\n❯ typing a draft\n────────\n  status",
+            )
+            .unwrap();
             store
                 .add(
                     vega_herdr::notes::Note {
@@ -345,6 +353,7 @@ mod tests {
                         kind: "ask".into(),
                         level: Some("action".into()),
                         title: "demo: test -> pane".into(),
+                        pane: Some("w1:p1".into()),
                         ..Default::default()
                     },
                     1000,
@@ -355,11 +364,38 @@ mod tests {
                 .build()
                 .unwrap();
             rt.block_on(super::tick(1)).unwrap();
-            rt.block_on(super::tick(1)).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join("calls")).unwrap(),
+                "",
+                "a recognized draft suppresses delivery"
+            );
             let path = vega_notify::Sent::path().unwrap();
+            assert!(vega_notify::Sent::load(&path).unwrap().receipts.is_empty());
+            std::fs::write(
+                root.join("screen"),
+                "answer\n────────\n❯ \n────────\n  status",
+            )
+            .unwrap();
+            let focus = vega_herdr::waiting::Ledger {
+                focus: Some("w1:p1".into()),
+                ..Default::default()
+            };
+            vega_herdr::waiting::save(&vega_herdr::waiting::path().unwrap(), &focus).unwrap();
+            let human = vega_registry::uber_engaged::human_file().unwrap();
+            let now = (vega_herdr::notes::now_ms() / 1000) as i64;
+            vega_registry::uber_engaged::write_at(&human, now).unwrap();
+            rt.block_on(super::tick(1)).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join("calls")).unwrap(),
+                "",
+                "recent focus suppresses an empty input box"
+            );
+            assert!(vega_notify::Sent::load(&path).unwrap().receipts.is_empty());
+            vega_registry::uber_engaged::write_at(&human, now - 301).unwrap();
+            rt.block_on(super::tick(1)).unwrap();
+            rt.block_on(super::tick(1)).unwrap();
             assert_eq!(vega_notify::Sent::load(&path).unwrap().receipts.len(), 1);
             assert_eq!(store.list().len(), 1, "delivery reuses the ask note");
-            let root = std::path::PathBuf::from(std::env::var_os("XDG_STATE_HOME").unwrap());
             assert_eq!(
                 std::fs::read_to_string(root.join("calls")).unwrap(),
                 "toast\n"
@@ -377,7 +413,7 @@ mod tests {
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let herdr = bin.join("herdr");
-        std::fs::write(&herdr, "#!/bin/sh\necho toast >> \"$XDG_STATE_HOME/calls\"\nprintf '%s\\n' '{\"result\":{\"shown\":true,\"reason\":\"shown\"}}'\n").unwrap();
+        std::fs::write(&herdr, "#!/bin/sh\nif [ \"$1\" = pane ]; then\n  /bin/cat \"$XDG_STATE_HOME/screen\"\n  exit 0\nfi\necho toast >> \"$XDG_STATE_HOME/calls\"\nprintf '%s\\n' '{\"result\":{\"shown\":true,\"reason\":\"shown\"}}'\n").unwrap();
         std::fs::set_permissions(&herdr, std::fs::Permissions::from_mode(0o755)).unwrap();
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "notify_delivery::tests::local_worker_checkpoints_and_restarts_without_a_second_toast", "--nocapture"])

@@ -117,6 +117,9 @@ fn probes_help_and_usage_do_not_need_context_or_write_state() {
     let out = run(dir.path(), "a", &["test", "toast"]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stdout).contains("channel_unavailable"));
+    let out = run(dir.path(), "a", &["test", "ntfy"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("phone channels land in a later build"));
     let out = run(
         dir.path(),
         "a",
