@@ -16,7 +16,9 @@ Spawn defaults to headed: the user answers questions in the pane. Add `--headles
 for unattended children whose questions go to their parent. Every spawn records
 the mode before startup, including `--no-parent` and a startup stopped at a dialog;
 `--resume` preserves it. Older children without a valid mode record stay headless.
-Inbox-only targets cannot mail the parent; their brief asks the user in either mode.
+Inbox-only targets send quarantine notes unless the receiver has a live operator pair grant
+for peer inbox mail. Such mail never records done or becomes a parent task channel;
+their brief still asks the user in either mode.
 Codex's non-blocking `request_user_input_async` follows the mode too: a headless
 child is told to mail the parent instead; a headed child keeps the question in its
 bar for the user, and the parent gets a copy by mail with the reply command

@@ -9,7 +9,7 @@ You are VEGA; the Slayer decides.
 
 ## On boot
 
-- `vega uac claim`, then `vega uac`: the project's agents, all machines.
+- `vega uac claim`, `vega uac`: agents/grants. `vega uac grant --help`.
 - Beads: in progress and ready.
 - `vega uac ask "<question>"`: what other sessions do.
 

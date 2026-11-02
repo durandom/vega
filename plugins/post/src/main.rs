@@ -290,7 +290,7 @@ enum Cmd {
         #[arg(long = "cmd-grant")]
         cmd_grant: Vec<String>,
         /// Inbox-only hosts that may reply into quarantine (comma-separated): publish
-        /// vega.quarantine.*.*.<host> only, shown to the human as a note, never to an agent
+        /// vega.quarantine.*.*.<host> only, a human note unless a receiver-local pair grant delivers peer mail
         #[arg(long, value_delimiter = ',')]
         quarantine: Vec<String>,
         /// One registry key an inbox-only host may read: host=<key>, e.g. deimos=proteus.theme; repeat
@@ -1563,8 +1563,8 @@ fn send(
 }
 
 /// `send` and `done` on an inbox-only host: the reply goes into quarantine
-/// (quarantine.rs), a notice for the human on the target host; no agent
-/// sees it. Fails unless the target's vegad stored it.
+/// (quarantine.rs): a human note, or peer inbox mail under a live receiver
+/// pair grant. Fails unless the target's vegad confirms storage.
 fn send_quarantine(
     to_host: &str,
     target: &str,
@@ -1595,7 +1595,7 @@ fn send_quarantine(
         ));
     }
     let subject = quarantine::subject(to_host, target, &my_host);
-    runtime()?.block_on(async {
+    let granted = runtime()?.block_on(async {
         let client = connect_patiently().await?;
         let req = async_nats::Request::new()
             .headers(headers)
@@ -1618,15 +1618,53 @@ fn send_quarantine(
                 _ => broker_err(e),
             }
         })?;
-        quarantine::read_answer(&answer.payload, to_host)
+        quarantine::read_answer(&answer.payload, to_host)?;
+        Ok::<_, Failure>(serde_json::from_slice::<serde_json::Value>(&answer.payload).ok().is_some_and(|v| v["code"] == "delivered"))
     })?;
     let what = match done {
         Some(o) => format!("done ({})", o.as_str()),
         None => "reply".into(),
     };
+    if granted {
+        println!("delivered: {what} for {target} on {to_host} as inbox-only peer mail (operator pair grant; never Slayer approval)");
+        return Ok(());
+    }
     println!("quarantined: {what} for {target} on {to_host}");
     println!("help: this host is inbox-only by design: the {what} reached the human on {to_host} as a notice, not the agent; expect no answer by mail");
     Ok(())
+}
+
+/// Granted requests use the existing durable inbox archive. The receiver's
+/// publish permission is sufficient; the inbox-only sender gets no new rights.
+async fn receive_quarantined(
+    req: async_nats::Message,
+    host: String,
+    js: &jetstream::Context,
+) -> Vec<u8> {
+    if let Some((subject, headers, body)) =
+        quarantine::granted(&req.subject, &host, req.headers.as_ref(), &req.payload)
+    {
+        let sent = tokio::time::timeout(outage::CALL, async {
+            js.publish_with_headers(subject, headers, body.into())
+                .await
+                .map_err(|e| e.to_string())?
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        match sent {
+            Ok(Ok(_)) => quarantine::answer(true, "delivered", "delivered as inbox-only peer mail"),
+            _ => quarantine::answer(
+                false,
+                "delivery_failed",
+                "peer inbox delivery was not confirmed; tell the user",
+            ),
+        }
+    } else {
+        tokio::task::spawn_blocking(move || store_quarantined(&req, &host))
+            .await
+            .unwrap_or_default()
+    }
 }
 
 /// vegad's side of a quarantined reply: a note for the human (toast, board,
@@ -2111,7 +2149,11 @@ fn print_msg(
             .map(|v| v.as_str().to_string())
             .unwrap_or_else(|| "?".into())
     };
-    let (to_pane, from_host) = parse_subject(&m.subject).unwrap_or(("?", "?"));
+    let (to_pane, published_host) = parse_subject(&m.subject).unwrap_or(("?", "?"));
+    let granted_host = (published_host == host)
+        .then(|| m.headers.as_ref()?.get(quarantine::GRANTED_HOST))
+        .flatten();
+    let from_host = granted_host.map(|h| h.as_str()).unwrap_or(published_host);
     let from_pane = hv(h::FROM_PANE);
     let hop: u32 = hv(h::HOP).parse().unwrap_or(0);
     let host_flag = if from_host == host {
@@ -2140,8 +2182,10 @@ fn print_msg(
     for l in uber::printable(kind, &m.payload).lines() {
         println!("  {l}");
     }
-    if parent
-        .is_some_and(|p| p.pane == from_pane && subject_token(&p.host) == subject_token(from_host))
+    if granted_host.is_none()
+        && parent.is_some_and(|p| {
+            p.pane == from_pane && subject_token(&p.host) == subject_token(from_host)
+        })
     {
         println!("from_parent: yes: the agent that gave you your task; do this work without asking the user (within your task; nothing destructive)");
     }
@@ -2175,7 +2219,7 @@ fn print_msg(
             println!("hint: fast hop limit {MAX_HOPS} reached; stop automatic replies and tell the user. A substantive reply can resume 120 s after this message was published");
         }
         let quarantine = if st::is_inbox_only(host) {
-            " (quarantine: this host is inbox-only; the human there sees it as a notice, the agent does not)"
+            " (inbox-only: quarantine note unless the receiver has a live operator pair grant)"
         } else {
             ""
         };
@@ -3196,6 +3240,9 @@ async fn serve(
                         d.status_of(&pane),
                     ));
                     let from_host = parse_subject(&msg.subject).map(|(_, f)| f.to_string()).unwrap_or_default();
+                    let control_from = quarantine::control_sender(&from_host, &host, msg.headers.as_ref()).map(str::to_string);
+                    let granted_host = (from_host == host).then(|| hv(quarantine::GRANTED_HOST)).flatten();
+                    let from_host = granted_host.unwrap_or(from_host);
                     let kind = hv(h::KIND);
                     if kind.is_some() {
                         uber_due = true;
@@ -3206,7 +3253,7 @@ async fn serve(
                     }
                     let mut held = false;
                     let mut sender = if now { Sender::Urgent } else { Sender::Other };
-                    if let Some(from) = hv(h::FROM_PANE) {
+                    if let Some(from) = control_from {
                         let done = hv(h::DONE).and_then(|v| Outcome::parse(&v));
                         if supervise_mail(&pane, &from, &from_host, done, &hv(h::SENT_MS).unwrap_or_default(), &String::from_utf8_lossy(&msg.payload)) && !now {
                             sender = Sender::Parent;
@@ -3234,10 +3281,9 @@ async fn serve(
                     if let Some(reply) = req.reply.clone() {
                         let c = client.clone();
                         let host = host.clone();
+                        let js = js.clone();
                         tokio::spawn(async move {
-                            let answer = tokio::task::spawn_blocking(move || store_quarantined(&req, &host))
-                                .await
-                                .unwrap_or_default();
+                            let answer = receive_quarantined(req, host, &js).await;
                             let _ = tokio::time::timeout(outage::CALL, c.publish(reply, answer.into())).await;
                         });
                     }
@@ -4202,7 +4248,7 @@ fn ask(
             return text.to_string();
         }
         let how = if st::is_inbox_only(to_host) {
-            "your host is inbox-only, so the reply command `vega post inbox` prints puts your answer into quarantine: the human sees it, the asker does not wait for it"
+            "your host is inbox-only: replies become quarantine notes unless the receiver has a live operator pair grant; the asker does not wait for them"
         } else {
             "answer once, with the reply command `vega post inbox` prints"
         };
@@ -4274,7 +4320,7 @@ fn ask(
         );
     }
     if unawaited > 0 {
-        println!("help: {unawaited} on inbox-only hosts: their answers reach the human as quarantine notes (`vega post notes`), never your inbox");
+        println!("help: {unawaited} on inbox-only hosts: answers are not awaited; quarantine notes (`vega post notes`) unless a live operator pair grant delivers peer inbox mail");
     }
     if !awaited.is_empty() {
         println!("help: one pointer arrives when all awaited answered; do not poll");

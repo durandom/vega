@@ -11,6 +11,7 @@
 //! a remote path is never resolved on this host.
 
 mod beads;
+mod grants;
 mod land;
 
 use std::env;
@@ -55,6 +56,12 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "prune") {
         return land::prune::main(&args[1..]);
+    }
+    if args
+        .first()
+        .is_some_and(|a| matches!(a.as_str(), "grant" | "revoke" | "grants"))
+    {
+        return grants::main(&args);
     }
     // `adopt --headless`: the flag may stand anywhere after `adopt`.
     let headless = args.first().is_some_and(|a| a == "adopt") && {
@@ -280,6 +287,8 @@ fn home(mode: Mode) -> Result<(), Failure> {
             "run it from the project's checkout",
         ));
     }
+
+    grants::listing()?;
 
     let mut snapshots = vec![local];
     let mut unreachable = Vec::new();

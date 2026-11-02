@@ -24,7 +24,8 @@ Reply only if it adds something. Do not reply to acknowledgements.
 The first prompt of `vega mux spawn --prompt` ends with `When done, run once: vega post done --to <parent>
 --outcome succeeded|failed "<one-line result>"` instead. Headed (the default) asks the user in the pane;
 `--headless` adds the parent reply command for questions, except on an inbox-only target where
-mail cannot reach the parent and the footer asks the user instead. The parent's
+mail is a quarantine note unless the receiver has a live operator pair grant for peer inbox mail;
+the footer still asks the user instead. Granted mail never records done or becomes task-channel mail. The parent's
 vegad records the outcome and wakes the parent (2026-10-08, vega-lhc.20, docs/design/vegad.md Supervision). Spawn also records the spawner's pane as the child's parent in
 `$XDG_STATE_HOME/vega/parents/<machine>_<pane>` (JSON with the child's agent name, so a reused pane id is not
 misread); `vega mux close` deletes it with the task file.

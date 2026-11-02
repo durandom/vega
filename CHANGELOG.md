@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 97 · 2026-11-02
+
+- feature: operators can grant exactly one inbox-only agent pair temporary peer mail with
+  `vega uac grant <sender-host>:<pane> <receiver-host>:<pane> --expires 2h` on the receiver.
+  `revoke` ends it and `grants` lists live, expired and revoked pairs. The sender pane is its
+  host's own claim; replies are never Slayer approval. No broker changes; see
+  [vegad quarantine](docs/design/vegad.md#quarantine-inbox-only-replies).
+
 ## 96 · 2026-10-30
 
 - feature: review overlays can send notes and load patches on local apps with strict Content Security

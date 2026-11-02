@@ -23,6 +23,11 @@ next `for the user (headed pane; no wake)`, but vegad does not wake you for them
 attention table adds the done report (parked: the bead) and the next command. Local input shows the dialog kind and title; all_done when every sentinel is completed.
 
 Commands:
+  grant <inbox-only-host>:<pane> <host>:<pane> --expires <duration>
+               allow one pair on this receiving host (s/m/h/d, expiry required);
+               peer mail only, never Slayer approval; see grant --help
+  revoke <inbox-only-host>:<pane> <host>:<pane>  revoke that pair (idempotent)
+  grants       list this host's live, expired and revoked mail grants
   land BEAD --branch BRANCH [--head SHA] [--target BRANCH] [--keep]
                resumable reviewed landing: merge, check, gate, verified push,
                install, bead close and owned sentinel cleanup; never deploys

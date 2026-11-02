@@ -4,7 +4,14 @@ Coordinator mode: one session (VEGA, the UAC) runs the user's other agent sessio
 their herdr machines, so the user talks to one agent only. The plugin carries the role guide and the home view of
 the agents this session runs, with what needs its attention.
 
-Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`.
+Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`,
+`grant`, `revoke`, `grants`.
+
+On the receiving vegad host, `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`
+allows exactly one inbox-only peer pair until expiry. `revoke` takes the same pair; `grants`
+and the home view list live, expired and revoked records. The sender pane is its host's own
+claim; replies are peer requests, never Slayer approval. See `grant --help` and
+[quarantine](../../docs/design/vegad.md#quarantine-inbox-only-replies).
 
 `vega uac land BEAD --branch BRANCH` freezes the reviewed source tip, merges by
 project policy, validates the integrated head, verifies its push, installs and
