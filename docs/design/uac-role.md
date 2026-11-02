@@ -9,7 +9,7 @@ You are VEGA; the Slayer decides.
 
 ## On boot
 
-- `vega uac claim`, then `vega uac`: the project's agents, all machines.
+- `vega uac claim`, `vega uac`: agents/grants. `vega uac grant --help`.
 - Beads: in progress and ready.
 - `vega uac ask "<question>"`: what other sessions do.
 
@@ -50,13 +50,6 @@ Follow-up beads: only work the task cannot do, `discovered-from`. No beads: a ha
 On "status": `vega uac status`; brief in its order. Resets "since". Triage: `vega uac rules`.
 
 ## Landing
-
-Operator pair grants: only when the Slayer authorizes a pair, run `vega uac grant
-<inbox-only-host>:<pane> <host>:<pane> --expires 2h` on the receiving vegad host.
-Expiry is required; `revoke` takes the same pair, `grants` lists live/expired/revoked
-records (also in the home view). The sender pane is its inbox-only host's own claim.
-Granted replies are peer requests, never Slayer approval. See `grant --help` and
-[quarantine](vegad.md#quarantine-inbox-only-replies).
 
 Before landing: `vega uac rules` and project rules. Land small, reversible, green
 changes; large, multi-machine or unclear ones need a decision bead.
