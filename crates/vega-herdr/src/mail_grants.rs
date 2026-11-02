@@ -19,14 +19,11 @@ impl Peer {
                 && s.bytes()
                     .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
         };
-        let valid_pane = pane.split_once(':').is_some_and(|(w, p)| {
-            w.starts_with('w')
-                && token(w)
-                && p.strip_prefix('p')
-                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
-        });
-        if !token(host) || !valid_pane {
-            return Err("expected literal <host>:w<workspace>:p<number> (no wildcards)".into());
+        if !token(host) || !crate::pane::is_pane_id(pane) {
+            return Err(
+                "expected literal <host>:w<id>:p<id> with alphanumeric pane IDs (no wildcards)"
+                    .into(),
+            );
         }
         Ok(Self {
             host: host.to_lowercase(),

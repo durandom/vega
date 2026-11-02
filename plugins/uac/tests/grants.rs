@@ -70,3 +70,30 @@ fn grant_cli_requires_expiry_and_retains_revocation() {
     assert!(String::from_utf8_lossy(&call(&["grants"]).stdout).contains("live"));
     assert!(call(&["grant", "--help"]).status.success());
 }
+
+#[test]
+fn grant_and_revoke_accept_alphanumeric_pane_ids() {
+    let root = tempfile::tempdir().unwrap();
+    let grant = [
+        "grant",
+        "deimos:w1C:pB",
+        "proteus:w3V:p1C",
+        "--expires",
+        "1h",
+    ];
+    let output = run(root.path(), &grant);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let listing = run(root.path(), &["grants"]);
+    let listing = String::from_utf8_lossy(&listing.stdout);
+    assert!(listing.contains("deimos:w1C:pB"));
+    assert!(listing.contains("proteus:w3V:p1C"));
+    assert!(
+        run(root.path(), &["revoke", "deimos:w1C:pB", "proteus:w3V:p1C"])
+            .status
+            .success()
+    );
+}

@@ -305,6 +305,19 @@ mod grant_tests {
             .path();
         std::fs::write(file, "{broken").unwrap();
         assert!(prepare(&subject, &headers).is_none());
+        let letter_pair = Grant {
+            sender: Peer::parse("deimos:w1C:pB").unwrap(),
+            target: Peer::parse("proteus:w3V:p1C").unwrap(),
+            created: grants::now(),
+            expires: grants::now() + 600,
+            revoked: None,
+        };
+        grants::save(&letter_pair).unwrap();
+        let mut letter_headers = headers.clone();
+        letter_headers.insert(crate::h::FROM_PANE, "w1C:pB");
+        let (to, _, _) =
+            prepare("vega.quarantine.proteus.w3V:p1C.deimos", &letter_headers).unwrap();
+        assert_eq!(to, "vega.inbox.proteus.w3V:p1C.proteus");
     }
 
     fn broker_round_trip(headers: &async_nats::HeaderMap) {

@@ -4,6 +4,7 @@ Usage: vega uac grant <inbox-only-host>:<pane> <host>:<pane> --expires <duration
 
 Run on the receiving vegad host, with its HOME/XDG_STATE_HOME. One literal pair
 per grant, no wildcards. --expires is required: positive integer + s/m/h/d.
+Pane IDs are alphanumeric, e.g. w3V:p1 or w1C:pB.
 Grant replaces that pair's expiry; revoke is idempotent. Listing includes expired
 and revoked records with Unix timestamps, also shown in the uac home view.
 Stored atomically in $XDG_STATE_HOME/vega/mail-grants (default ~/.local/state).
