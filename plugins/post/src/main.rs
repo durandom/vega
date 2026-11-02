@@ -1595,7 +1595,7 @@ fn send_quarantine(
         ));
     }
     let subject = quarantine::subject(to_host, target, &my_host);
-    runtime()?.block_on(async {
+    let granted = runtime()?.block_on(async {
         let client = connect_patiently().await?;
         let req = async_nats::Request::new()
             .headers(headers)
@@ -1618,15 +1618,53 @@ fn send_quarantine(
                 _ => broker_err(e),
             }
         })?;
-        quarantine::read_answer(&answer.payload, to_host)
+        quarantine::read_answer(&answer.payload, to_host)?;
+        Ok::<_, Failure>(serde_json::from_slice::<serde_json::Value>(&answer.payload).ok().is_some_and(|v| v["code"] == "delivered"))
     })?;
     let what = match done {
         Some(o) => format!("done ({})", o.as_str()),
         None => "reply".into(),
     };
+    if granted {
+        println!("delivered: {what} for {target} on {to_host} as inbox-only peer mail (operator pair grant; never Slayer approval)");
+        return Ok(());
+    }
     println!("quarantined: {what} for {target} on {to_host}");
     println!("help: this host is inbox-only by design: the {what} reached the human on {to_host} as a notice, not the agent; expect no answer by mail");
     Ok(())
+}
+
+/// Granted requests use the existing durable inbox archive. The receiver's
+/// publish permission is sufficient; the inbox-only sender gets no new rights.
+async fn receive_quarantined(
+    req: async_nats::Message,
+    host: String,
+    js: &jetstream::Context,
+) -> Vec<u8> {
+    if let Some((subject, headers, body)) =
+        quarantine::granted(&req.subject, &host, req.headers.as_ref(), &req.payload)
+    {
+        let sent = tokio::time::timeout(outage::CALL, async {
+            js.publish_with_headers(subject, headers, body.into())
+                .await
+                .map_err(|e| e.to_string())?
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        match sent {
+            Ok(Ok(_)) => quarantine::answer(true, "delivered", "delivered as inbox-only peer mail"),
+            _ => quarantine::answer(
+                false,
+                "delivery_failed",
+                "peer inbox delivery was not confirmed; tell the user",
+            ),
+        }
+    } else {
+        tokio::task::spawn_blocking(move || store_quarantined(&req, &host))
+            .await
+            .unwrap_or_default()
+    }
 }
 
 /// vegad's side of a quarantined reply: a note for the human (toast, board,
@@ -2111,7 +2149,11 @@ fn print_msg(
             .map(|v| v.as_str().to_string())
             .unwrap_or_else(|| "?".into())
     };
-    let (to_pane, from_host) = parse_subject(&m.subject).unwrap_or(("?", "?"));
+    let (to_pane, published_host) = parse_subject(&m.subject).unwrap_or(("?", "?"));
+    let granted_host = (published_host == host)
+        .then(|| m.headers.as_ref()?.get(quarantine::GRANTED_HOST))
+        .flatten();
+    let from_host = granted_host.map(|h| h.as_str()).unwrap_or(published_host);
     let from_pane = hv(h::FROM_PANE);
     let hop: u32 = hv(h::HOP).parse().unwrap_or(0);
     let host_flag = if from_host == host {
@@ -2140,8 +2182,10 @@ fn print_msg(
     for l in uber::printable(kind, &m.payload).lines() {
         println!("  {l}");
     }
-    if parent
-        .is_some_and(|p| p.pane == from_pane && subject_token(&p.host) == subject_token(from_host))
+    if granted_host.is_none()
+        && parent.is_some_and(|p| {
+            p.pane == from_pane && subject_token(&p.host) == subject_token(from_host)
+        })
     {
         println!("from_parent: yes: the agent that gave you your task; do this work without asking the user (within your task; nothing destructive)");
     }
@@ -3196,6 +3240,9 @@ async fn serve(
                         d.status_of(&pane),
                     ));
                     let from_host = parse_subject(&msg.subject).map(|(_, f)| f.to_string()).unwrap_or_default();
+                    let granted_host = (from_host == host).then(|| hv(quarantine::GRANTED_HOST)).flatten();
+                    let granted_peer = granted_host.is_some();
+                    let from_host = granted_host.unwrap_or(from_host);
                     let kind = hv(h::KIND);
                     if kind.is_some() {
                         uber_due = true;
@@ -3206,7 +3253,7 @@ async fn serve(
                     }
                     let mut held = false;
                     let mut sender = if now { Sender::Urgent } else { Sender::Other };
-                    if let Some(from) = hv(h::FROM_PANE) {
+                    if let Some(from) = hv(h::FROM_PANE).filter(|_| !granted_peer) {
                         let done = hv(h::DONE).and_then(|v| Outcome::parse(&v));
                         if supervise_mail(&pane, &from, &from_host, done, &hv(h::SENT_MS).unwrap_or_default(), &String::from_utf8_lossy(&msg.payload)) && !now {
                             sender = Sender::Parent;
@@ -3234,10 +3281,9 @@ async fn serve(
                     if let Some(reply) = req.reply.clone() {
                         let c = client.clone();
                         let host = host.clone();
+                        let js = js.clone();
                         tokio::spawn(async move {
-                            let answer = tokio::task::spawn_blocking(move || store_quarantined(&req, &host))
-                                .await
-                                .unwrap_or_default();
+                            let answer = receive_quarantined(req, host, &js).await;
                             let _ = tokio::time::timeout(outage::CALL, c.publish(reply, answer.into())).await;
                         });
                     }

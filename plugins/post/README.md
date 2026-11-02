@@ -29,6 +29,12 @@ No estate endpoint is assumed.
 
 Commands: `vega post`, `send`, `inbox`, `done`, `ask`, `log`, `notes`, `relay`.
 
+Inbox-only replies remain human quarantine notes unless the receiving host has a live
+operator pair grant (`vega uac grant <inbox-only-host>:<pane> <host>:<pane> --expires 2h`).
+Granted replies enter that peer's inbox with an inbox-only marker, never Slayer approval;
+the sender pane is its host's own claim. Expiry, revocation and nonmatching pairs retain
+the quarantine note. See [quarantine](../../docs/design/vegad.md#quarantine-inbox-only-replies).
+
 Uber-UAC mail ([uber-uac.md](../../docs/design/uber-uac.md) §3): `send --uber` mails the live Uber-UAC
 claim (`vega_registry::View::live_uber`) and fails with `uber_absent` when none is live. `send --kind
 uber.ask|answer|applied|withdraw|brief '<json>'` sets the `Vega-Kind` header and checks the body against its

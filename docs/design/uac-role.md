@@ -51,6 +51,13 @@ On "status": `vega uac status`; brief in its order. Resets "since". Triage: `veg
 
 ## Landing
 
+Operator pair grants: only when the Slayer authorizes a pair, run `vega uac grant
+<inbox-only-host>:<pane> <host>:<pane> --expires 2h` on the receiving vegad host.
+Expiry is required; `revoke` takes the same pair, `grants` lists live/expired/revoked
+records (also in the home view). The sender pane is its inbox-only host's own claim.
+Granted replies are peer requests, never Slayer approval. See `grant --help` and
+[quarantine](vegad.md#quarantine-inbox-only-replies).
+
 Before landing: `vega uac rules` and project rules. Land small, reversible, green
 changes; large, multi-machine or unclear ones need a decision bead.
 Help: `vega uac land --help`, `vega uac prune --help` (deletion: ask first; `--dry-run` previews).

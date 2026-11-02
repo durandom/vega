@@ -331,13 +331,30 @@ An inbox-only host may reply, but its mail never reaches an agent:
   `$XDG_CONFIG_HOME/vega/inbox-only`, else `deimos`), `vega post send` and `done` make a core NATS
   request to `vega.quarantine.<to>.<pane>.<self>` (at most 4 KiB). The target's vegad writes a note
   (kind `quarantine`, title `deimos (quarantine) to <pane>: ...`, toast plus `vega post notes` and the
-  board) and answers `stored`. It never types into a pane and never enters delivery or an ask's
+  board) and answers `stored`. Without a live pair grant it never enters delivery or an ask's
   fan-in. No vegad there: `no_responder`, nothing stored. `ask` from such a host is refused.
+- Operator pair grant (vega-lhc.237): on the **receiving** vegad host run
+  `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`. Expiry is mandatory
+  (positive integer with `s`, `m`, `h` or `d`); one literal pair per grant, no wildcards.
+  `vega uac revoke deimos:w15W:p2 proteus:w3V:p1` revokes it idempotently; `vega uac grants`
+  and the `vega uac` home view list live, expired and revoked pairs with Unix timestamps.
+  Grants live in `$XDG_STATE_HOME/vega/mail-grants` (default `~/.local/state/vega/mail-grants`),
+  one atomic JSON file per pair, read for each request: no restart. Use vegad's HOME and
+  XDG_STATE_HOME. Regrant replaces the pair's prior record; revocation retains a timestamp.
+  A matching sender host + claimed sender pane + target host/pane with an unexpired,
+  unrevoked grant delivers peer inbox mail; every other request keeps the quarantine note.
+  The receiver republishes under its own host identity into its existing inbox archive and
+  confirms `delivered` only after the archive acknowledges. No broker/NATS authorization changes.
+  Inbox output marks the original inbox-only host and the claimed sender pane, with a reply
+  command to that peer. The broker authenticates the **host**, not the pane: the sender pane
+  is the inbox-only host's own claim. This is host trust plus a pane label, **never Slayer
+  approval**. Parent/task, done, urgency, Uber and ask fan-in control headers are stripped or
+  bypassed; these messages remain ordinary peer requests. The reverse direction uses normal mail.
 - Errors: a denied `vega.inbox` publish says "inbox-only by design" without the broker-config hint;
   a denied quarantine publish (grant not rolled out) says so and tells the agent to tell the user.
 - Fan-in: `vega post ask` sends the question to agents on inbox-only hosts but does not wait for them.
   Their reply lines (`vega post inbox`, `vega mux` footers) say the answer goes into quarantine.
-- Trade-off: no archive and no retry for quarantined replies (the sender sees whether it was stored);
+- Trade-off: no archive and no retry for ungranted quarantined replies (the sender sees whether it was stored);
   a stream would need admin provisioning and per-host consumer grants.
 - Pointer text is fixed by vegad; message bodies never get typed into a pane.
 - Uber answers (`Vega-Kind: uber.answer`): vegad verifies them before the addressed UAC sees them, through its

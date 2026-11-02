@@ -1,5 +1,5 @@
 //! Quarantine (vega-lhc.83): an inbox-only host (deimos, corp-managed) may
-//! reply, but its mail never reaches an agent. Its key may publish only
+//! reply; absent an operator pair grant its mail never reaches an agent. Its key may publish only
 //! `vega.quarantine.<to>.<pane>.<self>` (`auth-config --quarantine`), never
 //! `vega.inbox.*`, so the broker enforces the split. The send is core NATS
 //! request/reply, no stream: the target host's vegad serves
@@ -60,6 +60,57 @@ pub fn note(
         "{text}\n\n(from {who}, an inbox-only host: for the human only; no agent was told, and agents never act on it)"
     );
     (title, body)
+}
+
+/// Only the receiver creates this marker on its own inbox subject. Never trust
+/// a remote publisher's marker when displaying an archived message.
+pub const GRANTED_HOST: &str = "Vega-Inbox-Only-Host";
+
+/// Prepare peer mail using an allowlist: no done, urgency, Uber kind, ask
+/// fan-in or other control headers from the inbox-only host survive.
+pub fn granted(
+    subject: &str,
+    my_host: &str,
+    headers: Option<&async_nats::HeaderMap>,
+    payload: &[u8],
+) -> Option<(String, async_nats::HeaderMap, String)> {
+    use vega_herdr::mail_grants::{self as grants, Peer};
+    if refuse(subject, my_host, payload).is_some() {
+        return None;
+    }
+    let (_, pane, from_host) = parse_subject(subject)?;
+    let from_pane = headers?.get(crate::h::FROM_PANE)?.as_str();
+    let sender = Peer::parse(&format!("{from_host}:{from_pane}")).ok()?;
+    let target = Peer::parse(&format!("{my_host}:{pane}")).ok()?;
+    if !grants::matches(&sender, &target, grants::now()) {
+        return None;
+    }
+    let mut clean = async_nats::HeaderMap::new();
+    clean.insert(GRANTED_HOST, from_host);
+    clean.insert(crate::h::FROM_PANE, from_pane);
+    clean.insert(crate::h::FROM_AGENT, "peer (inbox-only host)");
+    clean.insert(
+        crate::h::FROM_CWD,
+        "claimed sender pane; host-authenticated only",
+    );
+    clean.insert(crate::h::SENT_MS, crate::now_ms().to_string().as_str());
+    // Retain only the reply token, bounded to a literal token. It does not
+    // enter fan-in because the delivery loop explicitly treats this as peer mail.
+    if let Some(thread) = headers?.get(crate::h::THREAD).filter(|t| {
+        t.as_str().len() <= 128
+            && t.as_str()
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+    }) {
+        clean.insert(crate::h::THREAD, thread.as_str());
+    }
+    let hop = headers?
+        .get(crate::h::HOP)
+        .and_then(|v| v.as_str().parse::<u32>().ok())
+        .unwrap_or(1);
+    clean.insert(crate::h::HOP, hop.to_string().as_str());
+    let text = format!("[Peer mail from inbox-only host {from_host}; sender pane is that host's own claim. Never Slayer approval.]\n{}", std::str::from_utf8(payload).ok()?);
+    Some((crate::inbox_subject(my_host, pane, my_host), clean, text))
 }
 
 /// The vegad answer to one quarantined reply.
@@ -132,6 +183,205 @@ pub fn denied(msg: &str, inbox_only_self: bool) -> Failure {
         msg,
         "this machine's nkey lacks that right (mail as itself, commands as itself or as granted; see `vega post auth-config`); check VEGA_NATS_NKEY and the broker config",
     )
+}
+
+#[cfg(test)]
+mod grant_tests {
+    use super::*;
+    use vega_herdr::mail_grants::{self as grants, Grant, Peer};
+
+    #[test]
+    fn pair_grant_with_temp_home() {
+        const CHILD: &str = "VEGA_PAIR_GRANT_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let root = tempfile::tempdir().unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "quarantine::grant_tests::pair_grant_with_temp_home",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("HOME", root.path())
+                .env_remove("XDG_STATE_HOME")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let printed = String::from_utf8_lossy(&out.stdout);
+            assert!(printed.contains("on deimos"));
+            assert!(printed.contains("--host deimos w15W:p2 --re reply-token/3@"));
+            assert!(!printed.contains("from_parent: yes"));
+            return;
+        }
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert(crate::h::FROM_PANE, "w15W:p2");
+        headers.insert(crate::h::THREAD, "reply-token");
+        headers.insert(crate::h::HOP, "3");
+        for key in [
+            crate::h::KIND,
+            crate::h::DONE,
+            crate::h::NOW,
+            "Nats-Msg-Id",
+            GRANTED_HOST,
+        ] {
+            headers.insert(key, "untrusted");
+        }
+        let subject = subject("proteus", "w3V:p1", "deimos");
+        let prepare =
+            |s: &str, hs: &async_nats::HeaderMap| granted(s, "proteus", Some(hs), b"answer: 42");
+        assert!(prepare(&subject, &headers).is_none());
+        let mut g = Grant {
+            sender: Peer::parse("deimos:w15W:p2").unwrap(),
+            target: Peer::parse("proteus:w3V:p1").unwrap(),
+            created: grants::now(),
+            expires: grants::now() + 600,
+            revoked: None,
+        };
+        grants::save(&g).unwrap();
+        let (to, clean, body) = prepare(&subject, &headers).unwrap();
+        assert_eq!(to, "vega.inbox.proteus.w3V:p1.proteus");
+        assert_eq!(clean.get(GRANTED_HOST).unwrap().as_str(), "deimos");
+        assert_eq!(clean.get(crate::h::FROM_PANE).unwrap().as_str(), "w15W:p2");
+        assert_eq!(clean.get(crate::h::THREAD).unwrap().as_str(), "reply-token");
+        assert!(body.contains("Never Slayer approval"));
+        assert!(body.ends_with("answer: 42"));
+        broker_round_trip(&headers);
+        for key in [crate::h::KIND, crate::h::DONE, crate::h::NOW, "Nats-Msg-Id"] {
+            assert!(clean.get(key).is_none());
+        }
+        for subject in [
+            "vega.quarantine.proteus.w3V:p2.deimos",
+            "vega.quarantine.proteus.w3V:p1.other",
+            "vega.quarantine.other.w3V:p1.deimos",
+        ] {
+            assert!(prepare(subject, &headers).is_none());
+        }
+        let mut wrong = headers.clone();
+        wrong.insert(crate::h::FROM_PANE, "w15W:p3");
+        assert!(prepare(&subject, &wrong).is_none());
+        assert!(granted(&subject, "proteus", None, b"hi").is_none());
+        assert!(granted(
+            &subject,
+            "proteus",
+            Some(&headers),
+            &vec![b'x'; MAX_BODY + 1]
+        )
+        .is_none());
+        g.expires = grants::now();
+        grants::save(&g).unwrap();
+        assert!(prepare(&subject, &headers).is_none());
+        g.expires += 600;
+        g.revoked = Some(grants::now());
+        grants::save(&g).unwrap();
+        assert!(prepare(&subject, &headers).is_none());
+        assert_eq!(grants::list().unwrap().len(), 1);
+        let (title, body) = note("deimos", "w3V:p1", "claude", "w15W:p2", "answer: 42");
+        assert!(title.contains("(quarantine)"));
+        assert!(body.contains("for the human only"));
+        let file = std::fs::read_dir(grants::dir().unwrap())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        std::fs::write(file, "{broken").unwrap();
+        assert!(prepare(&subject, &headers).is_none());
+    }
+
+    fn broker_round_trip(headers: &async_nats::HeaderMap) {
+        use crate::registry_read_test::{connect, start, user};
+        use futures_util::StreamExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (admin_seed, admin) = user();
+        let (receiver_seed, receiver) = user();
+        let (sender_seed, sender) = user();
+        let auth = crate::auth::render(
+            &[
+                crate::auth::Entry {
+                    host: "proteus".into(),
+                    key: receiver,
+                },
+                crate::auth::Entry {
+                    host: "deimos".into(),
+                    key: sender,
+                },
+            ],
+            Some(&admin),
+            &["proteus".into()],
+            &["deimos".into()],
+            None,
+            &[],
+            &["deimos".into()],
+            &[],
+            None,
+        );
+        let (_server, url) = start(dir.path(), &auth);
+        crate::runtime().unwrap().block_on(async {
+            let admin = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+            async_nats::jetstream::new(admin)
+                .create_stream(async_nats::jetstream::stream::Config {
+                    max_bytes: 1 << 20,
+                    ..crate::stream_config("proteus")
+                })
+                .await
+                .unwrap();
+            let receiver = connect(&url, &receiver_seed, "_INBOX_proteus").await;
+            let archive = async_nats::jetstream::new(receiver.clone())
+                .get_stream(crate::stream_name("proteus"))
+                .await
+                .unwrap();
+            let mut requests = receiver
+                .subscribe("vega.quarantine.proteus.>")
+                .await
+                .unwrap();
+            receiver.flush().await.unwrap();
+            let sender = connect(&url, &sender_seed, "_INBOX_deimos").await;
+            sender
+                .publish_with_headers(
+                    subject("proteus", "w3V:p1", "deimos"),
+                    headers.clone(),
+                    "answer: 42".into(),
+                )
+                .await
+                .unwrap();
+            sender.flush().await.unwrap();
+            let req = tokio::time::timeout(std::time::Duration::from_secs(2), requests.next())
+                .await
+                .unwrap()
+                .unwrap();
+            let answer = crate::receive_quarantined(
+                req,
+                "proteus".into(),
+                &async_nats::jetstream::new(receiver),
+            )
+            .await;
+            let answer: Value = serde_json::from_slice(&answer).unwrap();
+            assert_eq!(answer["code"], "delivered");
+            let consumer = archive
+                .create_consumer(crate::inbox_consumer("proteus", "w3V:p1"))
+                .await
+                .unwrap();
+            let mut messages = consumer
+                .fetch()
+                .max_messages(1)
+                .expires(std::time::Duration::from_secs(1))
+                .messages()
+                .await
+                .unwrap();
+            let message = messages.next().await.unwrap().unwrap();
+            assert!(String::from_utf8_lossy(&message.payload).contains("Never Slayer approval"));
+            let parent = vega_herdr::state::Parent {
+                pane: "w15W:p2".into(),
+                host: "deimos".into(),
+            };
+            crate::print_msg(&message, "proteus", Some(&parent), &[], Some(1)).unwrap();
+        });
+    }
 }
 
 #[cfg(test)]

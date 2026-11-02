@@ -11,6 +11,7 @@ pub mod dialog;
 pub mod gather;
 pub mod hosts;
 pub mod lanes;
+pub mod mail_grants;
 pub mod notes;
 pub mod pane;
 pub mod project;
