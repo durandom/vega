@@ -20,6 +20,18 @@ pub fn main(args: &[String]) -> ExitCode {
 
 fn run(args: &[String]) -> Result<(), Failure> {
     let usage = |msg: String| Failure::new("usage", msg, HELP);
+    let grant = args.first().is_some_and(|a| a == "grant");
+    if let Some(flag) = args
+        .iter()
+        .skip(1)
+        .find(|a| a.starts_with('-') && !(grant && a.as_str() == "--expires"))
+    {
+        return Err(usage(format!(
+            "unknown flag {flag}; valid flags for {}: {}",
+            args[0],
+            if grant { "--expires, --help" } else { "--help" }
+        )));
+    }
     let io = |msg: String| {
         Failure::new(
             "grant_store",
@@ -31,7 +43,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
         [cmd] if cmd == "grants" => return listing(),
         [cmd, sender, target, flag, duration] if cmd == "grant" && flag == "--expires" => (false, sender, target, Some(duration)),
         [cmd, sender, target] if cmd == "revoke" => (true, sender, target, None),
-        _ => return Err(usage("expected grant <sender> <target> --expires <duration>, revoke <sender> <target>, or grants; valid flag: --expires (--help always allowed)".into())),
+        _ => return Err(usage("expected grant <sender> <target> --expires <duration>, revoke <sender> <target>, or grants (--help always allowed)".into())),
     };
     let sender = store::Peer::parse(sender).map_err(&usage)?;
     let target = store::Peer::parse(target).map_err(&usage)?;
