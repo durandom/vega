@@ -321,7 +321,7 @@ channel was full the next broker call waited forever, taking the single-threaded
 
 ### Quarantine (inbox-only replies)
 
-An inbox-only host may reply, but its mail never reaches an agent:
+An inbox-only host may reply; absent an operator pair grant its mail never reaches an agent:
 
 - Broker: `auth-config --inbox-only deimos --quarantine deimos` lets deimos publish only
   `vega.quarantine.*.*.deimos` (still no `vega.inbox.*`); every other host may subscribe
@@ -353,7 +353,8 @@ An inbox-only host may reply, but its mail never reaches an agent:
 - Errors: a denied `vega.inbox` publish says "inbox-only by design" without the broker-config hint;
   a denied quarantine publish (grant not rolled out) says so and tells the agent to tell the user.
 - Fan-in: `vega post ask` sends the question to agents on inbox-only hosts but does not wait for them.
-  Their reply lines (`vega post inbox`, `vega mux` footers) say the answer goes into quarantine.
+  Their reply lines (`vega post inbox`, `vega mux` footers) say quarantine note unless a live
+  operator pair grant delivers peer inbox mail; granted replies still do not enter the fan-in.
 - Trade-off: no archive and no retry for ungranted quarantined replies (the sender sees whether it was stored);
   a stream would need admin provisioning and per-host consumer grants.
 - Pointer text is fixed by vegad; message bodies never get typed into a pane.
