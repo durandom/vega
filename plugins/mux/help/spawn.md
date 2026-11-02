@@ -3,8 +3,9 @@ for an unattended child whose in-pane questions must go to its parent. Every spa
 records its mode, including --no-parent and a pane stopped at a startup dialog;
 --resume preserves it. Older children without a valid record remain headless.
 Change or inspect it with `vega mux mode <pane|name> [headed|headless]`.
-An inbox-only target cannot mail its parent: its brief tells it to ask the user
-in either mode.
+An inbox-only target sends quarantine notes unless the receiver has a live operator pair grant
+for peer inbox mail (never a done record or task-channel mail). Its brief still tells it to
+ask the user in either mode.
 
 Default agent args (extra args after `--` are appended):
   codex   --no-daemon --dangerously-bypass-approvals-and-sandbox -c check_for_update_on_startup=false

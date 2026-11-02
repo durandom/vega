@@ -3240,8 +3240,8 @@ async fn serve(
                         d.status_of(&pane),
                     ));
                     let from_host = parse_subject(&msg.subject).map(|(_, f)| f.to_string()).unwrap_or_default();
+                    let control_from = quarantine::control_sender(&from_host, &host, msg.headers.as_ref()).map(str::to_string);
                     let granted_host = (from_host == host).then(|| hv(quarantine::GRANTED_HOST)).flatten();
-                    let granted_peer = granted_host.is_some();
                     let from_host = granted_host.unwrap_or(from_host);
                     let kind = hv(h::KIND);
                     if kind.is_some() {
@@ -3253,7 +3253,7 @@ async fn serve(
                     }
                     let mut held = false;
                     let mut sender = if now { Sender::Urgent } else { Sender::Other };
-                    if let Some(from) = hv(h::FROM_PANE).filter(|_| !granted_peer) {
+                    if let Some(from) = control_from {
                         let done = hv(h::DONE).and_then(|v| Outcome::parse(&v));
                         if supervise_mail(&pane, &from, &from_host, done, &hv(h::SENT_MS).unwrap_or_default(), &String::from_utf8_lossy(&msg.payload)) && !now {
                             sender = Sender::Parent;

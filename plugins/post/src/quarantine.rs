@@ -66,6 +66,20 @@ pub fn note(
 /// a remote publisher's marker when displaying an archived message.
 pub const GRANTED_HOST: &str = "Vega-Inbox-Only-Host";
 
+/// A receiver-relayed peer may never enter parent/done or ask control paths.
+/// A remote publisher cannot bypass those paths by forging the local marker.
+pub fn control_sender<'a>(
+    published_host: &str,
+    my_host: &str,
+    headers: Option<&'a async_nats::HeaderMap>,
+) -> Option<&'a str> {
+    let headers = headers?;
+    if published_host == my_host && headers.get(GRANTED_HOST).is_some() {
+        return None;
+    }
+    headers.get(crate::h::FROM_PANE).map(|v| v.as_str())
+}
+
 /// Prepare peer mail using an allowlist: no done, urgency, Uber kind, ask
 /// fan-in or other control headers from the inbox-only host survive.
 pub fn granted(
@@ -374,6 +388,21 @@ mod grant_tests {
                 .await
                 .unwrap();
             let message = messages.next().await.unwrap().unwrap();
+            // This is the same decision the serve loop uses before calling
+            // supervise_mail, hold_answer or uber_brief::reply. Matching pane
+            // and thread labels must not turn the archived peer into controls.
+            assert!(control_sender("proteus", "proteus", message.headers.as_ref()).is_none());
+            // A remote host forging the marker is still normal remote mail.
+            assert_eq!(
+                control_sender("deimos", "proteus", Some(headers)),
+                Some("w15W:p2")
+            );
+            let mut ordinary = async_nats::HeaderMap::new();
+            ordinary.insert(crate::h::FROM_PANE, "w15W:p2");
+            assert_eq!(
+                control_sender("proteus", "proteus", Some(&ordinary)),
+                Some("w15W:p2")
+            );
             assert!(String::from_utf8_lossy(&message.payload).contains("Never Slayer approval"));
             let parent = vega_herdr::state::Parent {
                 pane: "w15W:p2".into(),

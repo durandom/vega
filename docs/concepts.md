@@ -191,8 +191,10 @@ sets or rekeys secrets.
 
 Mail into an agent's inbox is an instruction to an agent that runs without approval prompts, so who may send is
 decided per host. Each host has its own NATS key (`vega post keygen`) and writes only its own registry keys and
-sender subjects. A host listed as inbox-only (for example a work-managed machine) receives mail but cannot send
-it; with a quarantine grant its replies become a note for the owner, never typed into a pane. Broker rights
+sender subjects. A host listed as inbox-only (for example a work-managed machine) receives mail but cannot
+publish directly into agent inboxes. Its quarantine replies become owner notes unless a live receiver-local
+operator pair grant delivers marked peer inbox mail. The sender pane is the host's own claim; granted replies
+are never Slayer approval or parent/task-channel mail. Broker rights
 are not changed by vega itself: `vega post auth-config` prints the `nats.conf` authorization block, the
 owner of the broker reviews and applies it, and new hosts' streams need the admin key (`vega post provision`). Agents never approve trust or permission prompts, also not each
 other's (`vega mux answer` answers question dialogs only); a peer agent's mail is a request, not an order from

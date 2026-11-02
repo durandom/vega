@@ -2041,7 +2041,7 @@ fn footer_text(
         Footer::Plain => String::new(),
         Footer::Task(_) if quarantined => {
             let host = format!(" --host {}", host.unwrap_or_default());
-            // Inbox-only mail cannot reach the parent; the human must help.
+            // A receiver pair grant permits peer mail only; questions still go to the human.
             let questions = task_questions(Mode::Headed, me, &host);
             format!(
                 "\nYour host is inbox-only: your mail is a quarantine note unless the receiver has a live operator pair grant for peer inbox mail.\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\" (peer mail with a live pair grant; otherwise the human reads it).\n{questions}\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report."
