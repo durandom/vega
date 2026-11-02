@@ -290,7 +290,7 @@ enum Cmd {
         #[arg(long = "cmd-grant")]
         cmd_grant: Vec<String>,
         /// Inbox-only hosts that may reply into quarantine (comma-separated): publish
-        /// vega.quarantine.*.*.<host> only, shown to the human as a note, never to an agent
+        /// vega.quarantine.*.*.<host> only, a human note unless a receiver-local pair grant delivers peer mail
         #[arg(long, value_delimiter = ',')]
         quarantine: Vec<String>,
         /// One registry key an inbox-only host may read: host=<key>, e.g. deimos=proteus.theme; repeat
@@ -1563,8 +1563,8 @@ fn send(
 }
 
 /// `send` and `done` on an inbox-only host: the reply goes into quarantine
-/// (quarantine.rs), a notice for the human on the target host; no agent
-/// sees it. Fails unless the target's vegad stored it.
+/// (quarantine.rs): a human note, or peer inbox mail under a live receiver
+/// pair grant. Fails unless the target's vegad confirms storage.
 fn send_quarantine(
     to_host: &str,
     target: &str,
@@ -2219,7 +2219,7 @@ fn print_msg(
             println!("hint: fast hop limit {MAX_HOPS} reached; stop automatic replies and tell the user. A substantive reply can resume 120 s after this message was published");
         }
         let quarantine = if st::is_inbox_only(host) {
-            " (quarantine: this host is inbox-only; the human there sees it as a notice, the agent does not)"
+            " (inbox-only: quarantine note unless the receiver has a live operator pair grant)"
         } else {
             ""
         };
@@ -4248,7 +4248,7 @@ fn ask(
             return text.to_string();
         }
         let how = if st::is_inbox_only(to_host) {
-            "your host is inbox-only, so the reply command `vega post inbox` prints puts your answer into quarantine: the human sees it, the asker does not wait for it"
+            "your host is inbox-only: replies become quarantine notes unless the receiver has a live operator pair grant; the asker does not wait for them"
         } else {
             "answer once, with the reply command `vega post inbox` prints"
         };
@@ -4320,7 +4320,7 @@ fn ask(
         );
     }
     if unawaited > 0 {
-        println!("help: {unawaited} on inbox-only hosts: their answers reach the human as quarantine notes (`vega post notes`), never your inbox");
+        println!("help: {unawaited} on inbox-only hosts: answers are not awaited; quarantine notes (`vega post notes`) unless a live operator pair grant delivers peer inbox mail");
     }
     if !awaited.is_empty() {
         println!("help: one pointer arrives when all awaited answered; do not poll");

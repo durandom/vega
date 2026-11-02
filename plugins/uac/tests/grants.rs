@@ -50,6 +50,18 @@ fn grant_cli_requires_expiry_and_retains_revocation() {
     let list = String::from_utf8_lossy(&list.stdout);
     assert!(list.contains("deimos:w15W:p2"));
     assert!(list.contains("live"));
+    let file = std::fs::read_dir(root.path().join(".local/state/vega/mail-grants"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    record["expires"] = 0.into();
+    std::fs::write(&file, serde_json::to_vec(&record).unwrap()).unwrap();
+    assert!(String::from_utf8_lossy(&call(&["grants"]).stdout).contains("expired"));
+    assert!(call(&grant).status.success());
     let revoke = ["revoke", "deimos:w15W:p2", "proteus:w3V:p1"];
     assert!(call(&revoke).status.success());
     assert!(call(&revoke).status.success());

@@ -10,7 +10,7 @@ another host's stream that republishes all mail to the admin.
 Adding a host: config with --create <host>, reload, `vega post provision <host>`, config without --create, reload.
 
 --quarantine <host> (inbox-only hosts only): may publish vega.quarantine.*.*.<host>, request/reply, no stream; the
-target host's vegad notes it for the human and never types it into a pane. Every other host serves
+target host's vegad notes it for the human unless a live receiver-local operator pair grant delivers peer inbox mail. Every other host serves
 vega.quarantine.<self>.> for that.
 
 --registry-read <host>=<key> (inbox-only hosts only; repeat): one last-by-subject direct get of that registry key

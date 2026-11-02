@@ -2036,7 +2036,7 @@ fn footer_text(
     quarantined: bool,
 ) -> String {
     match footer {
-        Footer::Peer if quarantined => format!(" · reply only if it adds something: {reply_cmd} \"<reply>\" (your host is inbox-only: the reply goes into quarantine, a note for the human; I do not see it)"),
+        Footer::Peer if quarantined => format!(" · reply only if it adds something: {reply_cmd} \"<reply>\" (your host is inbox-only: the reply is a quarantine note unless the receiver has a live operator pair grant for peer inbox mail)"),
         Footer::Peer => format!(" · reply only if it adds something: {reply_cmd} \"<reply>\""),
         Footer::Plain => String::new(),
         Footer::Task(_) if quarantined => {
@@ -2044,7 +2044,7 @@ fn footer_text(
             // Inbox-only mail cannot reach the parent; the human must help.
             let questions = task_questions(Mode::Headed, me, &host);
             format!(
-                "\nYour host is inbox-only: your mail goes into quarantine, a note for the human; I never see it.\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\" (the human reads it).\n{questions}\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report."
+                "\nYour host is inbox-only: your mail is a quarantine note unless the receiver has a live operator pair grant for peer inbox mail.\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\" (peer mail with a live pair grant; otherwise the human reads it).\n{questions}\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report."
             )
         }
         // The parent's relay records the outcome and wakes the parent.

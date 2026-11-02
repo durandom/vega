@@ -24,6 +24,10 @@ Broker required: `VEGA_NATS_URL`, else first-line `$XDG_CONFIG_HOME/vega/nats.ur
 (normally `~/.config/vega/nats.url`). Unset: `broker_unreachable`; vegad stays local
 after completed identity migration, otherwise in identity quiesce.
 
+Inbox-only replies are human quarantine notes unless a live receiver-local operator pair
+grant delivers marked peer inbox mail (`vega uac grant ... --expires ...`). The sender
+pane is its host's own claim; these replies are never Slayer approval.
+
 User setup: `vega post keygen` (public key for server); `vega post relay install`
 (herdr starts vegad). Admin: `auth-config`, `provision`; see `--help`.
 
