@@ -274,20 +274,23 @@ pub fn output_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<Op
             .take()
             .map(|s| Box::new(s) as Box<dyn Read + Send>),
     );
-    let kill = |child: &mut std::process::Child| {
+    let kill = |mut child: std::process::Child| {
         // Include descendants holding stdout/stderr open after the direct
         // child exits; joining pipe readers must not bypass the deadline.
         unsafe {
             libc::kill(-(child.id() as i32), libc::SIGKILL);
         }
-        let _ = child.wait();
+        // Reap off the caller: even SIGKILL can wait on a kernel I/O stall.
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
     };
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
         if start.elapsed() >= timeout {
-            kill(&mut child);
+            kill(child);
             return Ok(None);
         }
         thread::sleep(Duration::from_millis(20));
@@ -303,7 +306,7 @@ pub fn output_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<Op
             stderr,
         })),
         _ => {
-            kill(&mut child);
+            kill(child);
             Ok(None)
         }
     }
