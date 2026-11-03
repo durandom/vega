@@ -18,10 +18,11 @@ use std::time::{Duration, Instant};
 const PROBE_GAP: Duration = Duration::from_secs(60);
 /// One bounded broker step: the probe's connect, the setup (`outage::CALL`).
 const BROKER_CALL: Duration = Duration::from_secs(10);
-/// The sidebar sends an unchanged row again after 60 s (`RENEW_AFTER`) on a
-/// 5 s tick (`TICK`, sidebar.rs). A row can still change at the first local
-/// refresh, up to one `REGISTRY_EVERY` (15 s, main.rs) into local mode.
-const RENEWAL: Duration = Duration::from_secs(60 + 5 + 15);
+/// Two local-mode reports of an unchanged row. The sidebar sends one again
+/// after 60 s (`RENEW_AFTER`) on a 5 s tick (`TICK`, sidebar.rs). A row sent
+/// just before the switch needs that twice; one that changes at the first local
+/// refresh, up to one `REGISTRY_EVERY` (15 s, main.rs) in, needs it once.
+const RENEWAL: Duration = Duration::from_secs(2 * (60 + 5) + 15);
 /// Headroom for a machine busy with a full check. Only a failure waits this.
 const LOAD: Duration = Duration::from_secs(20);
 
@@ -40,9 +41,15 @@ impl Drop for Proc {
     }
 }
 
-/// Two claude panes; w1:p1 closes once `$FAKE_LOG/p1-closed` exists.
+/// Two claude panes; w1:p1 closes once `$FAKE_LOG/p1-closed` exists. Reports for
+/// w1:p2 made while vegad's state says local also go to `local-reports`.
 const FAKE_HERDR: &str = r#"#!/bin/sh
 echo "$*" >> "$FAKE_LOG/herdr-calls"
+case "$*" in "pane report-metadata w1:p2"*)
+  case "$(cat "$FAKE_LOG/state/vega/post-relay-testhost.broker" 2>/dev/null)" in
+    local*) echo "$*" >> "$FAKE_LOG/local-reports" ;;
+  esac ;;
+esac
 p1='{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/","agent":"claude","agent_status":"idle"},'
 [ -e "$FAKE_LOG/p1-closed" ] && p1=''
 p2='{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/","agent":"claude","agent_status":"working"}'
@@ -81,22 +88,18 @@ fn wait_for(log: &Path, what: &str, within: Duration, mut ready: impl FnMut() ->
     }
 }
 
-fn metadata_reports(home: &Path) -> Vec<String> {
-    fs::read_to_string(home.join("herdr-calls"))
+fn local_reports(home: &Path) -> Vec<String> {
+    fs::read_to_string(home.join("local-reports"))
         .unwrap_or_default()
         .lines()
-        .filter(|l| l.starts_with("pane report-metadata w1:p2"))
         .map(String::from)
         .collect()
 }
 
-/// Whether a report from index `from` on repeats the one before it: a renewal
-/// of an unchanged row, not the first report or a changed one.
-fn renewed_since(reports: &[String], from: usize) -> bool {
-    reports
-        .windows(2)
-        .enumerate()
-        .any(|(i, pair)| i + 1 >= from && pair[0] == pair[1])
+/// Whether a report repeats the one before it: a renewal of an unchanged row,
+/// not a first report or a changed one.
+fn renewed(reports: &[String]) -> bool {
+    reports.windows(2).any(|pair| pair[0] == pair[1])
 }
 
 #[test]
@@ -165,10 +168,13 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
                 .unwrap();
         });
 
-    let exe = env!("CARGO_BIN_EXE_vega-post");
+    // A private copy: any cargo run in this target dir re-links the original,
+    // and vegad would take that for an upgrade and exec it mid-test.
+    let exe = bin.join("vega-post");
+    fs::copy(env!("CARGO_BIN_EXE_vega-post"), &exe).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let cmd = |args: &[&str]| {
-        let mut c = Command::new(exe);
+        let mut c = Command::new(&exe);
         c.args(args)
             .env_clear()
             .env("HOME", home)
@@ -237,10 +243,6 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     let outage = notes();
     assert_eq!(outage.len(), 1, "{outage:?}");
     assert!(outage[0]["resolved"].is_null(), "{outage:?}");
-    // Where local mode starts in the reports: its first refresh sends within
-    // about 100 ms, so it may or may not be counted here. Either way a renewal
-    // lies ahead.
-    let before = metadata_reports(home).len();
     fs::write(home.join("p1-closed"), "").unwrap();
     wait_for(
         &log_file,
@@ -271,12 +273,12 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     let _ = half.0.wait();
 
     // The sidebar keeps its labels without the broker: the unchanged row is
-    // renewed, whichever side of `before` its first report fell on.
+    // renewed, with both reports made in local mode.
     wait_for(
         &log_file,
         "a metadata renewal without the broker",
         RENEWAL + LOAD,
-        || renewed_since(&metadata_reports(home), before),
+        || renewed(&local_reports(home)),
     );
     assert!(
         broker_state().starts_with("local"),
@@ -317,17 +319,9 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
 #[test]
 fn only_a_repeated_report_counts_as_a_renewal() {
     let r = |lines: &[&str]| lines.iter().map(|l| l.to_string()).collect::<Vec<_>>();
-    assert!(!renewed_since(&r(&[]), 0));
-    assert!(!renewed_since(&r(&["a"]), 0), "a first report");
-    assert!(!renewed_since(&r(&["a", "b"]), 0), "a changed row");
-    assert!(renewed_since(&r(&["a", "a"]), 0));
-    assert!(
-        renewed_since(&r(&["a", "a"]), 1),
-        "counted first, renewed after"
-    );
-    assert!(
-        !renewed_since(&r(&["a", "a"]), 2),
-        "renewed before local mode"
-    );
-    assert!(renewed_since(&r(&["a", "a", "b", "b"]), 2));
+    assert!(!renewed(&r(&[])));
+    assert!(!renewed(&r(&["a"])), "a first report");
+    assert!(!renewed(&r(&["a", "b"])), "a changed row");
+    assert!(renewed(&r(&["a", "a"])));
+    assert!(renewed(&r(&["a", "b", "b"])), "changed, then renewed");
 }
