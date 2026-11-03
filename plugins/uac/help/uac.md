@@ -7,6 +7,10 @@ status, unread_mail, parent, mode and the claimed bead. Agents whose parent
 is your pane are your sentinels. Registry-off mode omits remote membership;
 remote paths are metadata and never opened locally.
 
+unread_mail: relay age, pending without a valid age, unknown without metadata.
+Unknown does not prove an empty inbox. Inspect `vega post log --pane <pane>`
+on the owning host for broker read status without acknowledging mail.
+
 Spawn and adopt default to headed. For unattended sentinels, use
 `vega mux spawn --headless` or `vega uac adopt --headless` so questions go to
 the parent. Older children without a valid mode record remain headless.

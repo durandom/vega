@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 98 · 2026-11-03
+
+- feature: vegad bounds herdr subprocesses and socket requests, logs timeouts and
+  retries pending pointers. `vega uac` and `vega mux show` expose mail metadata as
+  an age, `pending`, or `unknown`; missing metadata no longer appears blank or
+  implies an empty inbox. See [vegad](docs/design/vegad.md#herdr-integration).
+
 ## 97 · 2026-11-02
 
 - feature: operators can grant exactly one inbox-only agent pair temporary peer mail with

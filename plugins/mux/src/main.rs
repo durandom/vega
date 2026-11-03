@@ -108,7 +108,7 @@ enum Cmd {
         #[arg(long)]
         now: bool,
     },
-    /// Show one agent: kind, name, status, parent, title, cwd and recent output
+    /// Show one agent: kind, name, status, unread mail, parent, title, cwd and recent output
     #[command(after_help = "Examples:\n  vega mux show w3V:p2\n  vega mux show rev --lines 200")]
     Show {
         /// Target agent: pane id (e.g. w3V:p2) or unique herdr agent name
@@ -748,6 +748,11 @@ fn show(target: &str, lines: u32) -> Result<(), Failure> {
     println!("kind: {}", str_of(a, "agent"));
     println!("name: {}", cell(&name));
     println!("status: {}", str_of(a, "agent_status"));
+    println!(
+        "unread_mail: {}",
+        vega_herdr::mail::unread(a, (vega_herdr::notes::now_ms() / 1000) as i64)
+    );
+    println!("mail: relay metadata; unknown does not mean empty. Check `vega post log --pane {pane}` on the owning host.");
     println!(
         "parent: {}",
         parent_of(pane, &name).map_or("-".into(), |p| p.label(&vega_herdr::state::post_host()))

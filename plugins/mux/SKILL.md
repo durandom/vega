@@ -8,7 +8,7 @@ description: Lists, inspects, messages and spawns other coding agents in herdr p
 Help: `--help`.
 
 - `vega mux` lists the agents in your herdr workspace (`--all`: every workspace).
-  `vega mux show <pane|name>`: one agent's status, parent and recent output.
+  `vega mux show <pane|name>`: one agent's status, unread mail metadata, parent and recent output.
 - `vega mux transcript <pane|name> [--last|--since N|--count]` reads its session log: the
   evidence of what it said, unlike `show`.
 - `vega mux send <pane|name> "<text>"` (or `--file <path>`) mails it; the reply arrives

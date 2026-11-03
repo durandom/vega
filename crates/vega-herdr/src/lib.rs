@@ -11,12 +11,14 @@ pub mod dialog;
 pub mod gather;
 pub mod hosts;
 pub mod lanes;
+pub mod mail;
 pub mod mail_grants;
 pub mod notes;
 pub mod pane;
 pub mod project;
 pub mod resets;
 pub mod service_config;
+pub mod socket;
 pub mod state;
 pub mod theme;
 pub mod vegad_env;
@@ -34,6 +36,14 @@ use serde_json::Value;
 
 /// The herdr machine that `--machine` targets; `None` is this machine.
 static MACHINE: OnceLock<Option<String>> = OnceLock::new();
+
+static BOUNDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable before starting daemon workers: every herdr subprocess, including
+/// calls in shared helpers, must yield control even when herdr stops answering.
+pub fn bound_daemon_calls() {
+    BOUNDED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
 
 pub fn machine() -> Option<&'static str> {
     MACHINE.get().and_then(|m| m.as_deref())
@@ -148,6 +158,11 @@ fn run_herdr_on(
     args: &[&str],
     timeout: Option<Duration>,
 ) -> Result<String, Failure> {
+    let timeout = timeout.or_else(|| {
+        BOUNDED
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .then_some(socket::CALL_TIMEOUT)
+    });
     let mut full: Vec<&str> = Vec::new();
     if let Some(m) = target {
         full.extend(["--machine", m]);
@@ -167,9 +182,20 @@ fn run_herdr_on(
         Some(t) => output_within(&mut cmd, t)
             .map_err(not_found)?
             .ok_or_else(|| {
+                if BOUNDED.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "herdr timeout: {} ({}s); daemon continues",
+                        args.iter().take(2).copied().collect::<Vec<_>>().join(" "),
+                        t.as_secs()
+                    );
+                }
                 Failure::new(
                     "herdr_timeout",
-                    format!("herdr did not answer within {}s", t.as_secs()),
+                    format!(
+                        "herdr {} did not answer within {}s",
+                        args.iter().take(2).copied().collect::<Vec<_>>().join(" "),
+                        t.as_secs()
+                    ),
                     "check that the machine is up and reachable over ssh",
                 )
             })?,
@@ -217,19 +243,24 @@ fn run_herdr_on(
 /// (then it is killed). Pipes are drained on threads so a full pipe cannot
 /// block the child.
 pub fn output_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<Option<Output>> {
+    use std::os::unix::process::CommandExt;
+    let start = Instant::now();
     let mut child = cmd
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
     let drain = |r: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = std::sync::mpsc::channel();
         thread::spawn(move || {
             let mut buf = Vec::new();
             if let Some(mut r) = r {
                 let _ = r.read_to_end(&mut buf);
             }
-            buf
-        })
+            let _ = tx.send(buf);
+        });
+        rx
     };
     let out = drain(
         child
@@ -243,23 +274,39 @@ pub fn output_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<Op
             .take()
             .map(|s| Box::new(s) as Box<dyn Read + Send>),
     );
-    let start = Instant::now();
+    let kill = |child: &mut std::process::Child| {
+        // Include descendants holding stdout/stderr open after the direct
+        // child exits; joining pipe readers must not bypass the deadline.
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+        let _ = child.wait();
+    };
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
         if start.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill(&mut child);
             return Ok(None);
         }
         thread::sleep(Duration::from_millis(20));
     };
-    Ok(Some(Output {
-        status,
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
-    }))
+    let receive = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
+        rx.recv_timeout(timeout.saturating_sub(start.elapsed()))
+            .ok()
+    };
+    match (receive(out), receive(err)) {
+        (Some(stdout), Some(stderr)) => Ok(Some(Output {
+            status,
+            stdout,
+            stderr,
+        })),
+        _ => {
+            kill(&mut child);
+            Ok(None)
+        }
+    }
 }
 
 fn hint_for(code: &str) -> &'static str {
@@ -692,6 +739,77 @@ pub fn set_machine(m: Option<String>) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn subprocess_deadline_covers_a_stall_and_inherited_pipes() {
+        for script in ["sleep 10", "sleep 10 & exit 0"] {
+            let start = Instant::now();
+            let result = output_within(
+                Command::new("sh").args(["-c", script]),
+                Duration::from_millis(100),
+            )
+            .unwrap();
+            assert!(result.is_none(), "{script}");
+            assert!(start.elapsed() < Duration::from_secs(2));
+        }
+        let result = output_within(
+            Command::new("sh").args(["-c", "printf ok"]),
+            Duration::from_secs(2),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.stdout, b"ok");
+    }
+
+    #[test]
+    fn daemon_herdr_calls_time_out_and_next_call_can_succeed() {
+        const CHILD: &str = "VEGA_HERDR_DEADLINE_TEST";
+        if env::var_os(CHILD).is_some() {
+            bound_daemon_calls();
+            let start = Instant::now();
+            assert_eq!(
+                herdr_local(&["agent", "prompt"]).unwrap_err().code,
+                "herdr_timeout"
+            );
+            assert!(start.elapsed() < Duration::from_secs(8));
+            assert_eq!(herdr_text(&["pane", "read"]).unwrap(), "ok");
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("herdr");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nif [ \"$1\" = agent ]; then sleep 30; else printf ok; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let result = output_within(
+            Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::daemon_herdr_calls_time_out_and_next_call_can_succeed",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env(
+                    "PATH",
+                    format!(
+                        "{}:{}",
+                        dir.path().display(),
+                        env::var("PATH").unwrap_or_default()
+                    ),
+                ),
+            Duration::from_secs(12),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
 
     #[test]
     fn in_project_compares_ids_and_never_interprets_locations() {
