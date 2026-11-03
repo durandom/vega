@@ -17,7 +17,8 @@ impl Client {
     pub fn connect(path: &Path, timeout: Duration) -> io::Result<Self> {
         let socket = Socket::new(Domain::UNIX, Type::STREAM, None)?;
         socket.connect_timeout(&SockAddr::unix(path)?, timeout)?;
-        Ok(Self(BufReader::new(socket.into())))
+        let fd: std::os::fd::OwnedFd = socket.into();
+        Ok(Self(BufReader::new(UnixStream::from(fd))))
     }
 
     pub fn write(&mut self, value: &Value, timeout: Duration) -> io::Result<()> {
