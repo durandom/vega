@@ -9,7 +9,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: the broker outage test's waits now cover the full probe backoff plus 20 s of headroom for
   a busy machine, and it always checks the sidebar renewal during an outage. A run takes about
-  2 minutes, which can add up to about 2 minutes to `mise run check`. See
+  135 s, up from as little as 22 s, and `mise run check` grows with it. See
   [vegad](docs/design/vegad.md#broker-outage-vega-lhc205).
 
 ## 98 · 2026-11-03

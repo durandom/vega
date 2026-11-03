@@ -322,7 +322,7 @@ channel was full the next broker call waited forever, taking the single-threaded
   the TCP connection is noticed within about 30 s.
 - Test: `plugins/post/tests/broker_outage.rs` kills a local nats-server mid-run and starts it again. Each
   wait covers the full probe backoff, because a phase can meet any step; the sidebar renewal takes 60 s of
-  local mode, so a run takes about 2.5 minutes.
+  local mode, so a run takes about 135 s.
 
 `vega onboard` therefore recommends `vega post relay install` on every host.
 

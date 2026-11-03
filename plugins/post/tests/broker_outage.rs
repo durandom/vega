@@ -5,7 +5,7 @@
 //!
 //! Each phase may meet any step of the probe backoff, so the waits below come
 //! from vegad's own bounds. The sidebar renewal takes 60 s of local mode, which
-//! leaves the broker's return in the slow part of the backoff: about 2.5 minutes.
+//! leaves the broker's return in the slow part of the backoff: about 135 s.
 
 use std::fs;
 use std::net::TcpListener;
