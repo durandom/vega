@@ -16,13 +16,12 @@
 
 use std::collections::HashMap;
 use std::env;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedSender;
+use vega_herdr::socket::{Client, CALL_TIMEOUT};
 
 /// herdr `schema_version`s this client was written against (herdr 0.9.3).
 const KNOWN_SCHEMAS: [u64; 1] = [1];
@@ -145,14 +144,15 @@ fn socket_path() -> String {
     )
 }
 
-fn connect() -> Result<UnixStream, String> {
+fn connect() -> Result<Client, String> {
     let path = socket_path();
-    UnixStream::connect(&path).map_err(|e| format!("connect {path}: {e}"))
+    Client::connect(std::path::Path::new(&path), CALL_TIMEOUT)
+        .map_err(|e| format!("connect {path}: {e}"))
 }
 
-fn request(conn: &mut UnixStream, method: &str, params: Value) -> Result<(), String> {
-    let line = json!({"id": "vegad", "method": method, "params": params}).to_string();
-    conn.write_all(format!("{line}\n").as_bytes())
+fn request(conn: &mut Client, method: &str, params: Value) -> Result<(), String> {
+    let line = json!({"id": "vegad", "method": method, "params": params});
+    conn.write(&line, CALL_TIMEOUT)
         .map_err(|e| format!("write: {e}"))
 }
 
@@ -164,8 +164,9 @@ fn stream(tx: &UnboundedSender<Event>) -> Result<(), String> {
 
     let mut conn = connect()?;
     request(&mut conn, "events.subscribe", subscriptions(&ids))?;
-    let mut lines = BufReader::new(conn).lines();
-    let first = next_json(&mut lines)?;
+    let first = conn
+        .read(CALL_TIMEOUT)
+        .map_err(|e| format!("subscribe read: {e}"))?;
     if let Some(err) = first.get("error") {
         // A pane closed between snapshot and subscribe: try again.
         if err["code"] == "pane_not_found" {
@@ -175,7 +176,9 @@ fn stream(tx: &UnboundedSender<Event>) -> Result<(), String> {
     }
     let _ = tx.send(Event::Mode(Mode::Stream));
     loop {
-        let v = next_json(&mut lines)?;
+        let Some(v) = read_event(&mut conn, STREAM_RETRY)? else {
+            return Ok(());
+        };
         match parse_event(&v) {
             Parsed::Event(e) => {
                 let _ = tx.send(e);
@@ -186,17 +189,20 @@ fn stream(tx: &UnboundedSender<Event>) -> Result<(), String> {
     }
 }
 
-fn next_json(lines: &mut std::io::Lines<BufReader<UnixStream>>) -> Result<Value, String> {
-    loop {
-        match lines.next() {
-            None => return Err("herdr closed the event stream".into()),
-            Some(Err(e)) => return Err(format!("read: {e}")),
-            Some(Ok(l)) if l.trim().is_empty() => continue,
-            Some(Ok(l)) => {
-                return serde_json::from_str(&l)
-                    .map_err(|_| "herdr sent a line that is not JSON".into())
-            }
+/// Silence is normal on an idle host: resnapshot instead of entering the
+/// polling fallback. EOF, malformed JSON and other failures still fall back.
+fn read_event(conn: &mut Client, timeout: Duration) -> Result<Option<Value>, String> {
+    match conn.read(timeout) {
+        Ok(v) => Ok(Some(v)),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            Ok(None)
         }
+        Err(e) => Err(format!("event read: {e}")),
     }
 }
 
@@ -223,8 +229,9 @@ fn subscriptions(panes: &[String]) -> Value {
 fn snapshot() -> Result<HashMap<String, String>, String> {
     let mut conn = connect()?;
     request(&mut conn, "session.snapshot", json!({}))?;
-    let mut lines = BufReader::new(conn).lines();
-    let v = next_json(&mut lines)?;
+    let v = conn
+        .read(CALL_TIMEOUT)
+        .map_err(|e| format!("snapshot read: {e}"))?;
     if let Some(err) = v.get("error") {
         return Err(format!("session.snapshot refused: {}", err["message"]));
     }
@@ -310,6 +317,21 @@ fn poll_once(tx: &UnboundedSender<Event>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quiet_subscription_resnapshots_but_a_closed_one_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("herdr.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let mut client = Client::connect(&path, CALL_TIMEOUT).unwrap();
+        let (peer, _) = listener.accept().unwrap();
+        assert_eq!(
+            read_event(&mut client, Duration::from_millis(30)).unwrap(),
+            None
+        );
+        drop(peer);
+        assert!(read_event(&mut client, CALL_TIMEOUT).is_err());
+    }
 
     #[test]
     fn schema_must_be_known_and_complete() {

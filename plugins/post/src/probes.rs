@@ -24,6 +24,7 @@ const GIT_EVERY: Duration = Duration::from_secs(30);
 /// A checkout no refresh asked about for this long is no longer probed.
 const GIT_UNWANTED_AFTER: Duration = Duration::from_secs(120);
 
+#[derive(Clone)]
 struct Resolved {
     at: Instant,
     /// mtime of the common dir's config (Ok) or of the path (Err).
@@ -51,15 +52,17 @@ impl Resolved {
 pub fn resolve(path: &Path, host: &str) -> Result<Project, Failure> {
     type Cache = HashMap<(PathBuf, String), Resolved>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
-    let mut cache = CACHE
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let cache = CACHE.get_or_init(Default::default);
     let key = (path.to_path_buf(), host.to_owned());
     let now = Instant::now();
-    let hit = cache.get(&key).filter(|r| r.fresh(path, now));
-    let result = match hit {
-        Some(r) => r.result.clone(),
+    let hit = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .cloned();
+    // mtime and project resolution both do I/O, outside the cache lock.
+    let result = match hit.filter(|r| r.fresh(path, now)) {
+        Some(r) => r.result,
         None => {
             let result = vega_herdr::project::resolve(path, host);
             let stamp = match &result {
@@ -67,7 +70,7 @@ pub fn resolve(path: &Path, host: &str) -> Result<Project, Failure> {
                 Err(_) => mtime(path),
             };
             let result = result.map_err(|f| (f.code, f.message, f.hint));
-            cache.insert(
+            cache.lock().unwrap_or_else(|e| e.into_inner()).insert(
                 key,
                 Resolved {
                     at: now,

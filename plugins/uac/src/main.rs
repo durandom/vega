@@ -402,10 +402,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
                     None => lookup.bead(Path::new(str_of(a, "cwd")), &host),
                     Some(_) => String::new(),
                 },
-                unread: a["tokens"]["mail_since"]
-                    .as_str()
-                    .and_then(|t| t.parse::<i64>().ok())
-                    .map(|ms| unix_now() - ms / 1000),
+                unread: vega_herdr::mail::unread(a, unix_now()),
                 rank: status_rank(str_of(a, "agent_status")),
             });
         }
@@ -442,7 +439,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
             parent: c.parent.label_on(&host, c.machine.as_deref()),
             mode: String::new(),
             bead: String::new(),
-            unread: None,
+            unread: "unknown".into(),
             rank: 0,
         });
     }
@@ -479,6 +476,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
     for line in agent_table(&rows) {
         println!("{line}");
     }
+    println!("mail: relay metadata; unknown does not mean empty. Check `vega post log --pane <pane>` on the owning host.");
     for line in attention_table(&rows, &host) {
         println!("{line}");
     }
@@ -574,8 +572,8 @@ struct Row {
     /// headed or headless (`vega mux mode`); empty without a local parent record.
     mode: String,
     bead: String,
-    /// Age of the oldest unread mail (vegad's `mail_since` token), seconds.
-    unread: Option<i64>,
+    /// Relay mail observation; absent metadata means unknown.
+    unread: String,
     rank: usize,
 }
 
@@ -594,9 +592,7 @@ fn agent_table(rows: &[Row]) -> Vec<String> {
             cell(&r.kind),
             r.status,
             r.attention.map_or("", Attention::as_str),
-            r.unread
-                .map(|s| format!("{} old", age(s)))
-                .unwrap_or_default(),
+            cell(&r.unread),
             cell(&r.parent),
             r.mode,
             cell(&r.bead)
@@ -1937,7 +1933,7 @@ mod tests {
             parent: "w3V:p1 on proteus".into(),
             mode: "headless".into(),
             bead: String::new(),
-            unread: Some(1500),
+            unread: "25m old".into(),
             rank: 1,
         }];
         assert_eq!(
@@ -1968,7 +1964,7 @@ mod tests {
             parent: "w3V:p1".into(),
             mode: String::new(),
             bead: String::new(),
-            unread: None,
+            unread: "unknown".into(),
             rank: 0,
         }
     }

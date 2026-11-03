@@ -13,6 +13,8 @@ run = "cargo build --workspace --release"
 description = "Format check, lint and test"
 run = [
   "cargo fmt --all --check",
+  # Catch socket client feature assumptions hidden by workspace feature unification.
+  "cargo check -p vega-herdr",
   "cargo clippy --workspace --all-targets -- -D warnings",
   "cargo test --workspace",
   "cd vscode && node --test",

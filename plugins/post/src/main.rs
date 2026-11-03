@@ -782,6 +782,7 @@ async fn connect(
 static DAEMON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn enter_daemon() {
+    vega_herdr::bound_daemon_calls();
     DAEMON.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -792,9 +793,16 @@ fn is_daemon() -> bool {
 /// One log line per distinct denial: the catalog reconnects every 15 min.
 fn log_denied_once(msg: &str) {
     static SAID: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-    let Ok(mut said) = SAID.lock() else { return };
-    if !said.iter().any(|m| m == msg) {
-        said.push(msg.to_string());
+    let first = {
+        let Ok(mut said) = SAID.lock() else { return };
+        if said.iter().any(|m| m == msg) {
+            false
+        } else {
+            said.push(msg.to_string());
+            true
+        }
+    };
+    if first {
         log(&format!("broker right missing, feature off: {msg}"));
     }
 }
@@ -3176,6 +3184,9 @@ async fn serve(
                 if d.decide(&pane, count, floor) != Decision::Type {
                     continue;
                 }
+                log(&format!(
+                    "pointer check: {pane}, reading draft ({count} pending)"
+                ));
                 if drafts.holds(&pane) {
                     continue; // stays pending
                 }
@@ -3786,8 +3797,6 @@ async fn subject_counts(
     Ok(out)
 }
 
-/// Types the pointer as a new prompt. Blocking herdr calls are fine here: the
-/// relay is single-threaded and herdr answers in milliseconds.
 /// What `parent` was last woken for (`woke/` record, one `pane attention`
 /// per line), so a relay restart does not wake it again for the same.
 fn load_woke(parent: &str) -> Attentions {
@@ -4647,12 +4656,16 @@ fn save_project_badges(
 /// Logs what theme.toml's `[symbols]` got wrong, once per change.
 fn log_theme_errors(errors: &[String]) {
     static LAST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if *last != errors {
+    let changed = {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = *last != errors;
+        *last = errors.to_vec();
+        changed
+    };
+    if changed {
         for e in errors {
             log(e);
         }
-        *last = errors.to_vec();
     }
 }
 
@@ -6077,6 +6090,64 @@ fn log(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stalled_pointer_stays_pending_and_does_not_stop_the_next_pane() {
+        const CHILD: &str = "VEGA_POST_POINTER_DEADLINE_TEST";
+        if env::var_os(CHILD).is_some() {
+            enter_daemon();
+            let mut d = Delivery::default();
+            for p in ["w1:p1", "w1:p2"] {
+                d.status(p, "idle");
+                d.mail(p, Sender::Other);
+                assert_eq!(d.decide(p, 1, 0), Decision::Type);
+                let result = notify(p, &pointer(1));
+                d.typed(p, 0, result.is_ok());
+                if p == "w1:p1" {
+                    assert_eq!(result.unwrap_err().code, "herdr_timeout");
+                    assert_eq!(d.decide(p, 1, 0), Decision::Type);
+                } else {
+                    assert!(result.is_ok());
+                    assert!(d.repeat(p));
+                }
+            }
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("herdr");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nif [ \"$3\" = w1:p1 ]; then sleep 30; else printf '{}'; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let result = vega_herdr::output_within(
+            std::process::Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::a_stalled_pointer_stays_pending_and_does_not_stop_the_next_pane",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env(
+                    "PATH",
+                    format!(
+                        "{}:{}",
+                        dir.path().display(),
+                        env::var("PATH").unwrap_or_default()
+                    ),
+                ),
+            Duration::from_secs(12),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
 
     #[test]
     fn a_bounce_id_is_stable_per_retry_and_distinct_per_sender_and_close() {

@@ -4,6 +4,10 @@ Lets coding agents work with each other through herdr panes, on this machine or 
 lists the others, reads what they said, messages them, answers their dialogs and spawns new agents, also in their
 own git worktree. It is how the UAC runs its sentinels.
 
+`show` includes `unread_mail`: the relay's oldest mail age, `pending` without a
+valid age, or `unknown` without metadata. Unknown does not prove an empty inbox;
+inspect `vega post log --pane <pane>` on the owning host for broker read status.
+
 Commands: `vega mux`, `show`, `transcript`, `send`, `dialog`, `answer`, `spawn`, `close`, `reopen`, and for the Slayer `next`
 (the agent that has waited longest, on any host). There is no default vega key binding for `next`;
 use herdr's goto overlay (`prefix+g`, then `d`) to list done agents across machines and switch to one.

@@ -8,12 +8,10 @@
 //! machine themselves (upstream: vega-8m7).
 
 use std::env;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 /// Characters that wrap a path in prose, markdown or compiler output.
 const WRAPPERS: &[(char, char)] = &[
@@ -213,18 +211,12 @@ pub fn focus(hit: &Hit) -> Result<(), String> {
 /// (`agent focus`) or neighbours (`pane focus --direction`).
 fn focus_local(pane: &str) -> Result<(), String> {
     let path = socket_path().ok_or("no herdr socket (HOME unset)")?;
-    let mut conn =
-        UnixStream::connect(&path).map_err(|e| format!("connect {}: {e}", path.display()))?;
-    conn.set_read_timeout(Some(HERDR_TIMEOUT))
-        .map_err(|e| e.to_string())?;
+    let mut conn = crate::socket::Client::connect(&path, HERDR_TIMEOUT)
+        .map_err(|e| format!("connect {}: {e}", path.display()))?;
     let req = json!({"id": "vega-open", "method": "pane.focus", "params": {"pane_id": pane}});
-    conn.write_all(format!("{req}\n").as_bytes())
+    conn.write(&req, HERDR_TIMEOUT)
         .map_err(|e| format!("write: {e}"))?;
-    let mut line = String::new();
-    BufReader::new(conn)
-        .read_line(&mut line)
-        .map_err(|e| format!("read: {e}"))?;
-    let v: Value = serde_json::from_str(&line).map_err(|_| "herdr sent no JSON reply")?;
+    let v = conn.read(HERDR_TIMEOUT).map_err(|e| format!("read: {e}"))?;
     match v.get("error") {
         Some(err) => Err(err["message"].as_str().unwrap_or("refused").to_string()),
         None => Ok(()),

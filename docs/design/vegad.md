@@ -128,6 +128,17 @@ small socket client. Keep it minimal (these two methods plus `session.snapshot`)
 `schema_version` from `herdr api schema` at start, and fall back to polling `herdr agent list` when
 the schema is unknown.
 
+Daemon herdr subprocesses have a five-second deadline (including pipe draining),
+with their process group killed on timeout and a diagnostic logged. Direct socket
+connects, writes and complete JSON replies also have five-second deadlines;
+receiving part of a reply does not extend its deadline. The event subscription
+resnapshots after 30 seconds without a complete event, so an idle or stalled
+subscription cannot leave agent status stale indefinitely. Failed snapshots or
+subscription handshakes enter the existing polling fallback. Pointer checks log
+before reading the draft, and failures keep mail pending for a later attempt.
+Shared caches and deduplicated diagnostics release their locks before I/O.
+The socket client uses socket2 for a portable connect deadline on Unix sockets.
+
 ## Lifecycle (vega-lhc.54)
 
 vegad needs starting, not supervising: a restart loses little, and herdr is where vegad is needed.
@@ -533,7 +544,12 @@ shows its spawn name, its task or done report as title, `$attention` and `$paren
 shows `<atom> UAC` and `$role`, plus its badges (see Badges); a pane
 with unread mail gets `$mail`, and `mail_since` (Unix ms of the
 oldest unread arrival, as vegad saw it; since its restart for older mail), which `vega uac` shows as
-the `unread_mail` age. herdr renders `$name` tokens
+the `unread_mail` age, also shown by `vega mux show`. Both accept string or numeric
+timestamps, show `pending` when only `$mail` is available, and `unknown` when
+neither is available. These are relay observations, not broker counts: expired
+metadata cannot prove an empty inbox. Use `vega post log --pane <pane>` on the
+owning host to inspect broker read status without acknowledging mail.
+herdr renders `$name` tokens
 only where the sidebar rows name them. Snippet for `~/.config/herdr/config.toml` (rendered from `herdr/config.toml` by `vega config`, [config.md](config.md)):
 
 ```toml

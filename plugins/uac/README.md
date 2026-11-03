@@ -4,6 +4,10 @@ Coordinator mode: one session (VEGA, the UAC) runs the user's other agent sessio
 their herdr machines, so the user talks to one agent only. The plugin carries the role guide and the home view of
 the agents this session runs, with what needs its attention.
 
+`unread_mail` shows the relay's oldest mail age, `pending` when mail has no valid
+age, or `unknown` without mail metadata. Unknown does not prove an empty inbox;
+inspect `vega post log --pane <pane>` on the owning host for broker read status.
+
 Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`,
 `grant`, `revoke`, `grants`.
 
