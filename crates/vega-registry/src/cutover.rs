@@ -151,7 +151,7 @@ impl Plan {
     pub async fn rollback(&self, kv: &async_nats::jetstream::kv::Store) -> Result<(), String> {
         self.validate_local()?;
         for key in self.projection.keys() {
-            kv.delete(key).await.map_err(|e| e.to_string())?;
+            crate::remove(kv, key).await?;
         }
         for (key, value) in &self.backup {
             kv.put(key, value.to_string().into())
@@ -195,7 +195,7 @@ impl Plan {
     pub async fn apply(&self, kv: &async_nats::jetstream::kv::Store) -> Result<(), String> {
         self.validate_local()?;
         for key in self.backup.keys() {
-            kv.delete(key).await.map_err(|e| e.to_string())?;
+            crate::remove(kv, key).await?;
         }
         for (key, value) in &self.projection {
             kv.put(key, value.to_string().into())
@@ -342,7 +342,7 @@ impl Rekey {
             .keys()
             .filter(|k| !self.projection.contains_key(*k))
         {
-            kv.delete(key).await.map_err(|e| e.to_string())?;
+            crate::remove(kv, key).await?;
         }
         for (key, value) in &self.projection {
             kv.put(key, value.to_string().into())
@@ -359,7 +359,7 @@ impl Rekey {
             .keys()
             .filter(|k| !self.backup.contains_key(*k))
         {
-            kv.delete(key).await.map_err(|e| e.to_string())?;
+            crate::remove(kv, key).await?;
         }
         for (key, value) in &self.backup {
             kv.put(key, value.to_string().into())

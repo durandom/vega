@@ -74,9 +74,7 @@ pub async fn publish(
 
 /// Deletes this host's key.
 pub async fn unpublish(kv: &async_nats::jetstream::kv::Store, host: &str) -> Result<(), String> {
-    kv.delete(crate::uber_key(host))
-        .await
-        .map_err(|e| e.to_string())
+    crate::remove(kv, &crate::uber_key(host)).await
 }
 
 #[cfg(test)]

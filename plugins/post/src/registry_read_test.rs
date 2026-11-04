@@ -504,3 +504,246 @@ fn project_pins_cross_hosts_under_rendered_grants() {
             assert_eq!(resolve(&view, 102), None);
         });
 }
+
+/// Host ACLs permit TTL rollups only on their own keys, with no stream purge
+/// right. Exercise both server TTL settings and the daemon's startup cleanup.
+#[test]
+fn registry_ttl_removal_and_owner_cleanup() {
+    for ttl in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let (admin_seed, admin) = user();
+        let (seed, public) = user();
+        let (other_seed, other_public) = user();
+        let authz = auth::render(
+            &[
+                Entry {
+                    host: "proteus".into(),
+                    key: public,
+                },
+                Entry {
+                    host: "other".into(),
+                    key: other_public,
+                },
+            ],
+            Some(&admin),
+            &["registry".into()],
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            None,
+        );
+        let (_server, url) = start(dir.path(), &authz);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let a = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+                let js = jetstream::new(a);
+                let stream = js
+                    .create_stream(jetstream::stream::Config {
+                        name: "KV_VEGA_REGISTRY".into(),
+                        subjects: vec!["$KV.VEGA_REGISTRY.>".into()],
+                        max_messages_per_subject: 10,
+                        allow_rollup: true,
+                        allow_direct: true,
+                        deny_delete: true,
+                        allow_message_ttl: ttl,
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+                let c = connect(&url, &seed, "_INBOX_proteus").await;
+                let kv = jetstream::new(c.clone())
+                    .get_key_value(vega_registry::BUCKET)
+                    .await
+                    .unwrap();
+                let other = connect(&url, &other_seed, "_INBOX_other").await;
+                let other_kv = jetstream::new(other)
+                    .get_key_value(vega_registry::BUCKET)
+                    .await
+                    .unwrap();
+                other_kv
+                    .put("other.agent.dead", "old".into())
+                    .await
+                    .unwrap();
+                other_kv.delete("other.agent.dead").await.unwrap();
+                let foreign_revision = other_kv
+                    .entry("other.agent.dead")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .revision;
+                // Every removal kind used by reconcile, with history to roll up.
+                for key in [
+                    "proteus.agent.gone",
+                    "proteus.note.1",
+                    "proteus.ask.a",
+                    "proteus.wait.w",
+                ] {
+                    kv.put(key, "old".into()).await.unwrap();
+                    kv.put(key, "new".into()).await.unwrap();
+                    vega_registry::reconcile(
+                        &kv,
+                        "proteus",
+                        Default::default(),
+                        &Default::default(),
+                        &[key.into()],
+                    )
+                    .await
+                    .unwrap();
+                    let entry = kv.entry(key).await.unwrap().unwrap();
+                    assert_eq!(
+                        entry.operation,
+                        if ttl {
+                            jetstream::kv::Operation::Purge
+                        } else {
+                            jetstream::kv::Operation::Delete
+                        }
+                    );
+                    assert!(kv.get(key).await.unwrap().is_none());
+                    let raw = jetstream::new(c.clone())
+                        .get_stream("KV_VEGA_REGISTRY")
+                        .await
+                        .unwrap()
+                        .direct_get_last_for_subject(format!("$KV.VEGA_REGISTRY.{key}"))
+                        .await
+                        .unwrap();
+                    if ttl {
+                        assert_eq!(raw.headers.get("Nats-TTL").unwrap().as_str(), "3600");
+                        assert_eq!(raw.headers.get("Nats-Rollup").unwrap().as_str(), "sub");
+                        assert_eq!(raw.headers.get("KV-Operation").unwrap().as_str(), "PURGE");
+                    }
+                    // Repeated note removal must not renew the tombstone.
+                    vega_registry::remove(&kv, key).await.unwrap();
+                    assert_eq!(
+                        kv.entry(key).await.unwrap().unwrap().revision,
+                        entry.revision
+                    );
+                }
+                kv.put("proteus.agent.dead", "old".into()).await.unwrap();
+                kv.delete("proteus.agent.dead").await.unwrap();
+                kv.put("proteus.note.2", "live note".into()).await.unwrap();
+                kv.put("proteus.janitor", "live summary".into())
+                    .await
+                    .unwrap();
+                kv.put("proteus.agent.revived", "live again".into())
+                    .await
+                    .unwrap();
+                // A foreign subject must never even be attempted (ACL would reject it).
+                let mut keys = [
+                    "proteus.agent.dead",
+                    "proteus.note.2",
+                    "proteus.janitor",
+                    "proteus.agent.revived",
+                    "other.agent.dead",
+                ]
+                .map(str::to_owned)
+                .to_vec();
+                if ttl {
+                    // Larger than one batch. An immediate second run must not
+                    // drain the remainder, even on a burst of waiting events.
+                    for n in 0..33 {
+                        let key = format!("proteus.agent.batch{n:02}");
+                        kv.put(&key, "old".into()).await.unwrap();
+                        kv.delete(&key).await.unwrap();
+                        keys.push(key);
+                    }
+                }
+                let mut cleanup = vega_registry::DeadSubjects::default();
+                cleanup.run(&kv, "proteus", &keys).await.unwrap();
+                let dead = kv.entry("proteus.agent.dead").await.unwrap().unwrap();
+                assert_eq!(
+                    dead.operation,
+                    if ttl {
+                        jetstream::kv::Operation::Purge
+                    } else {
+                        jetstream::kv::Operation::Delete
+                    }
+                );
+                for key in &keys[1..4] {
+                    assert!(
+                        kv.get(key).await.unwrap().is_some(),
+                        "live value removed: {key}"
+                    );
+                }
+                cleanup.run(&kv, "proteus", &keys).await.unwrap();
+                assert_eq!(
+                    kv.entry("proteus.agent.dead")
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .revision,
+                    dead.revision
+                );
+                assert_eq!(
+                    other_kv
+                        .entry("other.agent.dead")
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .revision,
+                    foreign_revision
+                );
+                if ttl {
+                    assert_eq!(
+                        kv.entry("proteus.agent.batch32")
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .operation,
+                        jetstream::kv::Operation::Delete
+                    );
+                    // This key appeared after the one-time snapshot.
+                    kv.put("proteus.agent.late", "old".into()).await.unwrap();
+                    kv.delete("proteus.agent.late").await.unwrap();
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    cleanup.run(&kv, "proteus", &keys).await.unwrap();
+                    assert_eq!(
+                        kv.entry("proteus.agent.batch32")
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .operation,
+                        jetstream::kv::Operation::Purge
+                    );
+                    assert_eq!(
+                        kv.entry("proteus.agent.late")
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .operation,
+                        jetstream::kv::Operation::Delete
+                    );
+                    assert_eq!(
+                        kv.entry("proteus.agent.dead")
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .revision,
+                        dead.revision
+                    );
+                }
+                // Own-subject restriction still enforced for the actual TTL headers.
+                assert!(kv
+                    .purge_with_ttl("other.agent.dead", Duration::from_secs(3600))
+                    .await
+                    .is_err());
+                if ttl {
+                    use futures_util::StreamExt;
+                    let mut subjects = stream
+                        .info_with_subjects("$KV.VEGA_REGISTRY.proteus.>")
+                        .await
+                        .unwrap();
+                    while let Some(subject) = subjects.next().await {
+                        let (name, count) = subject.unwrap();
+                        if !name.ends_with(".beat") && !name.ends_with(".late") {
+                            assert_eq!(count, 1, "{name} retained old revisions");
+                        }
+                    }
+                }
+            });
+    }
+}
