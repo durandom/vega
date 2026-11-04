@@ -209,8 +209,9 @@ Hazards for answering:
 ### Questions follow the child's mode (vega-lhc.41, vega-lhc.165)
 
 Headed spawn and adopt footers tell the agent to ask the user in its pane. With `--headless`,
-questions and decisions go to the parent by `vega post send`. An inbox-only host normally sends quarantine
-notes; a live receiver-local operator pair grant permits peer inbox mail, with done/parent/fan-in controls
+questions and decisions go to the parent by `vega post send`. On an inbox-only host, same-host
+`send`/`done` use local herdr prompts with parent/done supervision; cross-host mail normally sends quarantine
+notes. A live receiver-local operator pair grant permits cross-host peer inbox mail, with done/parent/fan-in controls
 stripped or bypassed. That target's footer still tells the child to ask the user in the pane, even with
 `--headless`. A PreToolUse hook
 enforces it: `vega-mux hook ask-parent` denies AskUserQuestion (Claude) when the headless pane has a `parents` record for the

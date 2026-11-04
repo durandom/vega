@@ -115,7 +115,9 @@ pub fn deliver(
     // publishing mail or pretending there is a broker archive entry.
     let children = st::children();
     if let Some(child) = crate::child_of(&children, &me.pane, pane, &crate::host()) {
-        if let Some(outcome) = done {
+        if let Some(outcome) = done.filter(|_| {
+            crate::stale_brief(&children, pane, &me.pane, &crate::host(), hv(h::SENT_MS)).is_none()
+        }) {
             let prefix = format!("done ({}): ", outcome.as_str());
             st::save_done(
                 child.machine.as_deref(),

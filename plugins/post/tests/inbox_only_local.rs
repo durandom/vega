@@ -15,7 +15,13 @@ case "$1 $2" in
       *) echo '{"error":{"code":"agent_not_found","message":"closed"}}'; exit 1 ;;
     esac
     printf '{"result":{"agent":{"pane_id":"%s"}}}' "$pane" ;;
-  "agent prompt") printf '%s\n%s\n' "$3" "$4" >> "$HOME/prompts"; echo '{"result":{}}' ;;
+  "agent prompt")
+    printf '%s\n%s\n' "$3" "$4" >> "$HOME/prompts"
+    if test -f "$HOME/new-brief"; then
+      mkdir -p "$HOME/state/vega/briefs"
+      cat "$HOME/new-brief" > "$HOME/state/vega/briefs/local_w1_p1"
+    fi
+    echo '{"result":{}}' ;;
   *) echo '{"result":{}}' ;;
 esac
 "#;
@@ -165,6 +171,23 @@ fn local_panes_and_local_uac_claims_need_no_broker() {
             .unwrap();
     assert_eq!(record["outcome"], "succeeded");
     assert_eq!(record["summary"], "finished");
+
+    // A newer parent brief arriving while herdr takes the done prompt must
+    // keep the report from becoming the outcome of the newer task.
+    fs::remove_file(home.join("state/vega/done/local_w1_p1")).unwrap();
+    let future = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        + 60_000;
+    fs::write(home.join("new-brief"), future.to_string()).unwrap();
+    run(
+        home,
+        &["done", "--to", "w1:p2", "--outcome", "failed", "older task"],
+        true,
+    );
+    assert!(!home.join("state/vega/done/local_w1_p1").exists());
+    assert!(home.join("state/vega/replied/local_w1_p1").exists());
 }
 
 #[test]
