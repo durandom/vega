@@ -191,7 +191,8 @@ two ticks in a row (the install finished), and no draft is stashed and no comman
 vegad:
 
 1. writes `post-relay-<host>.handoff.json` (its pid, the time, the delivery state: pending,
-   urgent and parent mail, pointer floors, arrival times; the supervision state: last status,
+   urgent and parent mail, pointer floors, arrival times, pending bounces with sender history,
+   already notified senders and close timestamps; the supervision state: last status,
    busy, silent suspects);
 2. clears close-on-exec on the lock's fd and names it in `VEGA_RELAY_LOCK_FD`;
 3. execs the same path with the same arguments.
@@ -309,7 +310,7 @@ channel was full the next broker call waited forever, taking the single-threaded
   off. One note per outage, also across a vegad restart; it resolves when vegad connects again
   (`broker: outage note cleared` in the log).
 - Bounces wait: a pane that closes with unread mail while the broker is away (or whose bounce times
-  out, or whose herdr does not answer) keeps its bounce, through local mode, and the broker loop retries
+  out, or whose herdr does not answer) keeps its bounce through local mode and upgrade execs, and the broker loop retries
   it every 30 s once the broker is back. A pane herdr lists again is not bounced. The reconnect's mail
   rescan only marks known panes pending; it adds no sender-less arrival that would trim the real sender
   off the bounce. Each sender is told once: the bounce remembers whom it told, and its `Nats-Msg-Id` (pane, close

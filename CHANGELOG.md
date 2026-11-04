@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 100 · 2026-11-04
+
+- feature: vegad preserves pending bounces across self-upgrades, including senders already notified
+  and the close timestamp, so unread-mail notifications resume once the broker returns.
+
 ## 99 · 2026-11-03
 
 - feature: the broker outage test's waits now cover the full probe backoff plus 20 s of headroom for
