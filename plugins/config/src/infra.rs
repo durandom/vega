@@ -477,6 +477,7 @@ mod tests {
             herdr: d.path().join("no-herdr").into_os_string(),
             mux: PathBuf::from("/opt/vega/bin/vega-mux"),
             skills: d.path().join("no-skills").into_os_string(),
+            claude: d.path().join("no-claude").into_os_string(),
         };
         (d, probe, ctx)
     }

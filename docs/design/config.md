@@ -33,7 +33,7 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `pi.md` | `~/.pi/agent/AGENTS.md` | whole file | same |
 | `claude.styles` | `~/.claude/output-styles/<name>.md`, one per source file | whole file each; other files in the dir untouched | `claude/output-styles/` |
 | `claude.settings` | `~/.claude/settings.json` | key-merge: the top-level keys of the source, re-asserted only when their source value changes | `claude/settings.json` |
-| `claude.hooks` | `~/.claude/settings.json` | key-merge: vega's `PreToolUse` (ask-parent) and `SessionStart` (shim activation) entries | code (plugins/config) |
+| `claude.hooks` | `~/.local/share/vega/claude-marketplace/`, Claude plugin registration, legacy settings hooks | whole plugin files; CLI install/enable; remove only legacy vega commands after verification | code (plugins/config) |
 | `codex.hooks` | `~/.codex/hooks.json` | key-merge: vega's `PreToolUse` entry | code |
 | `pi.prefix` | `~/.pi/agent/settings.json` | key-merge: the activation line in `shellCommandPrefix` | code |
 | `skills` | `~/.agents/skills/<n>`, `~/.claude/skills/<n>` | the skills library; `vega skills lib sync` | `~/.config/vega/skills-global`, the library clone |
@@ -107,6 +107,59 @@ tests verify apply, backups, local overrides, idempotence and chezmoi refusal in
 
 Every write first copies the previous file to `<file>.vega-bak` (overwritten on the next write) and
 replaces the file atomically (temp file + rename in the same directory).
+
+## Claude hook plugin (vega-lhc.243)
+
+Claude Code can overwrite external settings edits from a running session's stale snapshot
+(vega-lhc.241). `claude.settings` keeps its seeded preference semantics. Hooks instead live in the
+minimal `vega-hooks@vega-local` plugin: `.claude-plugin/plugin.json` and `hooks/hooks.json`, with no
+skills, prompts or servers. Vega renders a local marketplace under
+`~/.local/share/vega/claude-marketplace/`, registers it with
+`claude plugin marketplace add <directory>`, and uses `claude plugin install` (or `update`)
+`vega-hooks@vega-local --scope user`. A disabled installation is enabled with `claude plugin enable`.
+Hook content (including the installed mux path) determines the plugin version, so cached installs
+refresh on changes. Local marketplace versions that load directly from their folder also work.
+`vega config apply hooks`, install-cli and deploy use this same unit; no special mux flag is needed.
+Without Claude Code the unit skips with an install hint. Failed CLI operations are failures, with
+legacy hooks retained for retry. Status and diff show pending installation/enablement.
+
+Before removing legacy hooks, apply verifies `claude plugin list --json`: an enabled user-scoped
+installation whose loaded folder contains the current hooks. It re-reads settings after Claude's own
+writes, backs it up and removes individual vega commands. Unrelated commands in the same entry,
+matchers/events, permissions, plugins and seeded preferences survive. Only the generated ask-parent
+command (vega-mux basename, AskUserQuestion matcher) and exact shim activation command are migrated;
+ambiguous/custom hooks stay. Chezmoi ownership of settings or any plugin source target refuses the
+entire unit. Claude owns its registry and registration writes; vega never edits the registry. As with
+existing Claude units, HOME/.claude is the target; CLI subprocesses explicitly use that HOME and
+CLAUDE_CONFIG_DIR.
+
+[Claude's install documentation](https://code.claude.com/docs/en/discover-plugins) states that installed
+plugins load in interactive and `-p` sessions, including stream-json runs. New sessions pick up shell
+installs. [Plugin hooks](https://code.claude.com/docs/en/plugins/components#hooks) register on load and
+run without invoking a skill. [Local marketplaces](https://code.claude.com/docs/en/plugin-marketplaces)
+are supported by the shell CLI. Existing sessions must restart or run `/reload-plugins`; policies
+disabling plugins/hooks still take precedence. A running session can also erase plugin enablement
+from settings: the next config apply repairs it; plugin hook source files remain intact.
+
+Validation uses temporary HOME and CLAUDE_CONFIG_DIR only. Unit tests fake the supported CLI and cover
+migration ordering, failed/disabled installs, retry, changed mux paths, missing files, preservation,
+chezmoi refusal and idempotence. Real-client smoke procedure (Claude Code 2.1.318, 2026-11-04):
+
+1. In a disposable shell, set HOME to a new temporary directory and CLAUDE_CONFIG_DIR to its
+   `.claude` subdirectory. Clear CLAUDECODE. Never use a real user config directory.
+2. Create `.claude/`, apply `claude.hooks` with the built `vega-config` binary, and inspect
+   `claude plugin list --json` for enabled `vega-hooks@vega-local` in user scope. Re-apply for a no-op.
+3. For an observable probe, create a disposable local plugin with the same hooks.json structure
+   and a SessionStart command appending to a marker inside the temporary directory. Install with
+   the same marketplace/install commands. Start `claude` interactively, then `claude -p hello`, then
+   `claude -p --verbose --output-format stream-json hello`; each new session must append once.
+   No model response is needed for SessionStart. Use test credentials or stop before a model request.
+   Check `/hooks` interactively for the plugin's AskUserQuestion PreToolUse hook.
+4. For mux coverage, launch an interactive and a `--headless` Claude sentinel from a disposable
+   herdr workspace whose shell has these same temporary HOME/config variables. Confirm the marker
+   and AskUserQuestion interception there; close the disposable panes afterward. Mux uses ordinary
+   Claude launches and does not suppress user plugin settings. This is a documented manual host
+   integration check; the automated unit suite does not spawn panes or contact models.
 
 ## Chezmoi refusal
 

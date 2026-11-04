@@ -5,6 +5,9 @@ hooks, global skills and herdr's config.toml. Each file is rendered from the rep
 override in `~/.config/vega/config/`, so one source drives every host. Shared files are key-merged: only vega's
 keys change.
 
+`claude.hooks` installs the minimal `vega-hooks@vega-local` plugin through Claude Code's CLI in user
+scope. It removes legacy vega settings hooks after verifying the plugin; restart running Claude sessions.
+
 Commands: `vega config`, `diff`, `apply`, `print`, `init`, `infra`.
 
 `dcg.config` and `dcg.packs` also manage Destructive Command Guard's config.toml and

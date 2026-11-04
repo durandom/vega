@@ -4,6 +4,7 @@
 //! install` (plugins/mux/src/hook.rs) and `scripts/install-cli.sh`.
 
 use serde_json::{json, Map, Value};
+use std::path::Path;
 
 /// The dialog tools the ask-parent hook intercepts, also its matcher. Codex
 /// matches `|`-separated exact names, so the sync name alone misses the async
@@ -82,6 +83,49 @@ pub fn claude_hooks(root: &mut Value, mux: &str) -> Result<bool, String> {
     )?;
     let b = upsert_hook(root, "SessionStart", ACTIVATE_MARK, activate_entry())?;
     Ok(a || b)
+}
+
+/// Remove only commands emitted by vega's legacy Claude installer. Mixed
+/// entries retain their matcher, metadata and all other hook commands.
+pub fn remove_claude_hooks(root: &mut Value) -> Result<(), String> {
+    let root = root.as_object_mut().ok_or("not a JSON object")?;
+    let Some(hooks) = root.get_mut("hooks") else {
+        return Ok(());
+    };
+    let hooks = hooks.as_object_mut().ok_or("hooks is not an object")?;
+    for event in ["PreToolUse", "SessionStart"] {
+        let Some(entries) = hooks.get_mut(event) else {
+            continue;
+        };
+        let entries = entries
+            .as_array_mut()
+            .ok_or(format!("hooks.{event} is not an array"))?;
+        entries.retain_mut(|entry| {
+            let matcher = entry.get("matcher").and_then(Value::as_str);
+            let pre = event == "PreToolUse" && matcher == Some(CLAUDE_TOOL);
+            let start = event == "SessionStart" && matcher.is_none();
+            if let Some(commands) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+                let before = commands.len();
+                commands.retain(|h| {
+                    if h["type"] != "command" {
+                        return true;
+                    }
+                    let Some(c) = h["command"].as_str() else {
+                        return true;
+                    };
+                    let ask = c
+                        .strip_suffix("' hook ask-parent")
+                        .and_then(|p| p.strip_prefix('\''))
+                        .is_some_and(|p| Path::new(p).file_name().is_some_and(|n| n == "vega-mux"));
+                    let activation = c == activate_entry()["hooks"][0]["command"].as_str().unwrap();
+                    !(pre && ask || start && activation)
+                });
+                return before == commands.len() || !commands.is_empty();
+            }
+            true
+        });
+    }
+    Ok(())
 }
 
 /// `codex.hooks`: ask-parent.

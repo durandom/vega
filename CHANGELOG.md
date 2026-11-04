@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 102 · 2026-11-04
+
+- migration: `claude.hooks` now installs the minimal `vega-hooks@vega-local` Claude Code plugin
+  per host. Legacy vega hooks leave settings.json after the enabled plugin is verified; other hooks
+  and seeded preferences survive. Restart running Claude sessions after deploy. See
+  [config](docs/design/config.md#claude-hook-plugin-vega-lhc243).
+
 ## 101 · 2026-11-04
 
 - feature: config apply retains 256 timestamped per-unit results and redacted managed-key

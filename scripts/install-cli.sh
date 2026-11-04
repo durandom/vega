@@ -55,8 +55,9 @@ cargo install --locked --path "$root/shims/bd" --root "$HOME/.local/share/vega/s
 # in its pane) for Claude and codex, and the P3 shim activation: Claude sources
 # activate.sh through a SessionStart hook and CLAUDE_ENV_FILE (it overwrites PATH
 # from its shell snapshot), pi through its shellCommandPrefix; codex runs `zsh -c`,
-# so zsh startup files cover it (chezmoi-managed, see P3). Key-merged: other keys
-# and hooks stay, the old file goes to <file>.vega-bak. After a hook change every
+# so zsh startup files cover it (chezmoi-managed, see P3). Claude hooks use the
+# vega-hooks plugin, migrating legacy settings hooks after install verification.
+# Codex hooks stay key-merged, with <file>.vega-bak. After a hook change every
 # new codex session stops at "Hooks need review" until the user trusts it once.
 # Only the hooks: the personal units (instructions, styles, settings keys) are
 # applied by `vega deploy` or an explicit `vega config apply`, never here.

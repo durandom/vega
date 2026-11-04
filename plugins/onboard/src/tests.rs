@@ -96,6 +96,7 @@ fn ctx(home: &Path) -> Ctx {
         herdr: home.join("no-herdr").into_os_string(),
         mux: PathBuf::from("/opt/vega/bin/vega-mux"),
         skills: home.join("no-skills").into_os_string(),
+        claude: home.join("no-claude").into_os_string(),
     }
 }
 

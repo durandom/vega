@@ -27,6 +27,8 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - Shared files (`settings.json`, `hooks.json`) are key-merged: only vega's keys and hook entries
   change. `claude.settings` keys are seeded: a local switch (e.g. outputStyle) stays until the
   source value changes.
+- `claude.hooks` installs/enables `vega-hooks@vega-local` through Claude's CLI in user scope.
+  Legacy vega commands leave settings only after plugin verification. Restart running Claude sessions.
 - `managed (chezmoi)`: the dotfiles still own the target; apply leaves it until they drop it.
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
 - Apply prints a redacted `evidence` table and retains the last 256 unit results in
