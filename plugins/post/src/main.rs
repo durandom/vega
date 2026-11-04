@@ -5519,6 +5519,7 @@ const WAITING_DELAY: Duration = Duration::from_secs(1);
 /// right, mail and local supervision go on and the state says why.
 #[derive(Default)]
 struct Registry {
+    dead_subjects: vega_registry::DeadSubjects,
     kv: Option<async_nats::jetstream::kv::Store>,
     last: std::collections::BTreeMap<String, serde_json::Value>,
     view: Option<vega_registry::View>,
@@ -5715,6 +5716,7 @@ impl Registry {
         let t = Instant::now();
         self.last = vega_registry::reconcile(kv, host, desired, &self.last, &present).await?;
         slow("registry reconcile", t);
+        self.dead_subjects.run(kv, host, &view.keys).await?;
         human::seen(host, &view);
         self.view = Some(view);
         Ok(RegistryUpdate::Synced(n))

@@ -722,7 +722,7 @@ fn run_inner(action: Action) -> Result<(), String> {
                         .filter(|key| key.starts_with(&format!("{}.", p.host)))
                     {
                         if !p.owned.contains_key(key) {
-                            kv.delete(key).await.map_err(|e| e.to_string())?;
+                            vega_registry::remove(&kv, key).await?;
                         }
                     }
                     for (key, value) in &p.owned {

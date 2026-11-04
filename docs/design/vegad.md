@@ -492,6 +492,21 @@ Readers validate the key against that ID. Old UAC keys and non-v2 payloads do
 not participate. vegad reconciles every 15 s. Ordinary reconcile preserves
 legacy UAC/pin keys until the backed-up owner cutover explicitly deletes them;
 see [project-registry-cutover.md](project-registry-cutover.md).
+Registry removals publish a subject-rollup `KV-Operation: PURGE` marker with
+`Nats-TTL: 3600`, discarding prior revisions and expiring the subject after one
+hour. The bucket must have `allow_msg_ttl` enabled; a TTL-disabled rejection
+falls back to plain KV delete and logs once per process. Other broker errors
+remain errors. Hosts already have publish rights on their own
+`$KV.VEGA_REGISTRY.<host>.>` subjects; no stream purge or wider ACL is needed.
+Existing tombstones are not deleted again, including pruned notes, asks and waits.
+Once per vegad lifetime, after a successful ordinary reconcile, each full host
+snapshots its own subject names and checks at most 32 every 15 seconds, converting
+old delete/purge markers to expiring purge markers. Reconnects retain progress;
+a restart begins a new snapshot. Actual KV operations distinguish dead subjects
+from live notes and janitor summaries whose bodies the normal read skips.
+Revision guards preserve values concurrently republished by another local CLI.
+Long-lived live pins, claims and other values have no new expiry.
+
 Readers use the stream's subject list and direct gets, no consumers; the state read skips the note
 keys (only their names count, for the badge and for deleting pruned notes). A host
 without a fresh beat (90 s) proves nothing; a remote child counts as gone only once its host
@@ -607,8 +622,8 @@ loop. A slow refresh logs `slow: metadata phases: sentinels …, notes …, layo
 panes …, hygiene …`; a slow send round logs `slow: sidebar sent N rows in … ms`.
 
 Not changed: a typed pointer costs a constant ~305 ms (p10 304, p90 309) inside herdr's own
-`agent prompt`, independent of load. The registry read gets every key ever written (3731 keys for 95
-live entries: delete markers keep their subjects), 5–15 s under load.
+`agent prompt`, independent of load. Before TTL purge cleanup, the registry read listed every key
+ever written (3731 keys for 95 live entries: delete markers kept their subjects), 5–15 s under load.
 
 ## Notifications
 

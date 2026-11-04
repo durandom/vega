@@ -44,6 +44,8 @@
 
 pub mod cutover;
 pub mod pins;
+mod removal;
+pub use removal::{remove, DeadSubjects};
 pub mod uber_asks;
 pub mod uber_engaged;
 pub mod uber_state;
@@ -729,8 +731,8 @@ pub async fn read_kinds(
         }
     }
     // Concurrent direct gets: a deleted key keeps its subject (the delete
-    // marker), so the subject list holds every key ever written and a
-    // sequential get per key took minutes (vegad's loop stalled).
+    // marker), until TTL purge cleanup expires it. Old markers can still
+    // dominate this list; a sequential get per key stalled vegad's loop.
     // Notes only where this host's viewer has not read them: the badges
     // need their project and resolved state, and few are unread.
     let seen = vega_herdr::notes::Store::local().map(|s| s.seen());
@@ -920,7 +922,7 @@ pub async fn reconcile(
             && !is_legacy_project_key(k)
             && !desired.contains_key(k)
         {
-            kv.delete(k).await.map_err(|e| e.to_string())?;
+            remove(kv, k).await?;
         }
     }
     heartbeat(kv, host).await?;

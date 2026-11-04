@@ -13,6 +13,12 @@ Daemon herdr subprocesses and socket requests have deadlines; timeouts are logge
 and pointer mail remains pending for retry. Event-stream silence triggers a fresh
 snapshot after 30 seconds. See [herdr integration](../../docs/design/vegad.md#herdr-integration).
 
+Registry removals use one-hour TTL purge markers when `KV_VEGA_REGISTRY` has
+`allow_msg_ttl` enabled, falling back to plain delete with one diagnostic otherwise.
+Each vegad checks a startup snapshot of its own subjects in batches of 32 per
+15 seconds and converts old tombstones; live values and other hosts are preserved.
+Existing host ACLs suffice. See [registry](../../docs/design/vegad.md#registry-m4).
+
 A pointer never joins text the user is typing (the draft guard): vegad reads the input box of Claude Code,
 Codex and pi and holds the pointer while it has a draft; a draft left 5 minutes is stashed and typed back
 after the pointer, or, when it cannot be typed back, keeps holding with one notification. A screen with no
