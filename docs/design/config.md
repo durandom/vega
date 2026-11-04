@@ -289,6 +289,8 @@ Every apply retains the last 256 unit results in
 `~/.local/state/vega/config-evidence.json`, mode 0600). Each event has a Unix
 millisecond timestamp, phase (`apply`, `install`, or `deploy`), unit, result,
 and successful file writes, including writes before a later unit failure.
+`VEGA_CONFIG_PHASE` selects the phase; install-cli.sh sets `install`, deploy sets
+`deploy`, and unset or unrecognized values use `apply`.
 Each file write also names the backup refreshed, or null for a new file.
 History replacement is atomic and locked across concurrent applies; retention
 errors fail the unit visibly. It is diagnostic history, not a writer lock for

@@ -573,3 +573,31 @@ fn evidence_is_bounded_and_keeps_results_without_error_text() {
         0o600
     );
 }
+
+#[test]
+fn evidence_retains_successful_writes_before_a_later_file_fails() {
+    let (_d, ctx) = setup();
+    for dir in AGENTSVIEW_DIRS {
+        let dir = ctx.env.home.join(dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), "fixture").unwrap();
+        fs::write(dir.join("LOCAL-SETUP.md"), "old").unwrap();
+    }
+    // A backup path that cannot be written causes the second file to fail,
+    // independent of UID/permission behavior in the test environment.
+    let second = ctx.env.home.join(AGENTSVIEW_DIRS[1]).join("LOCAL-SETUP.md");
+    fs::create_dir(backup_path(&second)).unwrap();
+    let (out, event) = apply_report(&ctx, Unit::Agentsview, &BTreeSet::new());
+    assert_eq!(out.kind(), "failed");
+    assert_eq!(event["result"], "failed");
+    let writes = event["writes"].as_array().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0]["target"],
+        "~/.claude/skills/agentsview-finding-history/LOCAL-SETUP.md"
+    );
+    assert_eq!(fs::read_to_string(second).unwrap(), "old");
+    let history: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(evidence::path(&ctx.env)).unwrap()).unwrap();
+    assert_eq!(history, [event]);
+}
