@@ -7,6 +7,7 @@ pub mod badges;
 pub mod capacity;
 pub mod catalog;
 pub mod cutover;
+pub mod daemon_health;
 pub mod dialog;
 pub mod gather;
 pub mod hosts;

@@ -234,6 +234,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
         .unwrap_or_else(|_| "unknown".into());
     println!("bin: {bin}");
     println!("description: UAC facility console: every agent on this project across your herdr machines, with parent and bead");
+    print!("{}", vega_herdr::daemon_health::status());
     let my_name = local
         .agents
         .iter()

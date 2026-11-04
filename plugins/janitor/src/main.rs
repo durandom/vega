@@ -215,7 +215,11 @@ fn run(cmd: Option<Cmd>) -> Result<String, Failure> {
     match cmd {
         None => {
             let idx = index::load_fresh(&roots, &cache).map_err(fail)?;
-            Ok(views::home(&idx, &live(), &local_host(), now))
+            Ok(format!(
+                "{}{}",
+                views::home(&idx, &live(), &local_host(), now),
+                vega_herdr::daemon_health::status()
+            ))
         }
         Some(Cmd::Scan) => {
             let idx = index::rescan(&roots, &cache).map_err(fail)?;
@@ -332,7 +336,11 @@ fn run(cmd: Option<Cmd>) -> Result<String, Failure> {
         }
         Some(Cmd::Report { months, limit }) => {
             let idx = index::load_fresh(&roots, &cache).map_err(fail)?;
-            Ok(views::report(&idx, &live(), months, limit, now))
+            Ok(format!(
+                "{}{}",
+                vega_herdr::daemon_health::status(),
+                views::report(&idx, &live(), months, limit, now)
+            ))
         }
     }
 }
