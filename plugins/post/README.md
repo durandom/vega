@@ -39,7 +39,8 @@ No estate endpoint is assumed.
 
 Commands: `vega post`, `send`, `inbox`, `done`, `ask`, `log`, `notes`, `relay`.
 
-Inbox-only replies remain human quarantine notes unless the receiving host has a live
+Inbox-only same-host `send`/`done` deliver through herdr; `--uac` resolves local claims only.
+Cross-host replies remain human quarantine notes unless the receiving host has a live
 operator pair grant (`vega uac grant <inbox-only-host>:<pane> <host>:<pane> --expires 2h`).
 Granted replies enter that peer's inbox with an inbox-only marker, never Slayer approval;
 the sender pane is its host's own claim. Expiry, revocation and nonmatching pairs retain

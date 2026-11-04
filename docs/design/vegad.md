@@ -330,19 +330,25 @@ channel was full the next broker call waited forever, taking the single-threaded
 ## Security
 
 - Each host writes only its own KV keys and its own sender subjects (as today for mail).
-- deimos is inbox-only (user decision). It replies into quarantine (Slayer decision 2026-10-12,
-  vega-lhc.83), see below.
+- deimos is inbox-only (user decision). Cross-host replies use quarantine (Slayer decision
+  2026-10-12, vega-lhc.83); same-host messages use local herdr delivery (vega-lhc.248).
 
 ### Quarantine (inbox-only replies)
 
-An inbox-only host may reply; absent an operator pair grant its mail never reaches an agent:
+An inbox-only host may message its own agents through herdr. Cross-host replies require an
+operator pair grant to reach an agent; otherwise they become human notices:
 
 - Broker: `auth-config --inbox-only deimos --quarantine deimos` lets deimos publish only
   `vega.quarantine.*.*.deimos` (still no `vega.inbox.*`); every other host may subscribe
   `vega.quarantine.<self>.>` and answers through its existing `allow_responses`. No stream, no
   provisioning.
-- Send: on a host in the inbox-only list (`VEGA_POST_INBOX_ONLY`, else
-  `$XDG_CONFIG_HOME/vega/inbox-only`, else `deimos`), `vega post send` and `done` make a core NATS
+- Local send (vega-lhc.248): on a host in the inbox-only list (`VEGA_POST_INBOX_ONLY`, else
+  `$XDG_CONFIG_HOME/vega/inbox-only`, else `deimos`), same-host `vega post send` and `done`
+  deliver direct herdr prompts with local reply tokens and parent/child supervision. No broker
+  access, pair grant or inbox archive is involved. `--uac` resolves open local v2 UAC claims,
+  including IDs, aliases and `.`; remote UAC enumeration and `--uber` remain unavailable.
+  `vega mux` lists local agents. `--now` also uses this direct local path.
+- Cross-host send: `vega post send --host <other-host> <pane>` and cross-host `done` make a core NATS
   request to `vega.quarantine.<to>.<pane>.<self>` (at most 4 KiB). The target's vegad writes a note
   (kind `quarantine`, title `deimos (quarantine) to <pane>: ...`, toast plus `vega post notes` and the
   board) and answers `stored`. Without a live pair grant it never enters delivery or an ask's
@@ -371,7 +377,8 @@ An inbox-only host may reply; absent an operator pair grant its mail never reach
   operator pair grant delivers peer inbox mail; granted replies still do not enter the fan-in.
 - Trade-off: no archive and no retry for ungranted quarantined replies (the sender sees whether it was stored);
   a stream would need admin provisioning and per-host consumer grants.
-- Pointer text is fixed by vegad; message bodies never get typed into a pane.
+- Broker pointer text is fixed by vegad; broker message bodies never get typed into a pane.
+  The same-host inbox-only path above delivers the body directly through herdr.
 - Uber answers (`Vega-Kind: uber.answer`): vegad verifies them before the addressed UAC sees them, through its
   own durable consumer of the host stream; `inbox` and `log` print them withheld
   ([uber-uac.md](uber-uac.md) §4).
@@ -549,7 +556,8 @@ machines ganymede saved) for "proteus is offline". Who is reachable is vega post
   registry does not show open is checked in herdr, the truth for its own panes (the registry trails a
   new pane by up to one reconcile, and is off in local mode); a remote child whose record is newer
   than its host's beat (+40 s) is not proven gone. Tool mail
-  (`--from-tool`) is not checked; inbox-only hosts quarantine as before.
+  (`--from-tool`) is not checked by the registry. Inbox-only hosts check local targets in herdr;
+  explicit cross-host targets use quarantine as described above.
 - **Bounce**: delivery keeps each unread mail's sender (host, pane, agent) next to its arrival time.
   When a pane closes, vegad asks the broker how many of its mails are unread and confirms herdr no
   longer lists it (a restarting herdr may report every pane gone), then mails each sender of the
