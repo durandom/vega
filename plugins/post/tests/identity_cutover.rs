@@ -106,7 +106,11 @@ fn quiesced_command(home: &Path, url: &str, host: &str, reason: &str, args: &[&s
             .unwrap(),
     );
     let status = post_as(home, url, host, &["relay", "status"]);
-    assert!(!String::from_utf8_lossy(&status.stdout).contains("off:"));
+    let text = String::from_utf8_lossy(&status.stdout).into_owned();
+    assert!(
+        text.contains("off: project workers (bd and git sync"),
+        "relay status hides the quiesce: {text}"
+    );
     success(status);
     child
 }
@@ -116,6 +120,7 @@ fn quiesced_state_probe() {
     if std::env::var_os("VEGA_IDENTITY_STATE_PROBE").is_some() {
         assert!(vega_herdr::state::relay_running());
         assert!(!vega_herdr::state::relay_local());
+        assert!(vega_herdr::state::relay_quiesced());
     }
 }
 
@@ -277,6 +282,23 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
         "{\"actor\":\"a/fix\",\"since\":3,\"pane\":\"p1\"}\n",
     )
     .unwrap();
+    // Issue #6: a newer binary wrote v2 records for the same project before
+    // approved.json existed; the cutover merges them with the legacy ones.
+    let hex = vega_herdr::project::encode_component("github.com/team/repo");
+    fs::create_dir_all(state.join("uac/v2")).unwrap();
+    fs::write(
+        state.join(format!("uac/v2/{hex}.json")),
+        json!({"schema":2,"project":"github.com/team/repo","pane":"p1","host":"a","at":9,"tracker":"task","folder_name":"repo","common_dir":repo.join(".git"),"checkout":repo,"locations":[{"common_dir":repo.join(".git"),"checkout":repo}]}).to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(state.join("lanes/v2")).unwrap();
+    fs::write(
+        state.join(format!("lanes/v2/{hex}.json")),
+        json!({"schema":2,"project":"github.com/team/repo","actor":"a/newer","since":9,"pane":"p1"})
+            .to_string() + "\n",
+    )
+    .unwrap();
+    let v2_original = fs::read(state.join(format!("uac/v2/{hex}.json"))).unwrap();
     let source_bytes = fs::read(&legacy).unwrap();
     success(post(
         home,
@@ -442,6 +464,12 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
     let claim: Value = serde_json::from_slice(&fs::read(&v2).unwrap()).unwrap();
     assert_eq!(claim["tracker"], "task");
     assert_eq!(claim["at"], 3);
+    let lanes = fs::read_to_string(state.join(format!("lanes/v2/{hex}.json"))).unwrap();
+    assert!(
+        lanes.contains("a/fix") && lanes.contains("a/newer"),
+        "legacy and v2 lane histories concatenate: {lanes}"
+    );
+    assert!(!state.join("lanes/local_~_repo_.git").exists());
     assert!(claim["aliases"]
         .as_array()
         .unwrap()
@@ -539,7 +567,8 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
     success(post(home, &url, &["identity", "rollback"]));
     success(post(home, &url, &["identity", "rollback"]));
     assert_eq!(fs::read_to_string(legacy).unwrap(), original);
-    assert!(!v2.exists());
+    // Rollback restores the pre-approval v2 claim's original bytes.
+    assert_eq!(fs::read(&v2).unwrap(), v2_original);
     assert!(!marker.exists());
     rt.block_on(async {
         assert_eq!(

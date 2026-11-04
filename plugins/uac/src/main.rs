@@ -1424,7 +1424,7 @@ fn beads_report() {
     let mut problems = Vec::new();
     for p in &projects {
         let (cells, problem) =
-            vega_bd_sync::store::row(p, &vega_bd_sync::store::state(&p.key, &p.common), now);
+            vega_bd_sync::store::status_row(p, &vega_bd_sync::store::state(&p.key, &p.common), now);
         println!(
             "  {}",
             cells.iter().map(|c| cell(c)).collect::<Vec<_>>().join(",")
