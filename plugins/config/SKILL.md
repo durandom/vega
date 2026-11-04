@@ -17,7 +17,6 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - Units: herdr, claude.md, codex.md, pi.md, claude.styles, claude.settings, claude.hooks,
   codex.hooks, pi.prefix, skills, agentsview, dcg.config, dcg.packs. Groups: instructions, hooks.
 - `dcg.config` and `dcg.packs` replace config.toml and their YAML pack targets;
-  oc.yaml's repo default was imported byte-for-byte from the existing pack.
   `allowlist.toml` stays user-owned. Preview: `vega config diff dcg.config dcg.packs`.
   Direct deletion flags get a `vega uac prune` / `wt remove` reason; dcg also uses it
   for extracted inline-shell bodies. Other core denials stay intact.
@@ -27,6 +26,8 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - Shared files (`settings.json`, `hooks.json`) are key-merged: only vega's keys and hook entries
   change. `claude.settings` keys are seeded: a local switch (e.g. outputStyle) stays until the
   source value changes.
+- `claude.hooks` installs/enables `vega-hooks@vega-local` through Claude's CLI in user scope.
+  Verified installation precedes legacy hook removal. Restart running Claude sessions.
 - `managed (chezmoi)`: the dotfiles still own the target; apply leaves it until they drop it.
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
 - Apply prints a redacted `evidence` table and retains the last 256 unit results in

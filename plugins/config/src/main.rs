@@ -262,6 +262,13 @@ fn diff(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
             continue;
         }
         let m = vega_config::managed_targets(&plan, &managed);
+        if plan.plugin_pending {
+            changed += 1;
+            println!("unit: claude.hooks");
+            for note in &plan.notes {
+                println!("note: {note}");
+            }
+        }
         for f in plan.files.iter().filter(|f| f.changed()) {
             changed += 1;
             let label = tilde(&ctx.env, &f.path);

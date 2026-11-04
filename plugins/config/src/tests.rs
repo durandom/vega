@@ -23,12 +23,23 @@ fn setup() -> (tempfile::TempDir, Ctx) {
         "vega-skills",
         "echo \"$*\" >> \"$(dirname \"$0\")/skills-calls\"; echo 'skills: 2 up to date'",
     );
+    let claude = script(
+        d.path(),
+        "claude",
+        &format!(
+            "exec python3 '{}' \"$@\"",
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/test_claude.py")
+                .display()
+        ),
+    );
     let ctx = Ctx {
         env: Env::at(&home),
         chezmoi: d.path().join("no-chezmoi").into_os_string(),
         herdr: herdr.into_os_string(),
         mux: PathBuf::from("/opt/vega/bin/vega-mux"),
         skills: skills.into_os_string(),
+        claude: claude.into_os_string(),
     };
     (d, ctx)
 }
@@ -173,8 +184,14 @@ fn fresh_home_gets_everything_then_nothing_changes() {
     );
     assert!(read(&ctx, ".codex/AGENTS.md").starts_with("# Git commits\n"));
     assert!(ctx.env.home.join(".claude/output-styles/ELI5.md").is_file());
-    let s: Value = serde_json::from_str(&read(&ctx, ".claude/settings.json")).unwrap();
-    assert_eq!(s["outputStyle"], "Caveman ELI5");
+    let settings: Value = serde_json::from_str(&read(&ctx, ".claude/settings.json")).unwrap();
+    assert_eq!(settings["outputStyle"], "Caveman ELI5");
+    assert!(settings.get("hooks").is_none());
+    let s: Value = serde_json::from_str(&read(
+        &ctx,
+        ".local/share/vega/claude-marketplace/plugins/vega-hooks/hooks/hooks.json",
+    ))
+    .unwrap();
     assert_eq!(
         s["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
         "'/opt/vega/bin/vega-mux' hook ask-parent"
@@ -332,7 +349,8 @@ fn settings_merge_keeps_tool_state_and_local_seeds() {
     );
     let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(v["outputStyle"], "Concise");
-    assert!(v["hooks"]["PreToolUse"].is_array());
+    assert!(v.get("hooks").is_none());
+    assert_eq!(v["enabledPlugins"]["vega-hooks@vega-local"], true);
     // A file that does not parse stays untouched.
     fs::write(&path, "not json").unwrap();
     assert!(matches!(
@@ -522,12 +540,36 @@ fn hook_evidence_is_redacted_and_symlink_backup_refreshes_at_referent() {
     let (d, ctx) = setup();
     let target = ctx.env.home.join(".claude/settings.json");
     let real = d.path().join("settings.json");
-    let before =
-        r#"{"env":{"TOKEN":"USER_SECRET"},"hooks":{"Stop":[{"command":"SECRET_COMMAND"}]}}"#;
-    fs::write(&real, before).unwrap();
+    let mut legacy = serde_json::json!({"env":{"TOKEN":"USER_SECRET"},"hooks":{"Stop":[{"command":"SECRET_COMMAND"}]}});
+    merge::claude_hooks(&mut legacy, "/old/vega-mux").unwrap();
+    let before = serde_json::to_string(&legacy).unwrap();
+    fs::write(&real, &before).unwrap();
     symlink(&real, &target).unwrap();
     let (_, event) = apply_report(&ctx, Unit::ClaudeHooks, &BTreeSet::new());
-    assert_eq!(fs::read_to_string(backup_path(&real)).unwrap(), before);
+    let backup: Value =
+        serde_json::from_str(&fs::read_to_string(backup_path(&real)).unwrap()).unwrap();
+    assert_eq!(backup["hooks"], legacy["hooks"]);
+    assert_eq!(backup["env"], legacy["env"]);
+    assert_eq!(backup["enabledPlugins"]["vega-hooks@vega-local"], true);
+    let writes = event["writes"].as_array().unwrap();
+    assert_eq!(
+        writes.len(),
+        5,
+        "three plugin files, CLI registration, legacy migration"
+    );
+    let registration = writes
+        .iter()
+        .find(|w| w["writer"] == "claude_plugin_cli")
+        .unwrap();
+    assert!(registration["backup_refreshed"].is_null());
+    assert_eq!(
+        registration["keys"][0]["key"],
+        "/enabledPlugins/vega-hooks@vega-local"
+    );
+    assert!(writes.last().unwrap()["backup_refreshed"]
+        .as_str()
+        .unwrap()
+        .ends_with("settings.json.vega-bak"));
     assert!(!backup_path(&target).exists());
     let text = event.to_string();
     assert!(text.contains("/hooks/PreToolUse"));
@@ -597,6 +639,127 @@ fn evidence_retains_successful_writes_before_a_later_file_fails() {
         "~/.claude/skills/agentsview-finding-history/LOCAL-SETUP.md"
     );
     assert_eq!(fs::read_to_string(second).unwrap(), "old");
+    let history: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(evidence::path(&ctx.env)).unwrap()).unwrap();
+    assert_eq!(history, [event]);
+}
+
+#[test]
+fn claude_plugin_migration_waits_for_enable_and_preserves_mixed_commands() {
+    let (_d, ctx) = setup();
+    let mut value = serde_json::json!({"permissions":{"allow":["Read"]}, "hooks": {
+        "PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"dcg"}]},
+            {"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"another hook ask-parent"}]}],
+        "SessionStart":[{"hooks":[]}]}});
+    merge::claude_hooks(&mut value, "/old/vega-mux").unwrap();
+    value["hooks"]["PreToolUse"][1]["hooks"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"type":"command","command":"unrelated"}));
+    // Add an unrelated command to the entry the old installer owned.
+    value["hooks"]["SessionStart"][0]["hooks"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"type":"command","command":"moshi-hook"}));
+    let path = ctx.env.home.join(".claude/settings.json");
+    fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+    // Preview and a CLI failure cannot remove hooks.
+    assert!(plan(&ctx, Unit::ClaudeHooks).unwrap().plugin_pending);
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    fs::write(ctx.env.home.join("fail-claude"), "").unwrap();
+    assert!(apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).failed());
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    fs::remove_file(ctx.env.home.join("fail-claude")).unwrap();
+    // An install that exits successfully but leaves the plugin disabled is insufficient.
+    fs::write(ctx.env.home.join("inactive-claude"), "").unwrap();
+    assert!(apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).failed());
+    let before: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(before["hooks"], value["hooks"]);
+    fs::remove_file(ctx.env.home.join("inactive-claude")).unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()),
+        Outcome::Written(_)
+    ));
+    let migrated: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut expected = value.clone();
+    merge::remove_claude_hooks(&mut expected).unwrap();
+    assert_eq!(migrated["hooks"], expected["hooks"]);
+    assert_eq!(migrated["permissions"], value["permissions"]);
+    assert_eq!(
+        migrated["cliWritten"], true,
+        "re-read settings after install"
+    );
+    assert_eq!(
+        migrated["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+        "moshi-hook"
+    );
+    assert_eq!(
+        apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()),
+        Outcome::Unchanged
+    );
+}
+
+#[test]
+fn claude_plugin_repairs_disabled_missing_and_updated_hooks() {
+    let (_d, mut ctx) = setup();
+    assert!(!apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).failed());
+    let state = ctx.env.home.join("fake-plugins.json");
+    let mut list: Value = serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
+    list[0]["enabled"] = false.into();
+    fs::write(&state, serde_json::to_string(&list).unwrap()).unwrap();
+    assert!(plan(&ctx, Unit::ClaudeHooks).unwrap().plugin_pending);
+    assert!(!apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).failed());
+    ctx.mux = "/new/vega-mux".into();
+    assert!(plan(&ctx, Unit::ClaudeHooks).unwrap().plugin_pending);
+    assert!(!apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).failed());
+    let hooks = ctx
+        .env
+        .home
+        .join(".local/share/vega/claude-marketplace/plugins/vega-hooks/hooks/hooks.json");
+    fs::remove_file(hooks).unwrap();
+    assert!(plan(&ctx, Unit::ClaudeHooks).unwrap().plugin_pending);
+    assert!(!apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).failed());
+    // A managed settings file blocks CLI writes, including on a fresh host.
+    fs::remove_file(ctx.env.home.join(".claude/settings.json")).unwrap();
+    let managed = BTreeSet::from([ctx.env.home.join(".claude/settings.json")]);
+    assert!(matches!(
+        apply(&ctx, Unit::ClaudeHooks, &managed),
+        Outcome::Managed(_)
+    ));
+}
+
+#[test]
+fn plugin_evidence_keeps_partial_cli_writes_and_retains_legacy_hooks_on_failure() {
+    let (_d, ctx) = setup();
+    let mut legacy = serde_json::json!({"env":{"TOKEN":"SECRET_VALUE"}});
+    merge::claude_hooks(&mut legacy, "/old/vega-mux").unwrap();
+    let path = ctx.env.home.join(".claude/settings.json");
+    fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
+    fs::write(ctx.env.home.join("fail-registration"), "").unwrap();
+    let (outcome, event) = apply_report(&ctx, Unit::ClaudeHooks, &BTreeSet::new());
+    assert!(outcome.failed());
+    let writes = event["writes"].as_array().unwrap();
+    assert_eq!(
+        writes.len(),
+        4,
+        "source writes and the CLI's partial registration must survive"
+    );
+    assert_eq!(writes[3]["writer"], "claude_plugin_cli");
+    assert_eq!(
+        writes[3]["keys"][0]["key"],
+        "/enabledPlugins/vega-hooks@vega-local"
+    );
+    assert!(writes[3]["backup_refreshed"].is_null());
+    let live: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        live["hooks"], legacy["hooks"],
+        "migration waits for successful activation"
+    );
+    let text = event.to_string();
+    for forbidden in ["SECRET_VALUE", "TOKEN", "cliWritten", "ask-parent"] {
+        assert!(!text.contains(forbidden), "leaked {forbidden}");
+    }
     let history: Vec<Value> =
         serde_json::from_str(&fs::read_to_string(evidence::path(&ctx.env)).unwrap()).unwrap();
     assert_eq!(history, [event]);

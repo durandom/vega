@@ -7,6 +7,7 @@
 //! override, else repo default) and the live files; [`apply`] writes it,
 //! refusing a unit while chezmoi manages one of its targets.
 
+mod claude_plugin;
 pub mod evidence;
 pub mod herdr;
 pub mod infra;
@@ -36,6 +37,8 @@ pub struct Ctx {
     pub mux: PathBuf,
     /// The `vega-skills` that syncs the library.
     pub skills: OsString,
+    /// Claude Code CLI used for supported plugin installation.
+    pub claude: OsString,
 }
 
 impl Ctx {
@@ -47,6 +50,7 @@ impl Ctx {
             skills: installed(&env.home, "vega-skills").into_os_string(),
             chezmoi: OsString::from("chezmoi"),
             herdr: OsString::from("herdr"),
+            claude: installed(&env.home, "claude").into_os_string(),
             env,
         })
     }
@@ -124,7 +128,8 @@ impl Unit {
             Unit::CodexMd => "~/.codex/AGENTS.md",
             Unit::PiMd => "~/.pi/agent/AGENTS.md",
             Unit::ClaudeStyles => "~/.claude/output-styles/",
-            Unit::ClaudeSettings | Unit::ClaudeHooks => "~/.claude/settings.json",
+            Unit::ClaudeSettings => "~/.claude/settings.json",
+            Unit::ClaudeHooks => "~/.local/share/vega/claude-marketplace/, ~/.claude/settings.json",
             Unit::CodexHooks => "~/.codex/hooks.json",
             Unit::PiPrefix => "~/.pi/agent/settings.json",
             Unit::Skills => "~/.agents/skills/, ~/.claude/skills/",
@@ -139,7 +144,8 @@ impl Unit {
             Unit::DcgConfig => "whole file",
             Unit::DcgPacks | Unit::ClaudeStyles => "whole file each",
             Unit::ClaudeSettings => "seeded keys",
-            Unit::ClaudeHooks | Unit::CodexHooks | Unit::PiPrefix => "key-merge",
+            Unit::ClaudeHooks => "plugin + legacy hook migration",
+            Unit::CodexHooks | Unit::PiPrefix => "key-merge",
             Unit::Skills => "library",
         }
     }
@@ -228,6 +234,8 @@ pub struct Plan {
     pub seeds: Option<Map<String, Value>>,
     /// The global skills and the ones missing (`skills`).
     pub skills: Option<(Vec<String>, Vec<String>)>,
+    /// The supported Claude CLI must install, update or enable the hook plugin.
+    pub plugin_pending: bool,
 }
 
 impl Plan {
@@ -468,19 +476,7 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
                 ..Plan::default()
             })
         }
-        Unit::ClaudeHooks => {
-            if let Some(p) = need_dir(env, ".claude") {
-                return Ok(p);
-            }
-            let (f, _) = json_plan(home.join(".claude/settings.json"), true, |v| {
-                merge::claude_hooks(v, &mux)
-            })?
-            .expect("created when missing");
-            Ok(Plan {
-                files: vec![f],
-                ..Plan::default()
-            })
-        }
+        Unit::ClaudeHooks => claude_plugin::plan(ctx),
         Unit::CodexHooks => {
             if let Some(p) = need_dir(env, ".codex") {
                 return Ok(p);
@@ -624,6 +620,9 @@ pub fn state(plan: &Plan, managed: &[PathBuf]) -> String {
             format!("missing: {}", missing.join(" "))
         };
     }
+    if plan.plugin_pending {
+        return "differs (plugin install/enable pending)".into();
+    }
     let changed: Vec<&FilePlan> = plan.files.iter().filter(|f| f.changed()).collect();
     let n = plan.files.len();
     match changed.len() {
@@ -761,6 +760,9 @@ fn apply_inner(
     let m = managed_targets(&plan, managed);
     if !m.is_empty() {
         return Outcome::Managed(m);
+    }
+    if unit == Unit::ClaudeHooks {
+        return claude_plugin::apply(ctx, &plan, evidence);
     }
     if unit == Unit::Skills {
         return sync_skills(&ctx.skills);

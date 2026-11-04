@@ -227,10 +227,13 @@ parent or when a dialog stops startup; `spawn --resume` preserves it. Missing re
 Headed asking, silent and input attentions are for the user and do not wake the parent;
 exited, failure, quota, completed and decided still do.
 
-`vega config apply hooks` (run by `scripts/install-cli.sh`; `vega mux hook install` is an alias) adds the entry to
-`~/.claude/settings.json` and `~/.codex/hooks.json` (matcher `request_user_input|request_user_input_async`), replaces an older entry of its
-own, keeps all other hooks and key order, and copies the file to `<file>.vega-bak` before a change
-([config.md](config.md), units `claude.hooks`, `codex.hooks`); see Limits for codex.
+`vega config apply hooks` (run by `scripts/install-cli.sh`; `vega mux hook install` is an alias)
+installs and enables Claude's `vega-hooks@vega-local` plugin in user scope. Its hooks live in
+`hooks/hooks.json`; legacy vega commands are removed from `~/.claude/settings.json` only after the
+enabled plugin is verified, preserving other hooks. Restart existing Claude sessions after installation.
+For codex it key-merges `~/.codex/hooks.json` (matcher `request_user_input|request_user_input_async`),
+replacing its older entry, keeping other hooks and key order, and backing up to `<file>.vega-bak`.
+See [config.md](config.md#claude-hook-plugin-vega-lhc243) and Limits for codex.
 
 Tested 2026-10-09 with Claude Code 2.1.295 (haiku): a spawned sentinel got `PreToolUse:AskUserQuestion hook error:
 You were spawned by …` and sent the question by `vega post send`; a session without a record showed the dialog.
