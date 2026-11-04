@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 105 · 2026-11-04
+
+- required: `vega mux spawn` now requires `--tier flagship|balanced|budget`, resolved
+  through lanista's model pins for the agent kind (Pi uses zai). Explicit `-m`/`--model`
+  after `--` and `--no-parent` are exempt. Update spawn scripts and briefs; mux show
+  and the UAC agent table expose the recorded tier and model.
+
 ## 104 · 2026-11-04
 
 - feature: `vega uac` and `vega janitor` show repeated vegad loop/phase budget overruns from

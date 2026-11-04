@@ -8,6 +8,7 @@ mod dialog;
 mod hook;
 mod next;
 mod reopen;
+mod tier;
 mod transcript;
 mod trust;
 mod worktree;
@@ -39,7 +40,7 @@ use vega_herdr::{
     bin_name = "vega mux",
     disable_version_flag = true,
     about = "Agent-to-agent messaging over herdr",
-    after_help = "Examples:\n  vega mux                         # agents in this workspace\n  vega mux --all                   # all workspaces, plus panes without an agent\n  vega mux show w3V:p2             # kind, name, status, title and recent output\n  vega mux transcript w3V:p2 --last # its last reply, from its session log\n  vega mux send w3V:p2 \"ping\"       # send a message; the reply arrives as a new prompt\n  vega mux send rev \"status?\"       # target an agent by its name instead of its pane\n  vega mux spawn rev --kind codex  # start a codex agent in a new tab\n  vega mux close fix-login         # close a worker (its worktree workspace)"
+    after_help = "Examples:\n  vega mux                         # agents in this workspace\n  vega mux --all                   # all workspaces, plus panes without an agent\n  vega mux show w3V:p2             # kind, name, status, title and recent output\n  vega mux transcript w3V:p2 --last # its last reply, from its session log\n  vega mux send w3V:p2 \"ping\"       # send a message; the reply arrives as a new prompt\n  vega mux send rev \"status?\"       # target an agent by its name instead of its pane\n  vega mux spawn rev --kind codex --tier balanced  # start a codex agent in a new tab\n  vega mux close fix-login         # close a worker (its worktree workspace)"
 )]
 struct Cli {
     /// List agents in all workspaces, plus workspace labels and panes without an agent
@@ -188,8 +189,11 @@ enum Cmd {
         /// herdr agent kind, e.g. codex, claude, pi, agy (see `herdr agent`)
         #[arg(long, required_unless_present = "resume")]
         kind: Option<String>,
+        /// Deliberate model choice (required unless --no-parent or extra args set a model)
+        #[arg(long, value_parser = ["flagship", "balanced", "budget"])]
+        tier: Option<String>,
         /// Deliver the saved brief of a spawn that stopped at a dialog, once the user answered it
-        #[arg(long, value_name = "PANE", conflicts_with_all = ["name", "kind", "cwd", "at", "prompt", "prompt_file", "worktree", "env", "no_parent", "headless", "args"])]
+        #[arg(long, value_name = "PANE", conflicts_with_all = ["name", "kind", "tier", "cwd", "at", "prompt", "prompt_file", "worktree", "env", "no_parent", "headless", "args"])]
         resume: Option<String>,
         /// Working directory of the new agent [default: current directory]
         #[arg(long)]
@@ -411,6 +415,7 @@ fn main() -> ExitCode {
         Some(Cmd::Spawn {
             name,
             kind,
+            tier,
             cwd,
             at,
             prompt,
@@ -440,6 +445,7 @@ fn main() -> ExitCode {
                     no_parent,
                     spawn_mode(headless),
                     &args,
+                    tier.as_deref(),
                 )
             }),
         },
@@ -487,6 +493,15 @@ fn validate(cmd: &Cmd) -> Option<Failure> {
             "--worktree works only on this machine",
             "spawn with --cwd <existing checkout> on that machine, or drop --machine",
         )),
+        Cmd::Spawn {
+            kind: Some(kind),
+            tier: None,
+            args,
+            no_parent: false,
+            resume: None,
+            cwd,
+            ..
+        } if tier::explicit_model(args).is_none() => Some(tier::required(kind, cwd.as_deref())),
         _ => None,
     }
 }
@@ -758,6 +773,23 @@ fn show(target: &str, lines: u32) -> Result<(), Failure> {
         parent_of(pane, &name).map_or("-".into(), |p| p.label(&vega_herdr::state::post_host()))
     );
     println!("mode: {}", mode_of(machine(), pane, &name).as_str());
+    let selection = vega_herdr::state::spawn_of_on(machine(), pane, &name, str_of(a, "agent"));
+    println!(
+        "tier: {}",
+        selection
+            .as_ref()
+            .and_then(|r| r.tier.as_deref())
+            .unwrap_or("-")
+    );
+    println!(
+        "model: {}",
+        cell(
+            selection
+                .as_ref()
+                .and_then(|r| r.model.as_deref())
+                .unwrap_or("-")
+        )
+    );
     println!("cwd: {}", cell(&collapse_home(str_of(a, "cwd"))));
     println!(
         "title: {}",
@@ -1213,9 +1245,10 @@ fn spawn(
     no_parent: bool,
     mode: Mode,
     extra: &[String],
+    tier: Option<&str>,
 ) -> Result<(), Failure> {
     spawn_inner(
-        name, kind, cwd, place, prompt, user_env, no_parent, mode, extra, None,
+        name, kind, cwd, place, prompt, user_env, no_parent, mode, extra, tier, None,
     )
     .map(|_| ())
 }
@@ -1231,6 +1264,7 @@ fn spawn_inner(
     no_parent: bool,
     mode: Mode,
     extra: &[String],
+    tier: Option<&str>,
     reopening: Option<&vega_herdr::state::SpawnRecord>,
 ) -> Result<String, Failure> {
     if machine().is_some() && matches!(place, Place::At(At::Split)) {
@@ -1240,6 +1274,8 @@ fn spawn_inner(
             "use --at tab or --at workspace with --machine",
         ));
     }
+    let selection = tier::select(kind, tier, extra, cwd.as_deref())?;
+    let extra = selection.args.as_slice();
     // Headroom of the kind's provider, read while the agent starts.
     let capacity = {
         let (kind, extra) = (kind.to_string(), extra.to_vec());
@@ -1439,6 +1475,8 @@ fn spawn_inner(
             task: prompt.and_then(task_label),
             session: None,
             extra: extra.to_vec(),
+            tier: tier.map(String::from),
+            model: selection.model.clone(),
         });
     lineage.pane = pane.clone();
     let saved = reopen::save_best_effort(&lineage);

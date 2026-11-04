@@ -1,3 +1,10 @@
+Choose --tier flagship|balanced|budget (no default): flagship for design/root-cause,
+balanced for normal implementation, budget for mechanical work. Models resolve through
+`vega lanista pin <lane> --tier <tier>` including active project overrides; Pi uses zai.
+An explicit -m/--model after `--` wins over the tier and needs no tier. --no-parent
+also permits the harness default. Spawn records retain tier and model for show and reopen.
+Local --cwd selects the project; remote spawns use the caller's project pins.
+
 Spawns are headed by default: the user answers questions in the pane. Add --headless
 for an unattended child whose in-pane questions must go to its parent. Every spawn
 records its mode, including --no-parent and a pane stopped at a startup dialog;
@@ -14,10 +21,10 @@ Default agent args (extra args after `--` are appended):
   pi      --approve
 
 Examples:
-  vega mux spawn rev --kind codex
-  vega mux spawn helper --kind claude --headless --at split --prompt "Run the tests and report failures."
+  vega mux spawn rev --kind codex --tier balanced
+  vega mux spawn helper --kind claude --tier balanced --headless --at split --prompt "Run the tests and report failures."
   vega mux spawn api --kind pi --cwd ~/src/api --at workspace -- --model zai/glm-5.3
-  vega mux spawn fix --kind claude --worktree fix-login --base origin/main --prompt-file /tmp/task.md
+  vega mux spawn fix --kind claude --tier balanced --worktree fix-login --base origin/main --prompt-file /tmp/task.md
   vega mux spawn gate-rev --kind codex --env VEGA_GATE_ROLE=reviewer -- -m gpt-6-luna
 
 --env K=V (repeatable) sets env on the agent's pane through herdr. Tool shells also

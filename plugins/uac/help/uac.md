@@ -3,7 +3,7 @@ Usage: vega uac
 Coordinator mode. Without arguments: every agent working on this session's
 project ID (the normalized Git fetch remote), across local clones and fresh
 schema-2 registry rows on other hosts, with machine, pane, name, kind,
-status, unread_mail, parent, mode and the claimed bead. Agents whose parent
+status, unread_mail, parent, mode, claimed bead, tier and model. Agents whose parent
 is your pane are your sentinels. Registry-off mode omits remote membership;
 remote paths are metadata and never opened locally.
 
@@ -12,7 +12,7 @@ Unknown does not prove an empty inbox. Inspect `vega post log --pane <pane>`
 on the owning host for broker read status without acknowledging mail.
 
 Spawn and adopt default to headed. For unattended sentinels, use
-`vega mux spawn --headless` or `vega uac adopt --headless` so questions go to
+`vega mux spawn <name> --kind claude --tier balanced --headless` or `vega uac adopt --headless` so questions go to
 the parent. Older children without a valid mode record remain headless.
 
 attention (from vegad and `vega post done`): input (blocked on a question or

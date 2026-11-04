@@ -47,7 +47,7 @@ Findings from the live test:
 
 ### `spawn` (added 2026-10-06)
 
-`vega mux spawn <name> --kind K [--cwd D] [--at tab|split|workspace] [--prompt TEXT] [-- extra args]` is a thin wrapper over herdr:
+`vega mux spawn <name> --kind K --tier T [--cwd D] [--at tab|split|workspace] [--prompt TEXT] [-- extra args]` is a thin wrapper over herdr:
 `tab create --workspace <mine>` (default), `pane split`, or `workspace create`, then `agent start`. `--prompt` goes through `send`, so it carries the reply footer.
 
 Deviations from section 3 below:
@@ -222,14 +222,14 @@ help[2]:
   vega mux read web
 ```
 
-Empty state: `workers: 0` plus hint `vega mux spawn <name> --kind claude --cwd <dir> --prompt "…"`.
+Empty state: `workers: 0` plus hint `vega mux spawn <name> --kind claude --tier balanced --cwd <dir> --prompt "…"`.
 Inside a worker: `me: api (worker of vega)` plus report/ask hints.
 
 ### Coordinator side
 
 | Command | Output / behaviour |
 | --- | --- |
-| `vega mux spawn <name> --kind claude\|codex --cwd <dir> (--prompt TEXT \| --prompt-file F) [--at workspace\|tab] [--worktree <branch>]` | `spawned: api (claude) in workspace w4A, pane w4A:p1` / `cwd:` / `prompt: taken` / `help: vega mux wait` |
+| `vega mux spawn <name> --kind claude\|codex --tier balanced --cwd <dir> (--prompt TEXT \| --prompt-file F) [--at workspace\|tab] [--worktree <branch>]` | `spawned: api (claude) in workspace w4A, pane w4A:p1` / `cwd:` / `prompt: taken` / `help: vega mux wait` |
 | `vega mux send <worker> (TEXT \| --file F)` | `sent: api (taken)`; errors `agent_blocked`, `not_taken` with hints |
 | `vega mux wait [<worker>…] [--timeout MS]` | events + pending + hints, see below. `--timeout 0` drains without blocking. Printing moves a message `new/` → `cur/`. |
 | `vega mux read <worker> [--lines 60]` | `agent read --source recent-unwrapped`, tail-truncated, `truncated: true` marker |

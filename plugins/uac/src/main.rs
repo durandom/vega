@@ -365,6 +365,8 @@ fn home(mode: Mode) -> Result<(), Failure> {
                     .map(|t| str_of(t, "label").to_string())
                     .unwrap_or_default(),
                 kind: str_of(a, "agent").to_string(),
+                selection: st::spawn_of_on(m, pane, agent_name(a), str_of(a, "agent"))
+                    .map(|r| (r.tier.unwrap_or_default(), r.model.unwrap_or_default())),
                 status: str_of(a, "agent_status").to_string(),
                 dialog: if m.is_none() && matches!(str_of(a, "agent_status"), "blocked" | "unknown")
                 {
@@ -432,6 +434,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
             name: c.name.clone(),
             tab: String::new(),
             kind: "-".into(),
+            selection: None,
             status: "gone".into(),
             dialog: None,
             attention: Some(Attention::Exited),
@@ -463,7 +466,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
             report(project.as_deref());
             return Ok(());
         }
-        println!("help: vega mux spawn <name> --kind claude --headless --worktree <branch> --base <base> --prompt-file <brief>   # start a sentinel; <base>: the branch with the work the task needs");
+        println!("help: vega mux spawn <name> --kind claude --tier balanced --headless --worktree <branch> --base <base> --prompt-file <brief>   # start a sentinel; <base>: the branch with the work the task needs");
         return Ok(());
     }
     let statuses: Vec<Value> = rows
@@ -490,7 +493,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
     println!(
         "  vega mux send <pane|name> \"<text>\" [--machine <m>]   # reply arrives as a new prompt"
     );
-    println!("  vega mux spawn <name> --kind claude --headless --worktree <branch> --base <base> --prompt-file <brief>   # <base>: the branch with the work the task needs");
+    println!("  vega mux spawn <name> --kind claude --tier balanced --headless --worktree <branch> --base <base> --prompt-file <brief>   # <base>: the branch with the work the task needs");
     println!("  vega mux close <pane|name> [--machine <m>]           # closes a sentinel's worktree workspace; then wt remove <branch>");
     Ok(())
 }
@@ -562,6 +565,7 @@ struct Row {
     /// The herdr tab label the Slayer sees.
     tab: String,
     kind: String,
+    selection: Option<(String, String)>,
     status: String,
     attention: Option<Attention>,
     /// The silent record: what its finished turn ended with.
@@ -580,12 +584,12 @@ struct Row {
 
 fn agent_table(rows: &[Row]) -> Vec<String> {
     let mut out = vec![format!(
-        "agents[{}]{{machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead}}:",
+        "agents[{}]{{machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead,tier,model}}:",
         rows.len()
     )];
     for r in rows {
         out.push(format!(
-            "  {},{},{},{},{},{},{},{},{},{},{}",
+            "  {},{},{},{},{},{},{},{},{},{},{},{},{}",
             cell(&r.machine),
             r.pane,
             cell(&r.name),
@@ -596,7 +600,9 @@ fn agent_table(rows: &[Row]) -> Vec<String> {
             cell(&r.unread),
             cell(&r.parent),
             r.mode,
-            cell(&r.bead)
+            cell(&r.bead),
+            cell(r.selection.as_ref().map_or("", |s| &s.0)),
+            cell(r.selection.as_ref().map_or("", |s| &s.1))
         ));
     }
     out
@@ -1926,6 +1932,7 @@ mod tests {
             name: "fix".into(),
             tab: "fix".into(),
             kind: "claude".into(),
+            selection: Some(("balanced".into(), "claude-sonnet-5-5".into())),
             status: "working".into(),
             dialog: None,
             attention: None,
@@ -1940,8 +1947,8 @@ mod tests {
         assert_eq!(
             agent_table(&rows),
             [
-                "agents[1]{machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead}:",
-                "  ganymede,w5S:p1,fix,fix,claude,working,,25m old,w3V:p1 on proteus,headless,",
+                "agents[1]{machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead,tier,model}:",
+                "  ganymede,w5S:p1,fix,fix,claude,working,,25m old,w3V:p1 on proteus,headless,,balanced,claude-sonnet-5-5",
             ]
         );
         assert_eq!(
@@ -1957,6 +1964,7 @@ mod tests {
             name: "x".into(),
             tab: String::new(),
             kind: "claude".into(),
+            selection: None,
             status: "idle".into(),
             dialog: None,
             attention,

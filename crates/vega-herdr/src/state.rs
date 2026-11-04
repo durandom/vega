@@ -946,6 +946,22 @@ pub struct SpawnRecord {
     pub task: Option<String>,
     pub session: Option<String>,
     pub extra: Vec<String>,
+    #[serde(default)]
+    pub tier: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Recorded selection for the current occupant; reused panes must not inherit it.
+pub fn spawn_of_on(
+    machine: Option<&str>,
+    pane: &str,
+    name: &str,
+    kind: &str,
+) -> Option<SpawnRecord> {
+    let text = std::fs::read_to_string(state_file_on("spawns", machine, pane)?).ok()?;
+    let r: SpawnRecord = serde_json::from_str(&text).ok()?;
+    (r.pane == pane && r.name == name && r.kind == kind).then_some(r)
 }
 
 pub fn save_spawn(record: &SpawnRecord) -> std::io::Result<()> {
