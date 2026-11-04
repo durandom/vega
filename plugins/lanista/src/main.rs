@@ -7,7 +7,7 @@
 //! and files, never its internals.
 
 mod install;
-mod seats;
+use vega_lanista::seats;
 
 use std::env;
 use std::path::Path;
@@ -597,17 +597,15 @@ fn pin(
         let change = if mutation { Some(set) } else { None };
         match vega_registry::pins::access(record, change) {
             Ok(view) => {
-                if let Some((host, pin)) =
-                    vega_registry::pins::latest(&view, &project, seat, provider, tier)
+                if let Some((host, active, expires)) =
+                    vega_lanista::effective_model(&view, &project, seat, provider, tier)
                 {
-                    if let Some(m) = pin.active(vega_herdr::capacity::now()) {
-                        model = m.to_string();
-                        source = format!("project ({host})");
-                        println!(
-                            "expires: {}",
-                            pin.expires.map_or("never".into(), |t| t.to_string())
-                        );
-                    }
+                    model = active;
+                    source = format!("project ({host})");
+                    println!(
+                        "expires: {}",
+                        expires.map_or("never".into(), |t| t.to_string())
+                    );
                 }
                 if mutation {
                     println!("action: {}", if clear { "cleared" } else { "set" });

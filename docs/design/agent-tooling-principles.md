@@ -328,7 +328,7 @@ Otherwise it stays passthrough.
 | Stage | Scope | Done when |
 | --- | --- | --- |
 | 0 | `shims/herdr`: Rust shim, passthrough via `exec`, resolves the real binary via `HERDR_BIN_PATH` then `PATH`, skips itself | Done. Exit codes, stdout and recursion guard verified. |
-| 1 | Coordinator workflow: `vega mux spawn <name> --kind <agent> --cwd <dir> --prompt "…"` (new workspace per project; `--worktree <branch>` optional), plus `send`, `wait`, `report`, `ask`/`reply` over a file mailbox, plus the `vega mux` home view (AXI 8). See [vega-mux-mvp.md](vega-mux-mvp.md). | One vega session coordinates two workers in two other repos end to end, without polling turns. |
+| 1 | Coordinator workflow: `vega mux spawn <name> --kind <agent> --tier balanced --cwd <dir> --prompt "…"` (new workspace per project; `--worktree <branch>` optional), plus `send`, `wait`, `report`, `ask`/`reply` over a file mailbox, plus the `vega mux` home view (AXI 8). See [vega-mux-mvp.md](vega-mux-mvp.md). | One vega session coordinates two workers in two other repos end to end, without polling turns. |
 | 2 | Discovery of `vega mux` (ambient line or skill stub). | A fresh agent session uses `vega mux` without being told in the prompt. |
 | 3 | `herdr` shim: first-call trailer and hints pointing to `vega mux` (P3, P4). | An agent that calls `herdr` directly switches to `vega mux` on its next call. |
 

@@ -946,6 +946,22 @@ pub struct SpawnRecord {
     pub task: Option<String>,
     pub session: Option<String>,
     pub extra: Vec<String>,
+    #[serde(default)]
+    pub tier: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Recorded selection for the current occupant; reused panes must not inherit it.
+pub fn spawn_of_on(
+    machine: Option<&str>,
+    pane: &str,
+    name: &str,
+    kind: &str,
+) -> Option<SpawnRecord> {
+    let text = std::fs::read_to_string(state_file_on("spawns", machine, pane)?).ok()?;
+    let r: SpawnRecord = serde_json::from_str(&text).ok()?;
+    (r.pane == pane && r.name == name && r.kind == kind).then_some(r)
 }
 
 pub fn save_spawn(record: &SpawnRecord) -> std::io::Result<()> {
@@ -998,6 +1014,65 @@ fn remove(file: &Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_selection_requires_the_current_occupant() {
+        if std::env::var_os("VEGA_SPAWN_RECORD_TEST_CHILD").is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "state::tests::spawn_selection_requires_the_current_occupant",
+                ])
+                .env("VEGA_SPAWN_RECORD_TEST_CHILD", "1")
+                .env("XDG_STATE_HOME", dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let pane = "w1:p1";
+        assert!(spawn_of_on(None, pane, "fix", "codex").is_none());
+        write(&state_file_on("spawns", None, pane), "not json");
+        assert!(spawn_of_on(None, pane, "fix", "codex").is_none());
+        let record = SpawnRecord {
+            pane: pane.into(),
+            name: "fix".into(),
+            kind: "codex".into(),
+            cwd: "/checkout".into(),
+            parent: None,
+            mode: "headed".into(),
+            task: None,
+            session: None,
+            extra: vec!["--model".into(), "chosen".into()],
+            tier: Some("budget".into()),
+            model: Some("chosen".into()),
+        };
+        write(
+            &state_file_on("spawns", None, pane),
+            &serde_json::to_string(&record).unwrap(),
+        );
+        assert_eq!(
+            spawn_of_on(None, pane, "fix", "codex"),
+            Some(record.clone())
+        );
+        assert!(spawn_of_on(None, pane, "renamed", "codex").is_none());
+        assert!(spawn_of_on(None, pane, "fix", "claude").is_none());
+        assert!(spawn_of_on(None, "w1:p2", "fix", "codex").is_none());
+        assert!(spawn_of_on(Some("other-host"), pane, "fix", "codex").is_none());
+        // Legacy records still decode with unknown tier/model.
+        let mut legacy = serde_json::to_value(&record).unwrap();
+        legacy.as_object_mut().unwrap().remove("tier");
+        legacy.as_object_mut().unwrap().remove("model");
+        let legacy: SpawnRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.tier, None);
+        assert_eq!(legacy.model, None);
+    }
 
     #[test]
     fn known_mode_requires_a_valid_current_agent_record() {

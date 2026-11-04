@@ -3307,6 +3307,7 @@ dependencies = [
  "tempfile",
  "vega-build",
  "vega-herdr",
+ "vega-lanista",
  "vega-plugin",
  "vega-registry",
  "vega-transcript",

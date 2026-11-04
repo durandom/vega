@@ -9,17 +9,17 @@ Help: `--help`.
 
 - `vega mux` lists the agents in your herdr workspace (`--all`: every workspace).
   `vega mux show <pane|name>`: status, mail metadata, parent and recent output.
-- `vega mux transcript <pane|name> [--last|--since N|--count]` reads its session log: the
-  evidence of what it said, unlike `show`.
+- `vega mux transcript <pane|name> [--last|--since N|--count]` reads its session log.
 - `vega mux send <pane|name> "<text>"` (or `--file <path>`) mails it; the reply arrives
-  as a new prompt (do not poll). `--now` pastes at once (urgent; no draft
-  guard).
+  as a new prompt (do not poll). `--now`: urgent paste.
 - `vega mux dialog <pane|name> [--json]` classifies a visible dialog; exit 1 means none.
 - `vega mux answer <target> --option N | --text "…"` answers questions only; trust/permission stay
   with the Slayer.
-- `vega mux spawn <name> --kind claude|codex|pi|agy [--cwd <dir>] --prompt-file <brief>` starts an
+- `vega mux spawn <name> --kind claude|codex|pi|agy --tier flagship|balanced|budget [--cwd <dir>] --prompt-file <brief>` starts an
   agent without approval prompts. Headed by default; `--headless` redirects questions to you.
-  Inbox-only targets ask the user in either mode.
+  Tiers: flagship design/root-cause; balanced implementation; budget mechanical.
+  Lanista resolves pins (Pi: zai); explicit `-m`/`--model` after `--` or `--no-parent` needs no tier.
+  `show`: tier/model. Inbox-only targets ask the user.
   Your pane is its parent; `vega post done` wakes you. Thin `capacity:` warns (stderr).
 - Add `--worktree <branch> --base <ref>` to start it in its own git worktree and herdr workspace;
   worktrunk creates it; never run `git worktree`.
@@ -27,12 +27,12 @@ Help: `--help`.
 - `vega mux close <pane|name>` closes an agent's worktree workspace or pane; then `wt remove <branch>`.
 - Remote: `--machine <label>` (`herdr machine list`); replies via `vega post`. Spawn needs `--cwd`.
 - On `approval_required`, `trust_required`, `hooks_review_required` or a dialog-naming
-  `timeout`, tell the user; never approve it yourself. Spawn gives claude and codex the trust either has for the repo.
+  `timeout`, tell the user; never approve it yourself. Spawn shares existing claude/codex repo trust.
   Then `brief: not delivered`: once the user answered, `vega mux spawn --resume <pane>` delivers it.
 
 ## Receiving
 
-A message that ends with a `[vega-mux] from <pane>` footer comes from a peer agent of the same user.
+A `[vega-mux] from <pane>` footer names a peer agent of the same user.
 
 - A footer with `vega post done` assigns your task. When finished, run it once as your only
   report; stop. Questions: user if headed/inbox-only; otherwise parent.

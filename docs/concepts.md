@@ -53,7 +53,7 @@ workspace.
 ## Agent kinds
 
 The kind is the herdr agent kind of a pane: `claude`, `codex`, `pi`, `agy` (`herdr agent` lists them).
-`vega mux spawn --kind <kind>` starts one with its default args (approval prompts off, see `vega mux spawn
+`vega mux spawn --kind <kind> --tier balanced` starts one with its default args (approval prompts off, see `vega mux spawn
 --help`); `vega mux reopen` resumes a closed claude or codex session. Delivery, the draft guard and the done
 report work the same for every kind. `vega capacity` shows subscription headroom per provider, to choose a kind.
 
