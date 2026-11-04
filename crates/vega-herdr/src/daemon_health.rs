@@ -20,9 +20,17 @@ pub struct Health {
 }
 
 pub fn path() -> Option<PathBuf> {
-    let root = std::env::var_os("XDG_STATE_HOME")
+    health_path(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+}
+
+fn health_path(
+    xdg: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let root = xdg
+        .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+        .or_else(|| home.map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(root.join("vega/vegad-health.json"))
 }
 
@@ -102,6 +110,24 @@ pub fn status() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_xdg_uses_the_same_home_fallback_as_the_daemon() {
+        let expected = PathBuf::from("/home/fixture/.local/state/vega/vegad-health.json");
+        assert_eq!(
+            health_path(Some("".into()), Some("/home/fixture".into())),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            health_path(None, Some("/home/fixture".into())),
+            Some(expected)
+        );
+        assert_eq!(
+            health_path(Some("/state".into()), None),
+            Some(PathBuf::from("/state/vega/vegad-health.json"))
+        );
+        assert_eq!(health_path(Some("".into()), None), None);
+    }
+
     #[test]
     fn repeated_overruns_recover_and_stale_evidence_is_unknown() {
         let mut h = Health {
