@@ -36,6 +36,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// A pointed pane with new mail is re-checked (one broker call) at most this
@@ -85,7 +86,7 @@ pub struct Delivery {
 }
 
 /// Who sent a mail: the bounce goes back there.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Origin {
     pub host: String,
     /// Empty for the user (vega board) or a tool: no pane to mail.
@@ -94,7 +95,7 @@ pub struct Origin {
 }
 
 /// A pane closed with mail it never read.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Bounce {
     pub pane: String,
     /// Senders of the mail still kept, oldest first.
@@ -489,6 +490,7 @@ impl Delivery {
             "typed_at": self.typed_at,
             "held": self.held,
             "retries": self.retries,
+            "bounces": self.bounces,
             "origins": self.origins.iter().map(|(p, os)| {
                 let os: Vec<Value> = os.iter().map(|o| match o {
                     Some(o) => json!({"host": o.host, "pane": o.pane, "agent": o.agent}),
@@ -520,6 +522,13 @@ impl Delivery {
         self.queued.extend(set("queued"));
         self.typed_at.extend(times("typed_at"));
         self.held.extend(times("held"));
+        self.bounces.extend(
+            v["bounces"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|b| serde_json::from_value::<Bounce>(b.clone()).ok()),
+        );
         // An older image kept when an exhausted quota aborted.
         for (p, t) in times("exhausted") {
             self.held.entry(p).or_insert(t + STALE.as_millis() as u64);
@@ -1407,5 +1416,48 @@ mod tests {
         assert_eq!(got[0].pane, "w1:p1");
         assert_eq!(got[0].origins, vec![origin("ganymede", "w5S:p1"), None]);
         assert!(got[0].done.is_empty());
+    }
+
+    #[test]
+    fn pending_bounces_survive_an_upgrade() {
+        let mut a = Delivery::default();
+        let told = origin("ganymede", "w5S:p1").unwrap();
+        let waiting = origin("proteus", "w3V:p2").unwrap();
+        a.mail_from("w1:p1", Sender::Other, Some(told.clone()));
+        a.mail("w1:p1", Sender::Other);
+        a.mail_from("w1:p1", Sender::Other, Some(waiting.clone()));
+        a.mail_from("w1:p1", Sender::Other, Some(waiting.clone()));
+        a.gone("w1:p1");
+        let mut retry = a.take_bounces();
+        retry[0].done.push(told);
+        retry[0].closed_ms = 1_700_000_000_123;
+        a.keep_bounces(retry);
+        a.mail_from("w2:p1", Sender::Other, Some(waiting.clone()));
+        a.gone("w2:p1");
+
+        // Exercise the JSON handoff, including a partially completed retry.
+        let saved = serde_json::to_string(&a.export()).unwrap();
+        let mut b = Delivery::default();
+        b.import(&serde_json::from_str(&saved).unwrap());
+        assert_eq!(
+            b.bounces(),
+            a.bounces(),
+            "all fields and queue order survive"
+        );
+        let got = b.take_bounces();
+        assert_eq!(got[0].senders(4), vec![waiting.clone()]);
+        assert_eq!(got[1].senders(1), vec![waiting]);
+    }
+
+    #[test]
+    fn an_export_without_bounces_still_imports() {
+        let mut a = Delivery::default();
+        a.mail("w1:p1", Sender::Urgent);
+        let mut saved = a.export();
+        saved.as_object_mut().unwrap().remove("bounces");
+        let mut b = Delivery::default();
+        b.import(&saved);
+        assert!(b.bounces().is_empty());
+        assert_eq!(b.candidates(false), vec!["w1:p1"]);
     }
 }
