@@ -38,6 +38,18 @@ fn successive_applies_retain_redacted_write_evidence() {
         );
         let text = String::from_utf8(output.stdout).unwrap();
         assert!(text.contains("summary: written 1"));
+        let cell = text
+            .split("evidence[1]{unit,event}:\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("  claude.settings,\""))
+            .map(|rest| format!("\"{rest}"))
+            .expect("an evidence event cell");
+        let encoded: String = serde_json::from_str(&cell).unwrap();
+        let event: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(event["unit"], "claude.settings");
+        assert_eq!(event["phase"], phase);
         assert!(text.contains("/outputStyle"));
         assert!(text.contains("missing_key"));
         for forbidden in ["SOURCE_SECRET", "USER_SECRET", "TOKEN", "/env"] {
