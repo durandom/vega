@@ -18,6 +18,7 @@ use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::Duration;
 
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, Subcommand};
@@ -1225,6 +1226,102 @@ fn shell_pid(info: &Value) -> Option<u64> {
         .filter(|p| *p > 1)
 }
 
+/// A fresh pane's shell must stay quiet this long before `herdr agent start`
+/// types the launch command: keys typed while the shell still runs its rc
+/// files can be lost (vega-8l8: `pprove` for `pi --approve`, `ude` for `claude`).
+const SHELL_SETTLE: Duration = Duration::from_millis(800);
+const SHELL_POLL: Duration = Duration::from_millis(100);
+/// After this, the start goes ahead anyway; herdr's own checks still apply.
+const SHELL_WAIT_MAX: Duration = Duration::from_secs(20);
+
+/// One look at a pane's shell.
+#[derive(Clone, Debug, PartialEq)]
+struct ShellSample {
+    /// Only the shell itself is in the foreground (no rc child like `mise`).
+    idle: bool,
+    /// The visible screen: a drawn prompt, unchanged while the shell is quiet.
+    screen: String,
+    /// The shell's CPU ticks, where readable (a local Linux pane): an rc file
+    /// sourced in-process changes them without a child or a redraw.
+    cpu: Option<u64>,
+}
+
+impl ShellSample {
+    fn ready(&self) -> bool {
+        self.idle && !self.screen.trim().is_empty()
+    }
+}
+
+/// Polls `probe` until two ready samples stay equal for `settle`; false when
+/// `max` passes first, or at once when the pane cannot be observed (`None`:
+/// no shell pid or screen), as nothing would change then. `sleep` waits one `poll`.
+fn wait_settled(
+    mut probe: impl FnMut() -> Option<ShellSample>,
+    mut sleep: impl FnMut(Duration),
+    settle: Duration,
+    poll: Duration,
+    max: Duration,
+) -> bool {
+    let (mut last, mut quiet, mut waited) = (None, Duration::ZERO, Duration::ZERO);
+    loop {
+        let Some(sample) = probe() else {
+            return false;
+        };
+        let sample = Some(sample).filter(ShellSample::ready);
+        quiet = match (&sample, &last) {
+            (Some(s), Some(l)) if s == l => quiet + poll,
+            _ => Duration::ZERO,
+        };
+        if quiet >= settle {
+            return true;
+        }
+        if waited >= max {
+            return false;
+        }
+        last = sample;
+        sleep(poll);
+        waited += poll;
+    }
+}
+
+/// The pane's shell right now; `local` adds its CPU ticks.
+fn shell_sample(pane: &str, local: bool) -> Option<ShellSample> {
+    let info = herdr(&["pane", "process-info", "--pane", pane]).ok()?;
+    let shell = shell_pid(&info)?;
+    // A herdr without the foreground list cannot be observed.
+    let fg = info["result"]["process_info"]["foreground_processes"].as_array()?;
+    let idle = !fg.is_empty() && fg.iter().all(|p| p["pid"].as_u64() == Some(shell));
+    let screen = herdr_text(&["pane", "read", pane, "--source", "visible"]).ok()?;
+    let cpu = if local { cpu_ticks(shell) } else { None };
+    Some(ShellSample { idle, screen, cpu })
+}
+
+/// utime + stime of `pid` from `/proc/<pid>/stat`; None without procfs.
+fn cpu_ticks(pid: u64) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    proc_cpu_ticks(&stat)
+}
+
+/// Fields 14 and 15 of a `/proc/<pid>/stat` line; the command name (field
+/// 2) may hold spaces, so count from its closing parenthesis.
+fn proc_cpu_ticks(stat: &str) -> Option<u64> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    let f: Vec<&str> = rest.split_whitespace().collect();
+    Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
+}
+
+/// Waits until the fresh pane's shell is at a settled prompt (best effort).
+fn await_shell(machine: Option<&str>, pane: &str) {
+    let local = machine.is_none();
+    wait_settled(
+        || shell_sample(pane, local),
+        std::thread::sleep,
+        SHELL_SETTLE,
+        SHELL_POLL,
+        SHELL_WAIT_MAX,
+    );
+}
+
 /// `start_spawn` with the pane shell reniced first on this machine, so the
 /// agent inherits AGENT_NICE; a `--machine` spawn keeps its priority.
 fn start_agent(
@@ -1538,6 +1635,7 @@ fn spawn_inner(
         }
     }
     vega_herdr::state::restore_parent(&pane, name, lineage.parent.as_ref());
+    await_shell(machine(), &pane);
     let started = start_agent(machine(), &pane, name, mode, || herdr(&args));
     reopen::capture(&mut lineage);
     reopen::save_best_effort(&lineage);
@@ -2353,6 +2451,67 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
         });
         assert!(started.is_ok());
         assert_eq!(std::fs::read_to_string(&calls).unwrap(), "agent start\n");
+    }
+
+    /// Runs `wait_settled` over `samples` (the last repeats); whether it
+    /// settled and how many polls it took.
+    fn settle_over(samples: Vec<Option<ShellSample>>) -> (bool, usize) {
+        let ms = Duration::from_millis;
+        let mut i = 0;
+        let ok = wait_settled(
+            || {
+                let s = samples[i.min(samples.len() - 1)].clone();
+                i += 1;
+                s
+            },
+            |_| {},
+            ms(300),
+            ms(100),
+            ms(2000),
+        );
+        (ok, i)
+    }
+
+    fn sample(idle: bool, screen: &str, cpu: u64) -> Option<ShellSample> {
+        Some(ShellSample {
+            idle,
+            screen: screen.into(),
+            cpu: Some(cpu),
+        })
+    }
+
+    /// vega-8l8: the launch command lost its first keys because it was typed
+    /// while the shell still ran its rc files. The wait holds through an rc
+    /// child, a static instant prompt with a busy shell, and a redraw.
+    #[test]
+    fn wait_settled_holds_until_the_shell_is_quiet() {
+        let samples = vec![
+            sample(true, "", 1),
+            sample(true, "$ ", 8),
+            sample(false, "$ ", 9),
+            sample(true, "$ ", 10),
+            sample(true, "$ ", 11),
+            sample(true, "> $ ", 12),
+        ];
+        // Ready at the 6th sample, then 3 equal samples of 100 ms each.
+        assert_eq!(settle_over(samples), (true, 9));
+    }
+
+    #[test]
+    fn wait_settled_gives_up_on_a_busy_shell() {
+        let busy = (0..30).map(|n| sample(true, "$ ", n)).collect();
+        assert_eq!(settle_over(busy), (false, 21));
+        assert_eq!(settle_over(vec![sample(false, "$ ", 1)]), (false, 21));
+        // An unobservable pane (no shell pid) is not waited for.
+        assert_eq!(settle_over(vec![None]), (false, 1));
+    }
+
+    #[test]
+    fn proc_cpu_ticks_sums_utime_and_stime() {
+        let stat = "4242 (z sh) S 1 4242 4242 34816 4242 4194304 900 0 0 0 7 5 0 0 20 0 1";
+        assert_eq!(proc_cpu_ticks(stat), Some(12));
+        assert_eq!(proc_cpu_ticks("4242 (zsh) S 1"), None);
+        assert_eq!(proc_cpu_ticks(""), None);
     }
 
     #[test]
