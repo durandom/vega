@@ -479,6 +479,26 @@ supervision running.
 
 ## Registry (M4)
 
+### One-time TTL enablement (vega-lhc.246)
+
+The operator temporarily renders the usual `vega post auth-config` with
+`--admin U... --create registry-ttl`, reloads the broker, runs
+`vega post provision registry --ttl`, then renders without `--create registry-ttl`
+and reloads again, even if provisioning fails. Enabling `allow_msg_ttl` is
+irreversible on NATS 2.14.7. The bucket must already exist; an enabled bucket is
+a no-op without any UPDATE request. No other target can be combined with `--ttl`.
+
+The temporary admin grant is exactly `STREAM.UPDATE.KV_VEGA_REGISTRY`, absent
+from default admin and all host renders. NATS cannot limit UPDATE to one field:
+the grant can also enable republishing, so keep the window short. Provisioning
+preserves raw JSON values from STREAM.INFO (including unknown server fields),
+checks that only `allow_msg_ttl` changes before sending, and checks the returned
+config (allowing only the server-generated metadata `_nats.req.level` transition
+from `"0"` to `"1"` in the response). The outgoing metadata stays verbatim.
+Run with no concurrent stream administration: NATS offers no config CAS.
+A post-update mismatch reports failure; it does not attempt a dangerous rollback.
+
+
 Bucket VEGA_REGISTRY, keys start with the writing host's token: `<host>.beat`, `<host>.agent.<pane>`
 (status, name, kind, cwd, repo, finished turns, and `waiting` {status, since} while the agent waits for
 the Slayer: [mux-next.md](mux-next.md)), `<host>.link.<child host>.<pane>` (lineage and

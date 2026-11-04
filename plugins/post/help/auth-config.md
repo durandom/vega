@@ -26,3 +26,8 @@ Examples:
   vega post auth-config --file hosts.txt --admin UXYZ... --inbox-only deimos --quarantine deimos \
       --registry-read deimos=proteus.theme
   (hosts.txt: host=U... lines, # comments)
+
+One-time registry TTL migration: `--create registry-ttl` grants the admin only
+`STREAM.UPDATE.KV_VEGA_REGISTRY`. Run `vega post provision registry --ttl`, then
+regenerate without this grant and reload even on failure. UPDATE can enable
+republishing; the broker cannot enforce TTL-only changes. Never leave it enabled.

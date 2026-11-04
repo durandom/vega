@@ -378,6 +378,10 @@ fn catalog_grants(host: &str, writer: Option<&str>) -> String {
 /// added. Creating an existing name with another config fails (10058), so
 /// a provisioned stream cannot be rewritten. No delete, purge, update,
 /// message get, consumer create, fetch, ack or `vega.inbox` subscribe.
+/// EXCEPTION: `--create registry-ttl` temporarily grants UPDATE on the registry
+/// alone. UPDATE can enable republishing too; the broker cannot restrict fields.
+/// Use only for `provision registry --ttl`, then remove the grant immediately.
+/// The provisioner preserves every other raw config field and checks the diff.
 fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     let mut allow = Vec::new();
     // The registry bucket (vegad M4): the admin creates it once, with
@@ -386,6 +390,9 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
         allow.push("\"$JS.API.STREAM.CREATE.KV_VEGA_REGISTRY\"".to_string());
         // Bucket creation reads the account limits first (read-only).
         allow.push("\"$JS.API.INFO\"".to_string());
+    }
+    if create.iter().any(|c| c == "registry-ttl") {
+        allow.push("\"$JS.API.STREAM.UPDATE.KV_VEGA_REGISTRY\"".to_string());
     }
     // The lanista catalog bucket, likewise once with `--create lanista`.
     if create.iter().any(|c| c == "lanista") {
@@ -404,14 +411,27 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
         allow.push(format!("\"$JS.API.STREAM.INFO.{s}\""));
         allow.push(format!("\"$JS.API.CONSUMER.LIST.{s}\""));
     }
-    let note = if create.is_empty() {
+    let creates: Vec<_> = create
+        .iter()
+        .filter(|c| c.as_str() != "registry-ttl")
+        .cloned()
+        .collect();
+    let mut note = if create.iter().any(|c| c == "registry-ttl") {
+        format!(
+            "    # admin: temporary provisioning grants; CREATE targets: {}.\n",
+            creates.join(", ")
+        )
+    } else if creates.is_empty() {
         "    # admin: stream info and consumer lists of the hosts below; creates no\n    # streams (steady state); cannot read mail, delete, purge or change streams.\n".to_string()
     } else {
         format!(
-            "    # admin: may CREATE the streams of: {} (provisioning; regenerate without\n    # --create afterwards). Cannot read mail, delete, purge or change streams.\n",
-            create.join(", ")
+            "    # admin: may CREATE the streams of: {} (provisioning; regenerate without\n    # --create afterwards). Cannot read mail, delete or purge.\n",
+            creates.join(", ")
         )
     };
+    if create.iter().any(|c| c == "registry-ttl") {
+        note.push_str("    # TEMPORARY: may UPDATE KV_VEGA_REGISTRY (including republishing).\n    # Run provision registry --ttl, then remove --create registry-ttl and reload.\n");
+    }
     format!(
         r#"{note}    {{
       nkey: {key}
@@ -501,6 +521,32 @@ mod tests {
         let args = vec![format!("a={k}"), format!("b={k}")];
         assert!(read_entries(&args, None).is_err());
         assert!(read_entries(&[], None).is_err());
+    }
+
+    #[test]
+    fn registry_update_is_explicit_and_admin_only() {
+        let entries = vec![Entry {
+            host: "proteus".into(),
+            key: key(),
+        }];
+        for grants in [
+            vec![],
+            vec!["registry".into()],
+            vec!["proteus".into()],
+            vec!["registry-ttl".into()],
+        ] {
+            let hosts = render(&entries, None, &grants, &[], None, &[], &[], &[], None);
+            assert!(!hosts.contains("STREAM.UPDATE"));
+            let admin = render_admin(&key(), &entries, &grants);
+            assert_eq!(
+                admin.matches("STREAM.UPDATE").count(),
+                usize::from(grants.contains(&"registry-ttl".into()))
+            );
+            if grants.contains(&"registry-ttl".into()) {
+                assert!(admin.contains("\"$JS.API.STREAM.UPDATE.KV_VEGA_REGISTRY\""));
+                assert!(!admin.contains("STREAM.CREATE"));
+            }
+        }
     }
 
     #[test]

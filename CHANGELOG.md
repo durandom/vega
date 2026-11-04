@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 106 · 2026-11-04
+
+- migration: operators can enable registry message TTL with the temporary admin grant
+  `auth-config --create registry-ttl` and `vega post provision registry --ttl`.
+  Regenerate without the grant and reload immediately afterwards, including on failure.
+  Enabling is irreversible on NATS 2.14.7; see [vegad](docs/design/vegad.md#one-time-ttl-enablement-vega-lhc246).
+
 ## 105 · 2026-11-04
 
 - required: `vega mux spawn` now requires `--tier flagship|balanced|budget`, resolved
