@@ -62,9 +62,12 @@ owner plan to list exact candidate subjects from the snapshot and migrated
 projection; orrery selects the authorized subset, never grants the whole list
 by default.
 
-Pin resolution with an explicit host list does exact direct gets. Current
-`post --uac` discovery enumerates beats/agents/UACs and therefore remains
-unavailable to an inbox-only host, which is also forbidden to send mail.
+Pin resolution with an explicit host list does exact direct gets. On inbox-only hosts, `post send --uac` resolves only open local UACs from
+local v2 claims (including aliases and `.`), without registry access. Same-host
+`post send` and `done` deliver through herdr with a local reply footer and
+supervision records, without broker publication or an inbox archive entry.
+Remote UAC discovery still requires registry enumeration and is unavailable;
+explicit cross-host pane targets keep the quarantine path.
 There is no new inbox-only publication right: reconcile and pin mutation need
 owner write rights that deimos does not hold. Beat and agent keys retain their
 existing spellings; UAC and pin keys are the project-key grant changes.

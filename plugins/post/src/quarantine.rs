@@ -188,8 +188,8 @@ pub fn denied(msg: &str, inbox_only_self: bool) -> Failure {
     if publish_to("vega.inbox.") || (inbox_only_self && publish_to("vega.")) {
         return Failure::new(
             "inbox_only",
-            format!("this host is inbox-only by design (receive only); it cannot mail agents ({msg})"),
-            "`vega post send` and `done` put replies into quarantine, a notice for the human; this is not a broker misconfiguration, do not ask for send rights",
+            format!("this host is inbox-only by design: it cannot mail agents across hosts over the broker ({msg})"),
+            "same-host `vega post send` and `done` deliver locally via herdr; cross-host replies go into quarantine unless a receiver pair grant allows peer mail; run `vega mux` to list local agents; do not ask for broker send rights",
         );
     }
     Failure::new(

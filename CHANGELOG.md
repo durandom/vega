@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 107 · 2026-11-04
+
+- feature: inbox-only hosts can use `vega post send` and `done` for local panes through herdr.
+  `send --uac` resolves open local UAC claims and aliases; cross-host mail stays quarantined
+  unless a receiver pair grant permits peer mail. No broker permission change.
+
 ## 106 · 2026-11-04
 
 - migration: operators can enable registry message TTL with the temporary admin grant

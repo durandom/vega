@@ -32,6 +32,7 @@ mod hygiene;
 mod identity;
 mod identity_mappings;
 mod janitor;
+mod local_send;
 mod loop_budget;
 mod notes;
 mod notify_delivery;
@@ -1507,19 +1508,20 @@ fn send(
         }
         Ok(())
     };
-    if let To::Pane(target, host) = to {
-        let to_host = host.map(subject_token).unwrap_or_else(|| my_host.clone());
+    if let To::Pane(target, target_host) = to {
+        let to_host = target_host
+            .map(subject_token)
+            .unwrap_or_else(|| my_host.clone());
         self_send(&to_host, target)?;
-        if vega_herdr::state::is_inbox_only(&my_host) {
-            let headers = send_headers(&me, &thread, hop, now, done, kind);
-            return send_quarantine(&to_host, target, headers, text, done);
+    }
+    if st::is_inbox_only(&my_host) {
+        let (target, to_host) = local_send::resolve(to, &my_host)?;
+        self_send(&to_host, &target)?;
+        let headers = send_headers(&me, &thread, hop, now, done, kind);
+        if to_host == my_host {
+            return local_send::deliver(&target, &me, &headers, text, done);
         }
-    } else if vega_herdr::state::is_inbox_only(&my_host) {
-        return Err(Failure::new(
-            "inbox_only",
-            format!("this host ({my_host}) is inbox-only: it cannot read the registry to find a UAC or the Uber-UAC"),
-            "reply to the pane from the reply command: vega post send --host <host> <pane> \"<text>\"",
-        ));
+        return send_quarantine(&to_host, &target, headers, text, done);
     }
 
     let started = Instant::now();
@@ -1586,7 +1588,7 @@ fn send(
     Ok(())
 }
 
-/// `send` and `done` on an inbox-only host: the reply goes into quarantine
+/// Cross-host `send` and `done` on an inbox-only host go into quarantine
 /// (quarantine.rs): a human note, or peer inbox mail under a live receiver
 /// pair grant. Fails unless the target's vegad confirms storage.
 fn send_quarantine(
@@ -1601,7 +1603,7 @@ fn send_quarantine(
         return Err(Failure::new(
             "inbox_only",
             format!("this host ({my_host}) is inbox-only by design: no mail between its own agents over the broker"),
-            &format!("on this machine use `vega mux send {target} \"<text>\"`"),
+            &format!("on this machine use `vega post send {target} \"<text>\"`"),
         ));
     }
     if text.len() > quarantine::MAX_BODY {
@@ -2242,7 +2244,7 @@ fn print_msg(
         {
             println!("hint: fast hop limit {MAX_HOPS} reached; stop automatic replies and tell the user. A substantive reply can resume 120 s after this message was published");
         }
-        let quarantine = if st::is_inbox_only(host) {
+        let quarantine = if from_host != host && st::is_inbox_only(host) {
             " (inbox-only: quarantine note unless the receiver has a live operator pair grant)"
         } else {
             ""
