@@ -61,7 +61,7 @@ cargo install --locked --path "$root/shims/bd" --root "$HOME/.local/share/vega/s
 # Only the hooks: the personal units (instructions, styles, settings keys) are
 # applied by `vega deploy` or an explicit `vega config apply`, never here.
 install -m 644 "$root/shims/activate.sh" "$HOME/.local/share/vega/shims/activate.sh"
-"$HOME/.local/bin/vega-config" apply hooks ||
+VEGA_CONFIG_PHASE=install "$HOME/.local/bin/vega-config" apply hooks ||
 	echo "warning: vega config apply hooks did not complete; see \`vega config hooks\`" 1>&2
 
 # Global git hooks, config-based (git >= 2.54): they run next to core.hooksPath

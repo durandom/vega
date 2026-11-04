@@ -1,0 +1,131 @@
+//! Real CLI, isolated HOME/XDG directories; no installed configuration touched.
+use std::fs;
+use std::process::Command;
+
+use serde_json::Value;
+
+#[test]
+fn successive_applies_retain_redacted_write_evidence() {
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("home");
+    let config = d.path().join("config");
+    let state = d.path().join("state");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    let src = config.join("vega/config/claude");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("settings.json"),
+        r#"{"outputStyle":"SOURCE_SECRET"}"#,
+    )
+    .unwrap();
+    let target = home.join(".claude/settings.json");
+    for phase in ["install", "deploy"] {
+        fs::write(&target, r#"{"env":{"TOKEN":"USER_SECRET"}}"#).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_vega-config"))
+            .args(["apply", "claude.settings"])
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &config)
+            .env("XDG_STATE_HOME", &state)
+            .env("XDG_DATA_HOME", d.path().join("data"))
+            .env("VEGA_CONFIG_PHASE", phase)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("summary: written 1"));
+        let cell = text
+            .split("evidence[1]{unit,event}:\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("  claude.settings,\""))
+            .map(|rest| format!("\"{rest}"))
+            .expect("an evidence event cell");
+        let encoded: String = serde_json::from_str(&cell).unwrap();
+        let event: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(event["unit"], "claude.settings");
+        assert_eq!(event["phase"], phase);
+        assert!(text.contains("/outputStyle"));
+        assert!(text.contains("missing_key"));
+        for forbidden in ["SOURCE_SECRET", "USER_SECRET", "TOKEN", "/env"] {
+            assert!(!text.contains(forbidden));
+        }
+    }
+    let text = fs::read_to_string(state.join("vega/config-evidence.json")).unwrap();
+    let events: Vec<Value> = serde_json::from_str(&text).unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["phase"], "install");
+    assert_eq!(events[1]["phase"], "deploy");
+    assert_eq!(events[1]["writes"][0]["keys"][0]["source_changed"], false);
+    assert!(events.iter().all(|e| e["at_unix_ms"].as_u64().unwrap() > 0));
+    for forbidden in ["SOURCE_SECRET", "USER_SECRET", "TOKEN", "/env"] {
+        assert!(!text.contains(forbidden));
+    }
+}
+
+#[test]
+fn corrupt_history_fails_cli_for_written_and_rejected_units() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for unit in ["claude.settings", "herdr"] {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let config = d.path().join("config");
+        let state = d.path().join("state");
+        let bin = d.path().join("bin");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(config.join("vega/config/herdr")).unwrap();
+        fs::write(config.join("vega/config/herdr/config.toml"), "BAD = 1\n").unwrap();
+        let herdr = bin.join("herdr");
+        fs::write(
+            &herdr,
+            "#!/bin/sh\necho 'config: issues found'\necho 'bad key BAD'\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(&herdr, fs::Permissions::from_mode(0o755)).unwrap();
+        let history = state.join("vega/config-evidence.json");
+        fs::create_dir_all(history.parent().unwrap()).unwrap();
+        fs::write(&history, "corrupt history").unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_vega-config"))
+            .args(["apply", unit])
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &config)
+            .env("XDG_STATE_HOME", &state)
+            .env("XDG_DATA_HOME", d.path().join("data"))
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("evidence not retained"), "{text}");
+        assert!(
+            text.contains(
+                "summary: written 0, unchanged 0, managed 0, skipped 0, rejected 0, failed 1"
+            ),
+            "{text}"
+        );
+        assert_eq!(fs::read_to_string(history).unwrap(), "corrupt history");
+        if unit == "herdr" {
+            // Retention failure promotes Rejected to Failed; it is reported in
+            // the failed result row rather than silently counted as a rejection.
+            assert!(
+                text.contains("failed: rejected; evidence not retained"),
+                "{text}"
+            );
+            assert!(!text.contains("issues["), "{text}");
+            assert!(!config.join("herdr/config.toml").exists());
+        } else {
+            assert!(
+                text.contains("failed: written; evidence not retained"),
+                "{text}"
+            );
+            assert!(home.join(".claude/settings.json").exists());
+        }
+    }
+}

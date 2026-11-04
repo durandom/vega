@@ -59,6 +59,9 @@ impl Fixture {
 set -e
 [ "$VEGA_INSTALL_BY" = deploy ]
 echo install >> "$HOME/actions"
+echo 'evidence[1]{unit,event}:'
+echo '  claude.hooks,"install /hooks/PreToolUse added"'
+echo 'summary: fixture hooks'
 cp "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
 "#,
         );
@@ -92,7 +95,7 @@ cp "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
             r#"#!/bin/sh
 case "$*" in
   --version) echo fixture ;;
-  'config apply') echo config >> "$HOME/actions"; echo 'summary: fixture config'; exit "${CONFIG_EXIT:-0}" ;;
+  'config apply') echo config >> "$HOME/actions"; echo 'evidence[1]{unit,event}:'; echo '  claude.settings,"deploy unchanged"'; echo 'summary: fixture config'; exit "${CONFIG_EXIT:-0}" ;;
   'post relay status')
     if [ -f "$HOME/started" ]; then echo 'vegad: running, binary current'
     else echo 'vegad: stopped'; fi ;;
@@ -268,4 +271,26 @@ fn overrides_replace_target_and_config_failure_is_nonfatal() {
     );
     assert_eq!(f.actions(), "install\nconfig\nstart\n");
     assert!(String::from_utf8_lossy(&out.stdout).contains(",current,1,fixture config,ok"));
+}
+
+#[test]
+fn reports_both_config_phases_across_deploys() {
+    let f = Fixture::new();
+    for _ in 0..2 {
+        let out = f.success(None);
+        assert!(
+            out.contains("config_evidence[2]{name,unit,event}:"),
+            "{out}"
+        );
+        for expected in [
+            "install",
+            "deploy",
+            "claude.hooks",
+            "claude.settings",
+            "/hooks/PreToolUse",
+            "added",
+        ] {
+            assert!(out.contains(expected), "{out}");
+        }
+    }
 }

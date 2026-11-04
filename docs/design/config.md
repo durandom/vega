@@ -281,3 +281,39 @@ host, retain its personal instructions in
 `~/.config/vega/config/agentsview/LOCAL-SETUP.md`). Without that source, applying
 the agentsview unit replaces installed sidecars with the generic example.
 Private server access and token paths belong in private dotfiles.
+
+## Write evidence
+
+Every apply retains the last 256 unit results in
+`$XDG_STATE_HOME/vega/config-evidence.json` (normally
+`~/.local/state/vega/config-evidence.json`, mode 0600). Each event has a Unix
+millisecond timestamp, phase (`apply`, `install`, or `deploy`), unit, result,
+and successful file writes, including writes before a later unit failure.
+`VEGA_CONFIG_PHASE` selects the phase; install-cli.sh sets `install`, deploy sets
+`deploy`, and unset or unrecognized values use `apply`.
+Each file write also names the backup refreshed, or null for a new file.
+History replacement is atomic and locked across concurrent applies; retention
+errors fail the unit visibly. It is diagnostic history, not a writer lock for
+the shared target files or a crash-proof transaction journal.
+
+`vega config apply` prints the same redacted events in its `evidence` table
+(JSON event strings in TOON cells).
+`vega deploy apply` reports these in `config_evidence`, with the machine name,
+from both install-cli's hook apply and the final apply. The target's history
+retains both phases even when the final apply finds everything unchanged.
+The existing summary still counts units, not files or keys.
+
+JSON writes identify changed managed keys by JSON pointer and operation
+(`added`, `changed`, `removed`). Before/after states are only `absent` or
+`redacted`: no values, hashes, hook commands, environment contents, or unchanged
+user settings enter this history. Arrays are opaque; hook changes identify the
+event array (for example `/hooks/PreToolUse`), not individual commands. Seeded
+settings use top-level key paths and record `missing_key` versus `source_changed`,
+plus whether the source differs from the previous seed. Whole-file units report
+the file operation without a per-key diff. This identifies vega's own writes;
+it cannot identify an external writer.
+
+Backups are separate, unredacted recovery files: every replacement of an
+existing file refreshes `<file>.vega-bak`, including seeded and key-merge units.
+For a key-merge symlink, the backup is beside the resolved target, not the link.
+Creating a missing file and unchanged applies do not refresh a backup.

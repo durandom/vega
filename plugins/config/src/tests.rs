@@ -476,3 +476,128 @@ fn herdr_written_with_backup_and_reload() {
     );
     assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 2);
 }
+
+#[test]
+fn evidence_attributes_repair_and_source_change_without_values_and_refreshes_backup() {
+    let (_d, ctx) = setup();
+    let src = sources::init(&ctx.env, "claude/settings.json").unwrap();
+    fs::write(&src, r#"{"outputStyle":"SOURCE_SECRET"}"#).unwrap();
+    let target = ctx.env.home.join(".claude/settings.json");
+    fs::write(
+        &target,
+        r#"{"env":{"TOKEN":"USER_SECRET"},"outputStyle":"OLD_SECRET"}"#,
+    )
+    .unwrap();
+    let before = fs::read_to_string(&target).unwrap();
+    let (out, first) = apply_report(&ctx, Unit::ClaudeSettings, &BTreeSet::new());
+    assert_eq!(out.kind(), "written");
+    assert_eq!(fs::read_to_string(backup_path(&target)).unwrap(), before);
+    assert_eq!(first["writes"][0]["keys"][0]["key"], "/outputStyle");
+    assert_eq!(first["writes"][0]["keys"][0]["operation"], "changed");
+    assert_eq!(first["writes"][0]["keys"][0]["source_changed"], true);
+    let repaired = r#"{"env":{"TOKEN":"USER_SECRET"}}"#;
+    fs::write(&target, repaired).unwrap();
+    let (_, second) = apply_report(&ctx, Unit::ClaudeSettings, &BTreeSet::new());
+    assert_eq!(fs::read_to_string(backup_path(&target)).unwrap(), repaired);
+    assert_eq!(second["writes"][0]["keys"][0]["operation"], "added");
+    assert_eq!(second["writes"][0]["keys"][0]["reason"], "missing_key");
+    assert_eq!(second["writes"][0]["keys"][0]["source_changed"], false);
+    assert!(second["at_unix_ms"].as_u64().unwrap() >= first["at_unix_ms"].as_u64().unwrap());
+    let text = fs::read_to_string(evidence::path(&ctx.env)).unwrap();
+    let events: Vec<Value> = serde_json::from_str(&text).unwrap();
+    assert_eq!(events, [first, second]);
+    for forbidden in [
+        "USER_SECRET",
+        "SOURCE_SECRET",
+        "OLD_SECRET",
+        "TOKEN",
+        "/env",
+    ] {
+        assert!(!text.contains(forbidden), "leaked {forbidden}");
+    }
+}
+
+#[test]
+fn hook_evidence_is_redacted_and_symlink_backup_refreshes_at_referent() {
+    let (d, ctx) = setup();
+    let target = ctx.env.home.join(".claude/settings.json");
+    let real = d.path().join("settings.json");
+    let before =
+        r#"{"env":{"TOKEN":"USER_SECRET"},"hooks":{"Stop":[{"command":"SECRET_COMMAND"}]}}"#;
+    fs::write(&real, before).unwrap();
+    symlink(&real, &target).unwrap();
+    let (_, event) = apply_report(&ctx, Unit::ClaudeHooks, &BTreeSet::new());
+    assert_eq!(fs::read_to_string(backup_path(&real)).unwrap(), before);
+    assert!(!backup_path(&target).exists());
+    let text = event.to_string();
+    assert!(text.contains("/hooks/PreToolUse"));
+    for forbidden in [
+        "USER_SECRET",
+        "SECRET_COMMAND",
+        "ask-parent",
+        "Stop",
+        "TOKEN",
+    ] {
+        assert!(!text.contains(forbidden));
+    }
+    let edited = before.replace("USER_SECRET", "NEXT_SECRET");
+    fs::write(&real, &edited).unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::ClaudeHooks, &BTreeSet::new()).kind(),
+        "written"
+    );
+    assert_eq!(fs::read_to_string(backup_path(&real)).unwrap(), edited);
+}
+
+#[test]
+fn evidence_is_bounded_and_keeps_results_without_error_text() {
+    let (_d, ctx) = setup();
+    for _ in 0..260 {
+        evidence::retain(
+            &ctx.env,
+            &evidence::event(Unit::ClaudeMd, "unchanged", vec![]),
+        )
+        .unwrap();
+    }
+    let text = fs::read_to_string(evidence::path(&ctx.env)).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<Value>>(&text).unwrap().len(),
+        256
+    );
+    assert_eq!(
+        fs::metadata(evidence::path(&ctx.env))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn evidence_retains_successful_writes_before_a_later_file_fails() {
+    let (_d, ctx) = setup();
+    for dir in AGENTSVIEW_DIRS {
+        let dir = ctx.env.home.join(dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), "fixture").unwrap();
+        fs::write(dir.join("LOCAL-SETUP.md"), "old").unwrap();
+    }
+    // A backup path that cannot be written causes the second file to fail,
+    // independent of UID/permission behavior in the test environment.
+    let second = ctx.env.home.join(AGENTSVIEW_DIRS[1]).join("LOCAL-SETUP.md");
+    fs::create_dir(backup_path(&second)).unwrap();
+    let (out, event) = apply_report(&ctx, Unit::Agentsview, &BTreeSet::new());
+    assert_eq!(out.kind(), "failed");
+    assert_eq!(event["result"], "failed");
+    let writes = event["writes"].as_array().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0]["target"],
+        "~/.claude/skills/agentsview-finding-history/LOCAL-SETUP.md"
+    );
+    assert_eq!(fs::read_to_string(second).unwrap(), "old");
+    let history: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(evidence::path(&ctx.env)).unwrap()).unwrap();
+    assert_eq!(history, [event]);
+}
