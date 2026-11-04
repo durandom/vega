@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 99 · 2026-11-03
+
+- feature: the broker outage test's waits now cover the full probe backoff plus 20 s of headroom for
+  a busy machine, and it always checks the sidebar renewal during an outage. A run takes about
+  135 s, up from as little as 22 s, and `mise run check` grows with it. See
+  [vegad](docs/design/vegad.md#broker-outage-vega-lhc205).
+
 ## 98 · 2026-11-03
 
 - feature: vegad bounds herdr subprocesses and socket requests, logs timeouts and

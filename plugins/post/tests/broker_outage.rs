@@ -2,6 +2,10 @@
 //! outage, vega-lhc.205): a local nats-server, killed mid-run and started
 //! again on the same port. vegad keeps labelling herdr's panes, logs the
 //! outage once, notes it for the human and reconnects. Temp HOME, fake herdr.
+//!
+//! Each phase may meet any step of the probe backoff, so the waits below come
+//! from vegad's own bounds. The sidebar renewal takes 60 s of local mode, which
+//! leaves the broker's return in the slow part of the backoff: about 135 s.
 
 use std::fs;
 use std::net::TcpListener;
@@ -9,6 +13,23 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// Local mode's longest gap between probes (`PROBE_EVERY`, main.rs).
+const PROBE_GAP: Duration = Duration::from_secs(60);
+/// One bounded broker step: the probe's connect, the setup (`outage::CALL`).
+const BROKER_CALL: Duration = Duration::from_secs(10);
+/// Two local-mode reports of an unchanged row. The sidebar sends one again
+/// after 60 s (`RENEW_AFTER`) on a 5 s tick (`TICK`, sidebar.rs). A row sent
+/// just before the switch needs that twice; one that changes at the first local
+/// refresh, up to one `REGISTRY_EVERY` (15 s, main.rs) in, needs it once.
+const RENEWAL: Duration = Duration::from_secs(2 * (60 + 5) + 15);
+/// Headroom for a machine busy with a full check. Only a failure waits this.
+const LOAD: Duration = Duration::from_secs(20);
+
+/// The next probe at the worst backoff step, its connect and the setup.
+fn through_next_probe() -> Duration {
+    PROBE_GAP + BROKER_CALL + BROKER_CALL + LOAD
+}
 
 /// Kills the process when the test ends, pass or fail.
 struct Proc(Child);
@@ -20,9 +41,15 @@ impl Drop for Proc {
     }
 }
 
-/// Two claude panes; w1:p1 closes once `$FAKE_LOG/p1-closed` exists.
+/// Two claude panes; w1:p1 closes once `$FAKE_LOG/p1-closed` exists. Reports for
+/// w1:p2 made while vegad's state says local also go to `local-reports`.
 const FAKE_HERDR: &str = r#"#!/bin/sh
 echo "$*" >> "$FAKE_LOG/herdr-calls"
+case "$*" in "pane report-metadata w1:p2"*)
+  case "$(cat "$FAKE_LOG/state/vega/post-relay-testhost.broker" 2>/dev/null)" in
+    local*) echo "$*" >> "$FAKE_LOG/local-reports" ;;
+  esac ;;
+esac
 p1='{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/","agent":"claude","agent_status":"idle"},'
 [ -e "$FAKE_LOG/p1-closed" ] && p1=''
 p2='{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/","agent":"claude","agent_status":"working"}'
@@ -61,12 +88,18 @@ fn wait_for(log: &Path, what: &str, within: Duration, mut ready: impl FnMut() ->
     }
 }
 
-fn metadata_reports(home: &Path) -> usize {
-    fs::read_to_string(home.join("herdr-calls"))
+fn local_reports(home: &Path) -> Vec<String> {
+    fs::read_to_string(home.join("local-reports"))
         .unwrap_or_default()
         .lines()
-        .filter(|l| l.starts_with("pane report-metadata w1:p2"))
-        .count()
+        .map(String::from)
+        .collect()
+}
+
+/// Whether a report repeats the one before it: a renewal of an unchanged row,
+/// not a first report or a changed one.
+fn renewed(reports: &[String]) -> bool {
+    reports.windows(2).any(|pair| pair[0] == pair[1])
 }
 
 #[test]
@@ -135,10 +168,13 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
                 .unwrap();
         });
 
-    let exe = env!("CARGO_BIN_EXE_vega-post");
+    // A private copy: any cargo run in this target dir re-links the original,
+    // and vegad would take that for an upgrade and exec it mid-test.
+    let exe = bin.join("vega-post");
+    fs::copy(env!("CARGO_BIN_EXE_vega-post"), &exe).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let cmd = |args: &[&str]| {
-        let mut c = Command::new(exe);
+        let mut c = Command::new(&exe);
         c.args(args)
             .env_clear()
             .env("HOME", home)
@@ -192,7 +228,9 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
         1,
         "the outage is logged once:\n{lost}"
     );
-    assert!(!lost.contains("count failed"), "{lost}");
+    // No counts while the client is away: only one in flight at the kill can
+    // fail (docs/design/vegad.md, Broker outage), not one per poll.
+    assert!(lost.matches("count failed").count() <= 1, "{lost}");
     let notes = || -> Vec<serde_json::Value> {
         fs::read_dir(state.join("notes"))
             .into_iter()
@@ -205,19 +243,6 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     let outage = notes();
     assert_eq!(outage.len(), 1, "{outage:?}");
     assert!(outage[0]["resolved"].is_null(), "{outage:?}");
-    // The sidebar keeps its labels without the broker: unchanged rows are
-    // renewed every 60 s (sidebar.rs).
-    let before = metadata_reports(home);
-    wait_for(
-        &log_file,
-        "metadata without the broker",
-        Duration::from_secs(75),
-        || metadata_reports(home) > before,
-    );
-    assert!(
-        relay.0.id() > 0 && cmd(&["relay", "status"]).output().is_ok(),
-        "vegad answers"
-    );
     fs::write(home.join("p1-closed"), "").unwrap();
     wait_for(
         &log_file,
@@ -231,12 +256,9 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     let bare = home.join("bare.conf");
     fs::write(&bare, format!("listen: 127.0.0.1:{port}\n")).unwrap();
     let mut half = broker(&bare);
-    wait_for(
-        &log_file,
-        "the failed setup",
-        Duration::from_secs(40),
-        || log().contains("broker: setup failed"),
-    );
+    wait_for(&log_file, "the failed setup", through_next_probe(), || {
+        log().contains("broker: setup failed")
+    });
     wait_for(
         &log_file,
         "local mode again",
@@ -250,9 +272,27 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     let _ = half.0.kill();
     let _ = half.0.wait();
 
+    // The sidebar keeps its labels without the broker: the unchanged row is
+    // renewed, with both reports made in local mode.
+    wait_for(
+        &log_file,
+        "a metadata renewal without the broker",
+        RENEWAL + LOAD,
+        || renewed(&local_reports(home)),
+    );
+    assert!(
+        broker_state().starts_with("local"),
+        "renewed in local mode: {}",
+        broker_state()
+    );
+    assert!(
+        relay.0.id() > 0 && cmd(&["relay", "status"]).output().is_ok(),
+        "vegad answers"
+    );
+
     // The broker comes back on the same port.
     let _nats = broker(&conf);
-    wait_for(&log_file, "the reconnect", Duration::from_secs(60), || {
+    wait_for(&log_file, "the reconnect", through_next_probe(), || {
         broker_state().trim() == "connected"
             && log().matches("relay: testhost watching").count() == 2
     });
@@ -266,8 +306,22 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     assert_eq!(back.matches("broker: lost").count(), 1, "{back}");
     let outage = notes();
     assert!(outage[0]["resolved"].is_i64(), "{outage:?}");
-    // The sender hears of the closed pane after all.
-    wait_for(&log_file, "the bounce", Duration::from_secs(20), || {
-        log().contains("bounce: w1:p1 unread, mailed w1:p2 on testhost")
-    });
+    // The sender hears of the closed pane after all: a first try that fails
+    // is retried after 30 s (docs/design/vegad.md, Broker outage).
+    wait_for(
+        &log_file,
+        "the bounce",
+        Duration::from_secs(30) + BROKER_CALL + LOAD,
+        || log().contains("bounce: w1:p1 unread, mailed w1:p2 on testhost"),
+    );
+}
+
+#[test]
+fn only_a_repeated_report_counts_as_a_renewal() {
+    let r = |lines: &[&str]| lines.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+    assert!(!renewed(&r(&[])));
+    assert!(!renewed(&r(&["a"])), "a first report");
+    assert!(!renewed(&r(&["a", "b"])), "a changed row");
+    assert!(renewed(&r(&["a", "a"])));
+    assert!(renewed(&r(&["a", "b", "b"])), "changed, then renewed");
 }
