@@ -46,6 +46,7 @@ mod quota;
 mod reach;
 #[cfg(test)]
 mod registry_read_test;
+mod registry_ttl;
 mod service;
 mod sidebar;
 mod supervise;
@@ -303,12 +304,15 @@ enum Cmd {
     },
     /// Create the archive streams for hosts (needs the admin key)
     #[command(
-        after_help = "Connects with the admin seed: VEGA_NATS_NKEY, else $XDG_CONFIG_HOME/vega/nats-admin.nk (`vega post keygen --admin`).\nExisting streams are checked, never changed. Lists push consumers (vega never makes any).\n\nThe admin user can only: read stream info and list consumers of the hosts in the auth config, and create the\nstreams of hosts listed with `auth-config --create`. It cannot read mail, delete, purge or update streams;\nrepairs are manual on the server.\n\nNot hosts: `registry` creates vegad's KV bucket, `lanista` the catalog's object store (both need\n`auth-config --create <name>` while provisioning).\n\nExamples:\n  vega post provision proteus ganymede\n  vega post provision lanista"
+        after_help = include_str!("../help/provision.md")
     )]
     Provision {
         /// Host names, as used in host=U... entries
         #[arg(required = true)]
         hosts: Vec<String>,
+        /// Enable registry per-message TTL (one-time, irreversible; needs temporary admin grant)
+        #[arg(long)]
+        ttl: bool,
     },
 }
 
@@ -480,7 +484,7 @@ fn main() -> ExitCode {
             &registry_read,
             lanista_writer.as_deref(),
         ),
-        Some(Cmd::Provision { hosts }) => provision(&hosts),
+        Some(Cmd::Provision { hosts, ttl }) => provision(&hosts, ttl),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -979,9 +983,17 @@ fn check_archive(stream: &stream::Stream, host: &str) -> Result<(), Failure> {
 }
 
 /// `vega post provision`: creates missing host streams, checks existing ones.
-fn provision(hosts: &[String]) -> Result<(), Failure> {
+fn provision(hosts: &[String], ttl: bool) -> Result<(), Failure> {
+    registry_ttl::validate_target(hosts, ttl)?;
     runtime()?.block_on(async {
         let client = connect_as("provision", Seed::Admin, None).await?;
+        if ttl {
+            let changed = registry_ttl::enable(&client).await?;
+            println!("registry: {} allow_msg_ttl {}", vega_registry::BUCKET,
+                if changed { "enabled" } else { "already enabled (no-op)" });
+            println!("help: regenerate auth-config without --create registry-ttl and reload the broker");
+            return Ok(());
+        }
         let js = jetstream::new(client);
         // `registry`: the KV bucket of vegad M4, not a host; `lanista`: the
         // catalog's object store (catalog.rs).
@@ -1101,7 +1113,10 @@ fn auth_config(
     for (flag, hosts) in [("--create", create), ("--inbox-only", inbox_only)] {
         if let Some(h) = hosts
             .iter()
-            .filter(|h| !(flag == "--create" && (*h == "registry" || *h == "lanista")))
+            .filter(|h| {
+                !(flag == "--create"
+                    && (*h == "registry" || *h == "lanista" || *h == "registry-ttl"))
+            })
             .find(|h| !entries.iter().any(|e| &e.host == *h))
         {
             return Err(Failure::new(
