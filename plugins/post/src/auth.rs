@@ -419,7 +419,11 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     let mut note = if create.iter().any(|c| c == "registry-ttl") {
         format!(
             "    # admin: temporary provisioning grants; CREATE targets: {}.\n",
-            creates.join(", ")
+            if creates.is_empty() {
+                "none".into()
+            } else {
+                creates.join(", ")
+            }
         )
     } else if creates.is_empty() {
         "    # admin: stream info and consumer lists of the hosts below; creates no\n    # streams (steady state); cannot read mail, delete, purge or change streams.\n".to_string()
@@ -524,6 +528,52 @@ mod tests {
     }
 
     #[test]
+    fn registry_ttl_auth_config_accepts_the_migration_token() {
+        let entries = [format!("proteus={}", key())];
+        let admin = key();
+        let create = ["registry-ttl".into()];
+        assert!(crate::auth_config(
+            &entries,
+            None,
+            Some(&admin),
+            &create,
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            None
+        )
+        .is_ok());
+        assert!(crate::auth_config(
+            &entries,
+            None,
+            None,
+            &create,
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            None
+        )
+        .is_err());
+        assert!(crate::auth_config(
+            &entries,
+            None,
+            Some(&admin),
+            &["registry-ttl-typo".into()],
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
     fn registry_update_is_explicit_and_admin_only() {
         let entries = vec![Entry {
             host: "proteus".into(),
@@ -545,6 +595,7 @@ mod tests {
             if grants.contains(&"registry-ttl".into()) {
                 assert!(admin.contains("\"$JS.API.STREAM.UPDATE.KV_VEGA_REGISTRY\""));
                 assert!(!admin.contains("STREAM.CREATE"));
+                assert!(admin.contains("CREATE targets: none."));
             }
         }
     }

@@ -242,7 +242,7 @@ Drop-in for orrery: I did not read `hosts/titan/assets/nats/nats.conf` (outside 
 
 - Machine keys cannot create streams: they have no `$JS.API.STREAM.CREATE` permission. A machine allowed to create its own stream could also choose its subjects, e.g. `vega.inbox.>`, and capture every host's mail; permissions cannot restrict the stream config inside a create request.
 - With a key configured, `vega post`, `inbox`, `log` and `relay` never try to create a stream. A missing stream gives `no_inbox_stream` with the hint `the admin must run vega post provision <host>`. Without a key (local dev broker) they still create it on first use.
-- `provision` creates missing streams with the canonical config and checks existing ones (must be Limits retention); it never changes a stream.
+- `provision` creates missing streams with the canonical config and checks existing ones (must be Limits retention); it never changes a stream in steady state. The explicit `registry --ttl` exception is described under [one-time TTL enablement](vegad.md#one-time-ttl-enablement-vega-lhc246).
 - The admin seed is generated where `provision` runs, e.g. on the workstation: `VEGA_NATS_NKEY=~/.config/vega/nats-admin.nk vega post keygen`, and passed to `auth-config --admin`. It never leaves that machine either. Run: `VEGA_NATS_NKEY=~/.config/vega/nats-admin.nk VEGA_NATS_URL=… vega post provision proteus ganymede`.
 - Order for a new host: `keygen` on the host → add its line → regenerate the auth config and reload the server → `provision <host>` → start its relay.
 

@@ -15,7 +15,7 @@ fn refused(message: impl std::fmt::Display) -> Failure {
     Failure::new(
         "registry_ttl_refused",
         message.to_string(),
-        "use `vega post provision registry --ttl` with the temporary `auth-config --create registry-ttl` admin grant; remove the grant and reload afterwards",
+        "use `vega post provision registry --ttl` with the temporary `auth-config --create registry-ttl` admin grant; if the bucket is missing, create it first with `auth-config --create registry` and `vega post provision registry`; remove the grant and reload afterwards",
     )
 }
 
