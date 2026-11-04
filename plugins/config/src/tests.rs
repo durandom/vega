@@ -540,12 +540,36 @@ fn hook_evidence_is_redacted_and_symlink_backup_refreshes_at_referent() {
     let (d, ctx) = setup();
     let target = ctx.env.home.join(".claude/settings.json");
     let real = d.path().join("settings.json");
-    let before =
-        r#"{"env":{"TOKEN":"USER_SECRET"},"hooks":{"Stop":[{"command":"SECRET_COMMAND"}]}}"#;
-    fs::write(&real, before).unwrap();
+    let mut legacy = serde_json::json!({"env":{"TOKEN":"USER_SECRET"},"hooks":{"Stop":[{"command":"SECRET_COMMAND"}]}});
+    merge::claude_hooks(&mut legacy, "/old/vega-mux").unwrap();
+    let before = serde_json::to_string(&legacy).unwrap();
+    fs::write(&real, &before).unwrap();
     symlink(&real, &target).unwrap();
     let (_, event) = apply_report(&ctx, Unit::ClaudeHooks, &BTreeSet::new());
-    assert_eq!(fs::read_to_string(backup_path(&real)).unwrap(), before);
+    let backup: Value =
+        serde_json::from_str(&fs::read_to_string(backup_path(&real)).unwrap()).unwrap();
+    assert_eq!(backup["hooks"], legacy["hooks"]);
+    assert_eq!(backup["env"], legacy["env"]);
+    assert_eq!(backup["enabledPlugins"]["vega-hooks@vega-local"], true);
+    let writes = event["writes"].as_array().unwrap();
+    assert_eq!(
+        writes.len(),
+        5,
+        "three plugin files, CLI registration, legacy migration"
+    );
+    let registration = writes
+        .iter()
+        .find(|w| w["writer"] == "claude_plugin_cli")
+        .unwrap();
+    assert!(registration["backup_refreshed"].is_null());
+    assert_eq!(
+        registration["keys"][0]["key"],
+        "/enabledPlugins/vega-hooks@vega-local"
+    );
+    assert!(writes.last().unwrap()["backup_refreshed"]
+        .as_str()
+        .unwrap()
+        .ends_with("settings.json.vega-bak"));
     assert!(!backup_path(&target).exists());
     let text = event.to_string();
     assert!(text.contains("/hooks/PreToolUse"));
@@ -703,4 +727,40 @@ fn claude_plugin_repairs_disabled_missing_and_updated_hooks() {
         apply(&ctx, Unit::ClaudeHooks, &managed),
         Outcome::Managed(_)
     ));
+}
+
+#[test]
+fn plugin_evidence_keeps_partial_cli_writes_and_retains_legacy_hooks_on_failure() {
+    let (_d, ctx) = setup();
+    let mut legacy = serde_json::json!({"env":{"TOKEN":"SECRET_VALUE"}});
+    merge::claude_hooks(&mut legacy, "/old/vega-mux").unwrap();
+    let path = ctx.env.home.join(".claude/settings.json");
+    fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
+    fs::write(ctx.env.home.join("fail-registration"), "").unwrap();
+    let (outcome, event) = apply_report(&ctx, Unit::ClaudeHooks, &BTreeSet::new());
+    assert!(outcome.failed());
+    let writes = event["writes"].as_array().unwrap();
+    assert_eq!(
+        writes.len(),
+        4,
+        "source writes and the CLI's partial registration must survive"
+    );
+    assert_eq!(writes[3]["writer"], "claude_plugin_cli");
+    assert_eq!(
+        writes[3]["keys"][0]["key"],
+        "/enabledPlugins/vega-hooks@vega-local"
+    );
+    assert!(writes[3]["backup_refreshed"].is_null());
+    let live: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        live["hooks"], legacy["hooks"],
+        "migration waits for successful activation"
+    );
+    let text = event.to_string();
+    for forbidden in ["SECRET_VALUE", "TOKEN", "cliWritten", "ask-parent"] {
+        assert!(!text.contains(forbidden), "leaked {forbidden}");
+    }
+    let history: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(evidence::path(&ctx.env)).unwrap()).unwrap();
+    assert_eq!(history, [event]);
 }

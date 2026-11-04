@@ -30,5 +30,7 @@ elif args[:2] in [['plugin', 'install'], ['plugin', 'update'], ['plugin', 'enabl
     value.setdefault('enabledPlugins', {})['vega-hooks@vega-local'] = True
     value['cliWritten'] = True
     settings.write_text(json.dumps(value))
+    if (home / 'fail-registration').exists():
+        sys.exit(1)
 else:
     sys.exit(2)

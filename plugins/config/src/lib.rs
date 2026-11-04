@@ -762,7 +762,7 @@ fn apply_inner(
         return Outcome::Managed(m);
     }
     if unit == Unit::ClaudeHooks {
-        return claude_plugin::apply(ctx, &plan);
+        return claude_plugin::apply(ctx, &plan, evidence);
     }
     if unit == Unit::Skills {
         return sync_skills(&ctx.skills);

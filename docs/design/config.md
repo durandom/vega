@@ -133,6 +133,11 @@ entire unit. Claude owns its registry and registration writes; vega never edits 
 existing Claude units, HOME/.claude is the target; CLI subprocesses explicitly use that HOME and
 CLAUDE_CONFIG_DIR.
 
+The unit participates in config write evidence: vega's plugin files and legacy migration use the
+normal redacted write records. Registration changes made by Claude's CLI are marked
+`writer: claude_plugin_cli`, report only the plugin's managed registration keys, and claim no vega
+backup. Partial registration changes remain in evidence if a CLI operation fails.
+
 [Claude's install documentation](https://code.claude.com/docs/en/discover-plugins) states that installed
 plugins load in interactive and `-p` sessions, including stream-json runs. New sessions pick up shell
 installs. [Plugin hooks](https://code.claude.com/docs/en/plugins/components#hooks) register on load and

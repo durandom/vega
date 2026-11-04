@@ -122,15 +122,15 @@ pub(super) fn plan(ctx: &Ctx) -> Result<Plan, String> {
     })
 }
 
-pub(super) fn apply(ctx: &Ctx, plan: &Plan) -> Outcome {
-    match install(ctx, plan) {
+pub(super) fn apply(ctx: &Ctx, plan: &Plan, changes: &mut Vec<Value>) -> Outcome {
+    match install(ctx, plan, changes) {
         Ok(done) if done.is_empty() => Outcome::Unchanged,
         Ok(done) => Outcome::Written(done),
         Err(e) => Outcome::Failed(e),
     }
 }
 
-fn install(ctx: &Ctx, plan: &Plan) -> Result<Vec<String>, String> {
+fn install(ctx: &Ctx, plan: &Plan, changes: &mut Vec<Value>) -> Result<Vec<String>, String> {
     let mut done = Vec::new();
     let settings = ctx.env.home.join(".claude/settings.json");
     for f in plan
@@ -139,30 +139,34 @@ fn install(ctx: &Ctx, plan: &Plan) -> Result<Vec<String>, String> {
         .filter(|f| f.path != settings && f.changed())
     {
         write(f)?;
+        changes.push(evidence::change(ctx, Unit::ClaudeHooks, plan, f));
         done.push(f.path.display().to_string());
     }
     let hooks = fs::read_to_string(root(ctx).join(HOOKS)).map_err(|e| e.to_string())?;
     if plan.plugin_pending {
-        let base = root(ctx);
-        command(
-            ctx,
-            &[
-                OsStr::new("plugin"),
-                OsStr::new("marketplace"),
-                OsStr::new("add"),
-                base.as_os_str(),
-            ],
-        )?;
-        let list = listing(ctx)?;
-        let operation = if entry(&list).is_some() {
-            "update"
-        } else {
-            "install"
-        };
-        run(ctx, &["plugin", operation, ID, "--scope", "user"])?;
-        if entry(&listing(ctx)?).is_some_and(|v| v["enabled"] != true) {
-            run(ctx, &["plugin", "enable", ID, "--scope", "user"])?;
-        }
+        let operation = registration(ctx, plan, changes, || {
+            let base = root(ctx);
+            command(
+                ctx,
+                &[
+                    OsStr::new("plugin"),
+                    OsStr::new("marketplace"),
+                    OsStr::new("add"),
+                    base.as_os_str(),
+                ],
+            )?;
+            let list = listing(ctx)?;
+            let operation = if entry(&list).is_some() {
+                "update"
+            } else {
+                "install"
+            };
+            run(ctx, &["plugin", operation, ID, "--scope", "user"])?;
+            if entry(&listing(ctx)?).is_some_and(|v| v["enabled"] != true) {
+                run(ctx, &["plugin", "enable", ID, "--scope", "user"])?;
+            }
+            Ok(operation)
+        })?;
         done.push(format!(
             "{ID}: {operation}, user scope; restart existing Claude sessions"
         ));
@@ -174,8 +178,46 @@ fn install(ctx: &Ctx, plan: &Plan) -> Result<Vec<String>, String> {
     if let Some((f, _)) = json_plan(settings, false, merge::remove_claude_hooks)? {
         if f.changed() {
             write(&f)?;
+            changes.push(evidence::change(ctx, Unit::ClaudeHooks, plan, &f));
             done.push(f.path.display().to_string());
         }
     }
     Ok(done)
+}
+
+/// Claude owns registration writes. Observe its managed settings keys without
+/// claiming a vega backup, and retain partial changes if a CLI operation fails.
+fn registration<T>(
+    ctx: &Ctx,
+    plan: &Plan,
+    changes: &mut Vec<Value>,
+    mutate: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let path = ctx.env.home.join(".claude/settings.json");
+    let (before, _) = read_live(&path)?;
+    let result = mutate();
+    let (after, link) = read_live(&path)?;
+    if before != after {
+        let file = FilePlan {
+            path,
+            live: before,
+            link,
+            text: after.unwrap_or_else(|| "{}".into()),
+            follow: true,
+        };
+        let mut change = evidence::change(ctx, Unit::ClaudeHooks, plan, &file);
+        change["backup_refreshed"] = Value::Null;
+        change["writer"] = Value::from("claude_plugin_cli");
+        if let Some(keys) = change["keys"].as_array_mut() {
+            keys.retain(|key| {
+                key["key"].as_str().is_some_and(|p| {
+                    p == "/enabledPlugins/vega-hooks@vega-local"
+                        || p == "/extraKnownMarketplaces/vega-local"
+                        || p.starts_with("/extraKnownMarketplaces/vega-local/")
+                })
+            });
+        }
+        changes.push(change);
+    }
+    result
 }
