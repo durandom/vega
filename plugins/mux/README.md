@@ -12,6 +12,14 @@ Commands: `vega mux`, `show`, `transcript`, `send`, `dialog`, `answer`, `spawn`,
 (the agent that has waited longest, on any host). There is no default vega key binding for `next`;
 use herdr's goto overlay (`prefix+g`, then `d`) to list done agents across machines and switch to one.
 
+`spawn` requires `--tier flagship|balanced|budget` with no default: flagship for
+design/root-cause, balanced for normal implementation, budget for mechanical work.
+Lanista's project pins resolve the model per kind (Pi uses zai);
+`vega lanista pin <lane> --tier <tier>` shows the selected pin. An explicit
+`-m`/`--model` after `--` wins and needs no tier; `--no-parent` is also exempt.
+Spawn records retain tier and model for `show` and `reopen`; the UAC agent table
+shows them too. Local `--cwd` selects the pin project; remote spawns use the caller's project.
+
 `spawn` records your pane as the agent's parent: its brief carries the done-report footer, and vegad and `vega uac`
 track it. `spawn --no-parent` records none and sends the brief with the origin line only, for an agent that reports
 by its own command (a `vega gate` reviewer gives its verdict with `vega gate verdict`).
