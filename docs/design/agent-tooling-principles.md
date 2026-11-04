@@ -149,7 +149,7 @@ A shim named `gh` would otherwise affect every caller on the machine.
   - **Claude Code**: `SessionStart` hook in the vega-owned Claude plugin (`claude.hooks`, [config.md](config.md#claude-hook-plugin-vega-lhc243)) appends the source line to `CLAUDE_ENV_FILE`. A zsh startup hook does not work: Claude runs `zsh -c 'source <snapshot> && …'`, and the snapshot ends with `export PATH=<Claude's own PATH>`, which overwrites anything `.zshenv` did.
   - **Codex**: runs `zsh -c`, which reads `~/.zshenv`. The chezmoi-managed `.zshenv` and `.zprofile` (after macOS `path_helper`) source the script. Codex has no env hook of its own.
   - **pi**: runs `/bin/bash -c`, which reads no startup file. `shellCommandPrefix` in `~/.pi/agent/settings.json` sources the script.
-  - `scripts/install-cli.sh` installs the script and edits the Claude and pi settings idempotently (backup `<file>.vega-bak`); the zsh lines live in chezmoi.
+  - `scripts/install-cli.sh` installs the script, installs/enables the Claude hook plugin and edits pi settings idempotently (backup `<file>.vega-bak`). Claude settings only lose legacy vega hooks after plugin verification; the zsh lines live in chezmoi.
 - Rejected: herdr pane env and `vega mux spawn` env. Both reach the pane's human shell, and they miss agents started by hand.
 - Session id resolution, in order (verified 2026-10-06 with Claude Code 2.1.291 and herdr 0.9.3):
   1. Agent env var. Claude Code exports `CLAUDE_CODE_SESSION_ID` into tool calls — no hook needed.

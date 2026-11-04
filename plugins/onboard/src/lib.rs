@@ -247,7 +247,7 @@ pub enum Done {
 }
 
 pub fn apply(ctx: &Ctx, managed: &BTreeSet<PathBuf>) -> Vec<(Unit, Done)> {
-    // Decide on the state before any write: the hooks create settings.json.
+    // Decide preferences before writes, including plugin registration, can create settings.json.
     let steps: Vec<(Unit, Result<Step, String>)> =
         Unit::ALL.iter().map(|u| (*u, decide(ctx, *u))).collect();
     steps

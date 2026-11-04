@@ -122,8 +122,11 @@ Every gap carries its next command (AXI 9). A required component missing shows f
 The repo's `config/` holds the Slayer's best practice. `vega onboard apply` writes it, but never replaces a
 file the user already has:
 
-- Key-merge and library units (`claude.hooks`, `codex.hooks`, `pi.prefix`, `skills`) apply always: they only
-  add vega's entries.
+- Key-merge and library units (`codex.hooks`, `pi.prefix`, `skills`) apply regardless of existing
+  entries, subject to tool availability: they only add vega's entries.
+- `claude.hooks` installs/enables the user-scoped hook plugin through the Claude CLI, then migrates
+  legacy vega commands out of settings after verification. Without the CLI it skips with an install
+  hint. See [config.md](config.md#claude-hook-plugin-vega-lhc243).
 - Whole-file units (`herdr`, `claude.md`, `codex.md`, `pi.md`, `claude.styles`, `agentsview`,
   `dcg.config`, `dcg.packs`) apply only where
   the target is missing; an existing target that differs is `kept`, with `vega config diff <unit>` and
