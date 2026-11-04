@@ -413,7 +413,10 @@ else
   mkdir -p "$(dirname "$dir")"
   git clone -q --branch {branch} {REPO_URL} "$dir"
 fi
-VEGA_INSTALL_BY=deploy "$dir/scripts/install-cli.sh" >/dev/null 2>"$dir/.deploy.log" || {{ tail -5 "$dir/.deploy.log" >&2; exit 1; }}
+install_ok=1
+i=$(VEGA_INSTALL_BY=deploy "$dir/scripts/install-cli.sh" 2>"$dir/.deploy.log") || install_ok=0
+printf '%s\n' "$i" | sed -n '/^evidence\[/,/^summary:/{{s/^  /vega-deploy:evidence=/p;}}'
+[ "$install_ok" = 1 ] || {{ tail -5 "$dir/.deploy.log" >&2; exit 1; }}
 echo "vega-deploy:commit=$(git -C "$dir" rev-parse --short=7 HEAD)"
 echo "vega-deploy:after=$("$HOME/.local/bin/vega" --version)"
 # Local config overrides from the deploying host replace the target's
@@ -423,7 +426,8 @@ echo "vega-deploy:after=$("$HOME/.local/bin/vega" --version)"
 ) 2>/dev/null || echo "vega-deploy:overrides=failed"
 # Agent and herdr config (vega config: skills, herdr, instructions, hooks, ...);
 # units chezmoi still manages stay untouched. Never fails the deploy.
-c=$("$HOME/.local/bin/vega" config apply 2>&1) || true
+c=$(VEGA_CONFIG_PHASE=deploy "$HOME/.local/bin/vega" config apply 2>&1) || true
+printf '%s\n' "$c" | sed -n '/^evidence\[/,/^summary:/{{s/^  /vega-deploy:evidence=/p;}}'
 c=$(echo "$c" | sed -n 's/^summary: //p' | tail -1)
 echo "vega-deploy:config=${{c:-failed}}"
 # vegad ends at the new binary: it execs it by itself, install-cli restarted it,
@@ -437,8 +441,14 @@ echo "vega-deploy:relay=$(relay_ensure)"
         "deployed[{}]{{name,before,after,commit,relay,overrides,config,status}}:",
         chosen.len()
     );
+    let mut evidence = Vec::new();
     for m in chosen {
         let (ok, f, err) = remote(&m.target, &script);
+        evidence.extend(
+            f.iter()
+                .filter(|(k, _)| k == "evidence")
+                .map(|(_, v)| (m.label.clone(), v.clone())),
+        );
         let status = if ok { "ok".to_string() } else { cell(&err) };
         if !ok {
             failed += 1;
@@ -454,6 +464,10 @@ echo "vega-deploy:relay=$(relay_ensure)"
             cell(field(&f, "config")),
             status
         );
+    }
+    println!("config_evidence[{}]{{name,unit,event}}:", evidence.len());
+    for (name, event) in evidence {
+        println!("  {},{}", cell(&name), event);
     }
     Ok(if failed == 0 {
         ExitCode::SUCCESS

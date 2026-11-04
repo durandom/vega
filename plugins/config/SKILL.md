@@ -29,6 +29,9 @@ vega config infra            # the infra vega needs: required/optional, state, n
   source value changes.
 - `managed (chezmoi)`: the dotfiles still own the target; apply leaves it until they drop it.
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
+- Apply prints a redacted `evidence` table and retains the last 256 unit results in
+  `$XDG_STATE_HOME/vega/config-evidence.json`: timestamp, phase, unit, target, key operations,
+  and presence states, never values. Deploy reports both install and final apply phases.
 - `infra` checks locally (no network): mise, cargo, git, vega, herdr and an agent are required;
   NATS, tailnet, Dolt, bd, gh and the rest are optional. `vega onboard` walks through it.
 

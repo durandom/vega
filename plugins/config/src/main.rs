@@ -360,8 +360,10 @@ fn apply(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
     .map(|k| (*k, 0))
     .collect();
     let mut issues = Vec::new();
+    let mut evidence = Vec::new();
     for u in &us {
-        let o = vega_config::apply(ctx, *u, &managed);
+        let (o, event) = vega_config::apply_report(ctx, *u, &managed);
+        evidence.push(event);
         if let Some(c) = counts.iter_mut().find(|(k, _)| *k == o.kind()) {
             c.1 += 1;
         }
@@ -396,6 +398,16 @@ fn apply(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
         for (u, l) in &issues {
             println!("  {u},{}", cell(l));
         }
+    }
+    println!(
+        "history: {} (last 256 unit results)",
+        tilde(&ctx.env, &vega_config::evidence::path(&ctx.env))
+    );
+    println!("evidence[{}]{{unit,event}}:", evidence.len());
+    for event in evidence {
+        // A JSON-quoted scalar is also a valid TOON cell, including backslashes.
+        let encoded = serde_json::to_string(&event.to_string()).expect("a string serializes");
+        println!("  {},{}", event["unit"].as_str().unwrap_or(""), encoded);
     }
     let failed = counts
         .iter()

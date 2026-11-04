@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 101 · 2026-11-04
+
+- feature: config apply retains 256 timestamped per-unit results and redacted managed-key
+  operations in `~/.local/state/vega/config-evidence.json`. Deploy reports evidence from
+  both its install-time hooks and final config apply, so a write count can be attributed.
+
 ## 100 · 2026-11-04
 
 - feature: vegad preserves pending bounces across self-upgrades, including senders already notified

@@ -7,6 +7,7 @@
 //! override, else repo default) and the live files; [`apply`] writes it,
 //! refusing a unit while chezmoi manages one of its targets.
 
+pub mod evidence;
 pub mod herdr;
 pub mod infra;
 pub mod merge;
@@ -727,6 +728,29 @@ fn write(f: &FilePlan) -> Result<(), String> {
 /// Applies one unit: plans it afresh (units sharing a file see each other's
 /// writes), refuses while chezmoi manages a target, writes what changed.
 pub fn apply(ctx: &Ctx, unit: Unit, managed: &BTreeSet<PathBuf>) -> Outcome {
+    apply_report(ctx, unit, managed).0
+}
+
+/// Apply and retain only redacted metadata, including partial writes on failure.
+pub fn apply_report(ctx: &Ctx, unit: Unit, managed: &BTreeSet<PathBuf>) -> (Outcome, Value) {
+    let mut changes = Vec::new();
+    let outcome = apply_inner(ctx, unit, managed, &mut changes);
+    let event = evidence::event(unit, outcome.kind(), changes);
+    match evidence::retain(&ctx.env, &event) {
+        Ok(()) => (outcome, event),
+        Err(e) => (
+            Outcome::Failed(format!("{}; evidence not retained: {e}", outcome.kind())),
+            event,
+        ),
+    }
+}
+
+fn apply_inner(
+    ctx: &Ctx,
+    unit: Unit,
+    managed: &BTreeSet<PathBuf>,
+    evidence: &mut Vec<Value>,
+) -> Outcome {
     let plan = match plan(ctx, unit) {
         Ok(p) => p,
         Err(e) => return Outcome::Failed(e),
@@ -765,6 +789,7 @@ pub fn apply(ctx: &Ctx, unit: Unit, managed: &BTreeSet<PathBuf>) -> Outcome {
         if let Err(e) = write(f) {
             return Outcome::Failed(e);
         }
+        evidence.push(evidence::change(ctx, unit, &plan, f));
         done.push(f.path.display().to_string());
     }
     if let Err(e) = record() {
