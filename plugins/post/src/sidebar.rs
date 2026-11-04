@@ -213,6 +213,7 @@ fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
                 state.mark_sent(k, cmds, Instant::now());
             }
         }
+        crate::loop_budget::observe("sidebar", started.elapsed(), crate::SLOW_STEP);
         if started.elapsed() > crate::SLOW_STEP {
             crate::log(&format!(
                 "slow: sidebar sent {n} rows in {} ms",

@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 104 · 2026-11-04
+
+- feature: `vega uac` and `vega janitor` show repeated vegad loop/phase budget overruns from
+  local health evidence, with stale reports marked unknown. Slow daemon log lines are summarized
+  at most once per ten minutes. See [vegad](docs/design/vegad.md#loop-budget-health-vega-lhc244).
+
 ## 103 · 2026-11-04
 
 - migration: registry deletes use one-hour TTL purge markers. Enable `allow_msg_ttl` on

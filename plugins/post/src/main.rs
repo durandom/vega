@@ -32,6 +32,7 @@ mod hygiene;
 mod identity;
 mod identity_mappings;
 mod janitor;
+mod loop_budget;
 mod notes;
 mod notify_delivery;
 mod notify_state;
@@ -5427,6 +5428,7 @@ impl Phases {
     /// Ends phase `name`, begun at the last mark.
     fn mark(&mut self, name: &'static str) {
         let now = Instant::now();
+        loop_budget::observe(&format!("metadata/{name}"), now - self.last, SLOW_STEP);
         self.took.push((name, now - self.last));
         self.last = now;
     }
@@ -5447,6 +5449,7 @@ impl Phases {
 /// rows are renewed by sidebar.rs, but a slow loop delays every change.
 fn slow(step: &str, since: Instant) {
     let took = since.elapsed();
+    loop_budget::observe(step, took, SLOW_STEP);
     if took > SLOW_STEP {
         log(&format!("slow: {step} took {} ms", took.as_millis()));
     }
@@ -5682,6 +5685,7 @@ impl Registry {
         let n = desired.len();
         let t = Instant::now();
         let view = vega_registry::read(client, kv).await?;
+        loop_budget::observe("registry read", t.elapsed(), SLOW_STEP);
         if t.elapsed() > SLOW_STEP {
             log(&format!(
                 "slow: registry read took {} ms ({} keys, {} entries)",
@@ -6093,6 +6097,16 @@ fn valid_pane_id(p: &str) -> bool {
 }
 
 fn log(line: &str) {
+    let limited;
+    let line = if line.starts_with("slow:") {
+        let Some(summary) = loop_budget::slow_log(line) else {
+            return;
+        };
+        limited = summary;
+        limited.as_str()
+    } else {
+        line
+    };
     let t = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())

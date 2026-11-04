@@ -625,6 +625,29 @@ Not changed: a typed pointer costs a constant ~305 ms (p10 304, p90 309) inside 
 `agent prompt`, independent of load. Before TTL purge cleanup, the registry read listed every key
 ever written (3731 keys for 95 live entries: delete markers kept their subjects), 5–15 s under load.
 
+### Loop budget health (vega-lhc.244)
+
+vegad measures completed local/broker loop work (excluding the idle select), registry reads and
+reconciliation, metadata and its subphases, live theme, Uber asks, janitor pulls and sidebar sends.
+The budget is 5 s per observation. Three consecutive overruns of the same phase trigger attention;
+one observation within budget clears that phase. A phase keeps its evidence until it runs again.
+This is diagnostic evidence, not a timeout or cancellation policy.
+
+The completed loop saves local `vegad-health.json` in the vega state directory at most every 15 s.
+`vega uac` (including `status`) and `vega janitor` (home and `report`) show the active phases,
+last duration, budget and consecutive count. Missing, invalid, future-dated or older-than-120-s
+reports are unknown, never healthy. Only loop completion refreshes the timestamp: sidebar workers
+cannot conceal a stalled loop. This report is local to the host running the command.
+
+All `slow:` log diagnostics share a 10-minute limiter: the first is printed immediately, later
+ones are counted, and the next diagnostic after the interval includes the suppressed count.
+Health observations continue for every measurement even when its log line is suppressed.
+
+The proposed watch cache is deferred: current registry ACLs prohibit consumer creation, and NATS
+subject permissions cannot enforce ephemeral-only consumers or restrict their delivery subjects.
+Marker cleanup is owned by titan/orrery; no bucket configuration or ACL changes accompany this work.
+Request handling remains on the existing dispatch path pending a separate extraction.
+
 ## Notifications
 
 herdr keeps one toast and no history, so vega keeps its own (vega-pqr). The model is macOS: the
