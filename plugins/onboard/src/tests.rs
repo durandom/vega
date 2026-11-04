@@ -113,11 +113,17 @@ fn fresh_home_gets_every_default() {
     assert!(!claude.is_empty());
     let settings = fs::read_to_string(d.path().join(".claude/settings.json")).unwrap();
     assert!(settings.contains("outputStyle"), "{settings}");
-    assert!(settings.contains("activate.sh"), "{settings}");
+    assert!(
+        !settings.contains("activate.sh"),
+        "hooks belong to the plugin"
+    );
+    assert!(done
+        .iter()
+        .any(|(u, r)| *u == Unit::ClaudeHooks && matches!(r, Done::Config(Outcome::Skipped(_)))));
 }
 
 #[test]
-fn own_files_are_kept_hooks_still_merge() {
+fn own_files_are_kept_and_claude_hooks_wait_for_the_cli() {
     let d = tempfile::tempdir().unwrap();
     let claude = d.path().join(".claude");
     fs::create_dir_all(&claude).unwrap();
@@ -141,14 +147,14 @@ fn own_files_are_kept_hooks_still_merge() {
     );
     assert!(matches!(
         of(Unit::ClaudeHooks),
-        Done::Config(Outcome::Written(_))
+        Done::Config(Outcome::Skipped(_))
     ));
     assert_eq!(
         fs::read_to_string(claude.join("CLAUDE.md")).unwrap(),
         "# mine\n"
     );
     let settings = fs::read_to_string(claude.join("settings.json")).unwrap();
-    assert!(settings.contains("Explanatory") && settings.contains("activate.sh"));
+    assert_eq!(settings, "{\"outputStyle\": \"Explanatory\"}\n");
 }
 
 #[test]

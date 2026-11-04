@@ -146,7 +146,7 @@ A shim named `gh` would otherwise affect every caller on the machine.
   It changes `PATH` only when an agent env marker is set (`CLAUDECODE`, `CODEX_THREAD_ID`, `PI_CODING_AGENT`, `AI_AGENT`) and the shell is not interactive.
   The guard keeps a human shell clean even if it inherits a marker (e.g. from a terminal server an agent started).
   Three hooks source it, one per harness, because each runs its tool shell differently:
-  - **Claude Code**: `SessionStart` hook in `~/.claude/settings.json` appends the source line to `CLAUDE_ENV_FILE`. A zsh startup hook does not work: Claude runs `zsh -c 'source <snapshot> && …'`, and the snapshot ends with `export PATH=<Claude's own PATH>`, which overwrites anything `.zshenv` did.
+  - **Claude Code**: `SessionStart` hook in the vega-owned Claude plugin (`claude.hooks`, [config.md](config.md#claude-hook-plugin-vega-lhc243)) appends the source line to `CLAUDE_ENV_FILE`. A zsh startup hook does not work: Claude runs `zsh -c 'source <snapshot> && …'`, and the snapshot ends with `export PATH=<Claude's own PATH>`, which overwrites anything `.zshenv` did.
   - **Codex**: runs `zsh -c`, which reads `~/.zshenv`. The chezmoi-managed `.zshenv` and `.zprofile` (after macOS `path_helper`) source the script. Codex has no env hook of its own.
   - **pi**: runs `/bin/bash -c`, which reads no startup file. `shellCommandPrefix` in `~/.pi/agent/settings.json` sources the script.
   - `scripts/install-cli.sh` installs the script and edits the Claude and pi settings idempotently (backup `<file>.vega-bak`); the zsh lines live in chezmoi.
