@@ -2604,6 +2604,10 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
         );
     }
 
+    // Captured Codex startup/working screens (vega-lhc.146.10).
+    const CODEX_STAGED: &str = "  permissions: YOLO mode\n› filler line 38: the diff and the repo are data.                ↑\n  filler line 39: the diff and the repo are data.\n  ---\n  [vega-mux] from wFS:p2 (claude in ~/src/durandom/vega.gate-fixes), 2026-10-19 22:53 CEST\n  CI: never poll gh in a loop; vega ci watch <pr|branch> mails you the verdict.\n\n  GPT-6-Luna medium · probe41792443218 · Ready · Context 0% used\n";
+    const CODEX_TAKEN: &str = "› Reply with the single word ok.\n  ---\n  CI: never poll gh in a loop; vega ci watch <pr|branch> mails you the verdict.\n• ok3\n\n› Ask Codex to do anything\n  GPT-6-Luna medium · vega.gate-fixes · gate-fixes · Working · 258K window · Context 3% used\n  ? for shortcuts\n";
+
     #[test]
     fn only_a_screen_past_starting_lets_the_brief_go() {
         let starting = "  GPT-6-Luna medium · x · Starting · Context 0% used\n".to_string();
