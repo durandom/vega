@@ -95,6 +95,20 @@ pub fn deliver(
         ));
     }
     let hv = |key| headers.get(key).map(|v| v.as_str()).unwrap_or("");
+    let host = crate::host();
+    let stale = || crate::stale_brief(&st::children(), pane, &me.pane, &host, hv(h::SENT_MS));
+    let stale_before = done.and_then(|_| stale());
+    let stale_marker = |at| {
+        format!("stale: report from {} sent at {} ms predates your newer brief at {at} ms; this reports on earlier work; your newer brief stands", me.pane, hv(h::SENT_MS))
+    };
+    let report = match (done, stale_before) {
+        (_, Some(at)) => format!("{}\n{text}", stale_marker(at)),
+        (Some(_), None) => format!(
+            "Report sent at {} ms; a newer brief supersedes this report.\n{text}",
+            hv(h::SENT_MS)
+        ),
+        _ => text.into(),
+    };
     let reply = if me.pane.is_empty() {
         "reply: none (sent from outside an agent pane)".into()
     } else {
@@ -106,18 +120,30 @@ pub fn deliver(
             hv(h::SENT_MS)
         )
     };
-    let body = format!(
-        "{text}\n\n---\n[vega-mux] from {} ({} in {}) · {reply}",
+    let sent = vega_herdr::local_time(None)
+        .map(|t| format!(", {t}"))
+        .unwrap_or_default();
+    let footer = format!(
+        "\n\n---\n[vega-mux] from {} ({} in {}){sent} · {reply}",
         me.pane, me.agent, me.cwd
     );
+    let body = format!("{report}{footer}");
     herdr_local(&["agent", "prompt", pane, &body])?;
+    vega_herdr::prompt::confirm_taken(pane, &body)?;
+    let stale_after = done.and_then(|_| stale());
+    // A brief can arrive while herdr is submitting the report. Its first
+    // prompt already carries the sent time and supersession rule; follow it
+    // with a concrete correction before acknowledging delivery to the sender.
+    if let Some(at) = stale_after.filter(|_| stale_before.is_none()) {
+        let correction = format!("{}{footer}", stale_marker(at));
+        herdr_local(&["agent", "prompt", pane, &correction])?;
+        vega_herdr::prompt::confirm_taken(pane, &correction)?;
+    }
     // Preserve local parent/child supervision, including done records, without
     // publishing mail or pretending there is a broker archive entry.
     let children = st::children();
     if let Some(child) = crate::child_of(&children, &me.pane, pane, &crate::host()) {
-        if let Some(outcome) = done.filter(|_| {
-            crate::stale_brief(&children, pane, &me.pane, &crate::host(), hv(h::SENT_MS)).is_none()
-        }) {
+        if let Some(outcome) = done.filter(|_| stale_after.is_none()) {
             let prefix = format!("done ({}): ", outcome.as_str());
             st::save_done(
                 child.machine.as_deref(),
@@ -136,9 +162,10 @@ pub fn deliver(
     {
         st::settle(None, pane);
     }
-    if done.is_none() && crate::child_of(&st::children(), pane, &me.pane, &crate::host()).is_some()
-    {
-        st::save_brief(None, pane);
+    if done.is_none() {
+        if let Some(child) = crate::child_of(&children, pane, &me.pane, &host) {
+            st::save_brief(child.machine.as_deref(), pane);
+        }
     }
     if let Some(outcome) = done {
         println!("done: {} to {pane} locally via herdr", outcome.as_str());

@@ -17,6 +17,7 @@ pub mod mail_grants;
 pub mod notes;
 pub mod pane;
 pub mod project;
+pub mod prompt;
 pub mod resets;
 pub mod service_config;
 pub mod socket;

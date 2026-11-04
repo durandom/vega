@@ -17,10 +17,26 @@ case "$1 $2" in
     printf '{"result":{"agent":{"pane_id":"%s"}}}' "$pane" ;;
   "agent prompt")
     printf '%s\n%s\n' "$3" "$4" >> "$HOME/prompts"
+    printf '%s\n' "$4" > "$HOME/current-prompt"
     if test -f "$HOME/new-brief"; then
       mkdir -p "$HOME/state/vega/briefs"
       cat "$HOME/new-brief" > "$HOME/state/vega/briefs/local_w1_p1"
     fi
+    echo '{"result":{}}' ;;
+  "agent wait")
+    if test -f "$HOME/stall"; then
+      echo '{"error":{"code":"timeout","message":"not working"}}'; exit 1
+    fi
+    echo '{"result":{}}' ;;
+  "pane read")
+    if test -f "$HOME/stage" && ! test -f "$HOME/entered"; then
+      printf '› '; cat "$HOME/current-prompt"
+    else
+      echo '› Ask Codex to do anything'
+    fi ;;
+  "agent send-keys")
+    test "$4" = enter || exit 1
+    printf '%s\n' enter >> "$HOME/entered"
     echo '{"result":{}}' ;;
   *) echo '{"result":{}}' ;;
 esac
@@ -188,6 +204,54 @@ fn local_panes_and_local_uac_claims_need_no_broker() {
     );
     assert!(!home.join("state/vega/done/local_w1_p1").exists());
     assert!(home.join("state/vega/replied/local_w1_p1").exists());
+    let prompts = fs::read_to_string(home.join("prompts")).unwrap();
+    assert!(prompts.contains("stale: report from w1:p1"));
+    assert!(prompts.contains("your newer brief stands"));
+    assert!(prompts.contains("a newer brief supersedes this report"));
+}
+
+#[test]
+fn staged_prompt_gets_enter_only_and_an_unconfirmed_send_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    fixture(home);
+    fs::write(home.join("stage"), "").unwrap();
+    run(home, &["send", "w1:p2", "staged hello"], true);
+    assert_eq!(fs::read_to_string(home.join("entered")).unwrap(), "enter\n");
+    assert_eq!(
+        fs::read_to_string(home.join("prompts"))
+            .unwrap()
+            .matches("staged hello")
+            .count(),
+        1
+    );
+    fs::write(home.join("stall"), "").unwrap();
+    let failed = run(home, &["send", "w1:p2", "never taken"], false);
+    assert!(failed.contains("not_taken"));
+    assert!(!failed.contains("sent:"));
+    assert_eq!(
+        fs::read_to_string(home.join("prompts"))
+            .unwrap()
+            .matches("never taken")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn same_host_machine_label_keeps_its_supervision_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    fixture(home);
+    fs::create_dir_all(home.join("state/vega/parents")).unwrap();
+    fs::write(
+        home.join("state/vega/parents/inbox-test_w1_p2"),
+        json!({"name":"child","parent":"w1:p1","host":"inbox-test"}).to_string(),
+    )
+    .unwrap();
+    run(home, &["send", "w1:p2", "new work"], true);
+    assert!(home.join("state/vega/briefs/inbox-test_w1_p2").exists());
+    assert!(!home.join("state/vega/briefs/local_w1_p2").exists());
 }
 
 #[test]
