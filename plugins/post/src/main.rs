@@ -2983,8 +2983,7 @@ async fn serve(
         // Since when the client is disconnected; LOST_AFTER of it ends the
         // broker loop.
         let mut away: Option<Instant> = None;
-        // Bounces the broker did not take yet (vega-lhc.205).
-        let mut bounces: Vec<delivery::Bounce> = Vec::new();
+        // Pending bounces stay in `d` between attempts so upgrade exports them.
         let mut bounce_retry_at = Instant::now();
         // A pass over the uber consumer runs in its own task (bd is slow);
         // due at start, on reconnect and on new uber.* mail.
@@ -3015,7 +3014,6 @@ async fn serve(
                     ));
                 }
                 log(&why);
-                d.keep_bounces(std::mem::take(&mut bounces));
                 return Ok(Served::Lost(Box::new(Carry {
                     d,
                     sup,
@@ -3111,25 +3109,11 @@ async fn serve(
                 d.mail(&asker, Sender::Other);
             }
             // A bounce the broker could not check waits for the next try.
-            bounces.extend(d.take_bounces());
-            if up && !bounces.is_empty() && Instant::now() >= bounce_retry_at {
-                let mut later = Vec::new();
-                for mut b in std::mem::take(&mut bounces) {
-                    let run = bounce(&js, &stream, &host, &mut b, registry.view.as_ref());
-                    if !while_up(&client, outage::CALL, run).await.unwrap_or(false) {
-                        later.push(b);
-                    }
-                }
-                if !later.is_empty() {
-                    log(&format!(
-                        "bounce: {} not checked, retrying in {} s",
-                        later.len(),
-                        CI_RETRY.as_secs()
-                    ));
-                    bounce_retry_at = Instant::now() + CI_RETRY;
-                }
-                bounces = later;
-            }
+            retry_bounces(&mut d, up, &mut bounce_retry_at, async |b| {
+                let run = bounce(&js, &stream, &host, b, registry.view.as_ref());
+                while_up(&client, outage::CALL, run).await.unwrap_or(false)
+            })
+            .await;
             let uber_ready = up && uber_due && !uber_running && Instant::now() >= uber_retry_at;
             if uber_ready && uber_in.is_none() && !st::is_inbox_only(&host) {
                 match outage::bounded("uber consumer", uber_consumer(&stream, &host)).await {
@@ -3483,6 +3467,33 @@ fn bounce_text(pane: &str, host: &str, hint: &str) -> String {
     format!(
         "bounce: {pane} on {host} closed before it read your mail; nobody will read it there. {hint}. Resend it if it still matters."
     )
+}
+
+/// Keep retries in the upgrade handoff while disconnected or backing off.
+async fn retry_bounces(
+    d: &mut Delivery,
+    up: bool,
+    retry_at: &mut Instant,
+    mut attempt: impl AsyncFnMut(&mut delivery::Bounce) -> bool,
+) {
+    if !up || d.bounces().is_empty() || Instant::now() < *retry_at {
+        return;
+    }
+    let mut later = Vec::new();
+    for mut b in d.take_bounces() {
+        if !attempt(&mut b).await {
+            later.push(b);
+        }
+    }
+    if !later.is_empty() {
+        log(&format!(
+            "bounce: {} not checked, retrying in {} s",
+            later.len(),
+            CI_RETRY.as_secs()
+        ));
+        *retry_at = Instant::now() + CI_RETRY;
+    }
+    d.keep_bounces(later);
 }
 
 /// vegad's bounce (vega-lhc.129): a closed pane's unread mail goes back to
@@ -6090,6 +6101,63 @@ fn log(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn broker_bounce_retries_stay_in_the_upgrade_handoff() {
+        let told = delivery::Origin {
+            host: "h".into(),
+            pane: "w9:p1".into(),
+            agent: "claude".into(),
+        };
+        let waiting = delivery::Origin {
+            pane: "w9:p2".into(),
+            ..told.clone()
+        };
+        let mut d = Delivery::default();
+        d.keep_bounces(vec![delivery::Bounce {
+            pane: "w1:p1".into(),
+            origins: vec![Some(told.clone()), None, Some(waiting.clone())],
+            done: vec![],
+            closed_ms: 1234,
+        }]);
+        let mut retry_at = Instant::now();
+        // A short disconnect must leave the bounce in the exported state.
+        retry_bounces(&mut d, false, &mut retry_at, async |_| {
+            panic!("disconnected")
+        })
+        .await;
+        let mut restored = Delivery::default();
+        restored.import(&d.export());
+        assert_eq!(restored.bounces(), d.bounces());
+        assert_eq!(restored.bounces().len(), 1);
+
+        // A partially completed attempt is kept before the loop can exec.
+        retry_bounces(&mut restored, true, &mut retry_at, async |b| {
+            b.done.push(told.clone());
+            false
+        })
+        .await;
+        assert!(retry_at > Instant::now());
+        retry_bounces(&mut restored, true, &mut retry_at, async |_| {
+            panic!("backoff")
+        })
+        .await;
+        let mut upgraded = Delivery::default();
+        upgraded.import(&restored.export());
+        assert_eq!(upgraded.bounces(), restored.bounces());
+        let b = &upgraded.bounces()[0];
+        assert_eq!(b.closed_ms, 1234);
+        assert_eq!(b.done, vec![told]);
+        assert_eq!(b.senders(3), vec![waiting.clone()]);
+
+        retry_at = Instant::now();
+        retry_bounces(&mut upgraded, true, &mut retry_at, async |b| {
+            assert_eq!(b.senders(3), vec![waiting.clone()]);
+            true
+        })
+        .await;
+        assert!(upgraded.bounces().is_empty());
+    }
 
     #[test]
     fn a_stalled_pointer_stays_pending_and_does_not_stop_the_next_pane() {
