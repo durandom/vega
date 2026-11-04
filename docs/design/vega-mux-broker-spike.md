@@ -323,12 +323,12 @@ The admin seed lives on proteus, where agents run without approval prompts. Unti
 | `$JS.API.CONSUMER.LIST.VEGA_INBOX_<h>` for each listed host | yes (push-consumer warning; consumer metadata only) |
 | `$JS.API.STREAM.CREATE.VEGA_INBOX_<h>` | **only for hosts given with `auth-config --create <h>`**; none in steady state |
 | subscribe | only its own reply prefix `_INBOX_admin.>` (client uses it with the admin seed) |
-| stream delete, purge, update | no |
+| stream delete, purge, update | no in steady state; temporary registry TTL update exception below |
 | message get, direct get, message delete | no |
 | consumer create (durable, ordered), fetch (`MSG.NEXT`), `$JS.ACK` | no |
 | subscribe `vega.inbox.>`, other hosts' `_INBOX_<h>.>` | no |
 
-No `STREAM.UPDATE`: `provision` only checks an existing stream (retention), it never changes one. Repair is manual on the server. The host name `admin` is reserved (it would share `_INBOX_admin`).
+No `STREAM.UPDATE` in steady state: `provision` normally only checks an existing stream (retention). Exception: `auth-config --create registry-ttl` temporarily grants UPDATE on `KV_VEGA_REGISTRY` for `provision registry --ttl`; remove the grant and reload immediately afterwards, including on failure. See [one-time TTL enablement](vegad.md#one-time-ttl-enablement-vega-lhc246). Other repairs are manual on the server. The host name `admin` is reserved (it would share `_INBOX_admin`).
 
 ### Why create is time-limited
 
