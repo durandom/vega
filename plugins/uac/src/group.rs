@@ -173,7 +173,7 @@ pub(super) fn claim_all(
             return Err(Failure::new(
                 "uac_exists",
                 format!("{pane} on {host} is the UAC of {member}"),
-                "release that live UAC before claiming the group",
+                "release that live UAC before claiming this repo or its group",
             ));
         }
         record(member)?;
@@ -283,6 +283,18 @@ mod tests {
         repo(&dir.join("service"), "service");
         repo(&dir.join("web"), "web");
         repo(&dir.join("service/nested"), "nested");
+        let bare = dir.join("bare-service.git");
+        fs::create_dir_all(&bare).unwrap();
+        git(&bare, &["init", "-q", "--bare"]);
+        git(
+            &bare,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/team/bare-service.git",
+            ],
+        );
         run(&["discover".into(), dir.to_string_lossy().into()]).unwrap();
         run(&["add".into(), "github.com/team/service".into()]).unwrap();
         run(&["add".into(), dir.join("web").to_string_lossy().into()]).unwrap();
@@ -290,6 +302,7 @@ mod tests {
         assert_eq!(
             members(&coord).unwrap(),
             BTreeSet::from([
+                "github.com/team/bare-service".into(),
                 "github.com/team/service".into(),
                 "github.com/team/web".into()
             ])

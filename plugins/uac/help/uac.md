@@ -1,7 +1,7 @@
 Usage: vega uac
 
 Coordinator mode. Without arguments: every agent working on this session's
-project ID (the normalized Git fetch remote), across local clones and fresh
+project ID (the normalized Git fetch remote) and its group manifest members, across local clones and fresh
 schema-2 registry rows on other hosts, with project, machine, pane, name, kind,
 status, unread_mail, parent, mode, claimed bead, tier and model. Agents whose parent
 is your pane are your sentinels. Registry-off mode omits remote membership;
