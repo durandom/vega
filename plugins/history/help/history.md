@@ -3,7 +3,8 @@ vega history [status|read|export]
 status: local host's last real PubAck time (Unix ms), sequence, pending receipts,
 and last publication error. Null means unknown; no broker credentials needed.
 read: compact event metadata, first 100 matches by arrival sequence.
-export: full envelopes as JSON lines on stdout; count on stderr (zero is success).
+export: full envelopes as JSON lines on stdout; count and last emitted sequence
+on stderr (zero is success). Resume a limited export with --after that sequence.
 
 read/export flags:
   --viewer-key <path>  Separate viewer seed (else VEGA_HISTORY_VIEWER_KEY or

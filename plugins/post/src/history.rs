@@ -638,6 +638,16 @@ mod tests {
                 .unwrap(),
                 (1, 4)
             );
+            let max_cursor = vega_history::Filter {
+                after: u64::MAX,
+                ..Default::default()
+            };
+            assert_eq!(
+                vega_history::scan(viewer.clone(), &max_cursor, |_, _| panic!("past snapshot"))
+                    .await
+                    .unwrap(),
+                (0, 4)
+            );
             let empty = vega_history::Filter {
                 host: Some("absent".into()),
                 ..Default::default()

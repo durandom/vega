@@ -213,8 +213,9 @@ Host and admin principals cannot read the history through this reader.
 matches by ascending arrival sequence. It reports the total matching count and
 snapshot end sequence. `--limit <positive-count>` raises or lowers the displayed
 limit. `export` streams full schema-1 JSON envelopes as JSON lines, unlimited by
-default; its emitted/total count goes to stderr, including an explicit zero on an
-empty result. No matching events is exit 0. Export contains the original bodies;
+default; its emitted/total count, last emitted sequence and snapshot end go to
+stderr, including an explicit zero on an empty result. Resume a limited export
+with `--after` its last emitted sequence, not the snapshot end. No matching events is exit 0. Export contains the original bodies;
 it is an explicit analysis operation, separate from metadata telemetry below.
 
 Both commands accept exact conjunctive `--project`, `--bead`, `--host` filters and

@@ -137,6 +137,39 @@ fn cli_reads_and_exports_full_filtered_jsonl_with_viewer_only() {
     let after = query(&["export", "--after", "2"]);
     assert!(after.status.success());
     assert_eq!(String::from_utf8(after.stdout).unwrap().lines().count(), 1);
+    let limited = query(&["export", "--project", "p", "--limit", "1"]);
+    assert!(limited.status.success());
+    assert_eq!(
+        String::from_utf8(limited.stdout).unwrap().lines().count(),
+        1
+    );
+    let progress = String::from_utf8(limited.stderr).unwrap();
+    assert!(
+        progress.contains("last emitted sequence 1; snapshot through 3"),
+        "{progress}"
+    );
+    let hostile = query(&["read", "--project", "$(id)' p"]);
+    assert!(hostile.status.success());
+    assert!(String::from_utf8(hostile.stdout)
+        .unwrap()
+        .contains("--project '$(id)'\"'\"' p'"));
+    rt.block_on(async {
+        let client = async_nats::ConnectOptions::with_nkey(admin.seed().unwrap())
+            .connect(&url)
+            .await
+            .unwrap();
+        async_nats::jetstream::new(client)
+            .publish("vega.history.h.bad", "{}".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+    });
+    let broken = query(&["export"]);
+    assert_eq!(broken.status.code(), Some(1));
+    assert!(String::from_utf8(broken.stdout)
+        .unwrap()
+        .contains("history_schema"));
     // Missing viewer path cannot silently use a configured host/admin seed.
     let denied = command(dir.path())
         .env("VEGA_NATS_URL", &url)
@@ -148,4 +181,15 @@ fn cli_reads_and_exports_full_filtered_jsonl_with_viewer_only() {
     assert!(String::from_utf8(denied.stdout)
         .unwrap()
         .contains("viewer_key"));
+}
+
+#[test]
+fn overflowing_cursor_is_usage_error_before_network() {
+    // CLI invalid-input handling is checked without consulting any configured broker.
+    let dir = tempfile::tempdir().unwrap();
+    let invalid = command(dir.path())
+        .args(["read", "--after", "18446744073709551616"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
 }

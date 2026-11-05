@@ -120,6 +120,7 @@ fn run(opts: Options, export: bool) -> Result<(), Failure> {
             .unwrap_or(if export { u64::MAX } else { 100 });
         let mut rows = Vec::new();
         let mut emitted = 0;
+        let mut last_emitted = None;
         let mut out = std::io::BufWriter::new(std::io::stdout().lock());
         let (total, end) = vega_history::scan(client, &opts.filter, |seq, e| {
             if emitted < limit {
@@ -136,6 +137,7 @@ fn run(opts: Options, export: bool) -> Result<(), Failure> {
                     ));
                 }
                 emitted += 1;
+                last_emitted = Some(seq);
             }
             Ok(())
         })
@@ -143,7 +145,8 @@ fn run(opts: Options, export: bool) -> Result<(), Failure> {
         if export {
             out.flush().map_err(|e| failure("output", e))?;
             eprintln!(
-                "history: {emitted} of {total} matching events exported through sequence {end}"
+                "history: exported {emitted} of {total} matches; last emitted sequence {}; snapshot through {end}",
+                last_emitted.map(|s| s.to_string()).unwrap_or("null".into())
             );
         } else {
             println!(
@@ -156,7 +159,7 @@ fn run(opts: Options, export: bool) -> Result<(), Failure> {
             }
             println!(
                 "help: vega history export --viewer-key {}{}",
-                cell(&key.display().to_string()),
+                shell_arg(&key.display().to_string()),
                 scope(&opts.filter)
             );
             if total > emitted {
@@ -166,6 +169,17 @@ fn run(opts: Options, export: bool) -> Result<(), Failure> {
         Ok(())
     })
 }
+fn shell_arg(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_./:-".contains(&b))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
+}
 fn scope(f: &Filter) -> String {
     let mut args = vec![];
     for (key, value) in [
@@ -174,7 +188,7 @@ fn scope(f: &Filter) -> String {
         ("host", &f.host),
     ] {
         if let Some(value) = value {
-            args.push(format!(" --{key} {}", cell(value)));
+            args.push(format!(" --{key} {}", shell_arg(value)));
         }
     }
     if let Some(since) = f.since {
