@@ -362,7 +362,7 @@ fn quarantine_receipt(path: &Path, reason: &str) {
 }
 
 /// Wrap the existing acknowledged mail publish, retaining its error contract.
-/// Every successful send path (CLI, tool, bounce, ask, Uber, quarantine grant)
+/// Every successful send path (CLI, tool, bounce, ask, Uber, quarantine grant, PagerDuty)
 /// uses this; a history failure never changes mail delivery's result.
 pub async fn mail(
     js: &async_nats::jetstream::Context,

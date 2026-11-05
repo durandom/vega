@@ -69,7 +69,7 @@ event or causal order; use timestamps and lineage chain IDs when reconstructing 
   and transport. A mux send through post also has a `mail.sent` event; these are
   distinct operation kinds, not two deliveries.
 - `mail.sent`: every acknowledged publish through post's shared mail helper
-  (send/done, ask, tool, bounce, Uber and granted quarantine) includes subject,
+  (send/done, ask, tool, bounce, Uber, granted quarantine and PagerDuty) includes subject,
   complete headers and full body. The original inbox archive remains intact.
   Its ID derives from host, subject and the mail's Nats-Msg-Id.
 - `mail.local`: confirmed brokerless tool delivery includes full source text.

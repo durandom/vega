@@ -7,6 +7,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 ## 108 · 2026-11-05
 
+- unit: vegad preserves live registry entries when a herdr agent or workspace snapshot
+  fails or is malformed; it logs `registry: off (...)` instead of reconciling an empty set.
 - migration: central history needs operator provisioning and a larger broker store.
   Use temporary `auth-config --create history --create archive`, then `vega post provision history`
   and `vega post provision <host> --archive`; remove the grants and reload afterwards.

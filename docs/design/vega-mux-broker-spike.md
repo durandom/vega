@@ -19,7 +19,7 @@ Delivery is fast (single-digit ms through the broker), durable, and acked. Per-m
 Setup (all inside the worktree):
 
 - `mise.toml`: `nats-server` 2.15.0 (mise registry) and `github:nats-io/natscli` 0.5.0 (mise github backend, no registry entry). No brew needed.
-- `mise run nats`: runs `nats-server -c spike/nats/nats.conf`: loopback only (`127.0.0.1:4222`, monitor `127.0.0.1:8222`), JetStream data in `.nats-data/` (gitignored), no auth, `max_file_store: 10G`. Clients reach it only with `VEGA_NATS_URL=nats://127.0.0.1:4222`; there is no built-in broker default.
+- `mise run nats`: runs `nats-server -c spike/nats/nats.conf`: loopback only (`127.0.0.1:4222`, monitor `127.0.0.1:8222`), JetStream data in `.nats-data/` (gitignored), no auth, `max_file_store: 100G`. Clients reach it only with `VEGA_NATS_URL=nats://127.0.0.1:4222`; there is no built-in broker default.
 - Round 1–3 had `spike/nats/gen-auth.sh`, which generated all seeds in one place. Removed in round 4: seeds never leave their machine; `vega post keygen` and `vega post auth-config` replace it.
 
 Crates (round 2; round 1 had the same code as `vega mux post|inbox|relay` inside `plugins/mux`):
