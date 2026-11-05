@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 109 · 2026-11-05
+
+- feature: `vega post log` without `--pane` waits for a cold archive scan instead of printing
+  `0 messages`, and a stalled read now fails with a broker error instead of a short list.
+
 ## 108 · 2026-11-05
 
 - unit: vegad preserves live registry entries when a herdr agent or workspace snapshot

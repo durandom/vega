@@ -3636,6 +3636,11 @@ async fn bounce(
     ok
 }
 
+/// Wait for the first archive message (cold wildcard scans are slow).
+const LOG_FIRST_WAIT: Duration = Duration::from_secs(10);
+/// Gap allowed between archive messages once they flow.
+const LOG_IDLE_WAIT: Duration = Duration::from_secs(5);
+
 /// `vega post log`: the archive of this machine's mail, newest first. It
 /// reads through an ordered consumer (ephemeral, no acks), so no read state
 /// changes. Read/unread comes from each pane's durable consumer ack floor.
@@ -3682,9 +3687,21 @@ fn log_view(
         let mut rows: VecDeque<LogRow> = VecDeque::new();
         let mut total = 0usize;
         // No match at all, or none newer than --since: the stream never ends,
-        // so stop when nothing arrives for a moment.
-        while let Ok(Some(m)) = tokio::time::timeout(Duration::from_millis(500), msgs.next()).await {
-            let m = m.map_err(broker_err)?;
+        // so an empty wait ends it. A cold wildcard scan of a big archive can
+        // take seconds before the first message, so that wait is generous; a
+        // stall after messages arrived is an error, never a short list.
+        loop {
+            let wait = if total == 0 { LOG_FIRST_WAIT } else { LOG_IDLE_WAIT };
+            let m = match tokio::time::timeout(wait, msgs.next()).await {
+                Ok(Some(m)) => m.map_err(broker_err)?,
+                Ok(None) if total == 0 => break,
+                Err(_) if total == 0 => break,
+                Ok(None) | Err(_) => {
+                    return Err(broker_err(format!(
+                        "log read stalled after {total} messages"
+                    )));
+                }
+            };
             let info = m.info().map_err(broker_err)?;
             let (to, from_host) = parse_subject(&m.subject).unwrap_or(("?", "?"));
             let hv = |k: &str| {

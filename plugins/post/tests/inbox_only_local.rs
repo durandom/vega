@@ -334,3 +334,70 @@ fn explicit_remote_target_uses_quarantine() {
             assert!(!home.join("prompts").exists());
         });
 }
+
+#[test]
+fn log_without_pane_lists_the_archive_across_panes() {
+    use std::{net::TcpListener, process::Stdio, time::Duration};
+    struct Server(std::process::Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    fixture(home);
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let _server = Server(
+        Command::new("nats-server")
+            .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string()])
+            .arg("-sd")
+            .arg(home.join("js"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let url = format!("nats://127.0.0.1:{port}");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let js = rt.block_on(async {
+        for _ in 0..50 {
+            if let Ok(c) = async_nats::connect(&url).await {
+                return async_nats::jetstream::new(c);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("test broker did not start");
+    });
+    let logcmd = |args: &[&str]| {
+        let mut cmd = command(home, args);
+        cmd.env("VEGA_NATS_URL", &url).env_remove("VEGA_NATS_NKEY");
+        cmd.output().unwrap()
+    };
+    // The first read creates the inbox stream (no machine key).
+    assert!(logcmd(&["log"]).status.success());
+    rt.block_on(async {
+        for (pane, text) in [("w1:p1", "alpha"), ("w2:p1", "beta"), ("w3:p1", "gamma")] {
+            let ack = js
+                .publish(format!("vega.inbox.inbox-test.{pane}.other"), text.into())
+                .await
+                .unwrap();
+            ack.await.unwrap();
+        }
+    });
+    let out = logcmd(&["log"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("3 of 3 messages"), "{text}");
+    for t in ["alpha", "beta", "gamma"] {
+        assert!(text.contains(t), "{text}");
+    }
+}
