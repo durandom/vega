@@ -81,4 +81,6 @@ vegad host. See [host precedence](../../docs/concepts.md).
 
 Central history capture and the explicit archive migration are documented in
 [history](../../docs/design/history.md). All hosts, including inbox-only hosts,
-publish their own history through vegad; mail restrictions remain unchanged.
+publish their own history through vegad; mail restrictions remain unchanged. When OTLP is enabled,
+vegad also reports its inbox stream capacity every five minutes. VEGA_HISTORY capacity requires a
+separate stream-info grant, which generated host permissions do not include.
