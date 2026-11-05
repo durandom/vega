@@ -17,6 +17,7 @@
 //! and may only touch the JetStream API of `VEGA_INBOX_<self>`.
 
 mod agents;
+mod archive;
 mod auth;
 mod bdsync;
 mod catalog;
@@ -27,6 +28,7 @@ mod cmd;
 mod delivery;
 mod gather;
 mod gitsync;
+mod history;
 mod human;
 mod hygiene;
 mod identity;
@@ -314,6 +316,9 @@ enum Cmd {
         /// Enable registry per-message TTL (one-time, irreversible; needs temporary admin grant)
         #[arg(long)]
         ttl: bool,
+        /// Remove inbox age expiry and raise its cap to 10 GiB (temporary admin grant)
+        #[arg(long, conflicts_with = "ttl")]
+        archive: bool,
     },
 }
 
@@ -485,7 +490,11 @@ fn main() -> ExitCode {
             &registry_read,
             lanista_writer.as_deref(),
         ),
-        Some(Cmd::Provision { hosts, ttl }) => provision(&hosts, ttl),
+        Some(Cmd::Provision {
+            hosts,
+            ttl,
+            archive,
+        }) => provision(&hosts, ttl, archive),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -496,11 +505,10 @@ fn main() -> ExitCode {
     }
 }
 
-/// Archive limits per host stream. Mail is kept, read or not, until it is
-/// older than ARCHIVE_MAX_AGE or the stream exceeds ARCHIVE_MAX_BYTES; then
-/// the oldest messages go first.
-const ARCHIVE_MAX_AGE: Duration = Duration::from_secs(365 * 24 * 3600);
-const ARCHIVE_MAX_BYTES: i64 = 1 << 30; // 1 GiB
+/// Archive limits per host stream. Zero max_age disables age expiry;
+/// inboxes retain their existing discard policy at the 10 GiB size cap.
+const ARCHIVE_MAX_AGE: Duration = Duration::ZERO;
+const ARCHIVE_MAX_BYTES: i64 = 10 << 30; // 10 GiB
 /// `log` truncates message text to this many characters.
 const LOG_TEXT: usize = 80;
 /// A chain of fast replies longer than this is treated as an agent loop.
@@ -984,8 +992,9 @@ fn check_archive(stream: &stream::Stream, host: &str) -> Result<(), Failure> {
 }
 
 /// `vega post provision`: creates missing host streams, checks existing ones.
-fn provision(hosts: &[String], ttl: bool) -> Result<(), Failure> {
+fn provision(hosts: &[String], ttl: bool, archive: bool) -> Result<(), Failure> {
     registry_ttl::validate_target(hosts, ttl)?;
+    archive::validate_target(hosts, archive)?;
     runtime()?.block_on(async {
         let client = connect_as("provision", Seed::Admin, None).await?;
         if ttl {
@@ -995,14 +1004,27 @@ fn provision(hosts: &[String], ttl: bool) -> Result<(), Failure> {
             println!("help: regenerate auth-config without --create registry-ttl and reload the broker");
             return Ok(());
         }
+        if archive {
+            for h in hosts {
+                let h = subject_token(&h.to_lowercase());
+                let changed = archive::update(&client, &h).await?;
+                println!("archive: {h} {}", if changed { "updated" } else { "already configured (no-op)" });
+            }
+            println!("help: remove --create archive from auth-config and reload the broker");
+            return Ok(());
+        }
         let js = jetstream::new(client);
+        if hosts.iter().any(|h| h == "history") {
+            history::provision(&js).await?;
+            println!("history: VEGA_HISTORY ready; remove --create history and reload the broker");
+        }
         // `registry`: the KV bucket of vegad M4, not a host; `lanista`: the
         // catalog's object store (catalog.rs).
         let wants_registry = hosts.iter().any(|h| h == "registry");
         let wants_lanista = hosts.iter().any(|h| h == "lanista");
         let hosts: Vec<String> = hosts
             .iter()
-            .filter(|h| *h != "registry" && *h != "lanista")
+            .filter(|h| *h != "registry" && *h != "lanista" && *h != "history")
             .cloned()
             .collect();
         if wants_lanista {
@@ -1116,7 +1138,10 @@ fn auth_config(
             .iter()
             .filter(|h| {
                 !(flag == "--create"
-                    && (*h == "registry" || *h == "lanista" || *h == "registry-ttl"))
+                    && (matches!(
+                        h.as_str(),
+                        "registry" | "lanista" | "registry-ttl" | "history" | "archive"
+                    )))
             })
             .find(|h| !entries.iter().any(|e| &e.host == *h))
         {
@@ -1153,12 +1178,12 @@ fn auth_config(
             ));
         }
     }
-    if entries.len() > auth::MAX_HOSTS_8GB {
+    if entries.len() > auth::MAX_HOSTS_100GB {
         eprintln!(
-            "warning: {} hosts reserve {} GiB; orrery's max_file_store 8GB fits {}",
+            "warning: {} hosts reserve {} GiB; 100 GiB with history reserves room for at most {} hosts (plus other streams)",
             entries.len(),
             entries.len() as i64 * ARCHIVE_MAX_BYTES / (1 << 30),
-            auth::MAX_HOSTS_8GB
+            auth::MAX_HOSTS_100GB
         );
     }
     if let Some(v) = viewer {
@@ -1538,7 +1563,7 @@ fn send(
         let js = jetstream::new(client);
         // No stream lookup: the target host's stream captures the subject. If
         // that host never ran `relay` or `inbox`, nothing does.
-        js.publish_with_headers(subject.clone(), headers, text.to_string().into())
+        history::mail(&js, subject.clone(), headers, text.to_string())
             .await
             .map_err(broker_err)?
             .await
@@ -1671,7 +1696,7 @@ async fn receive_quarantined(
         quarantine::granted(&req.subject, &host, req.headers.as_ref(), &req.payload)
     {
         let sent = tokio::time::timeout(outage::CALL, async {
-            js.publish_with_headers(subject, headers, body.into())
+            history::mail(js, subject, headers, body)
                 .await
                 .map_err(|e| e.to_string())?
                 .await
@@ -1775,10 +1800,7 @@ async fn publish_uber(
         headers.insert(h::KIND, k.as_str());
     }
     let publish = async {
-        match js
-            .publish_with_headers(subject, headers, body.to_string().into())
-            .await
-        {
+        match history::mail(js, subject, headers, body.to_string()).await {
             Ok(ack) => ack.await.map(|_| ()).map_err(|e| e.to_string()),
             Err(e) => Err(e.to_string()),
         }
@@ -2444,6 +2466,7 @@ impl Jobs {
         let (ctx, ci) = mpsc::unbounded_channel();
         let (btx, bd) = mpsc::unbounded_channel();
         if !once {
+            history::spawn();
             agents::spawn(etx);
             // Git sync (gitsync.rs): fetch, fast-forward clean main checkouts.
             gitsync::spawn();
@@ -2867,7 +2890,13 @@ fn deliver_local(mail: Vec<ToolMail>, d: &Delivery, drafts: &mut Drafts) -> Vec<
             continue;
         }
         match notify(&pane, &local_line(&agent, &text)) {
-            Ok(()) => log(&format!("local: {agent} mail typed into {pane}")),
+            Ok(()) => {
+                history::record(
+                    "mail.local",
+                    serde_json::json!({"agent":agent,"pane":pane,"body":text}),
+                );
+                log(&format!("local: {agent} mail typed into {pane}"));
+            }
             Err(f) if f.code == "bad_pane" => {
                 log(&format!("local: {pane}: {}, dropped", f.message))
             }
@@ -3449,10 +3478,7 @@ async fn publish_tool_mail(
         headers.insert(h::SENT_MS, now_ms().to_string().as_str());
         let subject = inbox_subject(host, &pane, host);
         let publish = async {
-            match js
-                .publish_with_headers(subject, headers, text.clone().into())
-                .await
-            {
+            match history::mail(js, subject, headers, text.clone()).await {
                 Ok(ack) => ack.await.map(|_| ()).map_err(|e| e.to_string()),
                 Err(e) => Err(e.to_string()),
             }
@@ -3586,10 +3612,7 @@ async fn bounce(
         headers.insert(h::FROM_CWD, "vegad");
         headers.insert(h::SENT_MS, now_ms().to_string().as_str());
         let subject = inbox_subject(&o.host, &o.pane, host);
-        let sent = match js
-            .publish_with_headers(subject, headers, text.clone().into())
-            .await
-        {
+        let sent = match history::mail(js, subject, headers, text.clone()).await {
             Ok(ack) => ack.await.map(|_| ()).map_err(|e| e.to_string()),
             Err(e) => Err(e.to_string()),
         };
@@ -4312,10 +4335,7 @@ fn ask(
                 headers.insert(h::KIND, k.as_str());
             }
             let subject = inbox_subject(to_host, pane, &my_host);
-            let result = match js
-                .publish_with_headers(subject, headers, body(to_host).into())
-                .await
-            {
+            let result = match history::mail(&js, subject, headers, body(to_host)).await {
                 Ok(f) => f
                     .await
                     .map(|a| a.sequence.to_string())
@@ -5679,16 +5699,16 @@ impl Registry {
             self.last.clear();
         }
         let kv = self.kv.as_ref().expect("set above");
-        let list = |what: &str, key: &str| -> Vec<serde_json::Value> {
-            herdr(&[what, "list"])
-                .ok()
-                .and_then(|v| v["result"][key].as_array().cloned())
-                .unwrap_or_default()
+        let list = |what: &str, key: &str| -> Result<Vec<serde_json::Value>, String> {
+            herdr(&[what, "list"]).map_err(|e| e.message)?["result"][key]
+                .as_array()
+                .cloned()
+                .ok_or_else(|| format!("invalid herdr {what} snapshot"))
         };
         let desired = vega_registry::local_entries(
             host,
-            &list("agent", "agents"),
-            &list("workspace", "workspaces"),
+            &list("agent", "agents")?,
+            &list("workspace", "workspaces")?,
         );
         let mut desired = desired;
         // vega theme's applied mode (theme.rs): headless hosts follow it.
@@ -5735,6 +5755,8 @@ impl Registry {
             .cloned()
             .collect();
         let t = Instant::now();
+        // Queue full values before reconciliation can delete the live keys.
+        history::lineage(&desired);
         self.last = vega_registry::reconcile(kv, host, desired, &self.last, &present).await?;
         slow("registry reconcile", t);
         self.dead_subjects.run(kv, host, &view.keys).await?;
@@ -6823,8 +6845,8 @@ mod tests {
 
     #[test]
     fn archive_limits() {
-        assert_eq!(ARCHIVE_MAX_AGE.as_secs(), 365 * 86400);
-        assert_eq!(ARCHIVE_MAX_BYTES, 1024 * 1024 * 1024);
+        assert_eq!(ARCHIVE_MAX_AGE.as_secs(), 0);
+        assert_eq!(ARCHIVE_MAX_BYTES, 10 * 1024 * 1024 * 1024);
     }
 
     #[test]

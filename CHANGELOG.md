@@ -5,6 +5,18 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 108 · 2026-11-05
+
+- unit: vegad preserves live registry entries when a herdr agent or workspace snapshot
+  fails or is malformed; it logs `registry: off (...)` instead of reconciling an empty set.
+- migration: central history needs operator provisioning and a larger broker store.
+  Use temporary `auth-config --create history --create archive`, then `vega post provision history`
+  and `vega post provision <host> --archive`; remove the grants and reload afterwards.
+  Inbox age expiry becomes unlimited with a 10 GiB cap; VEGA_HISTORY retains events at capacity
+  and rejects new ones. Hosts publish spawn/mux/mail/lineage events through a bounded outbox;
+  inbox-only hosts may also publish their own history, with no history reads or new mail rights.
+  See [history](docs/design/history.md) for capture coverage, limits and rollout.
+
 ## 107 · 2026-11-04
 
 - feature: inbox-only hosts can use `vega post send` and `done` for local panes through herdr.

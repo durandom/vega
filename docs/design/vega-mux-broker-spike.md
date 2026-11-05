@@ -19,7 +19,7 @@ Delivery is fast (single-digit ms through the broker), durable, and acked. Per-m
 Setup (all inside the worktree):
 
 - `mise.toml`: `nats-server` 2.15.0 (mise registry) and `github:nats-io/natscli` 0.5.0 (mise github backend, no registry entry). No brew needed.
-- `mise run nats`: runs `nats-server -c spike/nats/nats.conf`: loopback only (`127.0.0.1:4222`, monitor `127.0.0.1:8222`), JetStream data in `.nats-data/` (gitignored), no auth, `max_file_store: 10G`. Clients reach it only with `VEGA_NATS_URL=nats://127.0.0.1:4222`; there is no built-in broker default.
+- `mise run nats`: runs `nats-server -c spike/nats/nats.conf`: loopback only (`127.0.0.1:4222`, monitor `127.0.0.1:8222`), JetStream data in `.nats-data/` (gitignored), no auth, `max_file_store: 100G`. Clients reach it only with `VEGA_NATS_URL=nats://127.0.0.1:4222`; there is no built-in broker default.
 - Round 1–3 had `spike/nats/gen-auth.sh`, which generated all seeds in one place. Removed in round 4: seeds never leave their machine; `vega post keygen` and `vega post auth-config` replace it.
 
 Crates (round 2; round 1 had the same code as `vega mux post|inbox|relay` inside `plugins/mux`):
@@ -55,7 +55,7 @@ Command names below in the round 1 log (`vega mux post`) are the old names of `v
 
 ```
 vega.inbox.<to-host>.<to-pane>.<from-host>      e.g. vega.inbox.proteus.w3V:p17.ganymede
-stream VEGA_INBOX_<host>   subjects vega.inbox.<host>.>   Limits, file, max_age 365d, max_bytes 1 GiB, discard old
+stream VEGA_INBOX_<host>   subjects vega.inbox.<host>.>   Limits, file, max_age 0 (no age expiry), max_bytes 10 GiB, discard old
 consumer inbox-<host>-<pane>   durable pull, filter vega.inbox.<host>.<pane>.*, explicit ack, ack_wait 30s, never expires
 ```
 
@@ -171,7 +171,7 @@ No cache: a cache file would need invalidation when panes move, for a 0.03 s gai
 - Explicit ack per message, after it was printed. A crash between print and ack redelivers it after `ack_wait` (30 s): at-least-once. Duplicates are visible as `delivery 2`.
 - `--keep` = read without ack. The message is in flight for 30 s, then back. A real "peek" should use `$JS.API.DIRECT.GET` instead and not touch delivery state.
 - Publish is idempotent per `Nats-Msg-Id` within the stream's duplicate window (2 min default), so `send` can retry safely.
-- All mail expires after 365 days or when the host stream passes 1 GiB (oldest first, read or not). A dead pane's unread mail stays until then.
+- After the explicit archive migration, mail has no age expiry. At the 10 GiB inbox cap, the existing discard-old policy still removes oldest mail, read or not. VEGA_HISTORY uses discard-new instead; see [history](history.md) for migration and capacity limits.
 - Not done: `max_deliver` plus an advisory listener to surface poison messages; nak with delay for "later".
 
 ## Round 3: archive
@@ -179,10 +179,10 @@ No cache: a cache file would need invalidation when panes move, for a 0.03 s gai
 ### Semantics
 
 - **Unread** = not yet acked by the pane's durable consumer: `num_pending + num_ack_pending`. A pane without a consumer has never read anything, so all its mail counts (subject count). `vega post`, the relay's pointer count and the rescan all use this one function (`unread`).
-- **Consumers never expire** (`inactive_threshold` unset). With WorkQueue a lost consumer cost nothing; with an archive a recreated consumer starts at the first message again and would show a year of mail as unread.
+- **Consumers never expire** (`inactive_threshold` unset). With WorkQueue a lost consumer cost nothing; with an archive a recreated consumer starts at the first message again and would show all retained mail as unread.
 - **Pane id reuse:** a new agent in a reused pane id inherits that pane's consumer and any unread mail. Same as with WorkQueue. I don't know whether or how often herdr reuses pane ids.
 - **Migration:** JetStream cannot change a stream's retention in place, and `get_or_create_stream` does not update an existing stream. `vega post` now checks the retention and fails with `stream_outdated` and a hint. The local WorkQueue stream was deleted and recreated (spike data only).
-- **`max_bytes` is reserved up front.** Creating the 1 GiB stream failed with `insufficient storage resources (10047)` while the dev server had `max_file_store: 1G`. The server's `max_file_store` must cover the sum of all host streams' `max_bytes` (N machines × 1 GiB), even when they are almost empty.
+- **`max_bytes` is reserved up front.** The current inbox reservation is 10 GiB per host, plus 10 GiB for VEGA_HISTORY and room for registry/catalog. A small dev store can reject even an empty stream with `insufficient storage resources (10047)`. Increase broker capacity before the [explicit archive migration](history.md#one-time-operator-procedure).
 - **Relay rescan** now visits every pane that ever got mail on this host (one consumer-info request per pane). Local: milliseconds. Over the tailnet with a year of pane ids this grows; a relay-owned durable consumer over `vega.inbox.<host>.>` would remove the rescan altogether (it keeps its own position across relay restarts). Not done.
 
 ### `vega post log`
@@ -242,13 +242,18 @@ Drop-in for orrery: I did not read `hosts/titan/assets/nats/nats.conf` (outside 
 
 - Machine keys cannot create streams: they have no `$JS.API.STREAM.CREATE` permission. A machine allowed to create its own stream could also choose its subjects, e.g. `vega.inbox.>`, and capture every host's mail; permissions cannot restrict the stream config inside a create request.
 - With a key configured, `vega post`, `inbox`, `log` and `relay` never try to create a stream. A missing stream gives `no_inbox_stream` with the hint `the admin must run vega post provision <host>`. Without a key (local dev broker) they still create it on first use.
-- `provision` creates missing streams with the canonical config and checks existing ones (must be Limits retention); it never changes a stream in steady state. The explicit `registry --ttl` exception is described under [one-time TTL enablement](vegad.md#one-time-ttl-enablement-vega-lhc246).
+- `provision` creates missing streams with the canonical config and checks existing ones (must be Limits retention); it never changes a stream in steady state. Explicit updates are `registry --ttl` ([TTL enablement](vegad.md#one-time-ttl-enablement-vega-lhc246)) and `<host> --archive` ([history migration](history.md#one-time-operator-procedure)). `provision history` creates and validates the central history stream.
 - The admin seed is generated where `provision` runs, e.g. on the workstation: `VEGA_NATS_NKEY=~/.config/vega/nats-admin.nk vega post keygen`, and passed to `auth-config --admin`. It never leaves that machine either. Run: `VEGA_NATS_NKEY=~/.config/vega/nats-admin.nk VEGA_NATS_URL=… vega post provision proteus ganymede`.
 - Order for a new host: `keygen` on the host → add its line → regenerate the auth config and reload the server → `provision <host>` → start its relay.
 
-### Capacity: max 8 hosts on titan
+### Capacity: inboxes plus central history
 
-orrery sets `max_file_store: 8GB`. Each host stream reserves `ARCHIVE_MAX_BYTES` (1 GiB) up front. Measured on a scratch server with `max_file_store: 8GB`: streams 1–8 were created, the 9th failed with "insufficient storage", and the account showed "8.0 GiB reserved", so nats reads `8GB` as 8 GiB. **Limit: 8 hosts**, and fewer if anything else on titan's server uses JetStream file storage. More hosts need a larger `max_file_store` or a smaller `ARCHIVE_MAX_BYTES`. The constant `MAX_HOSTS_8GB` in `plugins/post/src/auth.rs` drives the warning.
+Each inbox reserves 10 GiB and VEGA_HISTORY reserves another 10 GiB. The original
+8 GiB broker store is insufficient; orrery must expand it before migration.
+`MAX_HOSTS_100GB` in `plugins/post/src/auth.rs` warns above **8 hosts**: those inboxes
+plus history reserve 90 GiB, leaving 10 GiB for registry, catalog and headroom in a
+100 GiB store. Nine hosts plus history alone would consume all 100 GiB. Confirm
+the actual broker limits and disk space; see [history](history.md).
 
 ### Tests (scratch server, identities proteus, deimos (fake), admin; scratch `XDG_CONFIG_HOME`, no real seed created)
 
@@ -300,7 +305,7 @@ Not used by vega-post (live check without it: no violations). It exposed account
 
 | Permission | Finding |
 | --- | --- |
-| `vega.inbox.*.*.<self>` | Intended: any host may write to any host, only as itself. **Flood risk:** a host can fill another host's 1 GiB stream; with `discard: old` that deletes the victim's oldest mail, read or unread. Pane tokens are free, so a per-subject cap (`max_msgs_per_subject`) does not stop it. Options: `discard: new` (flood fails instead of deleting), or a filter stage with per-sender rate limits. Headers (`Vega-From-Pane`, thread, hop) stay self-asserted. `Nats-Rollup` purges are off (stream default `allow_rollup_hdrs: false`). |
+| `vega.inbox.*.*.<self>` | Intended: any host may write to any host, only as itself. **Flood risk:** a host can fill another host's 10 GiB stream; with `discard: old` that deletes the victim's oldest mail, read or unread. Pane tokens are free, so a per-subject cap (`max_msgs_per_subject`) does not stop it. Options: `discard: new` (flood fails instead of deleting), or a filter stage with per-sender rate limits. Headers (`Vega-From-Pane`, thread, hop) stay self-asserted. `Nats-Rollup` purges are off (stream default `allow_rollup_hdrs: false`). |
 | `$JS.API.STREAM.INFO.VEGA_INBOX_<self>` | Own stream only (with subject counts): own data. |
 | `$JS.API.CONSUMER.*.VEGA_INBOX_<self>.>` | Matches `CREATE`, `DURABLE.CREATE`, `INFO`, `DELETE`, `PAUSE`, `UNPIN` on the own stream. Deleting or rewriting its own consumers only resets the host's own read state. `LEADER.STEPDOWN`, `NAMES`, `LIST` do not match. **Push consumers:** the same subject creates a push consumer with any `deliver_subject`, and the server publishes deliveries itself, past the host's publish permissions. Tested: deimos created a push consumer on its own stream with `deliver_subject: vega.inbox.proteus.w3V:p17.titan` (forged sender). The server did not deliver (no `push_bound` while the proteus relay's wildcard subscription was active), and nothing reached proteus' stream. I don't know whether that holds for every kind of subscriber; permissions cannot forbid the config. Mitigation added: `vega post provision` lists push consumers on the vega streams (vega never creates any) with a warning. Stronger options: one NATS account per host with an exported service, or an operator-mode JWT limit. **Consumer growth:** hosts can create unlimited consumers on their own stream, and every pane id gets a durable consumer that never expires; a stream `max_consumers` would cap both. |
 | `$JS.API.CONSUMER.MSG.NEXT.VEGA_INBOX_<self>.*` | Own consumers only. |
@@ -322,13 +327,29 @@ The admin seed lives on proteus, where agents run without approval prompts. Unti
 | `$JS.API.STREAM.INFO.VEGA_INBOX_<h>` for each listed host | yes (config check, counts) |
 | `$JS.API.CONSUMER.LIST.VEGA_INBOX_<h>` for each listed host | yes (push-consumer warning; consumer metadata only) |
 | `$JS.API.STREAM.CREATE.VEGA_INBOX_<h>` | **only for hosts given with `auth-config --create <h>`**; none in steady state |
+| `$JS.API.STREAM.INFO.VEGA_HISTORY` | yes (configuration check) |
+| `$JS.API.STREAM.CREATE.VEGA_HISTORY` | only with temporary `auth-config --create history` |
+| `$JS.API.STREAM.UPDATE.VEGA_INBOX_<h>` | only with temporary `auth-config --create archive` for listed inboxes |
 | subscribe | only its own reply prefix `_INBOX_admin.>` (client uses it with the admin seed) |
-| stream delete, purge, update | no in steady state; temporary registry TTL update exception below |
+| stream delete, purge, update | no in steady state; temporary registry TTL and inbox archive update exceptions below |
 | message get, direct get, message delete | no |
 | consumer create (durable, ordered), fetch (`MSG.NEXT`), `$JS.ACK` | no |
 | subscribe `vega.inbox.>`, other hosts' `_INBOX_<h>.>` | no |
 
-No `STREAM.UPDATE` in steady state: `provision` normally only checks an existing stream (retention). Exception: `auth-config --create registry-ttl` temporarily grants UPDATE on `KV_VEGA_REGISTRY` for `provision registry --ttl`; remove the grant and reload immediately afterwards, including on failure. See [one-time TTL enablement](vegad.md#one-time-ttl-enablement-vega-lhc246). Other repairs are manual on the server. The host name `admin` is reserved (it would share `_INBOX_admin`).
+No `STREAM.UPDATE` in steady state: provisioning normally checks existing streams.
+`auth-config --create registry-ttl` temporarily grants UPDATE on KV_VEGA_REGISTRY
+for `provision registry --ttl` ([TTL enablement](vegad.md#one-time-ttl-enablement-vega-lhc246)).
+`--create archive` temporarily grants UPDATE on each listed inbox for
+`provision <host> --archive`, changing only max_age/max_bytes. `--create history`
+grants CREATE on VEGA_HISTORY. Remove temporary grants and reload immediately,
+including on failure; UPDATE can enable republishing, which the broker cannot
+restrict by field. See [history](history.md#one-time-operator-procedure). Other
+repairs remain manual. The host name `admin` is reserved (it would share `_INBOX_admin`).
+
+All hosts, including inbox-only hosts, have publish-only `vega.history.<self>.>`.
+Host keys cannot read VEGA_HISTORY. The viewer principal can read its
+stream info and messages via `STREAM.MSG.GET`, never create consumers; the admin
+cannot read event bodies. See [history authority](history.md#storage-and-authority).
 
 ### Why create is time-limited
 
@@ -534,7 +555,7 @@ Decided (orrery D49, given in round 3): the server lives on **titan** as **`nats
 Server:
 
 1. nats-server with JetStream on a file store. R1 streams: a titan outage means no delivery, but no loss.
-2. `max_file_store` ≥ number of machines × `ARCHIVE_MAX_BYTES` (1 GiB each), because each host stream reserves its `max_bytes`. orrery's 8GB = **8 hosts max** (measured, round 4). Disk to match, plus headroom.
+2. `max_file_store` must cover 10 GiB per inbox plus 10 GiB for VEGA_HISTORY, registry/catalog and headroom, with disk to match. Expand the original 8 GiB store before the [history migration](history.md#one-time-operator-procedure); 8 inboxes plus history reserve 90 GiB.
 3. Auth config from `vega post auth-config` (public keys only), as an included file. The admin creates the `VEGA_INBOX_<host>` streams with `vega post provision` (see round 4); machine keys cannot.
 4. Port 4222 reachable only on the tailnet under `nats.<tailnet>`. No public listener. Do not expose the monitor port 8222 (or only to the admin machine).
 5. TLS: WireGuard already encrypts tailnet traffic; nkeys authenticate. Add TLS (e.g. `tailscale cert`) only if the policy requires it.
@@ -560,5 +581,5 @@ Open questions:
 
 - Real cross-machine traffic (scope: this machine only).
 - Pointer delivery confirmation (`confirm_taken`); the relay types once and does not retry Enter. Not needed so far: every pointer was taken (one short line).
-- A pointer to a pane whose agent is gone is logged as `pointer failed: agent_not_found`; it is tried again only after a rescan or new mail. The mail stays for 365 days.
+- A pointer to a pane whose agent is gone is logged as `pointer failed: agent_not_found`; it is tried again only after a rescan or new mail. After migration, mail has no age expiry but can still be removed at the 10 GiB inbox cap (discard-old).
 - Broker outage longer than 10 s during `send`.

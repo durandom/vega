@@ -7,6 +7,7 @@ description = "Shared herdr client and error contract for vega plugins"
 publish = false
 
 [dependencies]
+sha2 = "0.10"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 regex = "1"

@@ -12,9 +12,9 @@ use crate::{
     host, inbox_prefix, seed_path, stream_name, Seed, ADMIN_INBOX, ARCHIVE_MAX_BYTES, VIEWER_INBOX,
 };
 
-/// Hosts that fit orrery's `max_file_store: 8GB` at ARCHIVE_MAX_BYTES each:
-/// every host stream reserves its `max_bytes` up front.
-pub const MAX_HOSTS_8GB: usize = 8;
+/// Eight 10 GiB inboxes plus 10 GiB history reserve 90 GiB in a 100 GiB store,
+/// leaving 10 GiB for registry/catalog and headroom. Reservations are up front.
+pub const MAX_HOSTS_100GB: usize = 8;
 
 /// Creates the seed if missing (0600, never overwritten) and prints the
 /// public key. Running it again prints the same key.
@@ -250,6 +250,7 @@ pub fn parse_registry_read(s: &str) -> Result<(String, String), Failure> {
 /// `inbox_only` hosts receive and read their own mail but may send none: no
 /// `vega.inbox` publish at all. For machines that must not instruct the
 /// others' agents (e.g. a corp-managed laptop).
+/// All hosts may publish only their own history subjects, with no history reads.
 /// `quarantine` hosts (inbox-only ones) may also reply into
 /// `vega.quarantine.*.*.<self>`, which the other hosts serve as notes for
 /// the human, never as mail (quarantine.rs).
@@ -278,7 +279,7 @@ pub fn render(
     o.push_str(&format!(
         "# JetStream: each VEGA_INBOX_<host> stream reserves {gib} GiB, so max_file_store must be >= {need} GiB.\n"
     ));
-    o.push_str("# Streams are created by the admin user (`vega post provision <host>...`); machine keys cannot.\n");
+    o.push_str("# VEGA_HISTORY reserves another 10 GiB; leave space for registry/catalog too.\n# Streams are created by the admin user (`vega post provision <host>...`); machine keys cannot.\n");
     o.push_str("authorization {\n  users: [\n");
     if let Some(a) = admin {
         o.push_str(&render_admin(a, entries, create));
@@ -298,7 +299,7 @@ pub fn render(
                 .map(|(_, s)| format!("\n          \"{s}\","))
                 .collect();
             let mut note = if grants.is_empty() {
-                " (inbox only: may not send)".to_string()
+                " (inbox only: may not send mail)".to_string()
             } else {
                 " (inbox only: may not send mail; granted commands only)".to_string()
             };
@@ -340,6 +341,7 @@ pub fn render(
       nkey: {key}
       permissions: {{
         publish: {{ allow: [{send}
+          "vega.history.{h}.>",
           "$JS.API.STREAM.INFO.VEGA_INBOX_{h}",
           "$JS.API.CONSUMER.*.VEGA_INBOX_{h}.>",
           "$JS.API.CONSUMER.MSG.NEXT.VEGA_INBOX_{h}.*",
@@ -370,20 +372,27 @@ fn catalog_grants(host: &str, writer: Option<&str>) -> String {
         .collect()
 }
 
-/// The admin may only provision: read stream info and list consumers of the
-/// listed hosts, and create the streams of `create` hosts. Create is the
-/// dangerous right: a not-yet-existing stream can be created as a mirror of
-/// another host's stream that republishes every message to the admin's
-/// reply prefix (tested). So create rights exist only while a host is being
-/// added. Creating an existing name with another config fails (10058), so
-/// a provisioned stream cannot be rewritten. No delete, purge, update,
-/// message get, consumer create, fetch, ack or `vega.inbox` subscribe.
-/// EXCEPTION: `--create registry-ttl` temporarily grants UPDATE on the registry
-/// alone. UPDATE can enable republishing too; the broker cannot restrict fields.
-/// Use only for `provision registry --ttl`, then remove the grant immediately.
-/// The provisioner preserves every other raw config field and checks the diff.
+/// The admin's steady-state rights are stream info for listed inboxes,
+/// KV_VEGA_REGISTRY, OBJ_VEGA_LANISTA and VEGA_HISTORY, plus inbox consumer lists.
+/// Temporary `--create <host|registry|lanista|history>` grants CREATE for the
+/// named inbox, registry, catalog or VEGA_HISTORY stream during provisioning.
+/// Create is dangerous: a missing stream can mirror another host's stream and
+/// republish every message to the admin's reply prefix (tested). Creating an
+/// existing name with another config fails (10058); creation is not an update.
+/// Temporary UPDATE exceptions: `--create registry-ttl` grants UPDATE on
+/// KV_VEGA_REGISTRY for `provision registry --ttl`; `--create archive` grants
+/// UPDATE on listed inboxes for `provision <host> --archive`. These provisioners
+/// preserve all raw fields except their explicit TTL or age/size changes.
+/// UPDATE can also enable republishing; the broker cannot restrict fields.
+/// Remove every temporary grant and reload immediately after provisioning.
+/// No steady-state UPDATE, delete, purge, message get, consumer create, fetch,
+/// ack or `vega.inbox` subscribe; stream info never grants event-body reads.
 fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     let mut allow = Vec::new();
+    allow.push("\"$JS.API.STREAM.INFO.VEGA_HISTORY\"".to_string());
+    if create.iter().any(|c| c == "history") {
+        allow.push("\"$JS.API.STREAM.CREATE.VEGA_HISTORY\"".to_string());
+    }
     // The registry bucket (vegad M4): the admin creates it once, with
     // `--create registry`, like a host stream.
     if create.iter().any(|c| c == "registry") {
@@ -405,6 +414,9 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     allow.push(format!("\"{}\"", crate::catalog::info_subject()));
     for e in entries {
         let s = stream_name(&e.host);
+        if create.iter().any(|c| c == "archive") {
+            allow.push(format!("\"$JS.API.STREAM.UPDATE.{s}\""));
+        }
         if create.contains(&e.host) {
             allow.push(format!("\"$JS.API.STREAM.CREATE.{s}\""));
         }
@@ -436,6 +448,9 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     if create.iter().any(|c| c == "registry-ttl") {
         note.push_str("    # TEMPORARY: may UPDATE KV_VEGA_REGISTRY (including republishing).\n    # Run provision registry --ttl, then remove --create registry-ttl and reload.\n");
     }
+    if create.iter().any(|c| c == "archive") {
+        note.push_str("    # TEMPORARY: may UPDATE inbox streams; run provision <host> --archive, then remove --create archive and reload.\n");
+    }
     format!(
         r#"{note}    {{
       nkey: {key}
@@ -463,6 +478,8 @@ fn render_viewer(key: &str, entries: &[Entry]) -> String {
     let mut allow = vec![
         "\"$JS.API.STREAM.LIST\"".to_string(),
         "\"$JS.API.STREAM.NAMES\"".to_string(),
+        "\"$JS.API.STREAM.INFO.VEGA_HISTORY\"".to_string(),
+        "\"$JS.API.STREAM.MSG.GET.VEGA_HISTORY\"".to_string(),
     ];
     for e in entries {
         let s = stream_name(&e.host);
@@ -615,14 +632,14 @@ mod tests {
         let out = render(&e, Some(&key()), &[], &[], None, &[], &[], &[], None);
         assert!(out.contains("\"vega.inbox.*.*.proteus\""));
         assert!(out.contains("\"$JS.ACK.VEGA_INBOX_deimos.>\""));
-        assert!(out.contains("max_file_store must be >= 2 GiB"));
+        assert!(out.contains("max_file_store must be >= 20 GiB"));
         assert!(out.contains("# admin"));
         // Steady state: the admin creates nothing.
         assert!(!out.contains("STREAM.CREATE"));
         let guarded = render(&e, None, &[], &["deimos".into()], None, &[], &[], &[], None);
         assert!(guarded.contains("\"vega.inbox.*.*.proteus\""));
         assert!(!guarded.contains("vega.inbox.*.*.deimos"));
-        assert!(guarded.contains("# deimos (inbox only: may not send)"));
+        assert!(guarded.contains("# deimos (inbox only: may not send mail)"));
         assert!(guarded.contains("\"$JS.ACK.VEGA_INBOX_deimos.>\""));
         assert!(guarded.contains("\"_INBOX_deimos.>\""));
         // Commands: hosts request as themselves and serve their own subject;
@@ -786,7 +803,7 @@ mod tests {
         let start = out.find("# deimos").unwrap();
         let deimos = &out[start..];
         assert!(deimos.starts_with(
-            "# deimos (inbox only: may not send; reads registry key proteus.theme)\n"
+            "# deimos (inbox only: may not send mail; reads registry key proteus.theme)\n"
         ));
         // Exactly one registry subject: the direct get of that key.
         let registry: Vec<&str> = deimos
@@ -815,5 +832,52 @@ mod tests {
             None,
         );
         assert!(!full.contains("proteus.theme"));
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    #[test]
+    fn history_and_archive_grants_are_narrow_and_explicit() {
+        let entries = [
+            Entry {
+                host: "proteus".into(),
+                key: nkeys::KeyPair::new_user().public_key(),
+            },
+            Entry {
+                host: "deimos".into(),
+                key: nkeys::KeyPair::new_user().public_key(),
+            },
+        ];
+        let key = nkeys::KeyPair::new_user().public_key();
+        let hosts = render(
+            &entries,
+            None,
+            &[],
+            &["deimos".into()],
+            None,
+            &[],
+            &[],
+            &[],
+            None,
+        );
+        assert!(hosts.contains("\"vega.history.proteus.>\""));
+        assert!(hosts.contains("\"vega.history.deimos.>\""));
+        assert!(!hosts.contains("STREAM.INFO.VEGA_HISTORY"));
+        assert!(!hosts.contains("STREAM.MSG.GET.VEGA_HISTORY"));
+        for grants in [vec![], vec!["history".into()], vec!["archive".into()]] {
+            let admin = render_admin(&key, &entries, &grants);
+            assert_eq!(
+                admin.contains("STREAM.CREATE.VEGA_HISTORY"),
+                grants.contains(&"history".into())
+            );
+            assert_eq!(
+                admin.contains("STREAM.UPDATE.VEGA_INBOX_proteus"),
+                grants.contains(&"archive".into())
+            );
+            assert!(!admin.contains("STREAM.UPDATE.VEGA_HISTORY"));
+            assert!(!admin.contains("STREAM.MSG.GET"));
+        }
     }
 }

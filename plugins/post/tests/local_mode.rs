@@ -151,6 +151,32 @@ fn without_a_broker_vegad_stays_up_and_types_the_upgrade_proposal() {
             .filter(|t| t.contains("vega upgrade available"))
     });
     assert!(relay.0.try_wait().unwrap().is_none(), "vegad exited");
+    let history = home.join("state/vega/history-outbox/testhost");
+    wait_for(
+        "local mail history receipt",
+        Duration::from_secs(15),
+        || {
+            let files = vega_herdr::history::pending(&history).ok()?;
+            let events: Vec<serde_json::Value> = files
+                .iter()
+                .filter_map(|p| serde_json::from_slice(&fs::read(p).ok()?).ok())
+                .collect();
+            let local: Vec<_> = events
+                .iter()
+                .filter(|e| e["kind"] == "mail.local")
+                .collect();
+            if local.is_empty() {
+                return None;
+            }
+            assert_eq!(local.len(), 1);
+            assert_eq!(local[0]["data"]["pane"], "w1:p1");
+            assert!(local[0]["data"]["body"]
+                .as_str()
+                .unwrap()
+                .contains("Ask the user"));
+            Some("captured".into())
+        },
+    );
     let line = typed
         .lines()
         .find(|l| l.contains("vega upgrade available"))

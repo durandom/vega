@@ -1,4 +1,4 @@
-//! The sole opt-in stream update: preserve raw fields, enable registry TTL.
+//! Opt-in registry TTL update: preserve every other raw stream config field.
 //! Never round-trip through async-nats Config: it can drop newer server fields.
 use std::collections::BTreeMap;
 

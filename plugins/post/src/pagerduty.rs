@@ -941,16 +941,16 @@ async fn publish_mail(
     headers.insert(crate::h::FROM_AGENT, AGENT);
     headers.insert(crate::h::FROM_CWD, "vegad");
     headers.insert(crate::h::SENT_MS, crate::now_ms().to_string().as_str());
-    jetstream::new(client)
-        .publish_with_headers(
-            crate::inbox_subject(&crate::subject_token(host), pane, &crate::host()),
-            headers,
-            text.to_string().into(),
-        )
-        .await
-        .map_err(|_| "pagerduty: mail publish failed")?
-        .await
-        .map_err(|_| "pagerduty: mail not durably accepted")?;
+    crate::history::mail(
+        &jetstream::new(client),
+        crate::inbox_subject(&crate::subject_token(host), pane, &crate::host()),
+        headers,
+        text.to_string(),
+    )
+    .await
+    .map_err(|_| "pagerduty: mail publish failed")?
+    .await
+    .map_err(|_| "pagerduty: mail not durably accepted")?;
     Ok(())
 }
 

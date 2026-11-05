@@ -71,6 +71,8 @@ fn command(home: &Path, args: &[&str]) -> Command {
 }
 
 fn run(home: &Path, args: &[&str], success: bool) -> String {
+    let spool = home.join("state/vega/history-outbox/inbox-test");
+    let before = vega_herdr::history::pending(&spool).unwrap().len();
     let out = command(home, args).output().unwrap();
     let text = format!(
         "{}{}",
@@ -78,6 +80,11 @@ fn run(home: &Path, args: &[&str], success: bool) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(out.status.success(), success, "{args:?}: {text}");
+    assert_eq!(
+        vega_herdr::history::pending(&spool).unwrap().len(),
+        before + usize::from(success),
+        "only confirmed local delivery should enqueue one history receipt"
+    );
     text
 }
 
@@ -101,6 +108,8 @@ fn local_panes_and_local_uac_claims_need_no_broker() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
     fixture(home);
+    // Local history starts empty and queues without contacting the broker.
+    assert!(!home.join("state/vega/history-outbox").exists());
     claim(
         home,
         "github.com/test/demo",
@@ -162,7 +171,7 @@ fn local_panes_and_local_uac_claims_need_no_broker() {
     assert!(run(home, &["send", "--uac", "merged", "hello"], false).contains("ambiguous_uac"));
     assert!(run(home, &["send", "--uber", "hello"], false).contains("vega mux"));
 
-    // A same-host done report keeps parent supervision without any archive.
+    // A same-host done report keeps parent supervision and queues local history.
     fs::create_dir_all(home.join("state/vega/parents")).unwrap();
     fs::write(
         home.join("state/vega/parents/local_w1_p1"),
