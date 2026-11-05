@@ -3411,6 +3411,7 @@ dependencies = [
  "time",
  "tokio",
  "toml_edit",
+ "ureq",
  "vega-bd-sync",
  "vega-build",
  "vega-ci-watch",

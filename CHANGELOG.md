@@ -12,6 +12,14 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   install/config unit evidence through the existing bounded outbox. History
   capture failures remain diagnostic and do not change command results.
 
+## 112 · 2026-11-05
+
+- optional: vegad exports JetStream inbox capacity gauges through OTLP/HTTP; VEGA_HISTORY gauges
+  require a separate stream-info grant, which generated host grants do not include.
+  Export is off by default; set `enabled = true` and an `endpoint` in
+  `~/.config/vega/otlp.toml` to enable it. It reports stream bytes, messages and max_bytes every
+  five minutes.
+
 ## 110 · 2026-11-05
 
 - feature: UAC repo groups use `.vega/group.toml` in a coordination repo.
