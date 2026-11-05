@@ -19,6 +19,7 @@ nuid = "0.5"
 serde_json = { version = "1", features = ["raw_value"] }
 serde = { version = "1", features = ["derive"] }
 toml_edit = "0.25"
+ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 time = { version = "0.3", features = ["formatting", "macros"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }

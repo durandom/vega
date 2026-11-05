@@ -20,6 +20,7 @@ mod agents;
 mod archive;
 mod auth;
 mod bdsync;
+mod capacity;
 mod catalog;
 #[cfg(test)]
 mod catalog_broker_test;
@@ -2467,6 +2468,7 @@ impl Jobs {
         let (btx, bd) = mpsc::unbounded_channel();
         if !once {
             history::spawn();
+            capacity::spawn();
             agents::spawn(etx);
             // Git sync (gitsync.rs): fetch, fast-forward clean main checkouts.
             gitsync::spawn();

@@ -15,6 +15,7 @@ pub mod lanes;
 pub mod mail;
 pub mod mail_grants;
 pub mod notes;
+pub mod otlp;
 pub mod pane;
 pub mod project;
 pub mod prompt;

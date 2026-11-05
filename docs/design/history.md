@@ -1,11 +1,35 @@
 # Central event history (vega-lhc.249)
 
 NATS is the record. Agent transcripts stay in agentsview; history includes session
-identifiers when known so analysis can join them. No local history archive or new
-daemon is introduced. This first stage captures spawn, mux send, acknowledged mail
+identifiers when known so analysis can join them. No local history archive is
+introduced. This first stage captures spawn, mux send, acknowledged mail
 publishes, brokerless tool delivery and observed agent/link/UAC lineage changes.
-Land/deploy outcomes are also captured; the AXI reader/export and optional
-metadata-only OTLP exporter are vega-lhc.252. OTLP is off: no exporter runs yet.
+Land/deploy events are tracked in vega-lhc.251; the AXI reader/export and optional
+metadata-only OTLP exporter are vega-lhc.252. Capacity gauges are exported by vegad when
+the shared OTLP configuration is enabled; metadata log export is described by .252. Both
+exporters are off by default.
+
+## Capacity gauges
+
+vegad polls `VEGA_INBOX_<host>` and `VEGA_HISTORY` stream info every five minutes and exports
+the stream's stored bytes, message count and configured `max_bytes` as OTLP metrics. The inbox
+stream info right is part of the host's normal permissions. Generated host grants do not include
+VEGA_HISTORY stream info, so only the inbox gauges are available by default. If an operator grants
+VEGA_HISTORY info separately, vegad exports those gauges too; it never reads event messages. Such
+a broker grant requires coordination with orrery and the Slayer. These gauges are optional and
+off by default. Capacity metrics use the shared
+`$XDG_CONFIG_HOME/vega/otlp.toml` (normally `~/.config/vega/otlp.toml`):
+
+```toml
+enabled = true
+endpoint = "http://otel.example:4318"
+# timeout_ms = 5000
+```
+
+The endpoint is an OTLP/HTTP base URL. The metrics request appends `/v1/metrics`; stream identity
+and host are metric attributes. A missing file or `enabled = false` disables exporters. A denied
+or missing VEGA_HISTORY stream produces no history gauges and is logged once; the own inbox gauges
+continue independently. The .252 history metadata exporter will use this shared config too.
 
 ## Storage and authority
 

@@ -11,7 +11,7 @@ sha2 = "0.10"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 regex = "1"
-toml_edit = "0.25"
+toml_edit = { version = "0.25", features = ["serde"] }
 url = "2"
 libc = "0.2"
 socket2 = "0.6"
