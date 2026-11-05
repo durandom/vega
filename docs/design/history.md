@@ -57,6 +57,8 @@ incompatible one rather than changing or deleting it.
 Each JSON event has `schema:1`, a stable `id`, `ts` (Unix milliseconds), recording
 `host`, `kind`, nullable `project`, `bead`, `pane`, `session`, and `data`.
 Unknown identifiers are null; a task label is not assumed to be a bead ID.
+Receipts publish in ID filename order, so stream sequence is arrival order, not
+event or causal order; use timestamps and lineage chain IDs when reconstructing it.
 
 - `spawn`: captured after the start attempt in `plugins/mux/src/main.rs`, including
   full brief, parent, kind/tier/model, cwd, requested branch/base, target host,
@@ -111,6 +113,11 @@ window expires: the subject already exists. This holds while central events are
 retained; an operator deleting/recreating the stream also deletes that evidence.
 The worker retries broker failures independently of mail delivery. Bounded queues
 cannot retain an unlimited outage; rejected capture is visible in diagnostics.
+An unset worker also logs rejected capture. A parseable receipt rejected during
+publication (for example by a payload limit or changed ACL) remains pending and
+stops that drain pass; later receipts can wait behind it until the operator fixes
+the broker configuration. Such publish failures are logged and retried, not
+quarantined as corrupt data.
 
 Unreadable, malformed or invalid-envelope receipts are renamed with a unique
 `.corrupt-<id>` suffix and their location is logged once. Their bytes are preserved

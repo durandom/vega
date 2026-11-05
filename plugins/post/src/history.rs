@@ -64,6 +64,8 @@ fn submit(work: Work) {
         if tx.try_send(work).is_err() {
             crate::log("history: worker queue full or unavailable; event not queued");
         }
+    } else {
+        crate::log("history: worker not started; event not queued");
     }
 }
 
