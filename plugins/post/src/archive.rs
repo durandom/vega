@@ -4,6 +4,22 @@ use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 type Config = BTreeMap<String, Box<RawValue>>;
 
+pub fn validate_target(hosts: &[String], archive: bool) -> Result<(), Failure> {
+    if archive
+        && (hosts.is_empty()
+            || hosts
+                .iter()
+                .any(|h| matches!(h.as_str(), "history" | "registry" | "lanista")))
+    {
+        return Err(Failure::new(
+            "usage",
+            "--archive requires inbox host names only",
+            "vega post provision <host> --archive",
+        ));
+    }
+    Ok(())
+}
+
 fn error(e: impl std::fmt::Display) -> Failure {
     Failure::new("archive_update_refused", e.to_string(), "use `vega post provision <host> --archive` with temporary `auth-config --create archive` admin rights; remove that grant and reload afterwards")
 }
@@ -80,6 +96,26 @@ pub async fn update(client: &async_nats::Client, host: &str) -> Result<bool, Fai
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn archive_requires_inbox_hosts_before_connecting() {
+        for hosts in [
+            vec![],
+            vec!["history".into()],
+            vec!["registry".into()],
+            vec!["lanista".into()],
+            vec!["proteus".into(), "history".into()],
+        ] {
+            assert_eq!(
+                crate::provision(&hosts, false, true).unwrap_err().code,
+                "usage"
+            );
+        }
+        assert!(validate_target(&["proteus".into()], true).is_ok());
+        assert!(validate_target(&["proteus".into(), "deimos".into()], true).is_ok());
+        assert!(validate_target(&[], false).is_ok());
+        assert!(validate_target(&["history".into()], false).is_ok());
+    }
+
     #[test]
     fn only_changes_two_fields() {
         let raw = r#"{"name":"VEGA_INBOX_h","max_age":1,"max_bytes":123,"future":{ "big":18446744073709551616 },"discard":"old"}"#;

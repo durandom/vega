@@ -994,18 +994,7 @@ fn check_archive(stream: &stream::Stream, host: &str) -> Result<(), Failure> {
 /// `vega post provision`: creates missing host streams, checks existing ones.
 fn provision(hosts: &[String], ttl: bool, archive: bool) -> Result<(), Failure> {
     registry_ttl::validate_target(hosts, ttl)?;
-    if archive
-        && (hosts.is_empty()
-            || hosts
-                .iter()
-                .any(|h| matches!(h.as_str(), "history" | "registry" | "lanista")))
-    {
-        return Err(Failure::new(
-            "usage",
-            "--archive requires inbox host names only",
-            "vega post provision <host> --archive",
-        ));
-    }
+    archive::validate_target(hosts, archive)?;
     runtime()?.block_on(async {
         let client = connect_as("provision", Seed::Admin, None).await?;
         if ttl {

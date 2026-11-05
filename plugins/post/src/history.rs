@@ -180,6 +180,7 @@ pub fn spawn() {
     }
     std::thread::spawn(move || {
         let Ok(rt) = crate::runtime() else {
+            crate::log("history: cannot start runtime; worker stopped");
             return;
         };
         let mut lineage: Lineage = match std::fs::read(dir.join("lineage.state")) {
