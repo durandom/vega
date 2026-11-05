@@ -75,5 +75,5 @@ that host's relay lock and identity state. Otherwise the host matches the pinned
 vegad host. See [host precedence](../../docs/concepts.md).
 
 Central history capture and the explicit archive migration are documented in
-[history](../../docs/design/history.md). Full hosts publish through vegad;
-inbox-only hosts are excluded.
+[history](../../docs/design/history.md). All hosts, including inbox-only hosts,
+publish their own history through vegad; mail restrictions remain unchanged.

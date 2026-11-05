@@ -32,7 +32,7 @@ One-time registry TTL migration: `--create registry-ttl` grants the admin only
 regenerate without this grant and reload even on failure. UPDATE can enable
 republishing; the broker cannot enforce TTL-only changes. Never leave it enabled.
 
-History: full hosts may publish only vega.history.<self>.>; inbox-only hosts cannot.
+History: all hosts, including inbox-only hosts, may publish only vega.history.<self>.>.
 The viewer can read VEGA_HISTORY via stream info/message get, never create consumers.
 `--create history` temporarily permits creating VEGA_HISTORY (`provision history`).
 `--create archive` temporarily permits updating listed inboxes (`provision <host> --archive`)

@@ -13,8 +13,9 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   Use temporary `auth-config --create history --create archive`, then `vega post provision history`
   and `vega post provision <host> --archive`; remove the grants and reload afterwards.
   Inbox age expiry becomes unlimited with a 10 GiB cap; VEGA_HISTORY retains events at capacity
-  and rejects new ones. Full hosts publish spawn/mux/mail/lineage events through a bounded outbox;
-  inbox-only hosts do not publish. See [history](docs/design/history.md) for limits and rollout.
+  and rejects new ones. Hosts publish spawn/mux/mail/lineage events through a bounded outbox;
+  inbox-only hosts may also publish their own history, with no history reads or new mail rights.
+  See [history](docs/design/history.md) for capture coverage, limits and rollout.
 
 ## 107 · 2026-11-04
 

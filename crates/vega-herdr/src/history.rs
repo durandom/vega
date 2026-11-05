@@ -87,12 +87,8 @@ pub fn enrich(event: &mut Value) {
 }
 
 /// CLI capture is best effort: history failure never changes command success.
-/// Inbox-only hosts intentionally emit nothing, including local deliveries.
 pub fn emit(kind: &str, data: Value) {
     let host = crate::state::post_host();
-    if crate::state::is_inbox_only(&host) {
-        return;
-    }
     let mut event = event(&host, kind, data);
     enrich(&mut event);
     let result = root()

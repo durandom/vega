@@ -250,6 +250,7 @@ pub fn parse_registry_read(s: &str) -> Result<(String, String), Failure> {
 /// `inbox_only` hosts receive and read their own mail but may send none: no
 /// `vega.inbox` publish at all. For machines that must not instruct the
 /// others' agents (e.g. a corp-managed laptop).
+/// All hosts may publish only their own history subjects, with no history reads.
 /// `quarantine` hosts (inbox-only ones) may also reply into
 /// `vega.quarantine.*.*.<self>`, which the other hosts serve as notes for
 /// the human, never as mail (quarantine.rs).
@@ -298,7 +299,7 @@ pub fn render(
                 .map(|(_, s)| format!("\n          \"{s}\","))
                 .collect();
             let mut note = if grants.is_empty() {
-                " (inbox only: may not send)".to_string()
+                " (inbox only: may not send mail)".to_string()
             } else {
                 " (inbox only: may not send mail; granted commands only)".to_string()
             };
@@ -325,7 +326,7 @@ pub fn render(
             (
                 String::new(),
                 format!(
-                    "\n          \"vega.history.{h}.>\",\n          \"vega.inbox.*.*.{h}\",\n          \"vega.cmd.*.*.{h}\",\n          \"$KV.VEGA_REGISTRY.{h}.>\",\n          \"$JS.API.STREAM.INFO.KV_VEGA_REGISTRY\",\n          \"$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.>\",{}",
+                    "\n          \"vega.inbox.*.*.{h}\",\n          \"vega.cmd.*.*.{h}\",\n          \"$KV.VEGA_REGISTRY.{h}.>\",\n          \"$JS.API.STREAM.INFO.KV_VEGA_REGISTRY\",\n          \"$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.>\",{}",
                     catalog_grants(h, lanista_writer)
                 ),
                 // Serves quarantined replies to itself; answers them via
@@ -340,6 +341,7 @@ pub fn render(
       nkey: {key}
       permissions: {{
         publish: {{ allow: [{send}
+          "vega.history.{h}.>",
           "$JS.API.STREAM.INFO.VEGA_INBOX_{h}",
           "$JS.API.CONSUMER.*.VEGA_INBOX_{h}.>",
           "$JS.API.CONSUMER.MSG.NEXT.VEGA_INBOX_{h}.*",
@@ -637,7 +639,7 @@ mod tests {
         let guarded = render(&e, None, &[], &["deimos".into()], None, &[], &[], &[], None);
         assert!(guarded.contains("\"vega.inbox.*.*.proteus\""));
         assert!(!guarded.contains("vega.inbox.*.*.deimos"));
-        assert!(guarded.contains("# deimos (inbox only: may not send)"));
+        assert!(guarded.contains("# deimos (inbox only: may not send mail)"));
         assert!(guarded.contains("\"$JS.ACK.VEGA_INBOX_deimos.>\""));
         assert!(guarded.contains("\"_INBOX_deimos.>\""));
         // Commands: hosts request as themselves and serve their own subject;
@@ -801,7 +803,7 @@ mod tests {
         let start = out.find("# deimos").unwrap();
         let deimos = &out[start..];
         assert!(deimos.starts_with(
-            "# deimos (inbox only: may not send; reads registry key proteus.theme)\n"
+            "# deimos (inbox only: may not send mail; reads registry key proteus.theme)\n"
         ));
         // Exactly one registry subject: the direct get of that key.
         let registry: Vec<&str> = deimos
@@ -861,7 +863,7 @@ mod history_tests {
             None,
         );
         assert!(hosts.contains("\"vega.history.proteus.>\""));
-        assert!(!hosts.contains("vega.history.deimos"));
+        assert!(hosts.contains("\"vega.history.deimos.>\""));
         assert!(!hosts.contains("STREAM.INFO.VEGA_HISTORY"));
         assert!(!hosts.contains("STREAM.MSG.GET.VEGA_HISTORY"));
         for grants in [vec![], vec!["history".into()], vec!["archive".into()]] {

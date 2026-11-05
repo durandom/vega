@@ -10,11 +10,12 @@ metadata-only OTLP exporter are vega-lhc.252. OTLP is off: no exporter runs yet.
 ## Storage and authority
 
 `VEGA_HISTORY` is a file-backed Limits stream on `vega.history.>`, with no age
-expiry, a 10 GiB cap and `discard=new`. Full host keys may **publish only** to
+expiry, a 10 GiB cap and `discard=new`. All host keys may **publish only** to
 `vega.history.<host>.>`; they get no history read or management rights. The last
-subject token is an event ID. Inbox-only hosts (including deimos) get no publish
-right and enqueue nothing, including their .248 local deliveries. Capturing those
-requires a later Slayer decision. A full host receiving granted quarantine mail
+subject token is an event ID. Inbox-only hosts (including deimos) also publish
+their own history, including .248 local deliveries. Their private-host mail still
+uses quarantine and explicit pair grants; no additional mail rights are granted.
+A full host receiving granted quarantine mail
 can record its acknowledged inbox publish under its own history subject.
 
 The viewer principal may read history via stream info and `STREAM.MSG.GET`, using
@@ -74,12 +75,14 @@ event or causal order; use timestamps and lineage chain IDs when reconstructing 
   Its ID derives from host, subject and the mail's Nats-Msg-Id.
 - `mail.local`: confirmed brokerless tool delivery includes full source text.
   The actual one-line paste may be truncated by the existing delivery policy.
-  The inbox-only local-send path calls capture too, but policy excludes it.
+  The inbox-only local-send path captures confirmed local delivery too.
 - `lineage.start/change/end`: successful herdr snapshots feeding registry
   reconciliation send agent/link/UAC values to the worker before live KV removal.
   `end` retains the full last value. Failed herdr snapshots abort reconciliation;
   they never mean that every agent ended. Timestamps are observation times, not
   exact process start/exit times. Changes between reconciles may be missed.
+  Inbox-only hosts do not reconcile registry entries, so this stage has no
+  snapshot-based lineage events for them; their spawn/mux/local-mail capture runs.
 
 A command crash between its action and capture can miss an event; the operation
 and history are not one transaction. Historical inbox content is not backfilled

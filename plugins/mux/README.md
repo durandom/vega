@@ -5,7 +5,7 @@ lists the others, reads what they said, messages them, answers their dialogs and
 own git worktree. It is how the UAC runs its sentinels.
 
 On full hosts, `spawn` and `send` also record events through the bounded central
-[history outbox](../../docs/design/history.md); inbox-only hosts are excluded.
+[history outbox](../../docs/design/history.md), including on inbox-only hosts.
 
 `show` includes `unread_mail`: the relay's oldest mail age, `pending` without a
 valid age, or `unknown` without metadata. Unknown does not prove an empty inbox;

@@ -57,9 +57,6 @@ fn validate_config(actual: &async_nats::jetstream::stream::Config) -> Result<(),
 }
 
 fn submit(work: Work) {
-    if crate::st::is_inbox_only(&crate::host()) {
-        return;
-    }
     if let Some(tx) = TX.get() {
         if tx.try_send(work).is_err() {
             crate::log("history: worker queue full or unavailable; event not queued");
@@ -174,9 +171,6 @@ fn enrich_lineage(desired: &mut BTreeMap<String, Value>) {
 
 pub fn spawn() {
     let host = crate::host();
-    if crate::st::is_inbox_only(&host) {
-        return;
-    }
     let Some(dir) = outbox::root() else {
         return;
     };
@@ -401,14 +395,12 @@ pub async fn mail(
         .await?;
     Ok(async move {
         let result = ack.await?;
-        if !crate::st::is_inbox_only(&crate::host()) {
-            if TX.get().is_some() {
-                submit(Work::Event(event));
-            } else if let Some(dir) = outbox::root() {
-                outbox::enrich(&mut event);
-                if let Err(e) = outbox::enqueue(&dir, &event) {
-                    eprintln!("history: mail event not queued: {e}");
-                }
+        if TX.get().is_some() {
+            submit(Work::Event(event));
+        } else if let Some(dir) = outbox::root() {
+            outbox::enrich(&mut event);
+            if let Err(e) = outbox::enqueue(&dir, &event) {
+                eprintln!("history: mail event not queued: {e}");
             }
         }
         Ok(result)
@@ -642,7 +634,16 @@ mod tests {
             assert!(denied(&host, "$JS.API.STREAM.MSG.GET.VEGA_HISTORY", "{\"seq\":1}").await);
             assert!(denied(&host, "vega.history.other.fake", "{}").await);
             let deimos = connect(&url, &denied_seed, "_INBOX_deimos").await;
-            assert!(denied(&deimos, "vega.history.deimos.fake", "{}").await);
+            assert!(denied(&deimos, "vega.history.proteus.fake", "{}").await);
+            assert!(
+                denied(
+                    &deimos,
+                    "$JS.API.STREAM.MSG.GET.VEGA_HISTORY",
+                    "{\"seq\":1}"
+                )
+                .await
+            );
+            assert!(denied(&deimos, "vega.inbox.proteus.p.deimos", "{}").await);
             let host_js = async_nats::jetstream::new(host);
             let spool = dir.path().join("outbox");
             let e = outbox::event(
@@ -726,6 +727,14 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(recovered.info().await.unwrap().state.messages, 2);
+            let deimos = connect(&url, &denied_seed, "_INBOX_deimos").await;
+            let private = outbox::event("deimos", "mail.local", json!({"body":"local history"}));
+            outbox::enqueue(&spool, &private).unwrap();
+            drain(&async_nats::jetstream::new(deimos), &spool, "deimos")
+                .await
+                .unwrap();
+            assert!(outbox::pending(&spool).unwrap().is_empty());
+            assert_eq!(recovered.info().await.unwrap().state.messages, 3);
         });
     }
 }

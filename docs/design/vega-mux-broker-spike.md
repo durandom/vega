@@ -346,8 +346,8 @@ including on failure; UPDATE can enable republishing, which the broker cannot
 restrict by field. See [history](history.md#one-time-operator-procedure). Other
 repairs remain manual. The host name `admin` is reserved (it would share `_INBOX_admin`).
 
-Full hosts additionally have publish-only `vega.history.<self>.>`; inbox-only hosts
-have none. Host keys cannot read VEGA_HISTORY. The viewer principal can read its
+All hosts, including inbox-only hosts, have publish-only `vega.history.<self>.>`.
+Host keys cannot read VEGA_HISTORY. The viewer principal can read its
 stream info and messages via `STREAM.MSG.GET`, never create consumers; the admin
 cannot read event bodies. See [history authority](history.md#storage-and-authority).
 
