@@ -8,7 +8,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 ## 109 · 2026-11-05
 
 - feature: `vega post log` without `--pane` waits for a cold archive scan instead of printing
-  `0 messages`, and a stalled read now fails with a broker error instead of a short list.
+  `0 messages`. Empty results use the broker's filtered pending count; a stalled first
+  or later read fails with a broker error instead of an empty or short list.
 
 ## 108 · 2026-11-05
 

@@ -3641,6 +3641,21 @@ const LOG_FIRST_WAIT: Duration = Duration::from_secs(10);
 /// Gap allowed between archive messages once they flow.
 const LOG_IDLE_WAIT: Duration = Duration::from_secs(5);
 
+// A timeout is not evidence of an empty archive. Only consumer metadata can
+// establish that; once a read is expected, any premature end is a broker error.
+async fn next_log_message<T, E: std::fmt::Display>(
+    next: impl std::future::Future<Output = Option<Result<T, E>>>,
+    total: usize,
+    wait: Duration,
+) -> Result<T, Failure> {
+    match tokio::time::timeout(wait, next).await {
+        Ok(Some(message)) => message.map_err(broker_err),
+        Ok(None) | Err(_) => Err(broker_err(format!(
+            "log read stalled after {total} messages"
+        ))),
+    }
+}
+
 /// `vega post log`: the archive of this machine's mail, newest first. It
 /// reads through an ordered consumer (ephemeral, no acks), so no read state
 /// changes. Read/unread comes from each pane's durable consumer ack floor.
@@ -3681,27 +3696,17 @@ fn log_view(
             })
             .await
             .map_err(broker_err)?;
+        let empty = consumer.cached_info().num_pending == 0;
         let mut msgs = consumer.messages().await.map_err(broker_err)?;
 
         // Keep the newest `limit` rows; count all matches.
         let mut rows: VecDeque<LogRow> = VecDeque::new();
         let mut total = 0usize;
-        // No match at all, or none newer than --since: the stream never ends,
-        // so an empty wait ends it. A cold wildcard scan of a big archive can
-        // take seconds before the first message, so that wait is generous; a
-        // stall after messages arrived is an error, never a short list.
-        loop {
+        // Empty is established by the server's filtered consumer metadata,
+        // never by a quiet socket. Cold wildcard scans may take seconds.
+        while !empty {
             let wait = if total == 0 { LOG_FIRST_WAIT } else { LOG_IDLE_WAIT };
-            let m = match tokio::time::timeout(wait, msgs.next()).await {
-                Ok(Some(m)) => m.map_err(broker_err)?,
-                Ok(None) if total == 0 => break,
-                Err(_) if total == 0 => break,
-                Ok(None) | Err(_) => {
-                    return Err(broker_err(format!(
-                        "log read stalled after {total} messages"
-                    )));
-                }
-            };
+            let m = next_log_message(msgs.next(), total, wait).await?;
             let info = m.info().map_err(broker_err)?;
             let (to, from_host) = parse_subject(&m.subject).unwrap_or(("?", "?"));
             let hv = |k: &str| {
@@ -6173,6 +6178,44 @@ fn log(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn log_waits_for_a_cold_scan_and_errors_on_stalls() {
+        let wait = Duration::from_secs(1);
+        let first = next_log_message(
+            async {
+                tokio::time::sleep(Duration::from_millis(550)).await;
+                Some(Ok::<_, &str>("first"))
+            },
+            0,
+            wait,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, "first");
+        // Exercise the same read path before and after the first row: neither
+        // may turn a stall into a successful empty or partial list.
+        for total in [0, 1] {
+            let err = next_log_message::<(), &str>(
+                std::future::pending(),
+                total,
+                Duration::from_millis(1),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.code, "broker_error");
+            assert!(err.message.contains(&format!("after {total} messages")));
+            let err = next_log_message(async { None::<Result<(), &str>> }, total, wait)
+                .await
+                .unwrap_err();
+            assert_eq!(err.code, "broker_error");
+        }
+        let err = next_log_message(async { Some(Err::<(), _>("denied")) }, 0, wait)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "broker_error");
+        assert!(err.message.contains("denied"));
+    }
 
     #[tokio::test]
     async fn broker_bounce_retries_stay_in_the_upgrade_handoff() {

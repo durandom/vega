@@ -383,7 +383,9 @@ fn log_without_pane_lists_the_archive_across_panes() {
         cmd.output().unwrap()
     };
     // The first read creates the inbox stream (no machine key).
-    assert!(logcmd(&["log"]).status.success());
+    let out = logcmd(&["log"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("log: 0 messages"));
     rt.block_on(async {
         for (pane, text) in [("w1:p1", "alpha"), ("w2:p1", "beta"), ("w3:p1", "gamma")] {
             let ack = js
@@ -397,6 +399,12 @@ fn log_without_pane_lists_the_archive_across_panes() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}");
     assert!(text.contains("3 of 3 messages"), "{text}");
+    let pane = logcmd(&["log", "--pane", "w2:p1"]);
+    assert!(pane.status.success());
+    assert!(String::from_utf8_lossy(&pane.stdout).contains("1 of 1 messages"));
+    let absent = logcmd(&["log", "--pane", "w99:p1"]);
+    assert!(absent.status.success());
+    assert!(String::from_utf8_lossy(&absent.stdout).contains("log: 0 messages"));
     for t in ["alpha", "beta", "gamma"] {
         assert!(text.contains(t), "{text}");
     }

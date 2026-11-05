@@ -37,6 +37,11 @@ Unmigrated or failed-cutover hosts remain in identity quiesce; see
 [Local mode](../../docs/design/vegad.md#local-mode-vega-lhc118).
 No estate endpoint is assumed.
 
+`log` scans the filtered archive without acknowledging mail. It allows 10 seconds
+for the first message and 5 seconds between messages; a timeout or premature end
+returns `broker_error`. An empty result comes from the broker's filtered pending
+count, so a stalled first read cannot be reported as zero messages.
+
 Commands: `vega post`, `send`, `inbox`, `done`, `ask`, `log`, `notes`, `relay`.
 
 Inbox-only same-host `send`/`done` deliver through herdr; `--uac` resolves local claims only.
