@@ -284,20 +284,79 @@ async fn publish(
 }
 
 async fn drain(js: &async_nats::jetstream::Context, dir: &Path, host: &str) -> Result<(), String> {
-    for path in outbox::pending(dir)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .take(32)
-    {
-        let event: Value =
-            serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+    let mut published = 0;
+    for path in outbox::pending(dir).map_err(|e| e.to_string())? {
+        let event = match read_receipt(&path, host) {
+            Ok(event) => event,
+            Err(error) => {
+                quarantine_receipt(&path, &error);
+                continue;
+            }
+        };
+        // Bad receipts do not consume the publish budget: even when their
+        // quarantine rename fails, they cannot starve later valid receipts.
+        if published == 32 {
+            break;
+        }
         tokio::time::timeout(Duration::from_secs(5), publish(js, host, &event))
             .await
             .map_err(|_| "publish timeout".to_string())??;
         std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        published += 1;
     }
     Ok(())
+}
+
+fn read_receipt(path: &Path, host: &str) -> Result<Value, String> {
+    let event: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    if event["schema"] != 1
+        || !event["kind"].is_string()
+        || event["host"] != host
+        || !event["id"]
+            .as_str()
+            .is_some_and(|id| id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err("invalid history receipt envelope (schema, kind, host or id)".into());
+    }
+    Ok(event)
+}
+
+/// Preserve damaged bytes for inspection without letting one receipt block
+/// the queue. A fresh suffix never overwrites an earlier quarantined receipt.
+fn quarantine_receipt(path: &Path, reason: &str) {
+    static FAILED: OnceLock<std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>>> =
+        OnceLock::new();
+    let target = path.with_extension(format!("corrupt-{}", nuid::next()));
+    match std::fs::rename(path, &target) {
+        Ok(()) => {
+            crate::log(&format!(
+                "history: quarantined {} as {}: {reason}; inspect the preserved receipt",
+                path.display(),
+                target.display()
+            ));
+            if let Some(dir) = path.parent() {
+                if let Err(error) = std::fs::File::open(dir).and_then(|f| f.sync_all()) {
+                    crate::log(&format!(
+                        "history: could not sync quarantine directory {}: {error}",
+                        dir.display()
+                    ));
+                }
+            }
+            if let Ok(mut failed) = FAILED.get_or_init(Default::default).lock() {
+                failed.remove(path);
+            }
+        }
+        Err(error) => {
+            // A permissions problem must not block later receipts either.
+            // Retry the rename next round, but report a given path only once.
+            if let Ok(mut failed) = FAILED.get_or_init(Default::default).lock() {
+                if failed.insert(path.into()) {
+                    crate::log(&format!("history: cannot quarantine {}: {error}; receipt skipped ({reason}); inspect its permissions", path.display()));
+                }
+            }
+        }
+    }
 }
 
 /// Wrap the existing acknowledged mail publish, retaining its error contract.
@@ -590,10 +649,40 @@ mod tests {
                 json!({"brief":"full brief","tier":"balanced","model":"test"}),
             );
             outbox::enqueue(&spool, &e).unwrap();
+            // These sort ahead of the valid receipt. Both parse failures and
+            // unreadable receipt shapes must be quarantined, not poison drain.
+            let corrupt = spool.join("000-corrupt.json");
+            std::fs::write(&corrupt, b"{truncated").unwrap();
+            let unreadable = spool.join("000-directory.json");
+            std::fs::create_dir(&unreadable).unwrap();
+            let invalid = spool.join("000-invalid-envelope.json");
+            std::fs::write(&invalid, b"{}").unwrap();
             drain(&host_js, &spool, "proteus").await.unwrap();
             assert!(outbox::pending(&spool).unwrap().is_empty());
-            // Simulate crash after broker ack but before local unlink, beyond
-            // the server's duplicate window. Subject CAS still keeps one event.
+            assert!(!corrupt.exists());
+            assert!(!unreadable.exists());
+            assert!(!invalid.exists());
+            let quarantined: Vec<_> = std::fs::read_dir(&spool)
+                .unwrap()
+                .map(|f| f.unwrap().path())
+                .filter(|p| {
+                    p.extension()
+                        .is_some_and(|e| e.to_string_lossy().starts_with("corrupt-"))
+                })
+                .collect();
+            assert_eq!(quarantined.len(), 3);
+            let preserved = quarantined
+                .iter()
+                .find(|p| p.file_stem().unwrap() == "000-corrupt")
+                .unwrap();
+            assert_eq!(std::fs::read(preserved).unwrap(), b"{truncated");
+            drain(&host_js, &spool, "proteus").await.unwrap();
+            assert_eq!(
+                std::fs::read_dir(&spool).unwrap().count(),
+                quarantined.len() + 1
+            ); // lock only
+               // Simulate crash after broker ack but before local unlink, beyond
+               // the server's duplicate window. Subject CAS still keeps one event.
             tokio::time::sleep(Duration::from_millis(150)).await;
             outbox::enqueue(&spool, &e).unwrap();
             drain(&host_js, &spool, "proteus").await.unwrap();

@@ -111,3 +111,10 @@ window expires: the subject already exists. This holds while central events are
 retained; an operator deleting/recreating the stream also deletes that evidence.
 The worker retries broker failures independently of mail delivery. Bounded queues
 cannot retain an unlimited outage; rejected capture is visible in diagnostics.
+
+Unreadable, malformed or invalid-envelope receipts are renamed with a unique
+`.corrupt-<id>` suffix and their location is logged once. Their bytes are preserved
+for operator inspection; they no longer count as pending receipts or block later
+publications. If permissions prevent quarantine, the worker skips that receipt,
+logs its path once and retries the rename on later passes. Quarantined evidence
+is never automatically deleted; operators should inspect it and repair the cause.

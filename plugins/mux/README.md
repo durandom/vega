@@ -4,6 +4,9 @@ Lets coding agents work with each other through herdr panes, on this machine or 
 lists the others, reads what they said, messages them, answers their dialogs and spawns new agents, also in their
 own git worktree. It is how the UAC runs its sentinels.
 
+On full hosts, `spawn` and `send` also record events through the bounded central
+[history outbox](../../docs/design/history.md); inbox-only hosts are excluded.
+
 `show` includes `unread_mail`: the relay's oldest mail age, `pending` without a
 valid age, or `unknown` without metadata. Unknown does not prove an empty inbox;
 inspect `vega post log --pane <pane>` on the owning host for broker read status.
