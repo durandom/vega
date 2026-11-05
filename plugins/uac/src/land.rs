@@ -41,6 +41,7 @@ impl From<std::io::Error> for Fault {
 #[derive(Default, Debug, PartialEq)]
 struct Args {
     bead: String,
+    repo: Option<PathBuf>,
     branch: Option<String>,
     head: Option<String>,
     target: Option<String>,
@@ -61,7 +62,7 @@ fn parse(args: &[String]) -> Result<Args> {
                 return Err(Fault::new(format!("duplicate flag {a}")));
             }
             match a {
-                "--branch" | "--head" | "--target" => {
+                "--branch" | "--head" | "--target" | "--repo" => {
                     i += 1;
                     let value = args
                         .get(i)
@@ -71,6 +72,7 @@ fn parse(args: &[String]) -> Result<Args> {
                     match a {
                         "--branch" => out.branch = Some(value),
                         "--head" => out.head = Some(value),
+                        "--repo" => out.repo = Some(crate::expand_home(&value)),
                         _ => out.target = Some(value),
                     }
                 }
@@ -811,7 +813,7 @@ fn runtime_root(dir: &Path) -> Result<PathBuf> {
     Ok(root)
 }
 fn run(a: &Args, svc: &mut impl Services) -> Result<()> {
-    let cwd = env::current_dir()?;
+    let cwd = a.repo.clone().map(Ok).unwrap_or_else(env::current_dir)?;
     let dir = PathBuf::from(git(&cwd, &["rev-parse", "--show-toplevel"])?);
     let root = runtime_root(&dir)?;
     fs::create_dir_all(&root)?;

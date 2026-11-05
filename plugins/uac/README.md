@@ -9,7 +9,7 @@ age, or `unknown` without mail metadata. Unknown does not prove an empty inbox;
 inspect `vega post log --pane <pane>` on the owning host for broker read status.
 
 Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`,
-`grant`, `revoke`, `grants`.
+`grant`, `revoke`, `grants`, `group`.
 
 On the receiving vegad host, `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`
 allows exactly one inbox-only peer pair until expiry. `revoke` takes the same pair; `grants`
@@ -24,10 +24,19 @@ phases and residue with `land BEAD --status`. `--keep` retains pane/worktree;
 branches and stashes are always retained. See `vega uac land --help` and the
 [landing contract](../../docs/design/orchestration.md#uac-landing-contract-vega-lhc16611).
 
+A coordination repo's `.vega/group.toml` lists canonical member project IDs.
+`vega uac group add <path|project-id>` adds a member; `group discover <dir>` adds
+Git repos directly beneath a directory; `group` lists the members. Claim
+registers the same UAC for all members, refusing live conflicting UACs. Release
+clears its group records; inbox-only hosts route through their local records.
+The facility table includes member agents and their project IDs. Land member
+work with `land BEAD --repo <member-main-checkout> --branch BRANCH`; pass the
+same `--repo` for resume/status. Beads, policy, worktrees and gates stay per repo.
+
 Design: [uac-role.md](../../docs/design/uac-role.md), [uac-rules.md](../../docs/design/uac-rules.md).
 
 Agent guide: `vega skills uac`. `SKILL.md` links to the canonical role guide in
-`docs/design/uac-role.md`, which the plugin embeds directly.
+`docs/design/uac-role.md`, whose operational section the plugin embeds as the runtime guide.
 
 `vega uac prune --dry-run` previews ancestry-merged branch and clean paneless
 worktree cleanup; `vega uac prune` applies it without force. See `prune --help`.

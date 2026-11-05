@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 110 · 2026-11-05
+
+- feature: UAC repo groups use `.vega/group.toml` in a coordination repo.
+  `vega uac group add <path|project-id>` and `group discover <dir>` manage members;
+  claim registers their UAC routing, including locally on inbox-only hosts.
+  The facility view includes member agents with project IDs. Use
+  `vega uac land BEAD --repo <member-main-checkout> --branch BRANCH` to land there.
+
 ## 109 · 2026-11-05
 
 - feature: `vega post log` without `--pane` waits for a cold archive scan instead of printing

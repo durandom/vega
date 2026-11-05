@@ -12,6 +12,7 @@
 
 mod beads;
 mod grants;
+mod group;
 mod land;
 
 use std::env;
@@ -28,7 +29,13 @@ use vega_herdr::{
     status_rank, str_of, Failure, Me,
 };
 
-const SKILL: &str = include_str!("../../../docs/design/uac-role.md");
+const ROLE: &str = include_str!("../../../docs/design/uac-role.md");
+
+/// Keep the operational guide within its budget; the design follows in the
+/// canonical document linked by plugins/uac/SKILL.md.
+fn skill() -> &'static str {
+    ROLE.split("\n## Repo groups").next().unwrap_or(ROLE)
+}
 
 /// `vega uac rules`: generic coordinator rules, loaded on demand from the guide.
 const RULES: &str = include_str!("../../../docs/design/uac-rules.md");
@@ -51,6 +58,15 @@ fn run(mode: Mode) -> ExitCode {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "group") {
+        return match group::run(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(f) => {
+                print_failure(&f);
+                ExitCode::from(if f.code == "usage" { 2 } else { 1 })
+            }
+        };
+    }
     if args.first().is_some_and(|a| a == "land") {
         return land::main(&args[1..]);
     }
@@ -104,7 +120,7 @@ fn main() -> ExitCode {
         [a, q] if a == "ask" && !q.starts_with('-') => run(Mode::Ask(q.clone(), None)),
         [a, w, d, q] if a == "ask" && w == "--within" => run(Mode::Ask(q.clone(), Some(d.clone()))),
         [a] if a == "--skill" => {
-            print!("{SKILL}");
+            print!("{}", skill());
             ExitCode::SUCCESS
         }
         [a] if a == "rules" => {
@@ -255,7 +271,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
     if let Some(p) = &project {
         match &mode {
             Mode::Claim => {
-                return claim(
+                return group::claim_all(
                     p,
                     &my_pane,
                     &local.agents,
@@ -263,7 +279,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
                     &project_path(&local.workspaces, &my_ws, &my_cwd),
                 )
             }
-            Mode::Release => return release(p, &my_pane),
+            Mode::Release => return group::release_all(p, &my_pane),
             Mode::Adopt(target, machine, headless) => {
                 return adopt(target, machine.as_deref(), &my_pane, *headless)
             }
@@ -289,6 +305,15 @@ fn home(mode: Mode) -> Result<(), Failure> {
         ));
     }
 
+    let mut projects = if project.is_some() {
+        group::members(&project_path(&local.workspaces, &my_ws, &my_cwd))?
+    } else {
+        Default::default()
+    };
+    if let Some(p) = &project {
+        projects.insert(p.clone());
+    }
+
     grants::listing()?;
 
     let mut snapshots = vec![local];
@@ -312,15 +337,18 @@ fn home(mode: Mode) -> Result<(), Failure> {
             if m.is_none() && pane == my_pane {
                 continue;
             }
+            let agent_project = if m.is_none() {
+                project_key(&s.workspaces, str_of(a, "workspace_id"), str_of(a, "cwd"))
+                    .ok()
+                    .flatten()
+            } else {
+                projects
+                    .iter()
+                    .find(|p| remote_in_project(view, m.unwrap_or(&host), pane, p))
+                    .cloned()
+            };
             let mine = match &project {
-                Some(p) if m.is_none() => {
-                    project_key(&s.workspaces, str_of(a, "workspace_id"), str_of(a, "cwd"))
-                        .ok()
-                        .flatten()
-                        .as_ref()
-                        == Some(p)
-                }
-                Some(p) => remote_in_project(view, m.unwrap_or(&host), pane, p),
+                Some(_) => agent_project.as_ref().is_some_and(|p| projects.contains(p)),
                 None => m.is_none() && str_of(a, "workspace_id") == my_ws,
             };
             if !mine {
@@ -355,6 +383,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
                 (st::waiting(attention, ci.is_some()), silence)
             };
             rows.push(Row {
+                project: agent_project.unwrap_or_default(),
                 machine: m.unwrap_or(&host).to_string(),
                 pane: pane.to_string(),
                 name: agent_name(a).to_string(),
@@ -429,6 +458,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
             continue;
         }
         rows.push(Row {
+            project: String::new(),
             machine: c.machine.clone().unwrap_or_else(|| host.clone()),
             pane: c.pane.clone(),
             name: c.name.clone(),
@@ -559,6 +589,7 @@ fn expand_home(path: &str) -> std::path::PathBuf {
 }
 
 struct Row {
+    project: String,
     machine: String,
     pane: String,
     name: String,
@@ -584,12 +615,13 @@ struct Row {
 
 fn agent_table(rows: &[Row]) -> Vec<String> {
     let mut out = vec![format!(
-        "agents[{}]{{machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead,tier,model}}:",
+        "agents[{}]{{project,machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead,tier,model}}:",
         rows.len()
     )];
     for r in rows {
         out.push(format!(
-            "  {},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "  {},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            cell(&r.project),
             cell(&r.machine),
             r.pane,
             cell(&r.name),
@@ -1746,19 +1778,20 @@ mod tests {
 
     #[test]
     fn skill_has_valid_frontmatter() {
-        vega_plugin::assert_guide(SKILL, "uac");
-        let fm = vega_plugin::parse_frontmatter(SKILL).unwrap();
+        let guide = skill();
+        vega_plugin::assert_guide(guide, "uac");
+        let fm = vega_plugin::parse_frontmatter(guide).unwrap();
         assert!(fm
             .description
             .contains("Use only when the user runs /vega uac"));
-        assert!(SKILL.contains("`vega uac rules`"));
+        assert!(guide.contains("`vega uac rules`"));
         // The served role must expose the PagerDuty authority boundary, not only a doc link.
-        let words = SKILL.split_whitespace().collect::<Vec<_>>().join(" ");
+        let words = guide.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(words.contains("Agents may investigate, acknowledge and add notes."));
         assert!(
             words.contains("Resolve/escalate/reassign require a Slayer-approved board decision.")
         );
-        assert!(SKILL.contains("[Design](pagerduty.md)"));
+        assert!(guide.contains("[Design](pagerduty.md)"));
     }
 
     #[test]
@@ -1927,6 +1960,7 @@ mod tests {
     #[test]
     fn agent_table_has_machine_and_keeps_empty_cells() {
         let rows = [Row {
+            project: "github.com/team/repo".into(),
             machine: "ganymede".into(),
             pane: "w5S:p1".into(),
             name: "fix".into(),
@@ -1947,8 +1981,8 @@ mod tests {
         assert_eq!(
             agent_table(&rows),
             [
-                "agents[1]{machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead,tier,model}:",
-                "  ganymede,w5S:p1,fix,fix,claude,working,,25m old,w3V:p1 on proteus,headless,,balanced,claude-sonnet-5-5",
+                "agents[1]{project,machine,pane,name,tab,kind,status,attention,unread_mail,parent,mode,bead,tier,model}:",
+                "  github.com/team/repo,ganymede,w5S:p1,fix,fix,claude,working,,25m old,w3V:p1 on proteus,headless,,balanced,claude-sonnet-5-5",
             ]
         );
         assert_eq!(
@@ -1959,6 +1993,7 @@ mod tests {
 
     fn row(pane: &str, machine: &str, attention: Option<Attention>) -> Row {
         Row {
+            project: String::new(),
             machine: machine.into(),
             pane: pane.into(),
             name: "x".into(),

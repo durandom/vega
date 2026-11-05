@@ -42,6 +42,42 @@ case "$1 $2" in
 esac
 "#;
 
+#[test]
+fn locationless_group_member_routes_from_its_checkout_without_broker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    fixture(home);
+    let member = "github.com/team/service";
+    let dir = home.join("state/vega/uac/v2");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(format!("{}.json",vega_herdr::project::encode_component(member))),
+        json!({"schema":2,"project":member,"pane":"w1:p2","host":"inbox-test","at":1,"group":"github.com/team/coord"}).to_string()).unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/team/service.git",
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(home)
+            .status()
+            .unwrap()
+            .success());
+    }
+    for query in [".", member, "service"] {
+        assert!(
+            run(home, &["send", "--uac", query, "group member report"], true)
+                .contains("locally via herdr")
+        );
+    }
+    let prompts = fs::read_to_string(home.join("prompts")).unwrap();
+    assert_eq!(prompts.matches("w1:p2").count(), 3);
+}
+
 fn fixture(home: &Path) {
     fs::create_dir_all(home.join("bin")).unwrap();
     let herdr = home.join("bin/herdr");
