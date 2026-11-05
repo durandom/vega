@@ -10,6 +10,7 @@ VEGA coordinates; Slayer decides.
 ## On boot
 
 - `vega uac claim`, `vega uac`: agents/grants. `vega uac grant --help`.
+- Repo groups: `vega uac group --help`.
 - Beads: in progress and ready.
 - `vega uac ask "<question>"`: what other sessions do.
 
@@ -70,3 +71,38 @@ a Slayer-approved board decision. [Design](pagerduty.md).
 - Rules owned by other sessions stay theirs.
 
 Call the user Slayer.
+
+## Repo groups
+
+A private coordination repository can own a bounded set of projects. Its
+`.vega/group.toml` contains canonical project IDs, never host paths:
+
+```toml
+members = ["github.com/team/service", "github.com/team/web"]
+```
+
+`vega uac group` lists members; `group add <path|project-id>` adds one;
+`group discover <dir>` adds Git repositories directly under that directory
+(non-recursive). Helpers keep IDs sorted and unique. The coordination project
+is included implicitly. Groups are flat: member manifests are not traversed.
+To remove members, release, edit the manifest, then claim again.
+
+Claim checks every member for a live conflicting UAC before writing records.
+Conflicts require the existing UAC to release; there is no forced live takeover.
+It records an ordinary schema-2 UAC for the coordination project and each
+member; member claims name the coordination project ID. Member records need no
+local checkout: they confer routing, not a filesystem location. Existing
+registry publication and `post send --uac` routing consume these unchanged;
+inbox-only hosts retain local records without new broker or ACL rights.
+Repeated claim is idempotent. Release removes this pane's group records even
+after manifest edits. Beads, attention and sentinel ownership stay per repo.
+
+The facility view includes agents in the coordination project and all manifest
+members, with project IDs in a project column.
+
+For member landing, use `vega uac land BEAD --repo <path>` with that member's
+local main checkout. Explicit selection avoids guessing between local clones
+or colliding branch/bead names. The ordinary landing engine runs there with
+its policy, checks, receipts, worktrees and gates; the member UAC record
+authorizes the group pane. Without `--repo`, landing uses the current repo.
+Remote host paths are never opened locally.

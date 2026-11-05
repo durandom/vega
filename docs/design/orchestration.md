@@ -111,7 +111,7 @@ skips gates, resets a checkout, drops a stash, or deletes a branch.
 
 ### Inputs and authority
 
-`vega uac land <bead> --branch <branch> [--head <sha>] [--target <branch>]
+`vega uac land <bead> --branch <branch> [--repo <path>] [--head <sha>] [--target <branch>]
 [--keep]` starts a landing. Freeze the branch tip (or verify the supplied head
 matches it). `vega uac land <bead> --resume` continues its existing receipt;
 `--status` only inspects it. Resume cannot replace inputs. Unknown, duplicate,
@@ -119,7 +119,10 @@ missing and incompatible flags fail before effects; `--help` always works.
 One repository OS lock excludes concurrent landings; never steal it.
 
 Run from the registered UAC's target checkout, including a linked target checkout
-in a bare layout. Resolve Git's
+in a bare layout. For [repo groups](uac-role.md#repo-groups), `--repo <path>` selects
+the member repository's local target checkout; policy, beads, receipts, gates
+and the UAC authority check all use that repository. Pass the same `--repo` for
+resume/status. Resolve Git's
 common directory; reject sentinel worktrees, another UAC, dirty index/worktree
 (including untracked files), active merge/rebase, unresolved blocking dependencies
 or missing bead. `--target` overrides configured target for integration branches.

@@ -1,6 +1,6 @@
-Usage: vega uac land BEAD --branch BRANCH [--head SHA] [--target BRANCH] [--keep]
-       vega uac land BEAD --resume [--retry-install | --install-done]
-       vega uac land BEAD --status
+Usage: vega uac land BEAD --branch BRANCH [--repo PATH] [--head SHA] [--target BRANCH] [--keep]
+       vega uac land BEAD --resume [--repo PATH] [--retry-install | --install-done]
+       vega uac land BEAD --status [--repo PATH]
 
 Explicit UAC landing from its target checkout (including bare layouts). Freezes the
 source tip; optional --head must be its full SHA. --target overrides project
@@ -47,3 +47,8 @@ Examples:
   vega uac land v-123 --resume
 
 -h, --help: this reference. Design: docs/design/orchestration.md.
+
+--repo <path> selects the local main checkout for a member-repository landing,
+including --resume and --status. All policy, beads, receipts, gates and Git
+commands use that repository; its registered UAC must be the calling pane.
+Example: vega uac land svc-123 --repo ../service --branch fix-auth

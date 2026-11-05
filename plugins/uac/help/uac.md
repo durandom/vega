@@ -1,8 +1,8 @@
 Usage: vega uac
 
 Coordinator mode. Without arguments: every agent working on this session's
-project ID (the normalized Git fetch remote), across local clones and fresh
-schema-2 registry rows on other hosts, with machine, pane, name, kind,
+project ID (the normalized Git fetch remote) and its group manifest members, across local clones and fresh
+schema-2 registry rows on other hosts, with project, machine, pane, name, kind,
 status, unread_mail, parent, mode, claimed bead, tier and model. Agents whose parent
 is your pane are your sentinels. Registry-off mode omits remote membership;
 remote paths are metadata and never opened locally.
@@ -27,12 +27,14 @@ next `for the user (headed pane; no wake)`, but vegad does not wake you for them
 attention table adds the done report (parked: the bead) and the next command. Local input shows the dialog kind and title; all_done when every sentinel is completed.
 
 Commands:
+  group [add <path|project-id> | discover <dir>]  manage .vega/group.toml;
+               claim covers all members; see group --help
   grant <inbox-only-host>:<pane> <host>:<pane> --expires <duration>
                allow one pair on this receiving host (s/m/h/d, expiry required);
                peer mail only, never Slayer approval; see grant --help
   revoke <inbox-only-host>:<pane> <host>:<pane>  revoke that pair (idempotent)
   grants       list this host's live, expired and revoked mail grants
-  land BEAD --branch BRANCH [--head SHA] [--target BRANCH] [--keep]
+  land BEAD --branch BRANCH [--repo PATH] [--head SHA] [--target BRANCH] [--keep]
                resumable reviewed landing: merge, check, gate, verified push,
                install, bead close and owned sentinel cleanup; never deploys
                land BEAD --resume | --status; see vega uac land --help

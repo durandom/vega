@@ -119,6 +119,8 @@ fn commit(dir: &Path, message: &str) {
 }
 #[derive(Default)]
 struct Fake {
+    expected_repo: Option<PathBuf>,
+    evidence_sentinel: Option<Sentinel>,
     fail: String,
     closed: bool,
     pane_closed: bool,
@@ -140,7 +142,13 @@ impl Fake {
     }
 }
 impl Services for Fake {
-    fn authority(&mut self, _: &Path, _: &str) -> Result<()> {
+    fn authority(&mut self, dir: &Path, _: &str) -> Result<()> {
+        if let Some(expected) = &self.expected_repo {
+            assert_eq!(
+                dir.canonicalize().unwrap(),
+                expected.canonicalize().unwrap()
+            );
+        }
         self.call("authority")
     }
     fn completed(&mut self, _: &Path, r: &Receipt) -> Result<()> {
@@ -161,7 +169,7 @@ impl Services for Fake {
         _: &str,
     ) -> Result<(String, Option<Sentinel>)> {
         self.call("evidence")?;
-        Ok(("report".into(), None))
+        Ok(("report".into(), self.evidence_sentinel.clone()))
     }
     fn gate(&mut self, _: &Path, _: &str, _: &str, _: bool) -> Result<String> {
         self.call("gate")?;
@@ -214,6 +222,72 @@ fn strict_usage_and_policy_validate_before_effects() {
     assert!(Policy::parse("strategy='no-ff'\ncheck=[]").is_err());
     assert!(Policy::parse("strategy='no-ff'\ncheck=['true']\nassisted_by='wrong'").is_err());
     assert!(Policy::parse("strategy='ff-only'\ncheck=['pytest','-q']\ninstall=['true']").is_ok());
+}
+
+#[test]
+fn explicit_member_repo_lands_and_resumes_using_member_policy_and_receipts() {
+    const CHILD: &str = "VEGA_GROUP_LAND_FIXTURE";
+    if env::var_os(CHILD).is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = Command::new(env::current_exe().unwrap())
+            .args(["--exact","land::tests::explicit_member_repo_lands_and_resumes_using_member_policy_and_receipts"])
+            .env(CHILD,"1").env("XDG_STATE_HOME",tmp.path()).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        return;
+    }
+    let mut f = Fixture::new("no-ff");
+    fs::create_dir_all(f.repo.join(".vega")).unwrap();
+    fs::write(
+        f.repo.join(".vega/land.toml"),
+        "strategy='no-ff'\ncheck=['sh','-c','test -f feature']\n",
+    )
+    .unwrap();
+    commit(&f.repo, "member landing policy");
+    git(&f.repo, &["push", "-q", "origin", "main"]).unwrap();
+    f.add_sentinel();
+    let mut svc = Fake {
+        expected_repo: Some(f.repo.clone()),
+        evidence_sentinel: f.r.sentinel.clone(),
+        ..Fake::default()
+    };
+    let args = vec![
+        "v-1".into(),
+        "--repo".into(),
+        f.repo.to_string_lossy().into(),
+        "--branch".into(),
+        "feature".into(),
+        "--keep".into(),
+    ];
+    let a = parse(&args).unwrap();
+    run(&a, &mut svc).unwrap();
+    let receipt = runtime_root(&f.repo).unwrap().join("v-1.json");
+    let landed = read(&receipt).unwrap();
+    assert_eq!(landed.phase, "done");
+    assert_eq!(landed.head, f.r.head);
+    assert_eq!(
+        landed.sentinel.as_ref().unwrap().worktree,
+        f.r.sentinel.as_ref().unwrap().worktree
+    );
+    assert!(svc.closed);
+    assert!(f.repo.join("feature").exists());
+    assert_eq!(
+        remote_head(&f.repo, &landed.policy).unwrap(),
+        sha(&f.repo, "HEAD").unwrap()
+    );
+    let resume = Args {
+        bead: "v-1".into(),
+        repo: Some(f.repo.clone()),
+        resume: true,
+        ..Args::default()
+    };
+    run(&resume, &mut svc).unwrap();
+    assert!(svc.calls.contains(&"completed".into()));
+    assert!(parse(&["v-1".into(), "--repo".into()]).is_err());
 }
 #[test]
 fn both_strategies_and_completed_resume_keep_one_merge() {
