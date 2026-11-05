@@ -1,5 +1,6 @@
 //! Explicit, resumable coordinator landing. Runtime receipts are outside git.
 mod changelog;
+mod history;
 mod live;
 pub mod prune;
 #[cfg(test)]
@@ -214,6 +215,9 @@ impl Receipt {
 
 /// Only services with separate owners are abstracted; Git in fixtures is real.
 trait Services {
+    fn history(&mut self, kind: &str, data: Value) {
+        vega_herdr::history::emit(kind, data);
+    }
     fn authority(&mut self, dir: &Path, target: &str) -> Result<()>;
     fn completed(&mut self, dir: &Path, r: &Receipt) -> Result<()>;
     fn validate(&mut self, dir: &Path, r: &Receipt) -> Result<()>;
@@ -563,7 +567,29 @@ fn push_using(r: &Receipt, mut run: impl FnMut(&[&str]) -> Result<String>) -> Re
     }
     unreachable!()
 }
-fn step(dir: &Path, path: &Path, r: &mut Receipt, svc: &mut impl Services) -> Result<()> {
+fn step(
+    dir: &Path,
+    path: &Path,
+    r: &mut Receipt,
+    svc: &mut impl Services,
+    started: std::time::Instant,
+) -> Result<()> {
+    let mut trace = history::Trace::new(dir, r, started);
+    let result = step_inner(dir, path, r, svc, &mut trace);
+    trace.finish(dir, r, &result);
+    for (kind, data) in trace.events {
+        svc.history(kind, data);
+    }
+    result
+}
+
+fn step_inner(
+    dir: &Path,
+    path: &Path,
+    r: &mut Receipt,
+    svc: &mut impl Services,
+    trace: &mut history::Trace,
+) -> Result<()> {
     svc.authority(dir, &r.policy.target)?;
     if r.phase == "done" {
         let integrated = r.integrated_head()?;
@@ -579,7 +605,9 @@ fn step(dir: &Path, path: &Path, r: &mut Receipt, svc: &mut impl Services) -> Re
     if git(dir, &["symbolic-ref", "--short", "HEAD"])? != r.policy.target {
         return Err(Fault::new("target branch changed"));
     }
+    trace.next("merge", r);
     reconcile_merge(dir, path, r)?;
+    trace.next("check", r);
     r.phase = "check".into();
     save(path, r)?;
     current(dir, r)?;
@@ -589,15 +617,18 @@ fn step(dir: &Path, path: &Path, r: &mut Receipt, svc: &mut impl Services) -> Re
         r.checked = true;
         save(path, r)?;
     }
+    trace.next("gate", r);
     r.phase = "gate".into();
     save(path, r)?;
     r.gate = svc.gate(dir, &r.before, r.integrated.as_ref().unwrap(), true)?;
     current(dir, r)?;
+    trace.next("push", r);
     r.phase = "push".into();
     save(path, r)?;
     svc.validate(dir, r)?;
     push(dir, r)?;
     current(dir, r)?;
+    trace.next("install", r);
     r.phase = "install".into();
     save(path, r)?;
     if r.install == "started" {
@@ -617,14 +648,17 @@ fn step(dir: &Path, path: &Path, r: &mut Receipt, svc: &mut impl Services) -> Re
         r.install = "done".into();
         save(path, r)?;
     }
+    trace.next("close", r);
     r.phase = "close".into();
     save(path, r)?;
     svc.close(dir, r)?;
     current(dir, r)?;
     if !r.keep && r.sentinel.is_some() {
+        trace.next("pane", r);
         r.phase = "pane".into();
         save(path, r)?;
         svc.pane(dir, r)?;
+        trace.next("worktree", r);
         r.phase = "worktree".into();
         save(path, r)?;
         svc.remove(dir, r)?;
@@ -813,6 +847,35 @@ fn runtime_root(dir: &Path) -> Result<PathBuf> {
     Ok(root)
 }
 fn run(a: &Args, svc: &mut impl Services) -> Result<()> {
+    let started = std::time::Instant::now();
+    let mut attempted = false;
+    let result = run_inner(a, svc, &mut attempted, started);
+    if !a.status && !attempted {
+        let cwd = a.repo.clone().or_else(|| env::current_dir().ok());
+        let repo = cwd
+            .as_deref()
+            .and_then(|dir| git(dir, &["rev-parse", "--show-toplevel"]).ok());
+        let operation = repo
+            .as_ref()
+            .map(|dir| history::operation(Path::new(dir), &a.bead));
+        let attempt = vega_herdr::history::event("", "land", Value::Null)["id"].clone();
+        svc.history(
+            "land",
+            json!({"bead": a.bead, "branch": a.branch, "head": a.head,
+            "cwd": repo.map(PathBuf::from).or(cwd), "operation": operation, "attempt": attempt, "phase": "preflight", "success": result.is_ok(),
+            "duration_ms": started.elapsed().as_millis(),
+            "error": result.as_ref().err().map(|e| json!({"message":e.message,"exit":e.status}))}),
+        );
+    }
+    result
+}
+
+fn run_inner(
+    a: &Args,
+    svc: &mut impl Services,
+    attempted: &mut bool,
+    started: std::time::Instant,
+) -> Result<()> {
     let cwd = a.repo.clone().map(Ok).unwrap_or_else(env::current_dir)?;
     let dir = PathBuf::from(git(&cwd, &["rev-parse", "--show-toplevel"])?);
     let root = runtime_root(&dir)?;
@@ -863,7 +926,8 @@ fn run(a: &Args, svc: &mut impl Services) -> Result<()> {
         recover_install(&dir, &mut r, a.install_done)?;
         save(&path, &r)?;
     }
-    let result = step(&dir, &path, &mut r, svc);
+    *attempted = true;
+    let result = step(&dir, &path, &mut r, svc, started);
     if let Err(e) = &result {
         r.failure = Some(json!({"message": e.message, "exit": e.status, "output": e.output}));
         if r.phase != "done" {

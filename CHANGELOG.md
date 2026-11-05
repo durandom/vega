@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 111 · 2026-11-05
+
+- feature: central history now records land attempts and phase outcomes (including
+  resumes, validation, conflicts and timings), plus deploy machine commits and
+  install/config unit evidence through the existing bounded outbox. History
+  capture failures remain diagnostic and do not change command results.
+
 ## 110 · 2026-11-05
 
 - feature: UAC repo groups use `.vega/group.toml` in a coordination repo.
