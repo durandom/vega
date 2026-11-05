@@ -4,7 +4,7 @@ NATS is the record. Agent transcripts stay in agentsview; history includes sessi
 identifiers when known so analysis can join them. No local history archive or new
 daemon is introduced. This first stage captures spawn, mux send, acknowledged mail
 publishes, brokerless tool delivery and observed agent/link/UAC lineage changes.
-Land/deploy events are tracked in vega-lhc.251; the AXI reader/export and optional
+Land/deploy outcomes are also captured; the AXI reader/export and optional
 metadata-only OTLP exporter are vega-lhc.252. OTLP is off: no exporter runs yet.
 
 ## Storage and authority
@@ -88,6 +88,26 @@ event or causal order; use timestamps and lineage chain IDs when reconstructing 
   exact process start/exit times. Changes between reconciles may be missed.
   Inbox-only hosts do not reconcile registry entries, so this stage has no
   snapshot-based lineage events for them; their spawn/mux/local-mail capture runs.
+
+- `land.phase` and `land`: each `vega uac land` attempt/resume records phase
+  durations, source branch/head, integrated commit, bead, check and gate evidence,
+  install result, unresolved conflict paths and changelog renumberings. A stable
+  repository/bead `operation` links resumes; `attempt` links phases to their outcome.
+  Durations cover work in this invocation, not time waiting between resumes.
+  Phases that reuse completed work may have near-zero durations. A failing check
+  or gate phase is `not_passed`, with its error and actual exit code when known;
+  prior gate evidence remains separately available. Phase receipts are buffered
+  until the attempt returns; a crash can lose that attempt's phase events.
+  Preflight failures emit a `land` outcome with identifiers known at that point.
+  Read-only `--status`, help and rejected command syntax emit no events.
+- `deploy`: each `vega deploy apply` outcome includes the requested branch/machines,
+  total duration and per-machine duration, SSH success/failure, full checked-out
+  commit when known, install/config success, relay/override/config summaries and
+  raw `unit,event` evidence rows from both install and config. The commit is
+  captured before install so install failures retain it; checkout failures leave
+  it null. Missing unit evidence is an empty list, not a claim of unit success.
+  Optional config failures remain nonfatal to deployment and are recorded as such.
+  Status/help emit nothing; apply preflight errors emit a failed outcome.
 
 A command crash between its action and capture can miss an event; the operation
 and history are not one transaction. Historical inbox content is not backfilled

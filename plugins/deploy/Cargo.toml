@@ -7,6 +7,7 @@ description = "Build and install vega on herdr machines"
 publish = false
 
 [dependencies]
+vega-herdr = { path = "../../crates/vega-herdr" }
 vega-build = { path = "../../crates/vega-build" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"

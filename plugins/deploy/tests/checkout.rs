@@ -123,6 +123,7 @@ esac
         }
         cmd.env("HOME", &self.home)
             .env("XDG_CONFIG_HOME", self.home.join("deployer-config"))
+            .env("XDG_STATE_HOME", self.home.join("state"))
             .env("GIT_CONFIG_GLOBAL", &self.config)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -292,5 +293,76 @@ fn reports_both_config_phases_across_deploys() {
         ] {
             assert!(out.contains(expected), "{out}");
         }
+    }
+}
+
+fn history(f: &Fixture) -> serde_json::Value {
+    let root = f.home.join("state/vega/history-outbox");
+    let mut events = Vec::new();
+    for host in fs::read_dir(root).unwrap() {
+        for item in fs::read_dir(host.unwrap().path()).unwrap() {
+            let path = item.unwrap().path();
+            if path.extension().is_some_and(|s| s == "json") {
+                events.push(
+                    serde_json::from_slice::<serde_json::Value>(&fs::read(path).unwrap()).unwrap(),
+                );
+            }
+        }
+    }
+    assert_eq!(events.len(), 1);
+    events.remove(0)
+}
+
+#[test]
+fn history_records_real_remote_success_and_nonfatal_unit_failure() {
+    let f = Fixture::new();
+    assert!(f.apply(Some("feature/test"), true).status.success());
+    let event = history(&f);
+    assert_eq!(event["kind"], "deploy");
+    assert_eq!(event["data"]["success"], true);
+    assert_eq!(event["data"]["branch"], "feature/test");
+    let machine = &event["data"]["machines"][0];
+    assert_eq!(machine["machine"], "target");
+    assert_eq!(
+        machine["commit"],
+        git(&f.source, &["rev-parse", "feature/test"])
+    );
+    assert_eq!(machine["success"], true);
+    assert_eq!(machine["install_success"], true);
+    assert_eq!(machine["config_success"], false);
+    assert_eq!(machine["relay"], "current");
+    assert_eq!(machine["units"].as_array().unwrap().len(), 2);
+    assert!(machine["units"][0]
+        .as_str()
+        .unwrap()
+        .contains("claude.hooks"));
+    assert!(machine["duration_ms"].is_number());
+    assert!(
+        event["data"]["duration_ms"].as_u64().unwrap() >= machine["duration_ms"].as_u64().unwrap()
+    );
+}
+
+#[test]
+fn history_records_checkout_failure_without_inventing_commit_or_units() {
+    let f = Fixture::new();
+    assert_eq!(f.apply(Some("missing"), false).status.code(), Some(1));
+    let event = history(&f);
+    assert_eq!(event["data"]["success"], false);
+    let machine = &event["data"]["machines"][0];
+    assert_eq!(machine["success"], false);
+    assert!(machine["commit"].is_null());
+    assert!(machine["install_success"].is_null());
+    assert!(machine["error"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(machine["units"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn unavailable_outbox_does_not_change_deploy_success_or_failure() {
+    for branch in ["main", "missing"] {
+        let f = Fixture::new();
+        fs::write(f.home.join("state"), "not a directory").unwrap();
+        let out = f.apply(Some(branch), false);
+        assert_eq!(out.status.success(), branch == "main");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("history: event not queued:"));
     }
 }

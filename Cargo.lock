@@ -3233,6 +3233,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vega-build",
+ "vega-herdr",
  "vega-plugin",
 ]
 

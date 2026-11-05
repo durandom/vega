@@ -20,7 +20,7 @@ use std::process::{Command, ExitCode, Stdio};
 
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, Subcommand};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 const REPO_URL: &str = "git@github.com:durandom/vega.git";
 /// Branch `apply` deploys unless `--from-branch` says otherwise; also what the status reports.
@@ -303,6 +303,17 @@ fn field<'a>(fields: &'a [(String, String)], key: &str) -> &'a str {
         .unwrap_or("-")
 }
 
+fn optional_field<'a>(fields: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    fields
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+fn flag_field(fields: &[(String, String)], key: &str) -> Option<bool> {
+    optional_field(fields, key).map(|v| v == "1")
+}
+
 fn status() -> Result<ExitCode, Failure> {
     let host = local_host();
     let list = machines()?;
@@ -350,6 +361,27 @@ fn branch_name(s: &str) -> Result<String, String> {
 }
 
 fn apply(names: &[String], all: bool, branch: &str) -> Result<ExitCode, Failure> {
+    let started = std::time::Instant::now();
+    let mut data = json!({"branch": branch, "requested_machines": names, "all": all,
+        "cwd": env::current_dir().ok(), "machines": []});
+    let result = apply_inner(names, all, branch, &mut data);
+    data["duration_ms"] = json!(started.elapsed().as_millis());
+    data["success"] = json!(matches!(&result, Ok(code) if *code == ExitCode::SUCCESS));
+    data["error"] = result
+        .as_ref()
+        .err()
+        .map(|e| json!({"code":e.code,"message":e.message}))
+        .unwrap_or(Value::Null);
+    vega_herdr::history::emit("deploy", data);
+    result
+}
+
+fn apply_inner(
+    names: &[String],
+    all: bool,
+    branch: &str,
+    history: &mut Value,
+) -> Result<ExitCode, Failure> {
     let list = machines()?;
     if !all && names.is_empty() {
         return Err(Failure::new(
@@ -413,9 +445,11 @@ else
   mkdir -p "$(dirname "$dir")"
   git clone -q --branch {branch} {REPO_URL} "$dir"
 fi
+echo "vega-deploy:revision=$(git -C "$dir" rev-parse HEAD)"
 install_ok=1
 i=$(VEGA_INSTALL_BY=deploy "$dir/scripts/install-cli.sh" 2>"$dir/.deploy.log") || install_ok=0
 printf '%s\n' "$i" | sed -n '/^evidence\[/,/^summary:/{{s/^  /vega-deploy:evidence=/p;}}'
+echo "vega-deploy:install_ok=$install_ok"
 [ "$install_ok" = 1 ] || {{ tail -5 "$dir/.deploy.log" >&2; exit 1; }}
 echo "vega-deploy:commit=$(git -C "$dir" rev-parse --short=7 HEAD)"
 echo "vega-deploy:after=$("$HOME/.local/bin/vega" --version)"
@@ -426,7 +460,9 @@ echo "vega-deploy:after=$("$HOME/.local/bin/vega" --version)"
 ) 2>/dev/null || echo "vega-deploy:overrides=failed"
 # Agent and herdr config (vega config: skills, herdr, instructions, hooks, ...);
 # units chezmoi still manages stay untouched. Never fails the deploy.
-c=$(VEGA_CONFIG_PHASE=deploy "$HOME/.local/bin/vega" config apply 2>&1) || true
+config_ok=1
+c=$(VEGA_CONFIG_PHASE=deploy "$HOME/.local/bin/vega" config apply 2>&1) || config_ok=0
+echo "vega-deploy:config_ok=$config_ok"
 printf '%s\n' "$c" | sed -n '/^evidence\[/,/^summary:/{{s/^  /vega-deploy:evidence=/p;}}'
 c=$(echo "$c" | sed -n 's/^summary: //p' | tail -1)
 echo "vega-deploy:config=${{c:-failed}}"
@@ -443,7 +479,19 @@ echo "vega-deploy:relay=$(relay_ensure)"
     );
     let mut evidence = Vec::new();
     for m in chosen {
+        let started = std::time::Instant::now();
         let (ok, f, err) = remote(&m.target, &script);
+        history["machines"].as_array_mut().unwrap().push(json!({
+            "machine": m.label, "success": ok, "duration_ms": started.elapsed().as_millis(),
+            "commit": optional_field(&f, "revision"),
+            "install_success": flag_field(&f, "install_ok"),
+            "config_success": flag_field(&f, "config_ok"),
+            "relay": optional_field(&f, "relay"),
+            "overrides": optional_field(&f, "overrides"),
+            "config": optional_field(&f, "config"),
+            "units": f.iter().filter(|(k, _)| k == "evidence").map(|(_, v)| v).collect::<Vec<_>>(),
+            "error": if ok { None } else { Some(&err) }
+        }));
         evidence.extend(
             f.iter()
                 .filter(|(k, _)| k == "evidence")

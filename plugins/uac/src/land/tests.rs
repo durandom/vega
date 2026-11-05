@@ -74,7 +74,13 @@ impl Fixture {
         }
     }
     fn run(&mut self, svc: &mut Fake) -> Result<()> {
-        step(&self.repo, &self.receipt, &mut self.r, svc)
+        step(
+            &self.repo,
+            &self.receipt,
+            &mut self.r,
+            svc,
+            std::time::Instant::now(),
+        )
     }
     fn count_merges(&self) -> usize {
         git(&self.repo, &["rev-list", "--merges", "HEAD"])
@@ -126,6 +132,7 @@ struct Fake {
     pane_closed: bool,
     removed: bool,
     calls: Vec<String>,
+    history: Vec<(String, Value)>,
 }
 impl Fake {
     fn call(&mut self, phase: &str) -> Result<()> {
@@ -142,6 +149,9 @@ impl Fake {
     }
 }
 impl Services for Fake {
+    fn history(&mut self, kind: &str, data: Value) {
+        self.history.push((kind.into(), data));
+    }
     fn authority(&mut self, dir: &Path, _: &str) -> Result<()> {
         if let Some(expected) = &self.expected_repo {
             assert_eq!(
@@ -514,11 +524,16 @@ fn unsafe_conflict_is_preserved_until_manually_resolved() {
     commit(&f.repo, "target conflict");
     f.r.before = sha(&f.repo, "HEAD").unwrap();
     git(&f.repo, &["push", "-q", "origin", "main"]).unwrap();
+    let mut svc = Fake::default();
     assert!(f
-        .run(&mut Fake::default())
+        .run(&mut svc)
         .unwrap_err()
         .message
         .contains("requires UAC resolution"));
+    let event = &svc.history.last().unwrap().1;
+    assert_eq!(event["success"], false);
+    assert_eq!(event["phase"], "merge");
+    assert_eq!(event["conflicts"], json!(["base"]));
     assert!(state_path(&f.repo, "MERGE_HEAD").unwrap().exists());
     fs::write(f.repo.join("base"), "resolved").unwrap();
     commit(&f.repo, "resolved merge");
@@ -976,4 +991,59 @@ else:
     // A completed resume accepts the marker in notes without changing it.
     // Avoid external pane inventory: closure itself is verified above.
     live::Live.validate(&f.repo, &f.r).unwrap();
+}
+
+#[test]
+fn history_links_failed_check_resume_and_completed_inspection() {
+    let mut f = Fixture::new("no-ff");
+    f.r.policy.check = vec!["sh".into(), "-c".into(), "exit 17".into()];
+    let mut svc = Fake::default();
+    assert!(f.run(&mut svc).is_err());
+    let first = svc.history.last().unwrap().1.clone();
+    assert_eq!(svc.history.last().unwrap().0, "land");
+    assert_eq!(first["phase"], "check");
+    assert_eq!(first["success"], false);
+    assert_eq!(first["error"]["exit"], 17);
+    assert_eq!(first["bead"], f.r.bead);
+    assert_eq!(first["branch"], f.r.branch);
+    assert_eq!(first["conflicts"], json!([]));
+    assert!(first["duration_ms"].is_number());
+    let failed_phase = &svc.history[svc.history.len() - 2];
+    assert_eq!(failed_phase.0, "land.phase");
+    assert_eq!(failed_phase.1["attempt"], first["attempt"]);
+    assert_eq!(failed_phase.1["success"], false);
+
+    f.r.policy.check = vec!["true".into()];
+    svc.history.clear();
+    f.run(&mut svc).unwrap();
+    let second = &svc.history.last().unwrap().1;
+    assert_eq!(second["operation"], first["operation"]);
+    assert_ne!(second["attempt"], first["attempt"]);
+    assert_eq!(second["success"], true);
+    assert_eq!(second["completed"], true);
+    assert_eq!(second["check"], "exit 0");
+    assert_eq!(second["gate"], "pass fixture");
+    assert_eq!(second["commit"], f.r.integrated.clone().unwrap());
+    assert!(svc
+        .history
+        .iter()
+        .all(|(_, data)| data["attempt"] == second["attempt"]));
+    let phases: Vec<_> = svc
+        .history
+        .iter()
+        .filter(|(kind, _)| kind == "land.phase")
+        .map(|(_, data)| data["phase"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            "preflight",
+            "merge",
+            "check",
+            "gate",
+            "push",
+            "install",
+            "close"
+        ]
+    );
 }
