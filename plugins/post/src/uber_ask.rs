@@ -101,7 +101,7 @@ async fn publish(js: &jetstream::Context, host: &str, a: &OpenAsk, action: &Acti
     headers.insert(h::SENT_MS, now_ms().to_string().as_str());
     headers.insert(h::KIND, kind.as_str());
     let subject = inbox_subject(&to.host, &to.pane, host);
-    let sent = match js.publish_with_headers(subject, headers, json.into()).await {
+    let sent = match crate::history::mail(js, subject, headers, json).await {
         Ok(ack) => ack.await.map(drop).map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
     };

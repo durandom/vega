@@ -31,3 +31,10 @@ One-time registry TTL migration: `--create registry-ttl` grants the admin only
 `STREAM.UPDATE.KV_VEGA_REGISTRY`. Run `vega post provision registry --ttl`, then
 regenerate without this grant and reload even on failure. UPDATE can enable
 republishing; the broker cannot enforce TTL-only changes. Never leave it enabled.
+
+History: full hosts may publish only vega.history.<self>.>; inbox-only hosts cannot.
+The viewer can read VEGA_HISTORY via stream info/message get, never create consumers.
+`--create history` temporarily permits creating VEGA_HISTORY (`provision history`).
+`--create archive` temporarily permits updating listed inboxes (`provision <host> --archive`)
+to no age expiry and 10 GiB. Remove both grants and reload immediately afterwards.
+Reserve history's additional 10 GiB plus inboxes and other streams before provisioning.

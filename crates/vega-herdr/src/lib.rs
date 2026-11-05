@@ -952,3 +952,5 @@ mod tests {
         assert_eq!(cell("plain"), "plain");
     }
 }
+
+pub mod history;

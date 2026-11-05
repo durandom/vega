@@ -241,6 +241,8 @@ mod tests {
                     "VEGA_TEST_PARENT",
                     serde_json::to_string(&expected).unwrap(),
                 );
+                let history_root = vega_herdr::history::root().unwrap();
+                let history_before = vega_herdr::history::pending(&history_root).unwrap();
                 let result = spawn_inner(
                     "fix",
                     kind,
@@ -258,6 +260,34 @@ mod tests {
                     assert_eq!(result.unwrap_err().code, "timeout");
                 } else {
                     assert_eq!(result.unwrap(), "w1:p1");
+                }
+                let history_after = vega_herdr::history::pending(&history_root).unwrap();
+                let added: Vec<_> = history_after
+                    .iter()
+                    .filter(|p| !history_before.contains(p))
+                    .collect();
+                assert_eq!(added.len(), 1, "one spawn event per startup attempt");
+                let event: Value =
+                    serde_json::from_slice(&std::fs::read(added[0]).unwrap()).unwrap();
+                assert_eq!(event["kind"], "spawn");
+                assert_eq!(event["data"]["model"], "chosen-model");
+                assert_eq!(event["data"]["tier"], "budget");
+                assert_eq!(
+                    event["data"]["brief"],
+                    serde_json::json!((!no_parent).then_some("original task"))
+                );
+                if !no_parent {
+                    crate::send("fix", "complete mux send text", true).unwrap();
+                    let files = vega_herdr::history::pending(&history_root).unwrap();
+                    let added: Vec<_> = files
+                        .iter()
+                        .filter(|p| !history_after.contains(p))
+                        .collect();
+                    assert_eq!(added.len(), 1);
+                    let event: Value =
+                        serde_json::from_slice(&std::fs::read(added[0]).unwrap()).unwrap();
+                    assert_eq!(event["kind"], "mux.send");
+                    assert_eq!(event["data"]["body"], "complete mux send text");
                 }
                 let mut r = find("fix", spawn_records()).unwrap();
                 assert_eq!(r.session.as_deref(), Some("saved-session"));

@@ -78,6 +78,10 @@ fn run(home: &Path, args: &[&str], success: bool) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(out.status.success(), success, "{args:?}: {text}");
+    assert!(
+        !home.join("state/vega/history-outbox").exists(),
+        "inbox-only hosts must not enqueue history"
+    );
     text
 }
 
@@ -101,6 +105,8 @@ fn local_panes_and_local_uac_claims_need_no_broker() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
     fixture(home);
+    // Inbox-only capture remains excluded even after successful local mail.
+    assert!(!home.join("state/vega/history-outbox").exists());
     claim(
         home,
         "github.com/test/demo",

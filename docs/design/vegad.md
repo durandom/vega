@@ -822,3 +822,9 @@ Interrupted startup replays the saved plan; rollback restores original bytes
 while writers stay stopped. Historical bd backups remain untouched. The UAC
 coordinates preview, audit, deploy, verify and rollback: see
 [the operator runbook](project-registry-cutover.md#operator-runbook-146).
+
+## Central event history
+
+A dedicated worker publishes spawn/mux/mail and lineage events to VEGA_HISTORY through
+a bounded transient outbox. Live delivery never reads it. Inbox retention migration,
+permissions, capacity and recovery limits: [history](history.md).

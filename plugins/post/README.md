@@ -73,3 +73,7 @@ projection (plain `verify` is the flag-day check). Identity subcommands load
 `vegad.env`; a non-empty process `VEGA_POST_HOST` wins over the file and selects
 that host's relay lock and identity state. Otherwise the host matches the pinned
 vegad host. See [host precedence](../../docs/concepts.md).
+
+Central history capture and the explicit archive migration are documented in
+[history](../../docs/design/history.md). Full hosts publish through vegad;
+inbox-only hosts are excluded.

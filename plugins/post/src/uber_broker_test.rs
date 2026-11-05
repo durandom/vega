@@ -31,6 +31,28 @@ fn count_note(_: &str, _: &str, _: &str) {
 
 #[test]
 fn answers_are_verified_once_and_acknowledged_to_the_uber() {
+    // History capture is a real side effect of acknowledged mail; keep it
+    // inside this fixture rather than the developer's outbox.
+    if std::env::var_os("VEGA_UBER_HISTORY_FIXTURE").is_none() {
+        let state = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "uber_broker_test::answers_are_verified_once_and_acknowledged_to_the_uber",
+                "--nocapture",
+            ])
+            .env("VEGA_UBER_HISTORY_FIXTURE", "1")
+            .env("XDG_STATE_HOME", state.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let (admin_seed, admin) = user();
     let (proteus_seed, proteus) = user();

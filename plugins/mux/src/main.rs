@@ -990,6 +990,10 @@ fn send(target: &str, text: &str, now: bool) -> Result<(), Failure> {
     if !now && (machine().is_some() || relay) {
         match send_post(target, text) {
             Ok(pane) => {
+                vega_herdr::history::emit(
+                    "mux.send",
+                    serde_json::json!({"target":pane,"target_host":machine(),"body":text,"transport":"post","cwd":env::current_dir().ok()}),
+                );
                 println!("sent: {target} ({pane}) as mail; it gets a pointer when it is free (from its parent: also while it works)");
                 println!("help: the reply arrives as your own pointer; do not poll; --now pastes at once");
                 return Ok(());
@@ -1002,6 +1006,10 @@ fn send(target: &str, text: &str, now: bool) -> Result<(), Failure> {
         }
     }
     deliver(target, text, Footer::Peer)?;
+    vega_herdr::history::emit(
+        "mux.send",
+        serde_json::json!({"target":target,"target_host":machine(),"body":text,"transport":"herdr","cwd":env::current_dir().ok()}),
+    );
     println!("sent: {target} (pasted)");
     println!("help: the reply arrives as a new prompt in this session; do not poll");
     Ok(())
@@ -1333,6 +1341,10 @@ fn spawn_inner(
 
     // The tab is labelled with the short agent name; the task is saved per
     // pane instead (`save_task`), as the title fallback for Codex and pi.
+    let history_place = match &place {
+        Place::Worktree { branch, base } => serde_json::json!({"branch":branch,"base":base}),
+        _ => serde_json::Value::Null,
+    };
     let mut tree: Option<worktree::Opened> = None;
     let actor;
     let socket = std::env::var("SSH_AUTH_SOCK").ok();
@@ -1492,6 +1504,15 @@ fn spawn_inner(
     let started = start_agent(machine(), &pane, name, mode, || herdr(&args));
     reopen::capture(&mut lineage);
     reopen::save_best_effort(&lineage);
+    vega_herdr::history::emit(
+        "spawn",
+        serde_json::json!({
+            "pane":pane,"session":lineage.session,"parent":lineage.parent,"kind":kind,"tier":lineage.tier,
+            "model":lineage.model,"cwd":cwd,"target_host":machine(),"worktree":history_place,
+            "brief":prompt,"task":lineage.task,"started":started.is_ok(),
+            "project":if machine().is_none() { vega_herdr::project::resolve_optional(Path::new(&cwd), &vega_herdr::state::post_host()).ok().flatten().map(|p|p.id) } else { None }
+        }),
+    );
     let record = prompt.map(|text| KeptBrief {
         name: name.to_string(),
         kind: kind.to_string(),

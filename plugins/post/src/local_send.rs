@@ -130,6 +130,11 @@ pub fn deliver(
     let body = format!("{report}{footer}");
     herdr_local(&["agent", "prompt", pane, &body])?;
     vega_herdr::prompt::confirm_taken(pane, &body)?;
+    // Inbox-only hosts are explicitly excluded by the history policy.
+    vega_herdr::history::emit(
+        "mail.local",
+        serde_json::json!({"pane":pane,"from_pane":me.pane,"body":text,"thread":hv(h::THREAD),"hop":hv(h::HOP)}),
+    );
     let stale_after = done.and_then(|_| stale());
     // A brief can arrive while herdr is submitting the report. Its first
     // prompt already carries the sent time and supersession rule; follow it

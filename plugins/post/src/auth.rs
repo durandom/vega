@@ -12,9 +12,9 @@ use crate::{
     host, inbox_prefix, seed_path, stream_name, Seed, ADMIN_INBOX, ARCHIVE_MAX_BYTES, VIEWER_INBOX,
 };
 
-/// Hosts that fit orrery's `max_file_store: 8GB` at ARCHIVE_MAX_BYTES each:
+/// Hosts that fit orrery's `max_file_store: 100GB` at ARCHIVE_MAX_BYTES each:
 /// every host stream reserves its `max_bytes` up front.
-pub const MAX_HOSTS_8GB: usize = 8;
+pub const MAX_HOSTS_100GB: usize = 9;
 
 /// Creates the seed if missing (0600, never overwritten) and prints the
 /// public key. Running it again prints the same key.
@@ -278,7 +278,7 @@ pub fn render(
     o.push_str(&format!(
         "# JetStream: each VEGA_INBOX_<host> stream reserves {gib} GiB, so max_file_store must be >= {need} GiB.\n"
     ));
-    o.push_str("# Streams are created by the admin user (`vega post provision <host>...`); machine keys cannot.\n");
+    o.push_str("# VEGA_HISTORY reserves another 10 GiB; leave space for registry/catalog too.\n# Streams are created by the admin user (`vega post provision <host>...`); machine keys cannot.\n");
     o.push_str("authorization {\n  users: [\n");
     if let Some(a) = admin {
         o.push_str(&render_admin(a, entries, create));
@@ -325,7 +325,7 @@ pub fn render(
             (
                 String::new(),
                 format!(
-                    "\n          \"vega.inbox.*.*.{h}\",\n          \"vega.cmd.*.*.{h}\",\n          \"$KV.VEGA_REGISTRY.{h}.>\",\n          \"$JS.API.STREAM.INFO.KV_VEGA_REGISTRY\",\n          \"$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.>\",{}",
+                    "\n          \"vega.history.{h}.>\",\n          \"vega.inbox.*.*.{h}\",\n          \"vega.cmd.*.*.{h}\",\n          \"$KV.VEGA_REGISTRY.{h}.>\",\n          \"$JS.API.STREAM.INFO.KV_VEGA_REGISTRY\",\n          \"$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.>\",{}",
                     catalog_grants(h, lanista_writer)
                 ),
                 // Serves quarantined replies to itself; answers them via
@@ -384,6 +384,10 @@ fn catalog_grants(host: &str, writer: Option<&str>) -> String {
 /// The provisioner preserves every other raw config field and checks the diff.
 fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     let mut allow = Vec::new();
+    allow.push("\"$JS.API.STREAM.INFO.VEGA_HISTORY\"".to_string());
+    if create.iter().any(|c| c == "history") {
+        allow.push("\"$JS.API.STREAM.CREATE.VEGA_HISTORY\"".to_string());
+    }
     // The registry bucket (vegad M4): the admin creates it once, with
     // `--create registry`, like a host stream.
     if create.iter().any(|c| c == "registry") {
@@ -405,6 +409,9 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     allow.push(format!("\"{}\"", crate::catalog::info_subject()));
     for e in entries {
         let s = stream_name(&e.host);
+        if create.iter().any(|c| c == "archive") {
+            allow.push(format!("\"$JS.API.STREAM.UPDATE.{s}\""));
+        }
         if create.contains(&e.host) {
             allow.push(format!("\"$JS.API.STREAM.CREATE.{s}\""));
         }
@@ -436,6 +443,9 @@ fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     if create.iter().any(|c| c == "registry-ttl") {
         note.push_str("    # TEMPORARY: may UPDATE KV_VEGA_REGISTRY (including republishing).\n    # Run provision registry --ttl, then remove --create registry-ttl and reload.\n");
     }
+    if create.iter().any(|c| c == "archive") {
+        note.push_str("    # TEMPORARY: may UPDATE inbox streams; run provision <host> --archive, then remove --create archive and reload.\n");
+    }
     format!(
         r#"{note}    {{
       nkey: {key}
@@ -463,6 +473,8 @@ fn render_viewer(key: &str, entries: &[Entry]) -> String {
     let mut allow = vec![
         "\"$JS.API.STREAM.LIST\"".to_string(),
         "\"$JS.API.STREAM.NAMES\"".to_string(),
+        "\"$JS.API.STREAM.INFO.VEGA_HISTORY\"".to_string(),
+        "\"$JS.API.STREAM.MSG.GET.VEGA_HISTORY\"".to_string(),
     ];
     for e in entries {
         let s = stream_name(&e.host);
@@ -615,7 +627,7 @@ mod tests {
         let out = render(&e, Some(&key()), &[], &[], None, &[], &[], &[], None);
         assert!(out.contains("\"vega.inbox.*.*.proteus\""));
         assert!(out.contains("\"$JS.ACK.VEGA_INBOX_deimos.>\""));
-        assert!(out.contains("max_file_store must be >= 2 GiB"));
+        assert!(out.contains("max_file_store must be >= 20 GiB"));
         assert!(out.contains("# admin"));
         // Steady state: the admin creates nothing.
         assert!(!out.contains("STREAM.CREATE"));
@@ -815,5 +827,52 @@ mod tests {
             None,
         );
         assert!(!full.contains("proteus.theme"));
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    #[test]
+    fn history_and_archive_grants_are_narrow_and_explicit() {
+        let entries = [
+            Entry {
+                host: "proteus".into(),
+                key: nkeys::KeyPair::new_user().public_key(),
+            },
+            Entry {
+                host: "deimos".into(),
+                key: nkeys::KeyPair::new_user().public_key(),
+            },
+        ];
+        let key = nkeys::KeyPair::new_user().public_key();
+        let hosts = render(
+            &entries,
+            None,
+            &[],
+            &["deimos".into()],
+            None,
+            &[],
+            &[],
+            &[],
+            None,
+        );
+        assert!(hosts.contains("\"vega.history.proteus.>\""));
+        assert!(!hosts.contains("vega.history.deimos"));
+        assert!(!hosts.contains("STREAM.INFO.VEGA_HISTORY"));
+        assert!(!hosts.contains("STREAM.MSG.GET.VEGA_HISTORY"));
+        for grants in [vec![], vec!["history".into()], vec!["archive".into()]] {
+            let admin = render_admin(&key, &entries, &grants);
+            assert_eq!(
+                admin.contains("STREAM.CREATE.VEGA_HISTORY"),
+                grants.contains(&"history".into())
+            );
+            assert_eq!(
+                admin.contains("STREAM.UPDATE.VEGA_INBOX_proteus"),
+                grants.contains(&"archive".into())
+            );
+            assert!(!admin.contains("STREAM.UPDATE.VEGA_HISTORY"));
+            assert!(!admin.contains("STREAM.MSG.GET"));
+        }
     }
 }

@@ -47,6 +47,16 @@ fn send(home: &Path, url: &str, args: &[&str]) -> (bool, String) {
 
 fn post(home: &Path, url: &str, command: &str, args: &[&str]) -> (bool, String) {
     let bin = home.join("bin");
+    let receipts = || {
+        let mut files = Vec::new();
+        if let Ok(hosts) = fs::read_dir(home.join("state/vega/history-outbox")) {
+            for host in hosts.flatten() {
+                files.extend(vega_herdr::history::pending(&host.path()).unwrap());
+            }
+        }
+        files
+    };
+    let before = receipts();
     let out = Command::new(env!("CARGO_BIN_EXE_vega-post"))
         .arg(command)
         .args(args)
@@ -64,6 +74,22 @@ fn post(home: &Path, url: &str, command: &str, args: &[&str]) -> (bool, String) 
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    if command == "send" {
+        let after = receipts();
+        let added: Vec<_> = after.iter().filter(|p| !before.contains(p)).collect();
+        assert_eq!(
+            added.len(),
+            usize::from(out.status.success()),
+            "one history event only after acknowledged send: {text}"
+        );
+        if let Some(path) = added.first() {
+            let event: serde_json::Value =
+                serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+            assert_eq!(event["kind"], "mail.sent");
+            assert!(event["data"]["body"].is_string());
+            assert!(event["data"]["headers"]["Vega-Thread"].is_array());
+        }
+    }
     (out.status.success(), text)
 }
 
