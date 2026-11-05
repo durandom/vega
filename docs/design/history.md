@@ -18,6 +18,11 @@ uses quarantine and explicit pair grants; no additional mail rights are granted.
 A full host receiving granted quarantine mail
 can record its acknowledged inbox publish under its own history subject.
 
+The 10 GiB history capacity is shared, with no per-host quota. Any host key can
+fill it using its own subjects; `discard=new` then rejects history from every
+host until an operator expands capacity or otherwise intervenes. Subject ACLs
+prevent cross-host publication, not this shared-capacity denial of service.
+
 The viewer principal may read history via stream info and `STREAM.MSG.GET`, using
 `_INBOX_viewer` as its reply prefix. No consumer creation is granted: that could
 create push consumers publishing past ACLs. The provisioning admin can inspect
