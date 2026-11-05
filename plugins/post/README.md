@@ -84,3 +84,8 @@ Central history capture and the explicit archive migration are documented in
 publish their own history through vegad; mail restrictions remain unchanged. When OTLP is enabled,
 vegad also reports its inbox stream capacity every five minutes. VEGA_HISTORY capacity requires a
 separate stream-info grant, which generated host permissions do not include.
+
+`vega history status` inspects local PubAck evidence without privileged keys.
+The separate `vega history read/export` plugin uses a viewer seed for analysis.
+Optional metadata-only OTLP logs are off by default; configure `vega/otlp.toml`
+and restart vegad to opt in (the history design specifies the collector allowlist).

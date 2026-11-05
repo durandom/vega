@@ -30,7 +30,7 @@ the current reference. Some describe proposals, research or one-time cutovers; c
 | [vega-mux-battletest.md](design/vega-mux-battletest.md) | Field test of vega mux with Codex and pi |
 | [vega-mux-broker-spike.md](design/vega-mux-broker-spike.md) | Spike: NATS JetStream as the post office |
 | [vegad.md](design/vegad.md) | The per-host daemon: delivery, wake-ups, registry, local mode, security |
-| [history.md](design/history.md) | Central event history: VEGA_HISTORY, bounded outbox and inbox archive migration |
+| [history.md](design/history.md) | Central event history: capture, viewer reader/JSONL export, local status and metadata OTLP |
 | [pane-control.md](design/pane-control.md) | Steering TUI panes through herdr: dialogs, answers, folder trust |
 | [mux-next.md](design/mux-next.md) | `vega mux next`: focus the agent waiting longest, on any host |
 | [uac-role.md](design/uac-role.md) | The UAC coordinator guide (`vega skills uac`) |

@@ -201,6 +201,7 @@ pub fn spawn() {
                 return;
             }
         };
+        let otlp = crate::history_otlp::Sink::configured();
         let mut client = None;
         let mut last_failure = None;
         loop {
@@ -230,9 +231,10 @@ pub fn spawn() {
                     );
                 }
                 let js = async_nats::jetstream::new(client.as_ref().unwrap().clone());
-                drain(&js, &dir, &host).await
+                drain_to(&js, &dir, &host, otlp.as_ref()).await
             });
             if let Err(e) = result {
+                save_status(&dir, None, Some(&e));
                 if last_failure.as_ref() != Some(&e) {
                     crate::log(&format!("history: publish deferred: {e}"));
                     last_failure = Some(e);
@@ -246,11 +248,27 @@ pub fn spawn() {
     });
 }
 
+// A diagnostic file failure must neither block publication nor flood vegad logs.
+fn save_status(dir: &Path, sequence: Option<u64>, error: Option<&str>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    match outbox::publish_status(dir, sequence, error) {
+        Err(error) => {
+            if !FAILED.swap(true, Ordering::Relaxed) {
+                crate::log(&format!("history: status persistence failed: {error}"));
+            }
+        }
+        Ok(()) => {
+            FAILED.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
 async fn publish(
     js: &async_nats::jetstream::Context,
     host: &str,
     event: &Value,
-) -> Result<(), String> {
+) -> Result<Option<u64>, String> {
     let id = event["id"]
         .as_str()
         .filter(|s| s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit()))
@@ -270,17 +288,27 @@ async fn publish(
         .await
         .map_err(|e| e.to_string())?;
     match ack.await {
-        Ok(_) => Ok(()),
+        Ok(ack) => Ok(Some(ack.sequence)),
         Err(e)
             if e.kind() == async_nats::jetstream::context::PublishErrorKind::WrongLastSequence =>
         {
-            Ok(())
+            Ok(None)
         }
         Err(e) => Err(e.to_string()),
     }
 }
 
+#[cfg(test)]
 async fn drain(js: &async_nats::jetstream::Context, dir: &Path, host: &str) -> Result<(), String> {
+    drain_to(js, dir, host, None).await
+}
+
+async fn drain_to(
+    js: &async_nats::jetstream::Context,
+    dir: &Path,
+    host: &str,
+    otlp: Option<&crate::history_otlp::Sink>,
+) -> Result<(), String> {
     let mut published = 0;
     for path in outbox::pending(dir).map_err(|e| e.to_string())? {
         let event = match read_receipt(&path, host) {
@@ -295,10 +323,14 @@ async fn drain(js: &async_nats::jetstream::Context, dir: &Path, host: &str) -> R
         if published == 32 {
             break;
         }
-        tokio::time::timeout(Duration::from_secs(5), publish(js, host, &event))
+        let sequence = tokio::time::timeout(Duration::from_secs(5), publish(js, host, &event))
             .await
             .map_err(|_| "publish timeout".to_string())??;
+        save_status(dir, sequence, None);
         std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        if let (Some(_), Some(sink)) = (sequence, otlp) {
+            sink.submit(&event);
+        }
         published += 1;
     }
     Ok(())
@@ -530,6 +562,105 @@ mod tests {
     }
 
     #[test]
+    fn viewer_reader_filters_snapshot_without_host_or_admin_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let (admin_seed, admin) = user();
+        let (host_seed, host) = user();
+        let (viewer_seed, viewer) = user();
+        let authz = auth::render(
+            &[Entry {
+                host: "proteus".into(),
+                key: host,
+            }],
+            Some(&admin),
+            &["history".into()],
+            &[],
+            Some(&viewer),
+            &[],
+            &[],
+            &[],
+            None,
+        );
+        let (_server, url) = start(dir.path(), &authz);
+        crate::runtime().unwrap().block_on(async {
+            let admin = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+            async_nats::jetstream::new(admin.clone())
+                .create_stream(config())
+                .await
+                .unwrap();
+            let host = connect(&url, &host_seed, "_INBOX_proteus").await;
+            let js = async_nats::jetstream::new(host.clone());
+            for (project, bead, ts) in [
+                ("p", "b", 10),
+                ("other", "b", 20),
+                ("p", "other", 30),
+                ("p", "b", 40),
+            ] {
+                let mut e = outbox::event(
+                    "proteus",
+                    "mail.sent",
+                    json!({"project":project, "bead":bead, "body":"complete body"}),
+                );
+                e["ts"] = json!(ts);
+                publish(&js, "proteus", &e).await.unwrap();
+            }
+            let key = dir.path().join("viewer.nk");
+            std::fs::write(&key, viewer_seed).unwrap();
+            let viewer = vega_history::connect(&url, &key).await.unwrap();
+            let filter = vega_history::Filter {
+                project: Some("p".into()),
+                bead: Some("b".into()),
+                host: Some("proteus".into()),
+                since: Some(10),
+                ..Default::default()
+            };
+            let mut rows = vec![];
+            let result = vega_history::scan(viewer.clone(), &filter, |seq, e| {
+                rows.push((seq, e));
+                Ok(())
+            })
+            .await
+            .unwrap();
+            assert_eq!(result, (2, 4));
+            assert_eq!(rows.iter().map(|(seq, _)| *seq).collect::<Vec<_>>(), [1, 4]);
+            assert_eq!(rows[1].1["data"]["body"], "complete body");
+            let filter = vega_history::Filter {
+                after: 1,
+                since: Some(40),
+                ..filter
+            };
+            assert_eq!(
+                vega_history::scan(viewer.clone(), &filter, |seq, _| {
+                    assert_eq!(seq, 4);
+                    Ok(())
+                })
+                .await
+                .unwrap(),
+                (1, 4)
+            );
+            let empty = vega_history::Filter {
+                host: Some("absent".into()),
+                ..Default::default()
+            };
+            assert_eq!(
+                vega_history::scan(viewer.clone(), &empty, |_, _| panic!("no match"))
+                    .await
+                    .unwrap(),
+                (0, 4)
+            );
+            // Both non-viewer principals fail the exact reader path.
+            for client in [host, admin] {
+                assert!(
+                    vega_history::scan(client, &Default::default(), |_, _| Ok(()))
+                        .await
+                        .is_err()
+                );
+            }
+            assert!(denied(&viewer, "$JS.API.CONSUMER.CREATE.VEGA_HISTORY", "{}").await);
+        });
+    }
+
+    #[test]
     fn incompatible_history_is_not_reported_ready() {
         validate_config(&config()).unwrap();
         let mut old = config();
@@ -663,6 +794,10 @@ mod tests {
             std::fs::write(&invalid, b"{}").unwrap();
             drain(&host_js, &spool, "proteus").await.unwrap();
             assert!(outbox::pending(&spool).unwrap().is_empty());
+            let status = outbox::read_status(&spool).unwrap();
+            assert_eq!(status.last_acked_seq, Some(1));
+            assert!(status.last_acked_ms.is_some());
+            assert!(status.last_error.is_none());
             assert!(!corrupt.exists());
             assert!(!unreadable.exists());
             assert!(!invalid.exists());
@@ -683,14 +818,17 @@ mod tests {
             drain(&host_js, &spool, "proteus").await.unwrap();
             assert_eq!(
                 std::fs::read_dir(&spool).unwrap().count(),
-                quarantined.len() + 1
-            ); // lock only
+                quarantined.len() + 2
+            ); // lock and publish.state
                // Simulate crash after broker ack but before local unlink, beyond
                // the server's duplicate window. Subject CAS still keeps one event.
             tokio::time::sleep(Duration::from_millis(150)).await;
             outbox::enqueue(&spool, &e).unwrap();
             drain(&host_js, &spool, "proteus").await.unwrap();
             assert_eq!(stream.info().await.unwrap().state.messages, 1);
+            let retried = outbox::read_status(&spool).unwrap();
+            assert_eq!(retried.last_acked_seq, Some(1));
+            assert_eq!(retried.last_acked_ms, status.last_acked_ms);
             let viewer = connect(&url, &viewer_seed, crate::VIEWER_INBOX).await;
             let read = async_nats::jetstream::new(viewer.clone())
                 .get_stream(STREAM)
@@ -731,6 +869,8 @@ mod tests {
             let deimos = connect(&url, &denied_seed, "_INBOX_deimos").await;
             let private = outbox::event("deimos", "mail.local", json!({"body":"local history"}));
             outbox::enqueue(&spool, &private).unwrap();
+            // Local diagnostic evidence must never hold acknowledged events.
+            std::fs::write(spool.join("publish.state"), b"corrupt status").unwrap();
             drain(&async_nats::jetstream::new(deimos), &spool, "deimos")
                 .await
                 .unwrap();

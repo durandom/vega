@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 113 · 2026-11-05
+
+- feature: `vega history read/export` filters central events by project, bead, host
+  and timestamp using a separate viewer seed; export emits full JSONL. `vega history status`
+  shows this host's last PubAck, pending count and publication error without
+  privileged keys. See [history](docs/design/history.md).
+- optional: metadata-only OTLP history logs use the shared `vega/otlp.toml` config;
+  missing/disabled is off. Enable explicitly and restart vegad to send the closed
+  metadata allowlist to the orrery collector's `/v1/logs`; bodies are excluded.
+
 ## 112 · 2026-11-05
 
 - optional: vegad exports JetStream inbox capacity gauges through OTLP/HTTP; VEGA_HISTORY gauges
