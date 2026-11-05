@@ -129,7 +129,12 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             match listener.accept() {
-                Ok((socket, _)) => return socket,
+                Ok((socket, _)) => {
+                    // Accepted sockets inherit O_NONBLOCK on macOS; only the
+                    // listener uses polling. Request reads must wait for bytes.
+                    socket.set_nonblocking(false).unwrap();
+                    return socket;
+                }
                 Err(e)
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         && std::time::Instant::now() < deadline =>
@@ -340,6 +345,7 @@ mod tests {
                 Err(e) => panic!("OTLP test listener: {e}"),
             }
         };
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(std::time::Duration::from_secs(2)))
             .unwrap();
