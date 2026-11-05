@@ -3696,15 +3696,19 @@ fn log_view(
             })
             .await
             .map_err(broker_err)?;
-        let empty = consumer.cached_info().num_pending == 0;
+        // Only server metadata establishes an empty filtered archive.
+        let scope = describe_scope(&host, pane, from, since.is_some());
+        if consumer.cached_info().num_pending == 0 {
+            println!("log: 0 messages {scope}");
+            return Ok(());
+        }
         let mut msgs = consumer.messages().await.map_err(broker_err)?;
 
         // Keep the newest `limit` rows; count all matches.
         let mut rows: VecDeque<LogRow> = VecDeque::new();
         let mut total = 0usize;
-        // Empty is established by the server's filtered consumer metadata,
-        // never by a quiet socket. Cold wildcard scans may take seconds.
-        while !empty {
+        // Cold wildcard scans may take seconds before the first message.
+        loop {
             let wait = if total == 0 { LOG_FIRST_WAIT } else { LOG_IDLE_WAIT };
             let m = next_log_message(msgs.next(), total, wait).await?;
             let info = m.info().map_err(broker_err)?;
@@ -3742,7 +3746,6 @@ fn log_view(
             }
         }
 
-        let scope = describe_scope(&host, pane, from, since.is_some());
         if rows.is_empty() {
             println!("log: 0 messages {scope}");
             return Ok(());
