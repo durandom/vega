@@ -199,6 +199,12 @@ help: 2 older messages not shown; raise --limit or narrow with --pane, --from, -
 help: text truncated at 80 chars; add --full
 ```
 
+A zero pending count in the newly created filtered consumer establishes an empty
+result. Otherwise `log` waits up to 10 seconds for the first message (cold wildcard
+scans can be slow) and 5 seconds between messages. A timeout, stream end before
+completion, or consumer error returns `broker_error`, never a successful empty
+or partial list. Completion follows the delivered message's pending count.
+
 The archive is per receiving host: `log` shows mail *to* this machine. Mail this machine sent to others lives in their streams and needs their key.
 
 ### Checks (local broker, own pane, messages from `nats pub` with vega headers)
