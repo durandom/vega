@@ -29,7 +29,7 @@ endpoint = "http://otel.example:4318"
 The endpoint is an OTLP/HTTP base URL. The metrics request appends `/v1/metrics`; stream identity
 and host are metric attributes. A missing file or `enabled = false` disables exporters. A denied
 or missing VEGA_HISTORY stream produces no history gauges and is logged once; the own inbox gauges
-continue independently. The .252 history metadata exporter will use this shared config too.
+continue independently. The .252 history metadata exporter uses this shared config too.
 
 ## Storage and authority
 
@@ -232,8 +232,8 @@ Snapshot sequence is a cursor, not a count of timestamp-ordered events.
 
 ## Optional metadata-only OTLP logs: orrery collector contract
 
-The history exporter uses the shared `$XDG_CONFIG_HOME/vega/otlp.toml`
-(`~/.config/vega/otlp.toml`); the capacity exporter is specified separately in vega-lhc.253.
+The history exporter and capacity gauges use the shared `$XDG_CONFIG_HOME/vega/otlp.toml`
+(`~/.config/vega/otlp.toml`); capacity gauges are described above.
 A missing file or `enabled = false` disables export.
 To opt in, configure an OTLP/HTTP **base** endpoint and restart vegad:
 

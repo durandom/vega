@@ -7,7 +7,6 @@ description = "Agent mail over a NATS JetStream broker"
 publish = false
 
 [dependencies]
-ureq = { version = "2", features = ["json"] }
 vega-notify = { path = "../notify" }
 vega-build = { path = "../../crates/vega-build" }
 async-nats = "0.50"
