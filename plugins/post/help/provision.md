@@ -2,7 +2,7 @@ Connects with the admin seed: VEGA_NATS_NKEY, else
 $XDG_CONFIG_HOME/vega/nats-admin.nk (`vega post keygen --admin`).
 Existing streams are checked; lists push consumers (vega never makes any).
 `registry` creates vegad's KV bucket; `lanista` creates the catalog object store.
-Creation needs `auth-config --create <host|registry|lanista>` temporarily.
+Creation needs `auth-config --create <host|registry|lanista|history>` temporarily.
 
 `provision registry --ttl` updates only the registry: reads the existing registry config,
 preserves every other field verbatim, enables allow_msg_ttl and checks the result.

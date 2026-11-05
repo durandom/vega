@@ -370,18 +370,21 @@ fn catalog_grants(host: &str, writer: Option<&str>) -> String {
         .collect()
 }
 
-/// The admin may only provision: read stream info and list consumers of the
-/// listed hosts, and create the streams of `create` hosts. Create is the
-/// dangerous right: a not-yet-existing stream can be created as a mirror of
-/// another host's stream that republishes every message to the admin's
-/// reply prefix (tested). So create rights exist only while a host is being
-/// added. Creating an existing name with another config fails (10058), so
-/// a provisioned stream cannot be rewritten. No delete, purge, update,
-/// message get, consumer create, fetch, ack or `vega.inbox` subscribe.
-/// EXCEPTION: `--create registry-ttl` temporarily grants UPDATE on the registry
-/// alone. UPDATE can enable republishing too; the broker cannot restrict fields.
-/// Use only for `provision registry --ttl`, then remove the grant immediately.
-/// The provisioner preserves every other raw config field and checks the diff.
+/// The admin's steady-state rights are stream info for listed inboxes,
+/// KV_VEGA_REGISTRY, OBJ_VEGA_LANISTA and VEGA_HISTORY, plus inbox consumer lists.
+/// Temporary `--create <host|registry|lanista|history>` grants CREATE for the
+/// named inbox, registry, catalog or VEGA_HISTORY stream during provisioning.
+/// Create is dangerous: a missing stream can mirror another host's stream and
+/// republish every message to the admin's reply prefix (tested). Creating an
+/// existing name with another config fails (10058); creation is not an update.
+/// Temporary UPDATE exceptions: `--create registry-ttl` grants UPDATE on
+/// KV_VEGA_REGISTRY for `provision registry --ttl`; `--create archive` grants
+/// UPDATE on listed inboxes for `provision <host> --archive`. These provisioners
+/// preserve all raw fields except their explicit TTL or age/size changes.
+/// UPDATE can also enable republishing; the broker cannot restrict fields.
+/// Remove every temporary grant and reload immediately after provisioning.
+/// No steady-state UPDATE, delete, purge, message get, consumer create, fetch,
+/// ack or `vega.inbox` subscribe; stream info never grants event-body reads.
 fn render_admin(key: &str, entries: &[Entry], create: &[String]) -> String {
     let mut allow = Vec::new();
     allow.push("\"$JS.API.STREAM.INFO.VEGA_HISTORY\"".to_string());
