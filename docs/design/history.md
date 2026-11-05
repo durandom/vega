@@ -232,8 +232,9 @@ Snapshot sequence is a cursor, not a count of timestamp-ordered events.
 
 ## Optional metadata-only OTLP logs: orrery collector contract
 
-Both estate exporters use the shared `$XDG_CONFIG_HOME/vega/otlp.toml`
-(`~/.config/vega/otlp.toml`). A missing file or `enabled = false` disables export.
+The history exporter uses the shared `$XDG_CONFIG_HOME/vega/otlp.toml`
+(`~/.config/vega/otlp.toml`); the capacity exporter is specified separately in vega-lhc.253.
+A missing file or `enabled = false` disables export.
 To opt in, configure an OTLP/HTTP **base** endpoint and restart vegad:
 
 ```toml
@@ -271,7 +272,7 @@ allowlist; no arbitrary event data, header or attribute copying is permitted:
 | Attributes | `vega.project`, `vega.bead`, `vega.pane`, `vega.session` | strings, omitted when unknown |
 
 Known kinds are `spawn`, `mux.send`, `mail.sent`, `mail.local`,
-`lineage.start`, `lineage.change`, `lineage.end`, `land` and `deploy`. Unknown kinds
+`lineage.start`, `lineage.change`, `lineage.end`, `land.phase`, `land` and `deploy`. Unknown kinds
 or schemas are skipped instead of copying arbitrary text. The OTLP body is only
 the constant kind, never an event body. Mail bodies/headers, briefs, mux text,
 lineage values, cwd paths, transcripts, raw JSON and arbitrary `data` fields are
