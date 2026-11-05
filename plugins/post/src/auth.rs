@@ -12,9 +12,9 @@ use crate::{
     host, inbox_prefix, seed_path, stream_name, Seed, ADMIN_INBOX, ARCHIVE_MAX_BYTES, VIEWER_INBOX,
 };
 
-/// Hosts that fit orrery's `max_file_store: 100GB` at ARCHIVE_MAX_BYTES each:
-/// every host stream reserves its `max_bytes` up front.
-pub const MAX_HOSTS_100GB: usize = 9;
+/// Eight 10 GiB inboxes plus 10 GiB history reserve 90 GiB in a 100 GiB store,
+/// leaving 10 GiB for registry/catalog and headroom. Reservations are up front.
+pub const MAX_HOSTS_100GB: usize = 8;
 
 /// Creates the seed if missing (0600, never overwritten) and prints the
 /// public key. Running it again prints the same key.

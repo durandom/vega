@@ -361,6 +361,121 @@ mod tests {
     use crate::registry_read_test::{connect, denied, start, user};
 
     #[test]
+    fn failed_herdr_snapshot_preserves_live_registry_and_lineage() {
+        use std::os::unix::fs::PermissionsExt;
+        const FIXTURE: &str = "VEGA_HISTORY_SNAPSHOT_FIXTURE";
+        if std::env::var_os(FIXTURE).is_none() {
+            let root = tempfile::tempdir().unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "history::tests::failed_herdr_snapshot_preserves_live_registry_and_lineage",
+                    "--nocapture",
+                ])
+                .env(FIXTURE, "1")
+                .env("HOME", root.path())
+                .env("XDG_STATE_HOME", root.path().join("state"))
+                .env("XDG_CONFIG_HOME", root.path().join("config"))
+                .env("VEGA_POST_HOST", "proteus")
+                .env("VEGA_POST_INBOX_ONLY", "")
+                .current_dir(root.path())
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                stdout.contains("registry: off (fixture snapshot failure); local state only"),
+                "{stdout}"
+            );
+            return;
+        }
+        let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let herdr = bin.join("herdr");
+        std::fs::write(&herdr, include_str!("../tests/fixtures/history-herdr.sh")).unwrap();
+        std::fs::set_permissions(&herdr, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        let cutover = crate::service::state_dir()
+            .unwrap()
+            .join("identity-cutover");
+        std::fs::create_dir_all(&cutover).unwrap();
+        let plan = json!({"schema":2,"host":"proteus","inbox_only":false,"mappings":[],"original":{},"writes":{},"remove":[],"registry":{"host":"proteus","backup":{},"projection":{}},"registry_reads":[],"owned":{}});
+        std::fs::write(
+            cutover.join("approved.json"),
+            json!({"schema":2,"hosts":[plan],"grants":{}}).to_string(),
+        )
+        .unwrap();
+
+        let (admin_seed, admin) = user();
+        let (host_seed, host) = user();
+        let entries = [Entry {
+            host: "proteus".into(),
+            key: host,
+        }];
+        let authz = auth::render(
+            &entries,
+            Some(&admin),
+            &["registry".into()],
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            None,
+        );
+        let (_server, url) = start(&root, &authz);
+        // Intercept the real live-loop producer; persist every submitted
+        // snapshot just as the worker does, without spawning unrelated jobs.
+        let (tx, rx) = mpsc::sync_channel(64);
+        assert!(TX.set(tx).is_ok());
+        crate::runtime().unwrap().block_on(async {
+            let admin = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+            async_nats::jetstream::new(admin).create_key_value(async_nats::jetstream::kv::Config {
+                bucket: vega_registry::BUCKET.into(), ..Default::default()
+            }).await.unwrap();
+            let client = connect(&url, &host_seed, "_INBOX_proteus").await;
+            let kv = vega_registry::bucket(&client).await.unwrap();
+            let key = vega_registry::agent_key("proteus", "w1:p1");
+            let value = json!({"schema":2,"pane":"w1:p1","name":"worker","kind":"codex","status":"working"});
+            kv.put(&key, value.to_string().into()).await.unwrap();
+            let desired = BTreeMap::from([(key.clone(), value.clone())]);
+            let spool = outbox::root().unwrap();
+            let mut history = Lineage::default();
+            history.reconcile(&spool, "proteus", desired.clone()).unwrap();
+            let before = outbox::pending(&spool).unwrap();
+            for failed in ["agent", "workspace"] {
+                std::env::set_var("VEGA_SNAPSHOT_FAIL", failed);
+                let mut registry = crate::Registry {
+                    kv: Some(kv.clone()), last: desired.clone(),
+                    janitor_next: Some(std::time::Instant::now() + Duration::from_secs(3600)),
+                    ..Default::default()
+                };
+                registry.run(&client, "proteus", &mut crate::Supervisor::default()).await;
+                for work in rx.try_iter() {
+                    if let Work::Lineage(values) = work {
+                        history.reconcile(&spool, "proteus", values).unwrap();
+                    }
+                }
+                assert_eq!(registry.state, "registry: off", "failed {failed} snapshot must stop reconciliation");
+                let saved = kv.get(&key).await.unwrap().expect("live agent must not be deleted");
+                assert_eq!(serde_json::from_slice::<Value>(&saved).unwrap(), value);
+                assert_eq!(outbox::pending(&spool).unwrap(), before, "failed {failed} snapshot emitted lifecycle events");
+                for path in outbox::pending(&spool).unwrap() {
+                    let event: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+                    assert_ne!(event["kind"], "lineage.end");
+                }
+            }
+        });
+    }
+
+    #[test]
     fn incompatible_history_is_not_reported_ready() {
         validate_config(&config()).unwrap();
         let mut old = config();
