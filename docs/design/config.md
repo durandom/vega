@@ -320,6 +320,7 @@ precedence; blank values fall through to the file. No endpoint is enabled by def
 | NATS (post and registry) | `VEGA_NATS_URL` | `nats.url` | `nats://nats.<tailnet>:4222` |
 | Dolt remotesapi | `VEGA_BD_REMOTE` | `bd.remote` | `http://dolt.<tailnet>:8080` |
 | Dolt SQL (creating databases) | `VEGA_BD_SQL` | `bd.sql` | `dolt.<tailnet>:3306` |
+| History viewer seed path | `VEGA_HISTORY_VIEWER_KEY` | `history.viewer-key` | `/secure/viewer.nk` |
 | Janitor embeddings | `VEGA_JANITOR_EMBED_ENDPOINT` | `janitor-embed.url` | `https://embedding.<tailnet>/v1` |
 
 Before upgrading existing hosts, save their current service addresses in these

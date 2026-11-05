@@ -3280,6 +3280,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vega-history"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "clap",
+ "nkeys",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "vega-build",
+ "vega-herdr",
+ "vega-plugin",
+]
+
+[[package]]
 name = "vega-janitor"
 version = "0.1.0"
 dependencies = [
@@ -3416,6 +3431,7 @@ dependencies = [
  "vega-build",
  "vega-ci-watch",
  "vega-herdr",
+ "vega-history",
  "vega-notify",
  "vega-onboard",
  "vega-plugin",

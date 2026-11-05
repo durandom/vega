@@ -35,6 +35,7 @@ vega-plugin = { path = "../../crates/vega-plugin" }
 vega-onboard = { path = "../onboard" }
 
 [dev-dependencies]
+vega-history = { path = "../history" }
 tempfile = "3"
 
 [build-dependencies]

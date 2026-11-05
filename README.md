@@ -30,6 +30,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | [`secrets`](plugins/secrets/) | Secrets for tools and agents: inventory, env injection, rekey |
 | [`janitor`](plugins/janitor/) | Map of every git checkout on a machine (read-only) |
 | [`orchestration`](plugins/orchestration/) | Project waits, question evidence and supervised coordination |
+| [`history`](plugins/history/) | Viewer-authenticated history read/export and local publication status |
 | [`capacity`](plugins/capacity/) | Subscription capacity from token-burn: every window, the resets ledger, token-burn's health |
 | [`lanista`](plugins/lanista/) | Install, configure and use lanista, the LLM model catalog |
 | [`skills`](plugins/skills/) | Index and loader for the plugins' agent guides |

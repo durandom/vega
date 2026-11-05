@@ -192,3 +192,71 @@ mod tests {
         assert!(pending(tmp.path()).unwrap().is_empty());
     }
 }
+
+/// Host-local evidence only. Unknown acknowledgements are never synthesized
+/// from retries rejected by the subject compare-and-set or from local receipts.
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PublishStatus {
+    pub last_acked_ms: Option<u64>,
+    pub last_acked_seq: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+pub fn read_status(dir: &Path) -> io::Result<PublishStatus> {
+    match fs::read(dir.join("publish.state")) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(PublishStatus::default()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Written only by the history publisher thread, atomically outside live loops.
+pub fn publish_status(dir: &Path, sequence: Option<u64>, error: Option<&str>) -> io::Result<()> {
+    let mut state = read_status(dir)?;
+    if let Some(seq) = sequence {
+        state.last_acked_seq = Some(seq);
+        state.last_acked_ms = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        );
+    }
+    state.last_error = error.map(str::to_owned);
+    fs::create_dir_all(dir)?;
+    let tmp = dir.join("publish.tmp");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    file.write_all(&serde_json::to_vec(&state)?)?;
+    file.sync_all()?;
+    fs::rename(tmp, dir.join("publish.state"))?;
+    File::open(dir)?.sync_all()
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    #[test]
+    fn evidence_survives_errors_and_has_no_receipt_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_status(dir.path()).unwrap().last_acked_seq.is_none());
+        publish_status(dir.path(), None, Some("broker unreachable")).unwrap();
+        assert!(read_status(dir.path()).unwrap().last_acked_seq.is_none());
+        publish_status(dir.path(), Some(7), None).unwrap();
+        let status = read_status(dir.path()).unwrap();
+        assert_eq!(status.last_acked_seq, Some(7));
+        assert!(status.last_acked_ms.is_some());
+        publish_status(dir.path(), None, Some("publish failed")).unwrap();
+        let failed = read_status(dir.path()).unwrap();
+        assert_eq!(failed.last_acked_ms, status.last_acked_ms);
+        assert_eq!(failed.last_acked_seq, Some(7));
+        assert_eq!(failed.last_error.as_deref(), Some("publish failed"));
+        assert!(pending(dir.path()).unwrap().is_empty());
+        std::fs::write(dir.path().join("publish.state"), b"bad").unwrap();
+        assert!(read_status(dir.path()).is_err());
+    }
+}

@@ -30,6 +30,7 @@ mod delivery;
 mod gather;
 mod gitsync;
 mod history;
+mod history_otlp;
 mod human;
 mod hygiene;
 mod identity;

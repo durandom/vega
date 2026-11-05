@@ -827,4 +827,7 @@ coordinates preview, audit, deploy, verify and rollback: see
 
 A dedicated worker publishes spawn/mux/mail and lineage events to VEGA_HISTORY through
 a bounded transient outbox. Live delivery never reads it. Inbox retention migration,
-permissions, capacity and recovery limits: [history](history.md).
+permissions, capacity and recovery limits: [history](history.md). Local publication
+evidence is available without privileged keys through `vega history status`.
+The optional metadata-only OTLP log sink uses shared `vega/otlp.toml` configuration
+and a separate bounded worker; missing or disabled config leaves it off.
