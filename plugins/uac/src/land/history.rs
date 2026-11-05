@@ -39,7 +39,7 @@ impl Trace {
             "phase": self.phase, "success": result.is_ok(), "duration_ms": duration,
             "check": if result.is_err() && self.phase == "check" { "not_passed" } else if r.checked { "exit 0" } else { "pending" },
             "gate": if result.is_err() && self.phase == "gate" { "not_passed" } else { &r.gate },
-            "gate_evidence": r.gate, "install": live::install_result(r),
+            "gate_evidence": r.gate, "install": install_result(r, self.phase, result),
             "renumbered": r.renumbered,
             "error": result.as_ref().err().map(|e| json!({"message":e.message,"exit":e.status}))})
     }
@@ -66,5 +66,21 @@ impl Trace {
             .unwrap_or(Value::Null);
         data["completed"] = json!(result.is_ok() && r.phase == "done");
         self.events.push(("land", data));
+    }
+}
+
+fn install_result(r: &Receipt, phase: &str, result: &Result<()>) -> String {
+    if r.policy.install.is_empty() {
+        return "not configured".into();
+    }
+    match r.install.as_str() {
+        "done" => "exit 0".into(),
+        "attested" => "completion attested by UAC (exit status unmeasured)".into(),
+        "started" => "uncertain (exit status unmeasured)".into(),
+        _ if phase == "install" && result.is_err() => match result.as_ref().unwrap_err().status {
+            Some(exit) => format!("failed: exit {exit}"),
+            None => "not completed (exit status unmeasured)".into(),
+        },
+        _ => "not run".into(),
     }
 }

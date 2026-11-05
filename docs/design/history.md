@@ -96,7 +96,9 @@ event or causal order; use timestamps and lineage chain IDs when reconstructing 
   Durations cover work in this invocation, not time waiting between resumes.
   Phases that reuse completed work may have near-zero durations. A failing check
   or gate phase is `not_passed`, with its error and actual exit code when known;
-  prior gate evidence remains separately available. Phase receipts are buffered
+  prior gate evidence remains separately available. Install evidence distinguishes
+  not run, failed with a measured exit, uncertain, measured success and UAC
+  attestation; unmeasured states never imply exit 0. Phase receipts are buffered
   until the attempt returns; a crash can lose that attempt's phase events.
   Preflight failures emit a `land` outcome with identifiers known at that point.
   Read-only `--status`, help and rejected command syntax emit no events.

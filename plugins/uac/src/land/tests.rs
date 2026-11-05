@@ -384,21 +384,41 @@ fn check_mutation_and_changed_head_never_reuse_validation() {
 fn installs_retry_real_failures_but_interrupted_install_is_uncertain() {
     let mut f = Fixture::new("no-ff");
     f.r.policy.install = vec!["false".into()];
-    assert_eq!(f.run(&mut Fake::default()).unwrap_err().status, Some(1));
+    let mut svc = Fake::default();
+    assert_eq!(f.run(&mut svc).unwrap_err().status, Some(1));
+    let failed = &svc.history.last().unwrap().1;
+    assert_eq!(failed["phase"], "install");
+    assert_eq!(failed["install"], "failed: exit 1");
+    assert_eq!(failed["error"]["exit"], 1);
+    for (_, phase) in svc.history.iter().filter(|(kind, _)| kind == "land.phase") {
+        if phase["phase"] != "install" {
+            assert_eq!(phase["install"], "not run");
+        }
+    }
     assert_eq!(f.r.install, "pending");
     let pushed = remote_head(&f.repo, &f.r.policy).unwrap();
     assert_ne!(pushed, f.r.before);
     f.r.install = "started".into();
-    assert!(f
-        .run(&mut Fake::default())
-        .unwrap_err()
-        .message
-        .contains("uncertain"));
+    svc.history.clear();
+    assert!(f.run(&mut svc).unwrap_err().message.contains("uncertain"));
+    assert_eq!(
+        svc.history.last().unwrap().1["install"],
+        "uncertain (exit status unmeasured)"
+    );
     f.r.install = "pending".into();
     f.r.policy.install = vec!["true".into()];
-    f.run(&mut Fake::default()).unwrap();
+    svc.history.clear();
+    f.run(&mut svc).unwrap();
+    assert_eq!(svc.history.last().unwrap().1["install"], "exit 0");
     assert_eq!(f.r.install, "done");
     assert_eq!(f.count_merges(), 1);
+    f.r.install = "attested".into();
+    svc.history.clear();
+    f.run(&mut svc).unwrap();
+    assert_eq!(
+        svc.history.last().unwrap().1["install"],
+        "completion attested by UAC (exit status unmeasured)"
+    );
 }
 #[test]
 fn crash_after_merge_before_receipt_is_reconciled_for_both_strategies() {
@@ -997,6 +1017,7 @@ else:
 fn history_links_failed_check_resume_and_completed_inspection() {
     let mut f = Fixture::new("no-ff");
     f.r.policy.check = vec!["sh".into(), "-c".into(), "exit 17".into()];
+    f.r.policy.install = vec!["true".into()];
     let mut svc = Fake::default();
     assert!(f.run(&mut svc).is_err());
     let first = svc.history.last().unwrap().1.clone();
@@ -1004,6 +1025,7 @@ fn history_links_failed_check_resume_and_completed_inspection() {
     assert_eq!(first["phase"], "check");
     assert_eq!(first["success"], false);
     assert_eq!(first["error"]["exit"], 17);
+    assert_eq!(first["install"], "not run");
     assert_eq!(first["bead"], f.r.bead);
     assert_eq!(first["branch"], f.r.branch);
     assert_eq!(first["conflicts"], json!([]));
