@@ -34,7 +34,7 @@ check() { # name, expected calls (space-separated), states...
 	printf '%s\n' "$@" >"$tmp/states"
 	: >"$tmp/calls"
 	rm -f "$tmp/n"
-	HOME="$tmp" VEGAD_REFRESH_WAIT=2 sh "$script" "$tmp/vega-post" 2>/dev/null
+	HOME="$tmp" VEGAD_REFRESH_WAIT=2 VEGAD_REFRESH_STEP=0.01 sh "$script" "$tmp/vega-post" 2>/dev/null
 	got=$(tr '\n' ' ' <"$tmp/calls" | sed 's/ $//')
 	if [ "$got" = "$want" ]; then echo "ok   $name"; else
 		echo "FAIL $name: want '$want', got '$got'"; fails=$((fails + 1))
