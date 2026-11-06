@@ -483,10 +483,30 @@ mod tests {
             push(&dolt_bin, &a, &other, None),
             Err(PushError::Diverged { .. })
         ));
+    }
+
+    /// A fetch failing with dolt's observed connection error is Unreachable, and the temporary
+    /// remote is removed again. A fake dolt: the real one retries a dead port for ~6 s.
+    #[test]
+    fn an_unreachable_remote_is_reported_and_the_remote_removed() {
+        let t = tempfile::tempdir().unwrap();
+        let log = t.path().join("log");
+        let dolt_bin = testsrv::fake_dolt(
+            t.path(),
+            &format!(
+                "echo \"$*\" >>'{}'\n[ \"$1\" = fetch ] || exit 0\necho \"could not access dolt url 'http://127.0.0.1:1/X': rpc error: code = Unavailable desc = connection error\" >&2\nexit 1",
+                log.display()
+            ),
+        );
         assert!(matches!(
-            push(&dolt_bin, &a, "http://127.0.0.1:1/X", None),
+            push(&dolt_bin, t.path(), "http://127.0.0.1:1/X", None),
             Err(PushError::Unreachable(_))
         ));
+        let calls = fs::read_to_string(&log).unwrap();
+        assert!(
+            calls.ends_with("fetch vega-adopt\nremote remove vega-adopt\n"),
+            "{calls}"
+        );
     }
 
     #[test]
