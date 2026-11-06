@@ -5,6 +5,9 @@ description: Shows, diffs and applies the coding agents', herdr's and dcg's conf
 
 # vega config: agent, herdr and dcg config from one source
 
+With herdr-app running, `vega config apply herdr-app` checks the vega mod and selects its layout
+on first apply. Later layout choices stay yours. Status reports clone/app version drift.
+
 ```
 vega config                  # per unit: target, ownership, state; local sources
 vega config diff [UNIT...]   # what apply would change, as unified diffs
@@ -14,12 +17,9 @@ vega config init SOURCE      # copy a repo default to ~/.config/vega/config/ to 
 vega config infra            # the infra vega needs: required/optional, state, next step
 ```
 
-- Units: herdr, claude.md, codex.md, pi.md, claude.styles, claude.settings, claude.hooks,
-  codex.hooks, pi.prefix, skills, agentsview, dcg.config, dcg.packs. Groups: instructions, hooks.
+- `vega config` lists units; groups: instructions, hooks, herdr-app.
 - `dcg.config` and `dcg.packs` replace config.toml and their YAML pack targets;
   `allowlist.toml` stays user-owned. Preview: `vega config diff dcg.config dcg.packs`.
-  Direct deletion flags get a `vega uac prune` / `wt remove` reason; dcg also uses it
-  for extracted inline-shell bodies. Other core denials stay intact.
 - Sources: a file in `~/.config/vega/config/` wins over the repo default in `config/` (same
   layout, e.g. `instructions/vega.md`, `claude/settings.json`, `herdr/config.toml`). Edit the
   source, never the target: apply replaces whole files (old copy in `<file>.vega-bak`).

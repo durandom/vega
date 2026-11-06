@@ -53,7 +53,7 @@ enum Cmd {
     Print { unit: String },
     /// Copy a repo default to ~/.config/vega/config/ for local editing
     #[command(
-        after_help = "Sources: herdr/config.toml, instructions/<part>.md, claude/output-styles/<name>.md,\nclaude/settings.json, agentsview/LOCAL-SETUP.md, dcg/config.toml, dcg/packs/oc.yaml, herdr-app/keys.json, herdr-app/settings.json, herdr-app/themes/<name>.json. A local file that exists is never overwritten. With nonstandard XDG_CONFIG_HOME, edit dcg/config.toml packs.custom_paths to point at that dcg/packs directory after init (init copies literal defaults).\n\nExamples:\n  vega config init instructions/vega.md\n  vega config init claude/settings.json"
+        after_help = "Sources: herdr/config.toml, instructions/<part>.md, claude/output-styles/<name>.md,\nclaude/settings.json, agentsview/LOCAL-SETUP.md, dcg/config.toml, dcg/packs/oc.yaml, herdr-app/keys.json, herdr-app/settings.json, herdr-app/themes/<name>.json, herdr-app/mods/vega/{main.js,mod.json}, herdr-app/layouts/vega.json. A local file that exists is never overwritten. With nonstandard XDG_CONFIG_HOME, edit dcg/config.toml packs.custom_paths to point at that dcg/packs directory after init (init copies literal defaults).\n\nExamples:\n  vega config init instructions/vega.md\n  vega config init claude/settings.json"
     )]
     Init { source: String },
     /// The infra vega needs on this host: level, state, what it enables, next step
@@ -262,6 +262,13 @@ fn diff(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
             continue;
         }
         let m = vega_config::managed_targets(&plan, &managed);
+        if plan.herdr_app_pending {
+            changed += 1;
+            println!(
+                "{}: folder replacement or initial layout selection pending",
+                u.name()
+            );
+        }
         if plan.plugin_pending {
             changed += 1;
             println!("unit: claude.hooks");

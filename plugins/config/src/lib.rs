@@ -88,10 +88,12 @@ pub enum Unit {
     HerdrAppKeys,
     HerdrAppSettings,
     HerdrAppThemes,
+    HerdrAppMods,
+    HerdrAppLayouts,
 }
 
 impl Unit {
-    pub const ALL: [Unit; 16] = [
+    pub const ALL: [Unit; 18] = [
         Unit::Herdr,
         Unit::DcgConfig,
         Unit::DcgPacks,
@@ -109,6 +111,8 @@ impl Unit {
         // Themes before the settings that name them: the app rejects a theme
         // it has no file for.
         Unit::HerdrAppThemes,
+        Unit::HerdrAppMods,
+        Unit::HerdrAppLayouts,
         Unit::HerdrAppSettings,
     ];
 
@@ -130,6 +134,8 @@ impl Unit {
             Unit::HerdrAppKeys => "herdr-app.keys",
             Unit::HerdrAppSettings => "herdr-app.settings",
             Unit::HerdrAppThemes => "herdr-app.themes",
+            Unit::HerdrAppMods => "herdr-app.mods",
+            Unit::HerdrAppLayouts => "herdr-app.layouts",
         }
     }
 
@@ -152,6 +158,8 @@ impl Unit {
             Unit::HerdrAppKeys => "~/.config/herdr-app/keys.json",
             Unit::HerdrAppSettings => "~/.config/herdr-app/settings.json",
             Unit::HerdrAppThemes => "~/.config/herdr-app/themes/",
+            Unit::HerdrAppMods => "~/.config/herdr-app/mods/vega/",
+            Unit::HerdrAppLayouts => "~/.config/herdr-app/layouts/vega.json",
         }
     }
 
@@ -159,7 +167,8 @@ impl Unit {
         match self {
             Unit::Herdr => "whole file, herdr keys kept",
             Unit::ClaudeMd | Unit::CodexMd | Unit::PiMd | Unit::Agentsview => "whole file",
-            Unit::DcgConfig | Unit::HerdrAppKeys => "whole file",
+            Unit::DcgConfig | Unit::HerdrAppKeys | Unit::HerdrAppLayouts => "whole file",
+            Unit::HerdrAppMods => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
             Unit::ClaudeHooks => "plugin + legacy hook migration",
@@ -183,6 +192,8 @@ impl Unit {
                 | Unit::HerdrAppKeys
                 | Unit::HerdrAppSettings
                 | Unit::HerdrAppThemes
+                | Unit::HerdrAppMods
+                | Unit::HerdrAppLayouts
         )
     }
 }
@@ -200,6 +211,8 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
             Unit::HerdrAppKeys,
             Unit::HerdrAppSettings,
             Unit::HerdrAppThemes,
+            Unit::HerdrAppMods,
+            Unit::HerdrAppLayouts,
         ],
     ),
 ];
@@ -265,6 +278,10 @@ pub struct Plan {
     pub skills: Option<(Vec<String>, Vec<String>)>,
     /// The supported Claude CLI must install, update or enable the hook plugin.
     pub plugin_pending: bool,
+    /// Whole mod folder drift or first layout selection still needs applying.
+    pub herdr_app_pending: bool,
+    /// Directory replaced as a whole; include every descendant in ownership checks.
+    pub whole_dir: Option<PathBuf>,
 }
 
 impl Plan {
@@ -553,6 +570,7 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             plan.sources.push(src);
             Ok(plan)
         }
+        Unit::HerdrAppMods | Unit::HerdrAppLayouts => herdr_app::plan(ctx, unit),
         Unit::HerdrAppKeys => {
             if let Some(p) = need_herdr_app(env) {
                 return Ok(p);
@@ -663,10 +681,16 @@ pub fn chezmoi_managed(chezmoi: &OsStr) -> Result<BTreeSet<PathBuf>, String> {
 
 /// The targets of `plan` chezmoi manages.
 pub fn managed_targets(plan: &Plan, managed: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
-    plan.files
+    managed
         .iter()
-        .filter(|f| managed.contains(&f.path))
-        .map(|f| f.path.clone())
+        .filter(|p| {
+            plan.files.iter().any(|f| &f.path == *p)
+                || plan
+                    .whole_dir
+                    .as_ref()
+                    .is_some_and(|dir| p.starts_with(dir))
+        })
+        .cloned()
         .collect()
 }
 
@@ -702,6 +726,9 @@ pub fn state(plan: &Plan, managed: &[PathBuf]) -> String {
         } else {
             format!("missing: {}", missing.join(" "))
         };
+    }
+    if plan.herdr_app_pending {
+        return "differs (herdr-app folder or layout selection pending)".into();
     }
     if plan.plugin_pending {
         return "differs (plugin install/enable pending)".into();
@@ -843,6 +870,9 @@ fn apply_inner(
     let m = managed_targets(&plan, managed);
     if !m.is_empty() {
         return Outcome::Managed(m);
+    }
+    if matches!(unit, Unit::HerdrAppMods | Unit::HerdrAppLayouts) {
+        return herdr_app::apply(ctx, unit, &plan, evidence);
     }
     if unit == Unit::ClaudeHooks {
         return claude_plugin::apply(ctx, &plan, evidence);

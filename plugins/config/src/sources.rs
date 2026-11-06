@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 20] = [
+pub const DEFAULTS: [(&str, &str); 23] = [
     default!("herdr/config.toml"),
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
@@ -32,6 +32,9 @@ pub const DEFAULTS: [(&str, &str); 20] = [
     default!("capacity/windows.toml"),
     default!("dcg/config.toml"),
     default!("dcg/packs/oc.yaml"),
+    default!("herdr-app/mods/vega/main.js"),
+    default!("herdr-app/mods/vega/mod.json"),
+    default!("herdr-app/layouts/vega.json"),
     default!("herdr-app/keys.json"),
     default!("herdr-app/settings.json"),
     default!("herdr-app/themes/catppuccin-latte.json"),
@@ -213,6 +216,8 @@ mod tests {
             "capacity",
             "dcg/packs",
             "herdr-app/themes",
+            "herdr-app/mods/vega",
+            "herdr-app/layouts",
         ] {
             for f in repo_files(dir) {
                 assert!(embedded.contains(&f), "{f} is not in DEFAULTS");

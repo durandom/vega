@@ -846,3 +846,190 @@ fn herdr_app_units_skip_write_seed_and_reject() {
     .unwrap();
     assert_eq!(apply(&ctx, Unit::HerdrAppKeys, &managed).kind(), "written");
 }
+
+fn fake_app(d: &Path) -> OsString {
+    script(
+        d,
+        "app",
+        // inline-md: allow (fake app executable, not help text)
+        r#"
+case "$1" in
+  --version) echo 'herdr-app 0.1.13';;
+  check)
+    test -f "$2/main.js" && test -f "$2/mod.json" || exit 1
+    test "$2" != "$HERDR_APP_HOME/mods/vega" || exit 1
+    echo generated > "$2/gpui-kit.d.ts"
+    echo generated > "$2/jsconfig.json"
+    if grep -q INVALID "$2/main.js"; then echo 'invalid mod'; exit 1; fi
+    echo 'check passed';;
+  status)
+    if test -f "$HERDR_APP_HOME/offline"; then echo '{"error":"not running"}'; exit 1; fi
+    if test -f "$HERDR_APP_HOME/selected"; then echo '{"layout":"vega","errors":[]}'
+    else echo '{"layout":"main","errors":[]}'; fi;;
+  do)
+    if test "$4" = main; then
+      rm -f "$HERDR_APP_HOME/selected"
+      echo '{"ok":true}'; exit 0
+    fi
+    if test -f "$HERDR_APP_HOME/reject"; then echo '{"ok":true}'; exit 0; fi
+    test -f "$HERDR_APP_HOME/layouts/vega.json" || exit 1
+    echo selected > "$HERDR_APP_HOME/selected"
+    echo '{"ok":true}';;
+  *) exit 1;;
+esac
+"#,
+    )
+    .into_os_string()
+}
+
+#[test]
+fn app_mod_stages_rejects_and_replaces_the_whole_folder() {
+    let (d, mut ctx) = setup();
+    ctx.herdr_app = fake_app(d.path());
+    let dir = herdr_app::home(&ctx.env).join("mods/vega");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("main.js"), "old").unwrap();
+    fs::write(dir.join("stale.js"), "stale").unwrap();
+    let local = sources::init(&ctx.env, "herdr-app/mods/vega/main.js").unwrap();
+    fs::write(&local, "INVALID").unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()),
+        Outcome::Rejected(_)
+    ));
+    assert_eq!(fs::read_to_string(dir.join("main.js")).unwrap(), "old");
+    assert!(dir.join("stale.js").exists());
+    fs::write(
+        &local,
+        sources::default("herdr-app/mods/vega/main.js").unwrap(),
+    )
+    .unwrap();
+    let managed = BTreeSet::from([dir.join("stale.js")]);
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppMods, &managed),
+        Outcome::Managed(_)
+    ));
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()).kind(),
+        "written"
+    );
+    assert!(!dir.join("stale.js").exists());
+    assert!(!dir.join("gpui-kit.d.ts").exists());
+    assert!(!dir.join("jsconfig.json").exists());
+    assert!(herdr_app::home(&ctx.env)
+        .join(".vega-mod.vega-bak/stale.js")
+        .exists());
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()),
+        Outcome::Unchanged
+    );
+    // Drift consisting only of an extra file still replaces the folder.
+    fs::write(dir.join("extra"), "extra").unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()).kind(),
+        "written"
+    );
+    assert!(!dir.join("extra").exists());
+    let manifest = sources::init(&ctx.env, "herdr-app/mods/vega/mod.json").unwrap();
+    fs::write(manifest, "not JSON").unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()),
+        Outcome::Rejected(_)
+    ));
+    assert_eq!(
+        fs::read_to_string(dir.join("mod.json")).unwrap(),
+        "{ \"place\": \"none\" }\n"
+    );
+}
+
+#[test]
+fn app_mod_without_checker_never_writes() {
+    let (_d, ctx) = setup();
+    fs::create_dir_all(herdr_app::home(&ctx.env)).unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()),
+        Outcome::Rejected(_)
+    ));
+    assert!(!herdr_app::home(&ctx.env).join("mods/vega").exists());
+}
+
+#[test]
+fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
+    let (d, mut ctx) = setup();
+    ctx.herdr_app = fake_app(d.path());
+    let home = herdr_app::home(&ctx.env);
+    fs::create_dir_all(&home).unwrap();
+    let managed = BTreeSet::new();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed),
+        Outcome::Rejected(_)
+    ));
+    assert_eq!(apply(&ctx, Unit::HerdrAppMods, &managed).kind(), "written");
+    fs::write(home.join("offline"), "").unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed),
+        Outcome::Rejected(_)
+    ));
+    assert!(!home.join("layouts/vega.json").exists());
+    fs::remove_file(home.join("offline")).unwrap();
+    fs::write(home.join("reject"), "").unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed),
+        Outcome::Rejected(_)
+    ));
+    assert!(!home.join("layouts/vega.json").exists());
+    fs::remove_file(home.join("reject")).unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed).kind(),
+        "written"
+    );
+    assert!(home.join("selected").exists());
+    // A later user layout choice is not overwritten on apply.
+    fs::remove_file(home.join("selected")).unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed),
+        Outcome::Unchanged
+    );
+    assert!(!home.join("selected").exists());
+    let local = sources::init(&ctx.env, "herdr-app/layouts/vega.json").unwrap();
+    fs::write(local, "{broken").unwrap();
+    let before = fs::read(home.join("layouts/vega.json")).unwrap();
+    assert!(matches!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed),
+        Outcome::Rejected(_)
+    ));
+    assert_eq!(fs::read(home.join("layouts/vega.json")).unwrap(), before);
+}
+
+#[test]
+fn app_layout_drift_and_unit_dependency_order_are_visible() {
+    let (d, mut ctx) = setup();
+    ctx.herdr_app = fake_app(d.path());
+    fs::create_dir_all(herdr_app::home(&ctx.env)).unwrap();
+    fs::write(
+        herdr_app::home(&ctx.env).join("installed.json"),
+        r#"{"layout:main":{"json":"d25b961ea961fba1"}}"#,
+    )
+    .unwrap();
+    let p = plan(&ctx, Unit::HerdrAppLayouts).unwrap();
+    assert!(p.notes.iter().any(|n| n.contains("installed 0.1.13")));
+    fs::write(
+        herdr_app::home(&ctx.env).join("installed.json"),
+        r#"{"layout:main":{"json":"changed"}}"#,
+    )
+    .unwrap();
+    let p = plan(&ctx, Unit::HerdrAppLayouts).unwrap();
+    assert!(p
+        .notes
+        .iter()
+        .any(|n| n.contains("layout drift") && n.contains("changed")));
+    ctx.herdr_app = script(d.path(), "new-app", "echo 'herdr-app 0.2.0'").into_os_string();
+    let p = plan(&ctx, Unit::HerdrAppLayouts).unwrap();
+    assert!(p
+        .notes
+        .iter()
+        .any(|n| n.contains("layout drift") && n.contains("0.2.0")));
+    let selected = select(&["herdr-app".into()]).unwrap();
+    let index = |u| selected.iter().position(|v| *v == u).unwrap();
+    assert!(index(Unit::HerdrAppMods) < index(Unit::HerdrAppLayouts));
+    assert!(index(Unit::HerdrAppLayouts) < index(Unit::HerdrAppSettings));
+}
