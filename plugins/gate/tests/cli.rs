@@ -594,6 +594,7 @@ fn hc_verdict_requires_label_and_ancestry_then_falls_back_to_hc_mail() {
     assert_eq!(log(tmp.path(), "bd"), before);
     fs::remove_file(tmp.path().join("hc-stale")).unwrap();
     fs::write(tmp.path().join("fail-mail"), "").unwrap();
+    fs::write(tmp.path().join("hc-rm-busy"), "2").unwrap();
     let verdict = run(&work, tmp.path(), &env, &["verdict", "pass"]);
     assert!(verdict.status.success(), "{}", out(&verdict));
     assert!(out(&verdict).contains("t1 mailed"));
@@ -603,14 +604,22 @@ fn hc_verdict_requires_label_and_ancestry_then_falls_back_to_hc_mail() {
     assert!(!state_file.exists());
     // Wait only for this detached cleanup, never a real core.
     for _ in 0..70 {
-        if log(tmp.path(), "hc").contains("rm t11") {
+        if log(tmp.path(), "hc")
+            .lines()
+            .filter(|l| l.contains("rm t11"))
+            .count()
+            >= 3
+        {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     let calls = log(tmp.path(), "hc");
     assert!(calls.contains("kill t11"), "{calls}");
-    assert!(calls.contains("rm t11"), "{calls}");
+    assert!(
+        calls.lines().filter(|l| l.contains("rm t11")).count() >= 3,
+        "{calls}"
+    );
 }
 
 #[test]
@@ -620,12 +629,16 @@ fn hc_replacement_cleans_up_using_recorded_backend() {
     let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
     assert!(o.status.success(), "{}", out(&o));
     common::commit(&work, "src/a.rs", "fn a() { 2 }", "second");
+    fs::write(tmp.path().join("hc-rm-busy"), "2").unwrap();
     // A TUI caller retires the old hc review using its stored backend.
     let o = run(&work, tmp.path(), &[("HERDR_PANE_ID", "w1:p1")], &["start"]);
     assert!(o.status.success(), "{}", out(&o));
     let calls = log(tmp.path(), "hc");
     assert!(calls.contains("kill t11"), "{calls}");
-    assert!(calls.contains("rm t11"), "{calls}");
+    assert!(
+        calls.lines().filter(|l| l.contains("rm t11")).count() >= 3,
+        "{calls}"
+    );
     assert!(!log(tmp.path(), "herdr").contains("pane close t11"));
 }
 

@@ -309,13 +309,16 @@ pub fn pane_alive(r: &Review) -> bool {
 /// pane when asked. Only paths under the gate's cache dir are removed.
 pub fn cleanup(r: &Review, close_pane: bool) {
     if r.backend == Backend::Hc {
-        let verbs = if close_pane {
-            &["kill", "rm"][..]
-        } else {
-            &["rm"][..]
-        };
-        for verb in verbs {
-            let _ = vega_herdr::hc_on(None, &[verb, &r.pane], Some(Duration::from_secs(5)));
+        if close_pane {
+            let _ = vega_herdr::hc_on(None, &["kill", &r.pane], Some(Duration::from_secs(5)));
+        }
+        // Killing one's own terminal can return before the core publishes
+        // its finished state. Retry only that transition, never other errors.
+        for _ in 0..50 {
+            match vega_herdr::hc_on(None, &["rm", &r.pane], Some(Duration::from_secs(5))) {
+                Err(e) if e.code == "hc_live" => std::thread::sleep(Duration::from_millis(100)),
+                _ => break,
+            }
         }
     } else if close_pane {
         let _ = run(
@@ -346,7 +349,7 @@ pub fn cleanup_detached(r: &Review) {
     // Remove first: closing the pane may end this script with it.
     let close = if r.backend == Backend::Hc {
         format!(
-            "{0} kill {1} >/dev/null 2>&1; {0} rm {1} >/dev/null 2>&1",
+            "{0} kill {1} >/dev/null 2>&1; n=0; until {0} rm {1} >/dev/null 2>&1; do n=$((n + 1)); [ \"$n\" -ge 50 ] && break; sleep 0.1; done",
             q(Path::new("hc")),
             q(Path::new(&r.pane))
         )

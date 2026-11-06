@@ -250,7 +250,15 @@ case "$1" in
   run)
     n=$(( $(cat "$L/hc-n" 2>/dev/null || echo 10) + 1 )); echo "$n" > "$L/hc-n"
     printf '{"address":"t%s"}\n' "$n" ;;
-  send|kill|rm) echo '{}' ;;
+  rm)
+    n=$(cat "$L/hc-rm-busy" 2>/dev/null || echo 0)
+    if [ "$n" -gt 0 ]; then
+      echo $((n - 1)) > "$L/hc-rm-busy"
+      echo '{"error":{"kind":"live","message":"still running"}}' >&2
+      exit 6
+    fi
+    echo '{}' ;;
+  send|kill) echo '{}' ;;
 esac
 "#,
     );
