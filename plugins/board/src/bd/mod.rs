@@ -504,6 +504,12 @@ mod tests {
             ] {
                 cmd.env(k, home.join(d));
             }
+            // bd init commits to git. Without an identity in the empty HOME, git guesses
+            // one from the host name, which can stall for seconds on macOS.
+            for k in ["GIT_AUTHOR", "GIT_COMMITTER"] {
+                cmd.env(format!("{k}_NAME"), "Fixture")
+                    .env(format!("{k}_EMAIL"), "fixture@example.invalid");
+            }
             for k in [
                 "BEADS_DIR",
                 "BEADS_DOLT_SERVER_MODE",
