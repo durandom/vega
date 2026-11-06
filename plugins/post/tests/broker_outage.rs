@@ -119,6 +119,8 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     fs::create_dir_all(&bin).unwrap();
     fs::write(bin.join("herdr"), FAKE_HERDR).unwrap();
     fs::set_permissions(bin.join("herdr"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(bin.join("hc"), "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(bin.join("hc"), fs::Permissions::from_mode(0o755)).unwrap();
     let state = home.join("state/vega");
     // Startup past the one-time identity cutover.
     let cutover = state.join("identity-cutover");

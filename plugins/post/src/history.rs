@@ -474,7 +474,7 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
             assert!(
-                stdout.contains("registry: off (fixture snapshot failure); local state only"),
+                stdout.contains("registry: off (herdr snapshot unavailable: fixture snapshot failure); local state only"),
                 "{stdout}"
             );
             return;
@@ -485,6 +485,9 @@ mod tests {
         let herdr = bin.join("herdr");
         std::fs::write(&herdr, include_str!("../tests/fixtures/history-herdr.sh")).unwrap();
         std::fs::set_permissions(&herdr, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let hc = bin.join("hc");
+        std::fs::write(&hc, "#!/bin/sh\necho '{\"terminals\":[]}'\n").unwrap();
+        std::fs::set_permissions(&hc, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut paths = vec![bin];
         paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
         std::env::set_var("PATH", std::env::join_paths(paths).unwrap());

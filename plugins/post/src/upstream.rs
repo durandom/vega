@@ -99,17 +99,22 @@ impl Watch {
             save(&before, &c, state, &mut out);
             return out;
         }
-        let panes = match vega_herdr::herdr(&["pane", "list"]) {
+        let mut panes = match vega_herdr::herdr(&["pane", "list"]) {
             Ok(v) => upgrade::panes(&v),
             Err(f) => {
                 out.push(Event::Log(format!(
                     "upgrade check: herdr pane list: {}",
                     f.message
                 )));
-                save(&before, &c, state, &mut out);
-                return out;
+                Vec::new()
             }
         };
+        match crate::terminals::hc_list() {
+            Ok(agents) => panes.extend(upgrade::panes(
+                &serde_json::json!({"result":{"panes":agents}}),
+            )),
+            Err(e) => out.push(Event::Log(format!("upgrade check: hc ls: {}", e.message))),
+        }
         let uac = match upgrade::uac_panes(
             &vega_herdr::state::project_uac_records(),
             &install.checkout,

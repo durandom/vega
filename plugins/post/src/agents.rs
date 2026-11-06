@@ -41,6 +41,9 @@ pub enum Event {
     /// Full picture: every live pane and its agent status. Panes not in it
     /// are gone.
     Snapshot(HashMap<String, String>),
+    /// Only hc terminals; never removes a TUI pane.
+    HcSnapshot(HashMap<String, String>),
+    HcMode(String),
     /// One pane's agent status changed.
     Status(String, String),
     /// The pane closed or its process exited.

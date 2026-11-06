@@ -5,10 +5,11 @@ description: Sends and reads agent mail through a NATS broker, also across machi
 
 # vega post: agent mail over a broker (spike)
 
-The relay types pointers; targets pull messages.
+Recipients pull queued mail.
 
 1. `vega post`: broker, pane, unread count. `vega post log`: archive, without marking read.
 2. `vega post send <pane> "<text>"` stores the message; `--host <machine>` for another machine. The target gets its pointer when idle or done; mail from its parent also while it works; `--now` only for urgent mail ("stop"). Do not poll: the reply arrives as a pointer.
+   - Targets: hc `t7`/`hc:t7`, TUI `w1:p2`/`herdr:w1:p2`. hc blocked terminals wait.
    - `--uac <project>`: UAC by full project ID, published folder/origin/merged alias, repository name, or `.` (this checkout).
    - `pane_gone`: closed pane, nothing sent; the hint names the UAC. `warning:`: unchecked, sent anyway. A `bounce:` mail: a pane closed before reading yours.
    - Reachable is what `vega post` and `vega uac` say, not `herdr machine list`.
@@ -24,7 +25,7 @@ Broker required: `VEGA_NATS_URL`, else first-line `$XDG_CONFIG_HOME/vega/nats.ur
 (normally `~/.config/vega/nats.url`). Unset: `broker_unreachable`; vegad stays local
 after completed identity migration, otherwise in identity quiesce.
 
-Inbox-only hosts: same-host `send`/`done` deliver locally through herdr; `--uac` uses local v2 claims only. `vega mux` lists local agents. Cross-host replies: quarantine notes unless receiver operator pair grants deliver peer inbox mail. Sender panes are host claims, never approval.
+Inbox-only hosts: same-host `send`/`done` deliver through herdr or hc; `--uac` uses local v2 claims only. `vega mux` lists local agents. Cross-host replies: quarantine notes unless receiver operator pair grants deliver peer inbox mail. Sender panes are host claims, never approval.
 
 User setup: `vega post keygen` (public key for server); `vega post relay install`
 (herdr starts vegad). Admin: `auth-config`, `provision`; see `--help`.

@@ -30,6 +30,7 @@ pub struct Supervisor {
     /// Panes herdr knows; meaningful once `synced`.
     live: HashSet<String>,
     synced: bool,
+    hc_synced: bool,
     notified: HashMap<String, Attentions>,
     /// Went free after a prompt without a report, since when: silent once
     /// `ripe` confirms it (the status bar needs a moment to show a
@@ -48,8 +49,17 @@ fn is_busy(s: &str) -> bool {
 impl Supervisor {
     /// Full picture: every live pane.
     pub fn snapshot<'a>(&mut self, panes: impl IntoIterator<Item = &'a String>) {
-        self.live = panes.into_iter().cloned().collect();
-        self.synced = true;
+        self.snapshot_backend(panes, false);
+    }
+
+    pub fn snapshot_backend<'a>(&mut self, panes: impl IntoIterator<Item = &'a String>, hc: bool) {
+        self.live.retain(|p| crate::terminals::is_hc(p) != hc);
+        self.live.extend(panes.into_iter().cloned());
+        if hc {
+            self.hc_synced = true;
+        } else {
+            self.synced = true;
+        }
     }
 
     pub fn gone(&mut self, pane: &str) {
@@ -61,7 +71,12 @@ impl Supervisor {
 
     /// `None` until the first snapshot: absence proves nothing.
     pub fn alive(&self, pane: &str) -> Option<bool> {
-        self.synced.then(|| self.live.contains(pane))
+        (if crate::terminals::is_hc(pane) {
+            self.hc_synced
+        } else {
+            self.synced
+        })
+        .then(|| self.live.contains(pane))
     }
 
     /// A child's status; `reported`: it has a done report or a reply to its
@@ -328,6 +343,19 @@ pub fn short(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn liveness_is_known_independently_for_each_backend() {
+        let mut s = super::Supervisor::default();
+        s.snapshot([&"w1:p1".to_string()]);
+        assert_eq!(s.alive("t7"), None);
+        s.snapshot_backend([&"t7".to_string()], true);
+        s.snapshot(std::iter::empty());
+        assert_eq!(s.alive("t7"), Some(true));
+        assert_eq!(s.alive("w1:p1"), Some(false));
+        s.snapshot_backend(std::iter::empty(), true);
+        assert_eq!(s.alive("t7"), Some(false));
+    }
+
     #[test]
     fn unanswered_join_needs_a_resolved_host_and_current_mode() {
         use super::*;

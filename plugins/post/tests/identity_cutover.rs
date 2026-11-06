@@ -139,6 +139,12 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
     )
     .unwrap();
     fs::set_permissions(home.join("bin/herdr"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(home.join("bin").join("hc"), "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(
+        home.join("bin").join("hc"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
     let port = TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -217,6 +223,7 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
     let b = home.join("b");
     fs::create_dir_all(b.join("bin")).unwrap();
     fs::copy(home.join("bin/herdr"), b.join("bin/herdr")).unwrap();
+    fs::copy(home.join("bin/hc"), b.join("bin/hc")).unwrap();
     fs::copy(home.join("mappings.json"), b.join("mappings.json")).unwrap();
     let old_pin = json!({"project":"~/repo/.git","seat":"s","lane":"l","tier":"t","model":null,"at":3,"expires":1});
     rt.block_on(async {
@@ -751,6 +758,12 @@ fn rekey_journals_a_new_generation_replays_and_rolls_back() {
     )
     .unwrap();
     fs::set_permissions(home.join("bin/herdr"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(home.join("bin").join("hc"), "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(
+        home.join("bin").join("hc"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
     let port = TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()

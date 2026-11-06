@@ -510,6 +510,14 @@ fn records(kind: &str) -> Vec<(Option<String>, String, String)> {
 
 /// `local_w3V_p2` -> (None, `w3V:p2`); `gany_mede_w1_p1` -> (Some(gany_mede), `w1:p1`).
 fn split_key(file: &str) -> Option<(Option<String>, String)> {
+    if let Some((machine, encoded)) = file
+        .rsplit_once("_hc-")
+        .filter(|(_, encoded)| !encoded.contains('_'))
+    {
+        let pane = crate::project::decode_component(encoded).ok()?;
+        crate::pane::hc_storage_token(&pane)?;
+        return Some(((machine != "local").then(|| machine.to_string()), pane));
+    }
     let mut parts = file.rsplitn(3, '_');
     let (p, w, m) = (parts.next()?, parts.next()?, parts.next()?);
     let machine = (m != "local").then(|| m.to_string());
@@ -1029,6 +1037,25 @@ mod tests {
         assert_ne!(
             state_file_on("tasks", None, "io.a/t7"),
             state_file_on("tasks", None, "io_a/t7")
+        );
+    }
+
+    #[test]
+    fn enumerating_hc_state_decodes_the_written_address() {
+        for machine in [None, Some("io_a")] {
+            for pane in ["t7", "io.a/t7", "io_a/t7"] {
+                let file = state_file_on("parents", machine, pane).unwrap();
+                assert_eq!(
+                    split_key(file.file_name().unwrap().to_str().unwrap()),
+                    Some((machine.map(String::from), pane.into()))
+                );
+            }
+        }
+        assert_eq!(split_key("local_w1_p2"), Some((None, "w1:p2".into())));
+        assert_eq!(split_key("local_hc-zz"), None);
+        assert_eq!(
+            split_key("io_hc-other_w1_p2"),
+            Some((Some("io_hc-other".into()), "w1:p2".into()))
         );
     }
 

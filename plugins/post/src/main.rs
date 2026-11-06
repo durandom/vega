@@ -29,6 +29,7 @@ mod cmd;
 mod delivery;
 mod gather;
 mod gitsync;
+mod hc_agents;
 mod history;
 mod history_otlp;
 mod human;
@@ -56,6 +57,7 @@ mod registry_ttl;
 mod service;
 mod sidebar;
 mod supervise;
+mod terminals;
 mod theme;
 mod uber;
 mod uber_ask;
@@ -690,7 +692,7 @@ fn inbox_subject(to_host: &str, pane: &str, from_host: &str) -> String {
     format!(
         "vega.inbox.{}.{}.{}",
         subject_token(to_host),
-        subject_token(pane),
+        subject_token(terminals::bare(pane)),
         subject_token(from_host)
     )
 }
@@ -700,7 +702,7 @@ fn pane_filter(host: &str, pane: &str) -> String {
     format!(
         "vega.inbox.{}.{}.*",
         subject_token(host),
-        subject_token(pane)
+        subject_token(terminals::bare(pane))
     )
 }
 
@@ -709,7 +711,7 @@ fn pane_filter(host: &str, pane: &str) -> String {
 fn parse_subject(subject: &str) -> Option<(&str, &str)> {
     let mut t = subject.strip_prefix("vega.inbox.")?.split('.');
     let (_to_host, pane, from) = (t.next()?, t.next()?, t.next()?);
-    t.next().is_none().then_some((pane, from))
+    t.next().is_none().then_some((terminals::bare(pane), from))
 }
 
 /// Reply-subject prefix of admin connections (`provision`).
@@ -741,7 +743,7 @@ fn consumer_name(host: &str, pane: &str) -> String {
             })
             .collect()
     };
-    format!("inbox-{}-{}", safe(host), safe(pane))
+    format!("inbox-{}-{}", safe(host), safe(terminals::bare(pane)))
 }
 
 /// Parses `--re <thread>/<hop>[@<published-ms>]` at send time. Legacy tokens
@@ -1360,6 +1362,14 @@ fn my_project() -> Result<Option<String>, Failure> {
 
 /// Whether this host's herdr lists the pane; `None` when herdr is away.
 fn local_pane_open(pane: &str) -> Option<bool> {
+    let pane = terminals::bare(pane);
+    if terminals::is_hc(pane) {
+        return match vega_herdr::hc::hc_local(&["get", pane]) {
+            Ok(t) => Some(t["state"] == "live"),
+            Err(e) if e.code == "pane_not_found" => Some(false),
+            Err(_) => None,
+        };
+    }
     let v = herdr(&["agent", "list"]).ok()?;
     let agents = v["result"]["agents"].as_array()?;
     Some(agents.iter().any(|a| a["pane_id"] == pane))
@@ -1389,7 +1399,7 @@ async fn resolve_target(
                 })?;
             let here = if query == "." { my_project()? } else { None };
             let (h, p, _) = reach::resolve(&view, query, here.as_deref())?;
-            return Ok((p, subject_token(&h), None));
+            return Ok((terminals::bare(&p).to_string(), subject_token(&h), None));
         }
         To::Uber => {
             let view = tokio::time::timeout(reach::WAIT, reach::read(client))
@@ -1409,12 +1419,13 @@ async fn resolve_target(
                     "the Slayer's session runs `vega uber claim`; until then use the bead and the board",
                 )
             })?;
-            return Ok((c.pane, subject_token(&c.host), None));
+            return Ok((
+                terminals::bare(&c.pane).to_string(),
+                subject_token(&c.host),
+                None,
+            ));
         }
-        To::Pane(target, host) => (
-            target.to_string(),
-            host.map(subject_token).unwrap_or_else(|| my_host.clone()),
-        ),
+        To::Pane(target, host) => terminals::mail_target(target, host, &my_host)?,
     };
     if !check {
         return Ok((target, to_host, None));
@@ -2313,8 +2324,8 @@ fn child_of<'a>(
     pane_host: &str,
 ) -> Option<&'a st::Child> {
     children.iter().find(|c| {
-        c.pane == pane
-            && c.parent.pane == parent
+        terminals::bare(&c.pane) == terminals::bare(pane)
+            && terminals::bare(&c.parent.pane) == terminals::bare(parent)
             && match &c.machine {
                 None => pane_host == host(),
                 Some(m) => subject_token(&m.to_lowercase()) == pane_host,
@@ -2457,6 +2468,7 @@ struct Jobs {
     theme_remote: theme::Remote,
     live: ci::Live,
     mode: Option<agents::Mode>,
+    hc_mode: Option<String>,
     /// Agents waiting for the Slayer (vega_herdr::waiting, vega mux next).
     waiting: vega_herdr::waiting::Ledger,
     /// The ledger changed since the registry last took it.
@@ -2492,7 +2504,8 @@ impl Jobs {
         if !once {
             history::spawn();
             capacity::spawn();
-            agents::spawn(etx);
+            agents::spawn(etx.clone());
+            hc_agents::spawn(etx);
             // Git sync (gitsync.rs): fetch, fast-forward clean main checkouts.
             gitsync::spawn();
             // The lanista catalog (catalog.rs): fetch on the builder, copy elsewhere.
@@ -2517,6 +2530,7 @@ impl Jobs {
             theme_remote,
             live: Default::default(),
             mode: None,
+            hc_mode: None,
             waiting: vega_herdr::waiting::read(),
             waiting_changed: false,
             human: Default::default(),
@@ -2553,37 +2567,74 @@ impl Jobs {
         }
     }
 
+    fn snapshot(
+        &mut self,
+        panes: HashMap<String, String>,
+        hc: bool,
+        d: &mut Delivery,
+        sup: &mut Supervisor,
+    ) {
+        let now = vega_herdr::notes::now_ms() as i64;
+        let changed = self
+            .waiting
+            .snapshot_where(&panes, now, |p| terminals::is_hc(p) == hc);
+        self.waiting_save(changed);
+        if let Ok(mut l) = self.live.lock() {
+            l.snapshot(panes.keys().cloned(), hc);
+        }
+        if hc {
+            sup.snapshot_backend(panes.keys(), true);
+        } else {
+            sup.snapshot(panes.keys());
+        }
+        for (p, s) in &panes {
+            observe(sup, p, s);
+        }
+        let gone = if hc {
+            d.snapshot_backend(panes, true)
+        } else {
+            d.snapshot(panes)
+        };
+        for p in gone {
+            log(&format!("pane gone: {p}, pending pointer dropped"));
+        }
+    }
+
+    fn write_modes(&self) {
+        let herdr = self
+            .mode
+            .as_ref()
+            .map(agents::Mode::describe)
+            .unwrap_or_else(|| "herdr: waiting for snapshot".into());
+        let hc = self.hc_mode.as_deref().unwrap_or("waiting for snapshot");
+        service::write_mode(&format!("{herdr}; hc: {hc}"));
+    }
+
     /// An agent status event into delivery and supervision.
     fn agent(&mut self, e: agents::Event, d: &mut Delivery, sup: &mut Supervisor) {
         match e {
             agents::Event::Mode(m) => {
                 if self.mode.as_ref() != Some(&m) {
                     log(&format!("mode: {}", m.describe()));
-                    service::write_mode(&m.describe());
                     self.mode = Some(m);
+                    self.write_modes();
                 }
             }
-            agents::Event::Snapshot(panes) => {
-                let now = vega_herdr::notes::now_ms() as i64;
-                let changed = self.waiting.snapshot(&panes, now);
-                self.waiting_save(changed);
-                if let Ok(mut l) = self.live.lock() {
-                    *l = Some(panes.keys().cloned().collect());
-                }
-                sup.snapshot(panes.keys());
-                for (p, s) in &panes {
-                    observe(sup, p, s);
-                }
-                for p in d.snapshot(panes) {
-                    log(&format!("pane gone: {p}, pending pointer dropped"));
+            agents::Event::HcMode(mode) => {
+                if self.hc_mode.as_ref() != Some(&mode) {
+                    log(&format!("hc mode: {mode}"));
+                    self.hc_mode = Some(mode);
+                    self.write_modes();
                 }
             }
+            agents::Event::HcSnapshot(panes) => self.snapshot(panes, true, d, sup),
+            agents::Event::Snapshot(panes) => self.snapshot(panes, false, d, sup),
             agents::Event::Status(p, s) => {
                 let now = vega_herdr::notes::now_ms() as i64;
                 let changed = self.waiting.status(&p, &s, now);
                 self.waiting_save(changed);
-                if let Some(l) = self.live.lock().ok().as_mut().and_then(|l| l.as_mut()) {
-                    l.insert(p.clone());
+                if let Ok(mut l) = self.live.lock() {
+                    l.panes.insert(p.clone());
                 }
                 observe(sup, &p, &s);
                 if d.status(&p, &s) {
@@ -2596,11 +2647,13 @@ impl Jobs {
                 self.waiting_save(changed);
             }
             agents::Event::Gone(p) => {
-                self.human.gone(Instant::now());
+                if !terminals::is_hc(&p) {
+                    self.human.gone(Instant::now());
+                }
                 let changed = self.waiting.gone(&p);
                 self.waiting_save(changed);
-                if let Some(l) = self.live.lock().ok().as_mut().and_then(|l| l.as_mut()) {
-                    l.remove(&p);
+                if let Ok(mut l) = self.live.lock() {
+                    l.panes.remove(&p);
                 }
                 sup.gone(&p);
                 if d.gone(&p) {
@@ -3254,7 +3307,7 @@ async fn serve(
                     Some((s, _)) => wake_line(s, count),
                     None => pointer(count),
                 };
-                let typed = match notify(&pane, &line) {
+                let typed = match notify_queued(&pane, &line, d.may_queue(&pane)) {
                     Ok(()) => {
                         log(&format!(
                             "pointer: {pane} ({count} pending{}{}, agent {}), herdr {} ms",
@@ -3446,10 +3499,7 @@ const LIVE_THEME_EVERY: Duration = Duration::from_secs(2);
 
 /// This host's agents (`herdr agent list`); empty when herdr is away.
 fn local_agents() -> Vec<serde_json::Value> {
-    herdr(&["agent", "list"])
-        .ok()
-        .and_then(|v| v["result"]["agents"].as_array().cloned())
-        .unwrap_or_default()
+    terminals::Inventory::read().agents()
 }
 
 /// Types `/config theme=<mode>` into each waiting Claude pane that is idle
@@ -3967,6 +4017,9 @@ impl Drafts {
     /// stashed) instead; an unreadable screen does not hold, an unknown one
     /// holds until it is quiet.
     fn holds(&mut self, pane: &str) -> bool {
+        if terminals::is_hc(pane) {
+            return false;
+        }
         let now = Instant::now();
         if self
             .seen
@@ -4140,6 +4193,11 @@ fn screen(pane: &str) -> Option<String> {
     if !valid_pane_id(pane) {
         return None;
     }
+    if terminals::is_hc(pane) {
+        return vega_herdr::hc::hc_local(&["read", "--lines", "0", terminals::bare(pane)])
+            .ok()
+            .and_then(|v| v["text"].as_str().map(String::from));
+    }
     vega_herdr::herdr_text(&[
         "pane", "read", pane, "--source", "visible", "--format", "ansi",
     ])
@@ -4147,6 +4205,10 @@ fn screen(pane: &str) -> Option<String> {
 }
 
 fn notify(pane: &str, line: &str) -> Result<(), Failure> {
+    notify_queued(pane, line, false)
+}
+
+fn notify_queued(pane: &str, line: &str, queued: bool) -> Result<(), Failure> {
     // The pane token comes from the sender's subject: never let it reach
     // herdr as anything but a pane id (e.g. `--flag` or an agent name).
     if !valid_pane_id(pane) {
@@ -4156,7 +4218,10 @@ fn notify(pane: &str, line: &str) -> Result<(), Failure> {
             "the sender used a malformed target; the mail stays in the archive",
         ));
     }
-    herdr(&["agent", "prompt", pane, line])?;
+    if terminals::is_hc(pane) {
+        return terminals::send_hc(pane, line, queued);
+    }
+    herdr(&["agent", "prompt", terminals::bare(pane), line])?;
     Ok(())
 }
 
@@ -4582,7 +4647,7 @@ fn local_dialog(pane: &str, status: &str) -> Option<vega_herdr::dialog::Dialog> 
     if !matches!(status, "blocked" | "unknown") {
         return None;
     }
-    let raw = vega_herdr::herdr_text(&["pane", "read", pane, "--source", "visible"]).ok()?;
+    let raw = screen(pane)?;
     vega_herdr::dialog::classify(&raw, "", status)
 }
 
@@ -5749,18 +5814,12 @@ impl Registry {
             self.last.clear();
         }
         let kv = self.kv.as_ref().expect("set above");
-        let list = |what: &str, key: &str| -> Result<Vec<serde_json::Value>, String> {
-            herdr(&[what, "list"]).map_err(|e| e.message)?["result"][key]
-                .as_array()
-                .cloned()
-                .ok_or_else(|| format!("invalid herdr {what} snapshot"))
-        };
-        let desired = vega_registry::local_entries(
-            host,
-            &list("agent", "agents")?,
-            &list("workspace", "workspaces")?,
-        );
-        let mut desired = desired;
+        let inventory = terminals::Inventory::read();
+        let read_started = Instant::now();
+        let view = vega_registry::read(client, kv).await?;
+        let read_elapsed = read_started.elapsed();
+        let agents = inventory.checked(host, &view)?;
+        let mut desired = vega_registry::local_entries(host, &agents, &inventory.workspaces);
         // vega theme's applied mode (theme.rs): headless hosts follow it.
         if let Some((k, v)) = theme::registry_entry(host) {
             desired.insert(k, v);
@@ -5770,13 +5829,11 @@ impl Registry {
             desired.insert(k, v);
         }
         let n = desired.len();
-        let t = Instant::now();
-        let view = vega_registry::read(client, kv).await?;
-        loop_budget::observe("registry read", t.elapsed(), SLOW_STEP);
-        if t.elapsed() > SLOW_STEP {
+        loop_budget::observe("registry read", read_elapsed, SLOW_STEP);
+        if read_elapsed > SLOW_STEP {
             log(&format!(
                 "slow: registry read took {} ms ({} keys, {} entries)",
-                t.elapsed().as_millis(),
+                read_elapsed.as_millis(),
                 view.keys.len(),
                 view.entries.len()
             ));
@@ -6025,9 +6082,7 @@ fn abort_of(pane: &str) -> Option<st::Quota> {
 /// may still redraw its input box; without it the status bar would pass
 /// for the turn's last line.
 fn turn_screen(pane: &str) -> String {
-    let read = || {
-        vega_herdr::herdr_text(&["pane", "read", pane, "--source", "visible"]).unwrap_or_default()
-    };
+    let read = || screen(pane).unwrap_or_default();
     let mut screen = read();
     for _ in 0..3 {
         if supervise::read_turn_end(&screen).is_some() {
@@ -6104,21 +6159,29 @@ fn final_attention_line(pane: &str, waiting_on: Option<&[String]>) -> String {
 /// last error when herdr names the log, else the end of the screen. An
 /// exhausted quota without a reset in its text takes token-burn's.
 fn provider_abort(pane: &str, screen: &str) -> Option<st::Quota> {
-    let agent = vega_herdr::herdr(&["agent", "get", pane])
-        .map(|v| v["result"]["agent"].clone())
-        .unwrap_or_default();
+    let hc = terminals::is_hc(pane);
+    let agent = if hc {
+        vega_herdr::hc::hc_local(&["get", terminals::bare(pane)])
+            .map(|v| serde_json::json!({"agent":v["status"]["app"],"cwd":v["cwd"]}))
+    } else {
+        vega_herdr::herdr(&["agent", "get", pane]).map(|v| v["result"]["agent"].clone())
+    }
+    .unwrap_or_default();
     let kind = agent["agent"].as_str().unwrap_or("");
-    let logged = vega_transcript::Kind::from_herdr(kind).and_then(|k| {
-        let home = std::env::var("HOME").ok()?;
-        let path = vega_transcript::locate(
-            k,
-            agent["agent_session"]["value"].as_str(),
-            agent["cwd"].as_str().unwrap_or(""),
-            std::path::Path::new(&home),
-        )
-        .ok()?;
-        quota::from_entries(&vega_transcript::read(k, &path).ok()?)
-    });
+    let logged = (!hc)
+        .then(|| vega_transcript::Kind::from_herdr(kind))
+        .flatten()
+        .and_then(|k| {
+            let home = std::env::var("HOME").ok()?;
+            let path = vega_transcript::locate(
+                k,
+                agent["agent_session"]["value"].as_str(),
+                agent["cwd"].as_str().unwrap_or(""),
+                std::path::Path::new(&home),
+            )
+            .ok()?;
+            quota::from_entries(&vega_transcript::read(k, &path).ok()?)
+        });
     let abort = logged.or_else(|| quota::from_screen(screen))?;
     let now = vega_herdr::capacity::now();
     let fallback = (!abort.transient && abort.reset.is_none())
@@ -6169,9 +6232,11 @@ fn supervise_mail(
         return false;
     }
     let from_parent = local
-        && children
-            .iter()
-            .any(|c| c.machine.is_none() && c.pane == to && c.parent.pane == from);
+        && children.iter().any(|c| {
+            c.machine.is_none()
+                && terminals::bare(&c.pane) == terminals::bare(to)
+                && terminals::bare(&c.parent.pane) == terminals::bare(from)
+        });
     if from_parent {
         st::settle(None, to);
         log(&format!("sentinel: {to} got new work from {from}, settled"));
@@ -7243,6 +7308,18 @@ mod tests {
         assert!(!t.contains('\n'));
         // No reply path: a bounce comes from a tool, never a pane.
         assert_eq!(tool_sender("vega-post").unwrap(), BOUNCE_AGENT);
+    }
+
+    #[test]
+    fn canonical_addresses_share_inboxes_and_consumers() {
+        for (a, b) in [("hc:t7", "t7"), ("herdr:w1:p2", "w1:p2")] {
+            assert_eq!(
+                inbox_subject("host", a, "sender"),
+                inbox_subject("host", b, "sender")
+            );
+            assert_eq!(pane_filter("host", a), pane_filter("host", b));
+            assert_eq!(consumer_name("host", a), consumer_name("host", b));
+        }
     }
 
     #[test]

@@ -21,7 +21,35 @@ pub const AGENT: &str = "vega ci";
 
 /// The agent panes vegad knows are alive; `None` until the first snapshot
 /// (absence proves nothing then).
-pub type Live = Arc<Mutex<Option<HashSet<String>>>>;
+pub type Live = Arc<Mutex<LiveState>>;
+
+#[derive(Default)]
+pub struct LiveState {
+    pub panes: HashSet<String>,
+    pub herdr: bool,
+    pub hc: bool,
+}
+
+impl LiveState {
+    pub fn snapshot(&mut self, panes: impl Iterator<Item = String>, hc: bool) {
+        self.panes.retain(|p| crate::terminals::is_hc(p) != hc);
+        self.panes.extend(panes);
+        if hc {
+            self.hc = true;
+        } else {
+            self.herdr = true;
+        }
+    }
+
+    fn alive(&self, pane: &str) -> bool {
+        let known = if crate::terminals::is_hc(pane) {
+            self.hc
+        } else {
+            self.herdr
+        };
+        !known || self.panes.contains(crate::terminals::bare(pane))
+    }
+}
 
 /// (pane, text) mails and log lines for the relay loop.
 pub enum Event {
@@ -32,11 +60,7 @@ pub enum Event {
 pub fn spawn(tx: UnboundedSender<Event>, live: Live) {
     thread::spawn(move || loop {
         let now = unix_now();
-        let alive = |pane: &str| {
-            live.lock()
-                .map(|g| g.as_ref().is_none_or(|s| s.contains(pane)))
-                .unwrap_or(true)
-        };
+        let alive = |pane: &str| live.lock().map(|g| g.alive(pane)).unwrap_or(true);
         let mut fetch = |forge: Forge, host: &str, path: &str, etag: Option<&str>| {
             let r = match forge {
                 Forge::GitHub => gh::get(host, path, etag)?,
@@ -59,4 +83,21 @@ pub fn spawn(tx: UnboundedSender<Event>, live: Live) {
         }
         thread::sleep(EVERY);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unknown_backend_stays_live_until_its_own_snapshot() {
+        let mut live = LiveState::default();
+        live.snapshot(["w1:p1".into()].into_iter(), false);
+        assert!(live.alive("t7"));
+        live.snapshot(["t7".into()].into_iter(), true);
+        live.snapshot(std::iter::empty(), false);
+        assert!(live.alive("hc:t7"));
+        assert!(!live.alive("w1:p1"));
+        live.snapshot(std::iter::empty(), true);
+        assert!(!live.alive("t7"));
+    }
 }

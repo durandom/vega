@@ -214,3 +214,28 @@ filenames and registry pane tokens: canonical `hc:io/t7` and bare `io/t7` share 
 key, while `io.a/t7` and `io_a/t7` remain distinct. Legacy TUI state filenames and
 registry keys retain their spelling. Parsing carries the backend explicitly;
 opening/focusing hc addresses remains a later slice and fails explicitly for now.
+
+### Slice 3 delivery contract (2026-11-07)
+
+vegad consumes `hc events --json` (the `events.subscribe` snapshot/stream),
+resubscribes on `missed`, and polls `hc ls` while the stream is unavailable.
+Snapshots, CI liveness, and waiting/supervision state are scoped by backend.
+Only local hc terminals are published by this host; connected remote terminals'
+paths are never resolved as local checkouts. Registry agent rows retain bare
+`pane` IDs for existing readers and add `backend` and canonical `address` fields.
+Canonical and bare targets share inbox subjects and consumers.
+
+The parent confirmed parity with existing TUI delivery after a scratch hc
+0.1.18 probe proved that `--if idle` rejects `done` (exit 10): fresh `idle` uses
+`hc send --if idle`; fresh `done` uses plain `hc send`; parent/urgent mail may
+also use plain send while `working`. No `--force`, and blocked/unknown states
+wait. A failed send keeps the pointer pending. The get/send race can queue the
+pointer if work starts meanwhile; hc still refuses blocked. An atomic hc
+idle-or-done guard is follow-up vega-0h4c.17. hc owns its notes; vega keeps the
+existing done/silent ledger. Native local hc parent links seed missing vega
+parent records; an existing adoption wins, and discovery creates no new brief.
+hc receives no draft-clear/restore keystrokes.
+
+Cross-host post mail uses `t7 --host <registry-host>`. A machine-qualified hc
+address also needs `--host`: without a registry-host mapping, enqueueing it on
+this host would produce an inbox no local watcher could deliver.
