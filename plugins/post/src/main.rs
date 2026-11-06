@@ -6160,8 +6160,7 @@ fn supervise_mail(
 
 /// herdr pane ids look like `w3V:p17`: alphanumerics, one colon.
 fn valid_pane_id(p: &str) -> bool {
-    let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric());
-    matches!(p.split_once(':'), Some((w, q)) if ok(w) && ok(q))
+    vega_herdr::pane::is_address(p)
 }
 
 fn log(line: &str) {
@@ -6885,8 +6884,11 @@ mod tests {
     }
 
     #[test]
-    fn only_pane_ids_reach_herdr() {
-        assert!(valid_pane_id("w3V:p17"));
+    fn only_terminal_addresses_pass_validation() {
+        for good in ["w3V:p17", "herdr:w1:p2", "t7", "hc:t7", "io/t7", "hc:io/t7"] {
+            assert!(valid_pane_id(good), "{good}");
+        }
+        assert!(!valid_pane_id("hc:../t7"));
         assert!(!valid_pane_id("--help"));
         assert!(!valid_pane_id("natspeer"));
         assert!(!valid_pane_id("w3V:p1:x"));

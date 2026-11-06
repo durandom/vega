@@ -75,16 +75,27 @@ pub fn token(s: &str) -> String {
         .collect()
 }
 
+/// Terminal-address token; host/project tokens retain their legacy spelling.
+pub fn pane_token(pane: &str) -> String {
+    vega_herdr::pane::hc_storage_token(pane)
+        .unwrap_or_else(|| token(pane.strip_prefix("herdr:").unwrap_or(pane)))
+}
+
 pub fn beat_key(host: &str) -> String {
     format!("{}.beat", token(host))
 }
 
 pub fn agent_key(host: &str, pane: &str) -> String {
-    format!("{}.agent.{}", token(host), token(pane))
+    format!("{}.agent.{}", token(host), pane_token(pane))
 }
 
 pub fn link_key(host: &str, child_host: &str, pane: &str) -> String {
-    format!("{}.link.{}.{}", token(host), token(child_host), token(pane))
+    format!(
+        "{}.link.{}.{}",
+        token(host),
+        token(child_host),
+        pane_token(pane)
+    )
 }
 
 pub fn uac_key(host: &str, project: &str) -> String {
@@ -955,6 +966,15 @@ pub async fn heartbeat(kv: &async_nats::jetstream::kv::Store, host: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hc_address_tokens_preserve_boundaries() {
+        assert_eq!(agent_key("host", "w1:p2"), "host.agent.w1_p2");
+        assert_eq!(agent_key("host", "io/t7"), agent_key("host", "hc:io/t7"));
+        assert_ne!(agent_key("host", "io.a/t7"), agent_key("host", "io_a/t7"));
+        assert!(!pane_token("io/t7").contains('/'));
+        assert_eq!(token("t7"), "t7");
+    }
 
     #[test]
     fn registry_requires_explicit_endpoint() {

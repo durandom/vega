@@ -47,6 +47,10 @@ pub fn state_file_on(kind: &str, machine: Option<&str>, pane: &str) -> Option<Pa
         .filter(|s| !s.is_empty())
         .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.local/state")))?;
     let machine = machine.unwrap_or("local");
+    let encoded = crate::pane::hc_storage_token(pane);
+    let pane = encoded
+        .as_deref()
+        .unwrap_or_else(|| pane.strip_prefix("herdr:").unwrap_or(pane));
     let file = format!("{machine}_{pane}").replace([':', '/'], "_");
     Some(Path::new(&state).join("vega").join(kind).join(file))
 }
@@ -1014,6 +1018,19 @@ fn remove(file: &Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hc_state_paths_are_single_components_and_preserve_legacy_paths() {
+        let legacy = state_file_on("tasks", None, "w1:p2").unwrap();
+        assert_eq!(legacy.file_name().unwrap(), "local_w1_p2");
+        let bare = state_file_on("tasks", None, "io/t7").unwrap();
+        assert_eq!(bare.parent(), legacy.parent());
+        assert_eq!(bare, state_file_on("tasks", None, "hc:io/t7").unwrap());
+        assert_ne!(
+            state_file_on("tasks", None, "io.a/t7"),
+            state_file_on("tasks", None, "io_a/t7")
+        );
+    }
 
     #[test]
     fn spawn_selection_requires_the_current_occupant() {

@@ -42,6 +42,10 @@ const PANE_ENV: [&str; 4] = [
     "HERDR_WORKSPACE_ID",
     "HERDR_ENV",
 ];
+fn terminal_env(key: &str) -> bool {
+    PANE_ENV.contains(&key) || key.starts_with("HERDR_PLUGIN_") || key.starts_with("HC_")
+}
+
 /// The lock's fd, passed across exec by an upgrading vegad.
 const LOCK_FD_ENV: &str = "VEGA_RELAY_LOCK_FD";
 /// The log moves to `.log.1` above this size when vegad starts.
@@ -503,10 +507,7 @@ fn spawn_detached(exe: &Path) -> Result<std::process::Child, Failure> {
                 env::var("HERDR_BIN_PATH").ok().as_deref(),
             ),
         );
-    for k in PANE_ENV {
-        cmd.env_remove(k);
-    }
-    for (k, _) in env::vars().filter(|(k, _)| k.starts_with("HERDR_PLUGIN_")) {
+    for (k, _) in env::vars().filter(|(k, _)| terminal_env(k)) {
         cmd.env_remove(k);
     }
     for (k, v) in read_env_file() {
@@ -1014,6 +1015,24 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn daemon_drops_terminal_context_but_keeps_tui_socket() {
+        for key in [
+            "HC_TERMINAL_ID",
+            "HC_TERMINAL_SOCKET",
+            "HC_SCOPE",
+            "HC_SESSION",
+            "HC_FUTURE",
+            "HERDR_PANE_ID",
+            "HERDR_PLUGIN_CONTEXT_JSON",
+        ] {
+            assert!(terminal_env(key), "{key}");
+        }
+        for key in ["PATH", "HERDR_SOCKET_PATH", "VEGA_POST_HOST"] {
+            assert!(!terminal_env(key), "{key}");
+        }
     }
 
     #[test]

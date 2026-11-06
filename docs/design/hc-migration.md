@@ -136,3 +136,77 @@ each restarts in herdr-app from a handoff with resume.
 - Whether `HC_TERMINAL_ID` survives toolbox and `podman exec`.
 - Whether `hc keys` accepts literal text.
 - Whether Claude's staged pastes still need `confirm_taken` under hc.
+
+### Slice 0 findings (2026-11-06)
+
+Tested on proteus/macOS with hc 0.1.18, herdr-app 0.1.13 and Claude Code 2.1.319.
+All terminal mutations used scratch sessions `s0`/`s1`, runtime dirs `/tmp/hc-s0` and
+`/tmp/hc-s1`, and XDG homes under this worktree's `target/hc-probes`. Each command
+checked the scratch server PID against the recorded user-core PID. The second core
+was connected as `remote` through a local `--via` script, without adding a fleet host.
+The app used a separate `HERDR_APP_HOME` and the scratch core. Probe scripts and raw
+results are local, uncommitted artifacts in `target/hc-probes`.
+
+1. **Notes need a live agent parent.** A natural child exit (code 3) produced no
+   input in a plain `/bin/sh` parent (`hc read` before/after). The same experiment
+   with an idle Claude parent produced `<hc>... exited (exit 3). Read: hc read ...</hc>`
+   in that parent's input. An `--outlive-parent` child survived killing its Claude
+   parent, retained the same `parent` in `hc get`, and exited with code 4; no new
+   note appeared in the finished parent's screen or the live shell. No retargeting
+   was observed. Therefore notes cannot replace durable mail after a parent ends;
+   decision 6's durable done mail remains necessary. Verification: `results2.log`,
+   `notes.log`; natural exits were used as well as an explicit parent kill.
+2. **App-launched programs have a shell root on this macOS build.** In a scratch
+   app, `tab.new --argv '["sleep","120"]'` resulted in hc argv
+   `["/bin/zsh","-lic","\"$@\"; exec \"$0\" -li","/bin/zsh","sleep","120"]`.
+   The root PID belonged to zsh; `foreground.pid` belonged to sleep. The generated
+   app guide also documents this wrapper for menu agents on macOS (and interactive
+   shells on Linux). An agent finishing can leave the root shell alive; this does
+   not justify dropping `--outlive-parent` for direct hc spawns. Verification:
+   `app-results.log`, `app-terminals.log`, installed app `AGENTS.md`, “programs”.
+3. **An unshown mod does not run `init()`.** A fresh scratch app contained a probe
+   mod whose init used `exec` to write a marker. `status` showed no errors, but no
+   marker existed until `pane.split --mod probe` displayed it. Its `exec` inherited
+   the app's marker env, scratch XDG config and `HC_SESSION=s0`, with no terminal
+   ID. The installed guide says copies start on first display and then stay alive
+   while their block remains in the layout, even hidden. **This qualifies decision
+   5:** a mod merely installed on disk does not guarantee vegad startup. Decision
+   5 is unchanged here; `vega-0h4c.13` tracks choosing a guaranteed instantiated
+   placement/startup mechanism. Verification: `app.py`, `app-results.log`,
+   `mod-env.txt`, installed guide “A copy starts the first time it shows”.
+4. **`hc ls` includes remote terminals in one call.** After adding the second
+   scratch core with `machine add --name remote --via ... --session s1`, a terminal
+   created with `run --on remote` appeared beside local terminals in one `ls` JSON
+   result, addressed as `remote/t1`; `machines` reported the connection state.
+   `get remote/remote-child` returned that same qualified address. Verification:
+   `more.py`, `more.log`. `ls` has no `--on`; terminal operations use qualified
+   addresses, whereas run/exec/file/doc operations accept `--on`.
+5. **Plain `podman exec` drops hc identity; toolbox remains unverified.** A scratch
+   hc terminal started an isolated Ubuntu container, then printed its own ID,
+   the ID inside plain `podman exec`, and inside `podman exec -e HC_TERMINAL_ID`:
+   `host=t14`, `plain-exec=`, `explicit-exec=t14`. The container was removed by a
+   trap. Passing the variable alone does not establish ancestry or socket access.
+   `command -v toolbox` found no toolbox on proteus or its Podman VM, so a real
+   toolbox/ancestry check is still required on a Linux host (`vega-0h4c.12`). hc
+   identity currently fails closed across an unverified process-tree boundary.
+   Verification: `container.py`, `container2.log`; the Podman connection was
+   explicitly selected because scratch XDG paths hide its normal connection config.
+6. **`hc keys` is not arbitrary literal text.** `keys keyprobe 'hello world'`
+   returned `invalid_params`/exit 6. `keys keyprobe a b space c enter` sent `ab c`
+   to a `cat` terminal. Single-character literal keys work; multi-character strings
+   are interpreted as key names. Verification: `more.log`, `keys --help`.
+7. **The tested Claude multiline paste needs no extra `confirm_taken`.** In a
+   scratch terminal with tools and hooks disabled, an idle Claude received a
+   47-line prompt via one `hc send --wait --timeout 25`. It advanced its turn,
+   replied `SLICE_ZERO_PASTE_OK`, and left an empty prompt, without another Enter
+   or text retry. Verification: `claude.py`, `paste.py`, `paste.log` (status and
+   screen). This confirms the idle delivery path for these versions, not every
+   startup race: hc's guide explicitly requires checking `first_message.sent`
+   and `not_started` before recovery. Keep the TUI `confirm_taken` unchanged;
+   later hc delivery should use hc's own delivery/wait result.
+
+Foundation storage uses `hc-` plus the hex bytes of the bare hc address for state
+filenames and registry pane tokens: canonical `hc:io/t7` and bare `io/t7` share one
+key, while `io.a/t7` and `io_a/t7` remain distinct. Legacy TUI state filenames and
+registry keys retain their spelling. Parsing carries the backend explicitly;
+opening/focusing hc addresses remains a later slice and fails explicitly for now.
