@@ -419,13 +419,16 @@ fn discover() -> Result<Ownership, String> {
             path: location.common_dir,
         },
     ));
-    let agents = vega_herdr::herdr_local(&["agent", "list"])
-        .map_err(|_| "cannot enumerate local agents for PagerDuty ownership")?;
-    let workspaces = vega_herdr::herdr_local(&["workspace", "list"])
-        .map_err(|_| "cannot enumerate local workspaces for PagerDuty ownership")?;
-    if !agents["result"]["agents"].is_array() || !workspaces["result"]["workspaces"].is_array() {
-        return Err("unknown herdr schema discovering PagerDuty ownership".into());
+    let inventory = crate::terminals::Inventory::read();
+    if inventory.herdr.is_err() && inventory.hc.is_err() {
+        return Err("cannot enumerate local agents for PagerDuty ownership".into());
     }
+    if inventory.herdr.as_ref().is_ok_and(|a| !a.is_empty()) && inventory.workspace_error.is_some()
+    {
+        return Err("cannot enumerate local workspaces for PagerDuty ownership".into());
+    }
+    let agents = serde_json::json!({"result":{"agents":inventory.agents()}});
+    let workspaces = serde_json::json!({"result":{"workspaces":inventory.workspaces}});
     locations.extend(
         agent_projects(&agents, &workspaces)
             .into_iter()

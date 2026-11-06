@@ -91,9 +91,19 @@ impl Ledger {
         panes: impl IntoIterator<Item = (&'a String, &'a String)> + Clone,
         now: i64,
     ) -> bool {
+        self.snapshot_where(panes, now, |_| true)
+    }
+
+    /// Reconcile one independent source without deleting another's waits.
+    pub fn snapshot_where<'a>(
+        &mut self,
+        panes: impl IntoIterator<Item = (&'a String, &'a String)> + Clone,
+        now: i64,
+        belongs: impl Fn(&str) -> bool,
+    ) -> bool {
         let live: Vec<&String> = panes.clone().into_iter().map(|(p, _)| p).collect();
         let before = self.panes.len();
-        self.panes.retain(|p, _| live.contains(&p));
+        self.panes.retain(|p, _| !belongs(p) || live.contains(&p));
         let mut changed = self.panes.len() != before;
         for (p, s) in panes {
             changed |= self.status(p, s, now);

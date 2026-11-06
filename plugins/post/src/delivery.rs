@@ -277,10 +277,14 @@ impl Delivery {
 
     /// Full picture from herdr; returns the gone panes that had mail state.
     pub fn snapshot(&mut self, panes: HashMap<String, String>) -> Vec<String> {
+        self.snapshot_backend(panes, false)
+    }
+
+    pub fn snapshot_backend(&mut self, panes: HashMap<String, String>, hc: bool) -> Vec<String> {
         let mut gone: Vec<String> = self
             .known()
             .into_iter()
-            .filter(|p| !panes.contains_key(p))
+            .filter(|p| crate::terminals::is_hc(p) == hc && !panes.contains_key(p))
             .collect();
         gone.retain(|p| self.gone(p));
         gone.sort();
@@ -334,6 +338,10 @@ impl Delivery {
     /// RECHECK, or held after a provider abort; and free ones the safety net
     /// re-points. `ignore_status` (relay `--once`) treats every pending
     /// pane as free.
+    pub fn may_queue(&self, pane: &str) -> bool {
+        self.urgent.contains(pane) || self.queued.contains(pane)
+    }
+
     pub fn candidates(&self, ignore_status: bool) -> Vec<String> {
         let now = now_ms();
         let panes: HashSet<&String> = self.pending.iter().chain(self.arrivals.keys()).collect();
@@ -1296,6 +1304,24 @@ mod tests {
         assert!(!d.gone("w1:p1"));
         assert!(d.candidates(true).is_empty());
         assert_eq!(d.status_of("w1:p1"), "unknown");
+    }
+
+    #[test]
+    fn backend_snapshots_never_bounce_the_other_world() {
+        let mut d = d("idle");
+        d.mail("w1:p1", Sender::Other);
+        d.status("t7", "working");
+        d.mail("t7", Sender::Other);
+        assert!(d
+            .snapshot(HashMap::from([("w1:p1".into(), "idle".into())]))
+            .is_empty());
+        assert_eq!(d.status_of("t7"), "working");
+        assert!(d
+            .snapshot_backend(HashMap::from([("t7".into(), "idle".into())]), true)
+            .is_empty());
+        assert_eq!(d.candidates(false), vec!["t7", "w1:p1"]);
+        assert_eq!(d.snapshot_backend(HashMap::new(), true), vec!["t7"]);
+        assert_eq!(d.candidates(false), vec!["w1:p1"]);
     }
 
     #[test]

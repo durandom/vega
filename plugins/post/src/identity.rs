@@ -1236,17 +1236,10 @@ async fn startup_inner() -> Result<(), String> {
         )?;
         // Agents/notes have stable pane/source keys and reconcile from migrated
         // local state. Publish and verify them before releasing project workers.
-        let agents = vega_herdr::herdr(&["agent", "list"]).map_err(|e| e.message)?;
-        let workspaces = vega_herdr::herdr(&["workspace", "list"]).map_err(|e| e.message)?;
-        let mut desired = vega_registry::local_entries(
-            &host,
-            agents["result"]["agents"]
-                .as_array()
-                .ok_or("invalid agent list")?,
-            workspaces["result"]["workspaces"]
-                .as_array()
-                .ok_or("invalid workspace list")?,
-        );
+        let inventory = crate::terminals::Inventory::read();
+        let view = vega_registry::read(&c, &kv).await?;
+        let agents = inventory.checked(&host, &view)?;
+        let mut desired = vega_registry::local_entries(&host, &agents, &inventory.workspaces);
         // Advertise this owner's verified v2 projection even while ordinary
         // reconciliation is held by other hosts' remaining legacy entries.
         desired.insert(

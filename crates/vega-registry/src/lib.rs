@@ -215,6 +215,8 @@ pub fn local_entries(
             .unwrap_or("");
         let mut entry = json!({
             "pane": pane,
+            "backend": a["backend"].as_str().unwrap_or("herdr"),
+            "address": a["address"].as_str().map(String::from).unwrap_or_else(|| format!("herdr:{pane}")),
             "name": vega_herdr::agent_name(a),
             "kind": a["agent"].as_str().unwrap_or(""),
             "status": a["agent_status"].as_str().unwrap_or("unknown"),
@@ -276,6 +278,7 @@ pub fn local_entries(
                 "parent_host": host,
                 "child_host": child_host,
                 "pane": c.pane,
+                "backend": if vega_herdr::pane::hc_storage_token(&c.pane).is_some() { "hc" } else { "herdr" },
                 "name": c.name,
                 "done": done.as_ref().map(|d| d.outcome.as_str()),
                 "summary": done.map(|d| d.summary),
