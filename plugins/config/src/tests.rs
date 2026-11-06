@@ -37,6 +37,7 @@ fn setup() -> (tempfile::TempDir, Ctx) {
         env: Env::at(&home),
         chezmoi: d.path().join("no-chezmoi").into_os_string(),
         herdr: herdr.into_os_string(),
+        herdr_app: d.path().join("no-herdr-app").into_os_string(),
         mux: PathBuf::from("/opt/vega/bin/vega-mux"),
         skills: skills.into_os_string(),
         claude: claude.into_os_string(),
@@ -763,4 +764,78 @@ fn plugin_evidence_keeps_partial_cli_writes_and_retains_legacy_hooks_on_failure(
     let history: Vec<Value> =
         serde_json::from_str(&fs::read_to_string(evidence::path(&ctx.env)).unwrap()).unwrap();
     assert_eq!(history, [event]);
+}
+
+#[test]
+fn herdr_app_units_skip_write_seed_and_reject() {
+    let (d, mut ctx) = setup();
+    let all = apply_all(&ctx);
+    for u in [
+        Unit::HerdrAppKeys,
+        Unit::HerdrAppSettings,
+        Unit::HerdrAppThemes,
+    ] {
+        assert!(
+            matches!(outcome(&all, u), Outcome::Skipped(r) if r.contains("herdr-app")),
+            "{u:?}"
+        );
+    }
+    let home = herdr_app::home(&ctx.env);
+    fs::create_dir_all(&home).unwrap();
+    // The user's own settings key survives; the seeded ones are set.
+    fs::write(
+        home.join("settings.json"),
+        "{\"font\": \"Mine\", \"zoom\": 1}\n",
+    )
+    .unwrap();
+    let managed = BTreeSet::new();
+    for u in [
+        Unit::HerdrAppKeys,
+        Unit::HerdrAppSettings,
+        Unit::HerdrAppThemes,
+    ] {
+        assert_eq!(apply(&ctx, u, &managed).kind(), "written", "{u:?}");
+        assert_eq!(apply(&ctx, u, &managed), Outcome::Unchanged, "{u:?}");
+    }
+    let s: Value = serde_json::from_str(&read(&ctx, ".config/herdr-app/settings.json")).unwrap();
+    assert_eq!(s["font"], "Mine");
+    assert_eq!(s["theme"]["dark"], "catppuccin-mocha");
+    assert_eq!(s["sounds"]["enabled"], false);
+    assert!(home.join("themes/catppuccin-latte.json").is_file());
+    assert!(read(&ctx, ".config/herdr-app/keys.json").contains("\"ctrl-s ctrl-s\""));
+    // A theme set in the app's Settings screen stays until the source changes.
+    fs::write(
+        home.join("settings.json"),
+        "{\"font\": \"Mine\", \"theme\": \"paper\", \"sounds\": {\"enabled\": false}}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppSettings, &managed),
+        Outcome::Unchanged
+    );
+    // An unknown command is rejected before writing, with herdr-app present.
+    ctx.herdr_app = script(
+        d.path(),
+        "herdr-app",
+        "echo '[{\"name\":\"tab.new\",\"args\":[]}]'",
+    )
+    .into_os_string();
+    let local = sources::local_dir(&ctx.env).join("herdr-app");
+    fs::create_dir_all(&local).unwrap();
+    fs::write(
+        local.join("keys.json"),
+        "{\"global\": {\"ctrl-s c\": \"tab.new\", \"ctrl-s q\": \"nope.quit\"}}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppKeys, &managed),
+        Outcome::Rejected(vec!["global ctrl-s q: unknown command nope.quit".into()])
+    );
+    assert!(read(&ctx, ".config/herdr-app/keys.json").contains("\"ctrl-s ctrl-s\""));
+    fs::write(
+        local.join("keys.json"),
+        "{\"global\": {\"ctrl-s c\": \"tab.new\"}}\n",
+    )
+    .unwrap();
+    assert_eq!(apply(&ctx, Unit::HerdrAppKeys, &managed).kind(), "written");
 }

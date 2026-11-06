@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 114 · 2026-11-06
+
+- unit: `herdr-app.keys`, `herdr-app.settings`, `herdr-app.themes` (group `herdr-app`) own
+  `~/.config/herdr-app/`: the TUI's ctrl-s prefix keys as chords (`ctrl-s ctrl-s` sends ctrl-s),
+  Catppuccin latte/mocha themes, sounds off. Skipped without herdr-app. `vega config apply herdr-app`.
+  See [config](docs/design/config.md) "herdr-app".
+
 ## 113 · 2026-11-05
 
 - feature: `vega history read/export` filters central events by project, bead, host

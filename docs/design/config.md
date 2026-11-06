@@ -37,9 +37,35 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `codex.hooks` | `~/.codex/hooks.json` | key-merge: vega's `PreToolUse` entry | code |
 | `pi.prefix` | `~/.pi/agent/settings.json` | key-merge: the activation line in `shellCommandPrefix` | code |
 | `skills` | `~/.agents/skills/<n>`, `~/.claude/skills/<n>` | the skills library; `vega skills lib sync` | `~/.config/vega/skills-global`, the library clone |
+| `herdr-app.keys` | `~/.config/herdr-app/keys.json` | whole file; actions checked against `herdr-app commands` | `herdr-app/keys.json` |
+| `herdr-app.settings` | `~/.config/herdr-app/settings.json` | seeded keys (the app's Settings screen writes the file too) | `herdr-app/settings.json` |
+| `herdr-app.themes` | `~/.config/herdr-app/themes/<name>.json` | whole file each; other themes untouched | `herdr-app/themes/` |
 | `agentsview` | `LOCAL-SETUP.md` in `~/.claude/skills/agentsview-finding-history/` and `~/.agents/skills/agentsview-finding-history/` | whole file each, only where agentsview generated the skill (`SKILL.md` exists) | `agentsview/LOCAL-SETUP.md` |
 
-Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks codex.hooks pi.prefix`.
+Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks codex.hooks pi.prefix`;
+`herdr-app` = `herdr-app.keys herdr-app.settings herdr-app.themes`.
+
+### herdr-app (vega-0h4c.1)
+
+herdr-app (the GPUI window over herdr-core) replaces the herdr TUI (epic vega-0h4c; the tag
+`herdr-tui-final` marks the last TUI-only state). Its home `~/.config/herdr-app/` is files the app
+reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units skip.
+
+- `keys.json` is the whole keymap: once edited, the app no longer upgrades its defaults, so the
+  source carries the app's `cmd-…` defaults plus the TUI's `ctrl-s` prefix bindings as chords
+  (`"ctrl-s c": "tab.new"`). A lone prefix is dropped after the chord timeout, so
+  `"ctrl-s ctrl-s": "send:\u0013"` passes ctrl-s to the program. Before writing, every action must
+  name an app command (`herdr-app commands`, works without a window), `send:`, `terminal` or a
+  folder in `mods/`: the app accepts an unknown name silently and only toasts when it is pressed.
+  TUI keys without an app command (last pane, break pane, copy mode, resize mode, plugin actions)
+  are not bound; vega open, the board and worktrunk follow with the hc migration (vega-0h4c.2).
+- `settings.json` takes seeded keys (`theme` as `{light, dark}`, `sounds`), recorded per unit in
+  the same state file as `claude.settings`; the font and other Settings-screen choices stay the user's.
+- `themes/catppuccin-{latte,mocha}.json`: Catppuccin with the TUI's overrides as theme `colors`
+  (`selected` = surface1 rows, `done` blue, `working` amber). Shape is checked before writing.
+- After writing `keys.json` or `settings.json` with the app running (`herdr-app.sock`), vega waits
+  up to 3 s for a fresh `<stem>.error`. The app keeps its last good version running; vega restores
+  the previous file and reports `rejected`.
 
 ### Destructive Command Guard
 
@@ -183,6 +209,7 @@ chezmoi nothing is managed. Two exceptions, because chezmoi cannot see them or v
 
 None of the sources are templates per host. What differs comes from the host's own state:
 
+- `herdr-app.*`: none; skipped where `~/.config/herdr-app` does not exist.
 - `herdr`: colours, host labels and the sentinel icon from the host's `theme.toml` (as before).
 - `agentsview`: only where `agentsview skills install` generated the skill (proteus, ganymede today).
 - Key-merge units: the rest of each file is the host's own.

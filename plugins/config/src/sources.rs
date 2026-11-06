@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 16] = [
+pub const DEFAULTS: [(&str, &str); 20] = [
     default!("herdr/config.toml"),
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
@@ -32,6 +32,10 @@ pub const DEFAULTS: [(&str, &str); 16] = [
     default!("capacity/windows.toml"),
     default!("dcg/config.toml"),
     default!("dcg/packs/oc.yaml"),
+    default!("herdr-app/keys.json"),
+    default!("herdr-app/settings.json"),
+    default!("herdr-app/themes/catppuccin-latte.json"),
+    default!("herdr-app/themes/catppuccin-mocha.json"),
 ];
 
 pub const HERDR: &str = DEFAULTS[0].1;
@@ -102,6 +106,11 @@ pub fn get(env: &Env, rel: &str) -> Result<Source, String> {
 /// The output styles: the defaults and the local `*.md`, by file name.
 pub fn styles(env: &Env) -> Result<Vec<(String, Source)>, String> {
     directory(env, STYLES_DIR, &[".md"])
+}
+
+/// herdr-app themes: the defaults and the local `*.json`, by file name.
+pub fn herdr_app_themes(env: &Env) -> Result<Vec<(String, Source)>, String> {
+    directory(env, "herdr-app/themes", &[".json"])
 }
 
 /// Default packs and local YAML additions, resolved per file.
@@ -203,6 +212,7 @@ mod tests {
             "agentsview",
             "capacity",
             "dcg/packs",
+            "herdr-app/themes",
         ] {
             for f in repo_files(dir) {
                 assert!(embedded.contains(&f), "{f} is not in DEFAULTS");

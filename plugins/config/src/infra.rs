@@ -475,6 +475,7 @@ mod tests {
             env,
             chezmoi: d.path().join("bin/chezmoi").into_os_string(),
             herdr: d.path().join("no-herdr").into_os_string(),
+            herdr_app: d.path().join("no-herdr-app").into_os_string(),
             mux: PathBuf::from("/opt/vega/bin/vega-mux"),
             skills: d.path().join("no-skills").into_os_string(),
             claude: d.path().join("no-claude").into_os_string(),

@@ -10,6 +10,7 @@
 mod claude_plugin;
 pub mod evidence;
 pub mod herdr;
+pub mod herdr_app;
 pub mod infra;
 pub mod merge;
 pub mod sources;
@@ -33,6 +34,8 @@ pub struct Ctx {
     pub env: Env,
     pub chezmoi: OsString,
     pub herdr: OsString,
+    /// The `herdr-app` that lists its commands.
+    pub herdr_app: OsString,
     /// The `vega-mux` the hooks run.
     pub mux: PathBuf,
     /// The `vega-skills` that syncs the library.
@@ -50,6 +53,7 @@ impl Ctx {
             skills: installed(&env.home, "vega-skills").into_os_string(),
             chezmoi: OsString::from("chezmoi"),
             herdr: OsString::from("herdr"),
+            herdr_app: OsString::from("herdr-app"),
             claude: installed(&env.home, "claude").into_os_string(),
             env,
         })
@@ -81,10 +85,13 @@ pub enum Unit {
     PiPrefix,
     Skills,
     Agentsview,
+    HerdrAppKeys,
+    HerdrAppSettings,
+    HerdrAppThemes,
 }
 
 impl Unit {
-    pub const ALL: [Unit; 13] = [
+    pub const ALL: [Unit; 16] = [
         Unit::Herdr,
         Unit::DcgConfig,
         Unit::DcgPacks,
@@ -98,6 +105,11 @@ impl Unit {
         Unit::PiPrefix,
         Unit::Skills,
         Unit::Agentsview,
+        Unit::HerdrAppKeys,
+        // Themes before the settings that name them: the app rejects a theme
+        // it has no file for.
+        Unit::HerdrAppThemes,
+        Unit::HerdrAppSettings,
     ];
 
     pub fn name(self) -> &'static str {
@@ -115,6 +127,9 @@ impl Unit {
             Unit::PiPrefix => "pi.prefix",
             Unit::Skills => "skills",
             Unit::Agentsview => "agentsview",
+            Unit::HerdrAppKeys => "herdr-app.keys",
+            Unit::HerdrAppSettings => "herdr-app.settings",
+            Unit::HerdrAppThemes => "herdr-app.themes",
         }
     }
 
@@ -134,6 +149,9 @@ impl Unit {
             Unit::PiPrefix => "~/.pi/agent/settings.json",
             Unit::Skills => "~/.agents/skills/, ~/.claude/skills/",
             Unit::Agentsview => "*/skills/agentsview-finding-history/LOCAL-SETUP.md",
+            Unit::HerdrAppKeys => "~/.config/herdr-app/keys.json",
+            Unit::HerdrAppSettings => "~/.config/herdr-app/settings.json",
+            Unit::HerdrAppThemes => "~/.config/herdr-app/themes/",
         }
     }
 
@@ -141,9 +159,9 @@ impl Unit {
         match self {
             Unit::Herdr => "whole file, herdr keys kept",
             Unit::ClaudeMd | Unit::CodexMd | Unit::PiMd | Unit::Agentsview => "whole file",
-            Unit::DcgConfig => "whole file",
-            Unit::DcgPacks | Unit::ClaudeStyles => "whole file each",
-            Unit::ClaudeSettings => "seeded keys",
+            Unit::DcgConfig | Unit::HerdrAppKeys => "whole file",
+            Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
+            Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
             Unit::ClaudeHooks => "plugin + legacy hook migration",
             Unit::CodexHooks | Unit::PiPrefix => "key-merge",
             Unit::Skills => "library",
@@ -162,16 +180,27 @@ impl Unit {
                 | Unit::Agentsview
                 | Unit::DcgConfig
                 | Unit::DcgPacks
+                | Unit::HerdrAppKeys
+                | Unit::HerdrAppSettings
+                | Unit::HerdrAppThemes
         )
     }
 }
 
 /// Unit groups for the command line.
-pub const GROUPS: [(&str, &[Unit]); 2] = [
+pub const GROUPS: [(&str, &[Unit]); 3] = [
     ("instructions", &[Unit::ClaudeMd, Unit::CodexMd, Unit::PiMd]),
     (
         "hooks",
         &[Unit::ClaudeHooks, Unit::CodexHooks, Unit::PiPrefix],
+    ),
+    (
+        "herdr-app",
+        &[
+            Unit::HerdrAppKeys,
+            Unit::HerdrAppSettings,
+            Unit::HerdrAppThemes,
+        ],
     ),
 ];
 
@@ -309,22 +338,22 @@ fn seeds_path(env: &Env) -> PathBuf {
     env.state.join("vega/config.json")
 }
 
-fn last_seeds(env: &Env) -> Map<String, Value> {
+fn last_seeds(env: &Env, unit: Unit) -> Map<String, Value> {
     fs::read_to_string(seeds_path(env))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| v.get(Unit::ClaudeSettings.name())?.as_object().cloned())
+        .and_then(|v| v.get(unit.name())?.as_object().cloned())
         .unwrap_or_default()
 }
 
-fn record_seeds(env: &Env, seeds: &Map<String, Value>) -> Result<(), String> {
+fn record_seeds(env: &Env, unit: Unit, seeds: &Map<String, Value>) -> Result<(), String> {
     let p = seeds_path(env);
     let mut root = fs::read_to_string(&p)
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| Value::Object(Map::new()));
-    root[Unit::ClaudeSettings.name()] = Value::Object(seeds.clone());
+    root[unit.name()] = Value::Object(seeds.clone());
     if let Some(d) = p.parent() {
         fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
@@ -446,35 +475,12 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             if let Some(p) = need_dir(env, ".claude") {
                 return Ok(p);
             }
-            let src = sources::get(env, "claude/settings.json")?;
-            let seeds = match serde_json::from_str::<Value>(&src.text) {
-                Ok(Value::Object(m)) => m,
-                _ => return Err(format!("{}: not a JSON object", src.rel)),
-            };
-            let last = last_seeds(env);
-            let (f, s) = json_plan(home.join(".claude/settings.json"), true, |v| {
-                merge::seed(v, &seeds, &last)
-            })?
-            .expect("created when missing");
-            let live: Option<Value> = f.live.as_deref().and_then(|t| serde_json::from_str(t).ok());
-            let notes = s
-                .local
-                .iter()
-                .map(|k| {
-                    let lv = live.as_ref().map(|l| l[k].to_string()).unwrap_or_default();
-                    format!(
-                        "local: {k} = {lv} stays until the source value ({}) changes",
-                        seeds[k]
-                    )
-                })
-                .collect();
-            Ok(Plan {
-                files: vec![f],
-                notes,
-                sources: vec![src],
-                seeds: Some(seeds),
-                ..Plan::default()
-            })
+            seeded(
+                env,
+                unit,
+                "claude/settings.json",
+                home.join(".claude/settings.json"),
+            )
         }
         Unit::ClaudeHooks => claude_plugin::plan(ctx),
         Unit::CodexHooks => {
@@ -547,7 +553,84 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             plan.sources.push(src);
             Ok(plan)
         }
+        Unit::HerdrAppKeys => {
+            if let Some(p) = need_herdr_app(env) {
+                return Ok(p);
+            }
+            let src = sources::get(env, "herdr-app/keys.json")?;
+            Ok(Plan {
+                files: vec![whole(
+                    herdr_app::home(env).join("keys.json"),
+                    src.text.clone(),
+                )?],
+                sources: vec![src],
+                ..Plan::default()
+            })
+        }
+        Unit::HerdrAppSettings => {
+            if let Some(p) = need_herdr_app(env) {
+                return Ok(p);
+            }
+            seeded(
+                env,
+                unit,
+                "herdr-app/settings.json",
+                herdr_app::home(env).join("settings.json"),
+            )
+        }
+        Unit::HerdrAppThemes => {
+            if let Some(p) = need_herdr_app(env) {
+                return Ok(p);
+            }
+            let mut plan = Plan::default();
+            for (name, src) in sources::herdr_app_themes(env)? {
+                plan.files.push(whole(
+                    herdr_app::home(env).join("themes").join(name),
+                    src.text.clone(),
+                )?);
+                plan.sources.push(src);
+            }
+            Ok(plan)
+        }
     }
+}
+
+/// A seeded-keys plan: the top-level keys of the source `rel`, set in `path`
+/// when missing or when their source value changed since the last apply.
+fn seeded(env: &Env, unit: Unit, rel: &str, path: PathBuf) -> Result<Plan, String> {
+    let src = sources::get(env, rel)?;
+    let seeds = match serde_json::from_str::<Value>(&src.text) {
+        Ok(Value::Object(m)) => m,
+        _ => return Err(format!("{}: not a JSON object", src.rel)),
+    };
+    let last = last_seeds(env, unit);
+    let (f, s) =
+        json_plan(path, true, |v| merge::seed(v, &seeds, &last))?.expect("created when missing");
+    let live: Option<Value> = f.live.as_deref().and_then(|t| serde_json::from_str(t).ok());
+    let notes = s
+        .local
+        .iter()
+        .map(|k| {
+            let lv = live.as_ref().map(|l| l[k].to_string()).unwrap_or_default();
+            format!(
+                "local: {k} = {lv} stays until the source value ({}) changes",
+                seeds[k]
+            )
+        })
+        .collect();
+    Ok(Plan {
+        files: vec![f],
+        notes,
+        sources: vec![src],
+        seeds: Some(seeds),
+        ..Plan::default()
+    })
+}
+
+/// Skips a herdr-app unit on a host without the app's home.
+fn need_herdr_app(env: &Env) -> Option<Plan> {
+    (!herdr_app::home(env).is_dir())
+        .then(|| Plan::skip("no ~/.config/herdr-app (herdr-app not set up)"))
 }
 
 /// The paths chezmoi manages (`chezmoi managed -p absolute`); empty without
@@ -769,7 +852,7 @@ fn apply_inner(
     }
     let changed: Vec<&FilePlan> = plan.files.iter().filter(|f| f.changed()).collect();
     let record = || match &plan.seeds {
-        Some(s) => record_seeds(&ctx.env, s),
+        Some(s) => record_seeds(&ctx.env, unit, s),
         None => Ok(()),
     };
     if changed.is_empty() {
@@ -786,6 +869,28 @@ fn apply_inner(
             Ok(herdr::Check::Ok) => {}
         }
     }
+    let problems = match unit {
+        Unit::HerdrAppKeys => match herdr_app::commands(&ctx.herdr_app) {
+            Err(e) => return Outcome::Failed(e),
+            Ok(cmds) => herdr_app::validate_keys(
+                &changed[0].text,
+                cmds.as_ref(),
+                &herdr_app::mods(&herdr_app::home(&ctx.env)),
+            ),
+        },
+        Unit::HerdrAppThemes => changed
+            .iter()
+            .flat_map(|f| {
+                let name = f.path.file_name().unwrap_or_default().to_string_lossy();
+                herdr_app::validate_theme(&name, &f.text)
+            })
+            .collect(),
+        _ => vec![],
+    };
+    if !problems.is_empty() {
+        return Outcome::Rejected(problems);
+    }
+    let since = std::time::SystemTime::now();
     let mut done = Vec::new();
     for f in &changed {
         if let Err(e) = write(f) {
@@ -793,6 +898,22 @@ fn apply_inner(
         }
         evidence.push(evidence::change(ctx, unit, &plan, f));
         done.push(f.path.display().to_string());
+    }
+    if matches!(unit, Unit::HerdrAppKeys | Unit::HerdrAppSettings) {
+        let f = changed[0];
+        let wait = std::time::Duration::from_secs(3);
+        if let Some(err) = herdr_app::app_error(&f.path, since, wait) {
+            // The app keeps the last good file running; put it back on disk too.
+            let back = match &f.live {
+                Some(old) => fs::write(&f.path, old),
+                None => fs::remove_file(&f.path),
+            };
+            let mut lines = vec![err];
+            if let Err(e) = back {
+                lines.push(format!("restoring {}: {e}", f.path.display()));
+            }
+            return Outcome::Rejected(lines);
+        }
     }
     if let Err(e) = record() {
         return Outcome::Failed(e);

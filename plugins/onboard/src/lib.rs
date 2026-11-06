@@ -197,6 +197,8 @@ pub fn whole_file(u: Unit) -> bool {
             | Unit::PiMd
             | Unit::ClaudeStyles
             | Unit::Agentsview
+            | Unit::HerdrAppKeys
+            | Unit::HerdrAppThemes
             | Unit::DcgConfig
             | Unit::DcgPacks
     )
@@ -218,7 +220,7 @@ pub fn decide(ctx: &Ctx, u: Unit) -> Result<Step, String> {
             Step::Apply
         });
     }
-    if u == Unit::ClaudeSettings {
+    if matches!(u, Unit::ClaudeSettings | Unit::HerdrAppSettings) {
         let seeds = plan.seeds.unwrap_or_default();
         let live: Value = plan
             .files

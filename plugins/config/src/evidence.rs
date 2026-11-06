@@ -37,7 +37,7 @@ pub fn change(ctx: &Ctx, unit: Unit, plan: &Plan, f: &FilePlan) -> Value {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or(json!({}));
         let new: Value = serde_json::from_str(&f.text).unwrap_or(json!({}));
-        if unit == Unit::ClaudeSettings {
+        if matches!(unit, Unit::ClaudeSettings | Unit::HerdrAppSettings) {
             let names: BTreeSet<_> = old
                 .as_object()
                 .into_iter()
@@ -55,8 +55,8 @@ pub fn change(ctx: &Ctx, unit: Unit, plan: &Plan, f: &FilePlan) -> Value {
         } else {
             diff("", Some(&old), Some(&new), &mut keys);
         }
-        if unit == Unit::ClaudeSettings {
-            let last = crate::last_seeds(&ctx.env);
+        if matches!(unit, Unit::ClaudeSettings | Unit::HerdrAppSettings) {
+            let last = crate::last_seeds(&ctx.env, unit);
             for key in &mut keys {
                 // Seeded keys are compared as top-level keys; values stay private.
                 let name = key["key"]
