@@ -10,10 +10,11 @@ Commands:
   check [--target <ref>]    what the git shim would do on a push, without pushing:
                             target, base, each segment's key and pass state
   start [--target <ref>]    start a reviewer for every segment without a pass:
-                            a tab gate-<branch> in your workspace, verdict by mail
+                            TUI tab gate-<branch> or hc terminal gate-<review id>,
+                            in the author's backend; verdict sent to the author
   verdict pass|fail [--findings <file.jsonl>]
                             the reviewer's verdict; only the pane `start` spawned
-                            may give it; mails the author, closes the tab
+                            may give it; sends the verdict, closes the terminal
   log [--since <7d>]        every gate bead: passes, fails, skips, no-reviewer
   gc                        remove clones of finished or day-old reviews
 
