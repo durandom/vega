@@ -348,6 +348,11 @@ fn state_wait_records(host: &str) -> Result<Vec<vega_herdr::waits::Wait>, String
 /// Read the origin locally: readers must never inspect their own filesystem
 /// to interpret another host's key. Publish only the name, never credentials.
 pub fn project_origin_name(project: &str) -> Option<String> {
+    origin_name_within(project, Duration::from_secs(2))
+}
+
+/// `project_origin_name` with the Git budget given (tests of the bound).
+fn origin_name_within(project: &str, budget: Duration) -> Option<String> {
     let dir = match project.strip_prefix("~/") {
         Some(rest) => std::path::PathBuf::from(env::var_os("HOME")?).join(rest),
         None => std::path::PathBuf::from(project),
@@ -359,7 +364,7 @@ pub fn project_origin_name(project: &str) -> Option<String> {
             .args(["config", "--get", "remote.origin.url"])
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_OPTIONAL_LOCKS", "0"),
-        Duration::from_secs(2),
+        budget,
     )
     .ok()??;
     if !out.status.success() {
@@ -1174,10 +1179,18 @@ mod tests {
     fn origin_config_failures_are_bounded() {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(mode) = env::var("VEGA_ORIGIN_TEST_MODE") {
-            let started = std::time::Instant::now();
+            if mode == "hang" {
+                // The bound itself, without waiting out the production 2 s.
+                let started = std::time::Instant::now();
+                assert_eq!(
+                    origin_name_within("~/project/.git", Duration::from_millis(100)),
+                    None
+                );
+                assert!(started.elapsed() < Duration::from_secs(2));
+                return;
+            }
             let name = project_origin_name("~/project/.git");
             assert_eq!(name.as_deref(), (mode == "ok").then_some("orrery"));
-            assert!(started.elapsed() < Duration::from_secs(5));
             return;
         }
         let home = tempfile::tempdir().unwrap();
