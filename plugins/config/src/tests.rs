@@ -863,15 +863,23 @@ case "$1" in
     if grep -q INVALID "$2/main.js"; then echo 'invalid mod'; exit 1; fi
     echo 'check passed';;
   status)
+    echo status >> "$HERDR_APP_HOME/layout-calls"
+    if test -f "$HERDR_APP_HOME/layout-error"; then echo '{"layout":"vega","errors":["rejected update"]}'; exit 0; fi
     if test -f "$HERDR_APP_HOME/offline"; then echo '{"error":"not running"}'; exit 1; fi
     if test -f "$HERDR_APP_HOME/selected"; then echo '{"layout":"vega","errors":[]}'
     else echo '{"layout":"main","errors":[]}'; fi;;
   do)
+    echo "$*" >> "$HERDR_APP_HOME/layout-calls"
+    rm -f "$HERDR_APP_HOME/layout-error"
     if test "$4" = main; then
       rm -f "$HERDR_APP_HOME/selected"
       echo '{"ok":true}'; exit 0
     fi
-    if test -f "$HERDR_APP_HOME/reject"; then echo '{"ok":true}'; exit 0; fi
+    if test -f "$HERDR_APP_HOME/reject"; then
+      if test -f "$HERDR_APP_HOME/selected"; then rm "$HERDR_APP_HOME/reject"; fi
+      touch "$HERDR_APP_HOME/layout-error"
+      echo '{"ok":true}'; exit 0
+    fi
     test -f "$HERDR_APP_HOME/layouts/vega.json" || exit 1
     echo selected > "$HERDR_APP_HOME/selected"
     echo '{"ok":true}';;
@@ -998,6 +1006,66 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
         Outcome::Rejected(_)
     ));
     assert_eq!(fs::read(home.join("layouts/vega.json")).unwrap(), before);
+}
+
+#[test]
+fn app_selected_layout_update_reverifies_and_restores_on_false_success() {
+    let (d, mut ctx) = setup();
+    ctx.herdr_app = fake_app(d.path());
+    let home = herdr_app::home(&ctx.env);
+    fs::create_dir_all(&home).unwrap();
+    let managed = BTreeSet::new();
+    assert_eq!(apply(&ctx, Unit::HerdrAppMods, &managed).kind(), "written");
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed).kind(),
+        "written"
+    );
+    assert!(ctx
+        .env
+        .state
+        .join("vega/herdr-app-layout-selected")
+        .exists());
+    assert!(home.join("selected").exists());
+    // Only existence is checked: no live app or actual socket is needed.
+    fs::write(home.join("herdr-app.sock"), "").unwrap();
+    let local = sources::init(&ctx.env, "herdr-app/layouts/vega.json").unwrap();
+    let accepted = "{\"type\":\"row\",\"children\":[]}\n";
+    fs::write(&local, accepted).unwrap();
+    let plan = herdr_app::plan(&ctx, Unit::HerdrAppLayouts).unwrap();
+    assert!(!plan.herdr_app_pending);
+    assert!(plan.files[0].changed());
+    fs::write(home.join("layout-calls"), "").unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed).kind(),
+        "written"
+    );
+    assert_eq!(
+        fs::read_to_string(home.join("layouts/vega.json")).unwrap(),
+        accepted
+    );
+    assert_eq!(
+        fs::read_to_string(home.join("layout-calls")).unwrap(),
+        "status\ndo layout.switch --name vega\nstatus\n"
+    );
+
+    // The fake acknowledges the switch but reports an activation error. Its
+    // one-shot rejection allows the subsequent rollback switch to succeed.
+    fs::write(&local, "{\"type\":\"column\",\"children\":[]}\n").unwrap();
+    fs::write(home.join("reject"), "").unwrap();
+    fs::write(home.join("layout-calls"), "").unwrap();
+    let result = apply(&ctx, Unit::HerdrAppLayouts, &managed);
+    assert!(matches!(result, Outcome::Rejected(ref errors)
+        if errors.iter().any(|e| e.contains("rejected update"))));
+    assert_eq!(
+        fs::read_to_string(home.join("layouts/vega.json")).unwrap(),
+        accepted
+    );
+    assert!(home.join("selected").exists());
+    assert!(!home.join("layout-error").exists());
+    assert_eq!(
+        fs::read_to_string(home.join("layout-calls")).unwrap(),
+        "status\ndo layout.switch --name vega\nstatus\ndo layout.switch --name vega\n"
+    );
 }
 
 #[test]
