@@ -42,6 +42,14 @@ static MACHINE: OnceLock<Option<String>> = OnceLock::new();
 
 static BOUNDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The limit of a daemon's herdr call. The unit tests take a second: their fake herdr
+/// stalls on purpose.
+const DAEMON_CALL_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_secs(1)
+} else {
+    socket::CALL_TIMEOUT
+};
+
 /// Enable before starting daemon workers: every herdr subprocess, including
 /// calls in shared helpers, must yield control even when herdr stops answering.
 pub fn bound_daemon_calls() {
@@ -164,7 +172,7 @@ fn run_herdr_on(
     let timeout = timeout.or_else(|| {
         BOUNDED
             .load(std::sync::atomic::Ordering::Relaxed)
-            .then_some(socket::CALL_TIMEOUT)
+            .then_some(DAEMON_CALL_TIMEOUT)
     });
     let mut full: Vec<&str> = Vec::new();
     if let Some(m) = target {
@@ -777,7 +785,7 @@ mod tests {
                 herdr_local(&["agent", "prompt"]).unwrap_err().code,
                 "herdr_timeout"
             );
-            assert!(start.elapsed() < Duration::from_secs(8));
+            assert!(start.elapsed() < Duration::from_secs(4));
             assert_eq!(herdr_text(&["pane", "read"]).unwrap(), "ok");
             return;
         }
