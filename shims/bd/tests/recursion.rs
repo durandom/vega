@@ -212,6 +212,8 @@ fn stuck_metadata_helper_cannot_delay_passthrough_indefinitely() {
     let out = f
         .command()
         .env("PATH", path)
+        // vega-herdr's local Git limit (default 2 s) is what cuts the helper short.
+        .env("VEGA_PROJECT_GIT_TIMEOUT_MS", "100")
         .arg("where")
         .bounded_output()
         .unwrap();

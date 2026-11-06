@@ -173,25 +173,12 @@ pub fn pending(dir: &Path) -> io::Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// A process forked by a parallel test holds a just-closed lock fd until it execs, so
-    /// the nonblocking lock can report busy for a moment; retry that only.
-    fn retry_busy(mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {
-        for _ in 0..100 {
-            match op() {
-                Err(e) if e.to_string().contains("outbox busy") => {
-                    std::thread::sleep(std::time::Duration::from_millis(10))
-                }
-                r => return r,
-            }
-        }
-        op()
-    }
     #[test]
     fn bounded_durable_and_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
         let e = event("h", "mail.sent", json!({"body":"full text"}));
-        retry_busy(|| enqueue(tmp.path(), &e)).unwrap();
-        retry_busy(|| enqueue(tmp.path(), &e)).unwrap();
+        enqueue(tmp.path(), &e).unwrap();
+        enqueue(tmp.path(), &e).unwrap();
         let files = pending(tmp.path()).unwrap();
         assert_eq!(files.len(), 1);
         let saved: Value = serde_json::from_slice(&fs::read(&files[0]).unwrap()).unwrap();
@@ -201,7 +188,7 @@ mod tests {
             let id = hash(&i.to_string());
             fs::write(tmp.path().join(format!("{id}.json")), "{}").unwrap();
         }
-        let full = retry_busy(|| enqueue(tmp.path(), &event("h", "test", Value::Null)));
+        let full = enqueue(tmp.path(), &event("h", "test", Value::Null));
         assert!(full.unwrap_err().to_string().contains("outbox full"));
         assert_eq!(pending(tmp.path()).unwrap().len(), MAX_EVENTS);
         let huge = event("h", "test", json!({"body":"x".repeat(MAX_EVENT_BYTES)}));
