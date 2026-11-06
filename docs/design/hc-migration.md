@@ -111,7 +111,8 @@ dirs for a real core (never the user's core).
    starts with `hc run --bg --json --no-parent --outlive-parent --name gate-<id> --cwd <clone>
    --label vega.role=gate-reviewer --label vega.review=<id> -- env VEGA_GATE_ROLE=reviewer <kind> ...`;
    liveness, cleanup and reviewer state through `hc get/kill/rm`; verdict authorization by state file plus
-   the `vega.review` label plus ancestry. Verdict mail falls back to `hc send <author>` until slice 3. Ends
+   the `vega.review` label plus ancestry. Verdict mail uses `hc send <author>` directly, selected by the
+   saved backend, until slice 3; a successful post enqueue does not prove hc delivery. Ends
    the `VEGA_GATE=skip` pushes from herdr-app (vega-yixb).
 2. **Own identity everywhere.** `post inbox` parent lookup, `ci watch`, `notify`, `review`, orchestration
    `caller()`, the mux PreToolUse hook, `uber answer`. An hc agent can then read mail and run every tool.
