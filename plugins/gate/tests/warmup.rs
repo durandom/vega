@@ -3,11 +3,12 @@ mod common;
 use std::io::{Error, ErrorKind};
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
+use std::time::Duration;
 
 #[test]
 fn warmup_recovers_only_from_transient_busy_errors() {
     let mut attempts = 0;
-    let status = common::warm_with(|| {
+    let status = common::warm_with_backoff(Duration::ZERO, || {
         attempts += 1;
         if attempts < 3 {
             Err(Error::from(ErrorKind::ExecutableFileBusy))
@@ -24,7 +25,7 @@ fn warmup_recovers_only_from_transient_busy_errors() {
 fn warmup_does_not_retry_other_errors_or_unsuccessful_exits() {
     for kind in [ErrorKind::NotFound, ErrorKind::PermissionDenied] {
         let mut attempts = 0;
-        let error = common::warm_with(|| {
+        let error = common::warm_with_backoff(Duration::ZERO, || {
             attempts += 1;
             Err(Error::from(kind))
         })
@@ -33,7 +34,7 @@ fn warmup_does_not_retry_other_errors_or_unsuccessful_exits() {
         assert_eq!(attempts, 1);
     }
     let mut attempts = 0;
-    let status = common::warm_with(|| {
+    let status = common::warm_with_backoff(Duration::ZERO, || {
         attempts += 1;
         Ok(ExitStatus::from_raw(1 << 8))
     })
@@ -45,7 +46,7 @@ fn warmup_does_not_retry_other_errors_or_unsuccessful_exits() {
 #[test]
 fn warmup_reports_a_persistent_writer_after_fifty_attempts() {
     let mut attempts = 0;
-    let error = common::warm_with(|| {
+    let error = common::warm_with_backoff(Duration::ZERO, || {
         attempts += 1;
         Err(Error::from(ErrorKind::ExecutableFileBusy))
     })

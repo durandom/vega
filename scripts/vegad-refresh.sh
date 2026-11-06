@@ -10,11 +10,13 @@
 # state the handoff would keep). Not running: left alone, never started.
 #
 # Usage: vegad-refresh.sh [<vega-post>]   (default ~/.local/bin/vega-post)
-# VEGAD_REFRESH_WAIT: seconds to wait for the self-exec (default 15).
+# VEGAD_REFRESH_WAIT: polls for the self-exec (default 15), VEGAD_REFRESH_STEP
+# seconds apart (default 1, so 15 s; tests shrink the step).
 set -eu
 
 post=${1:-$HOME/.local/bin/vega-post}
 wait=${VEGAD_REFRESH_WAIT:-15}
+step=${VEGAD_REFRESH_STEP:-1}
 [ -x "$post" ] || exit 0
 
 # running | stale | stopped, from `relay status --json` (compact serde JSON).
@@ -37,7 +39,7 @@ while :; do
 	*) exit 0 ;;
 	esac
 	[ "$i" -lt "$wait" ] || break
-	sleep 1
+	sleep "$step"
 	i=$((i + 1))
 done
 

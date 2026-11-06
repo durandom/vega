@@ -595,7 +595,13 @@ fn hook_evidence_is_redacted_and_symlink_backup_refreshes_at_referent() {
 #[test]
 fn evidence_is_bounded_and_keeps_results_without_error_text() {
     let (_d, ctx) = setup();
-    for _ in 0..260 {
+    // Seed a full history in one write: 260 retains would cost 260 fsyncs
+    // (F_FULLFSYNC on macOS, seconds in all).
+    let seed: Vec<Value> = (0..256).map(|i| serde_json::json!({ "seed": i })).collect();
+    let p = evidence::path(&ctx.env);
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, serde_json::to_string(&seed).unwrap()).unwrap();
+    for _ in 0..4 {
         evidence::retain(
             &ctx.env,
             &evidence::event(Unit::ClaudeMd, "unchanged", vec![]),
@@ -603,10 +609,11 @@ fn evidence_is_bounded_and_keeps_results_without_error_text() {
         .unwrap();
     }
     let text = fs::read_to_string(evidence::path(&ctx.env)).unwrap();
-    assert_eq!(
-        serde_json::from_str::<Vec<Value>>(&text).unwrap().len(),
-        256
-    );
+    let events = serde_json::from_str::<Vec<Value>>(&text).unwrap();
+    assert_eq!(events.len(), 256);
+    // The oldest go first: seeds 0..4 dropped, the new events last.
+    assert_eq!(events[0]["seed"], 4);
+    assert!(events[252..].iter().all(|e| e["result"] == "unchanged"));
     assert_eq!(
         fs::metadata(evidence::path(&ctx.env))
             .unwrap()
