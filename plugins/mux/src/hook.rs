@@ -20,8 +20,8 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
-use vega_herdr::state::{mode_of, parent_of, redirects_questions, Mode, Parent};
-use vega_herdr::{agent_name, herdr_local, machine, me};
+use vega_herdr::state::{mode_of, redirects_questions, Mode, Parent};
+use vega_herdr::{agent_name, machine, own_terminal};
 
 /// The dialog tools the hook intercepts, also the hook's matcher.
 const CLAUDE_TOOL: &str = "AskUserQuestion";
@@ -44,19 +44,19 @@ pub fn ask_parent() {
     if !matches!(tool, CLAUDE_TOOL | CODEX_TOOL | CODEX_ASYNC_TOOL) {
         return;
     }
-    let Ok(me) = me() else { return };
-    let Ok(a) = herdr_local(&["agent", "get", &me.pane]) else {
+    let Ok(me) = own_terminal() else { return };
+    let Ok(a) = me.agent() else {
         return;
     };
-    let name = agent_name(&a["result"]["agent"]);
-    let parent = parent_of(&me.pane, name);
-    let mode = mode_of(machine(), &me.pane, name);
+    let name = agent_name(&a);
+    let parent = me.parent(&a);
+    let mode = mode_of(machine(), me.pane(), name);
     match route(
         tool,
         parent.as_ref(),
         mode,
         &vega_herdr::state::post_host(),
-        &me.pane,
+        me.pane(),
         &v["tool_input"],
     ) {
         Route::Allow => {}

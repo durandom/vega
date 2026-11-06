@@ -19,6 +19,9 @@ fn host() -> String {
     vega_herdr::hosts::key(&state::post_host())
 }
 fn agent(pane: &str) -> Option<Value> {
+    if vega_herdr::pane::is_hc_id(pane) {
+        return vega_herdr::Terminal::Hc(pane.into()).agent().ok();
+    }
     vega_herdr::herdr_on(None, &["agent", "get", pane], Duration::from_secs(2))
         .ok()
         .and_then(|v| v["result"].get("agent").cloned())
@@ -38,16 +41,15 @@ fn local_endpoint(pane: &str) -> Result<Endpoint, Failure> {
     })
 }
 pub fn caller() -> Result<Actor, Failure> {
-    let pane = std::env::var("HERDR_PANE_ID")
-        .ok()
-        .filter(|p| vega_shim::is_pane(p))
-        .ok_or_else(|| fail("wait_identity", "a herdr agent pane is required"))?;
+    let terminal = vega_herdr::own_terminal()
+        .map_err(|_| fail("wait_identity", "a verified agent terminal is required"))?;
+    let pane = terminal.pane();
     let session = ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "PI_SESSION_ID"]
         .into_iter()
         .find_map(|k| std::env::var(k).ok().filter(|s| !s.is_empty()))
         .ok_or_else(|| fail("wait_identity", "harness session identity is unavailable"))?;
     Ok(Actor {
-        endpoint: local_endpoint(&pane)?,
+        endpoint: local_endpoint(pane)?,
         session,
     })
 }

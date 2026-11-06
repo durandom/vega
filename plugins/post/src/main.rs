@@ -79,7 +79,7 @@ use futures_util::StreamExt;
 use supervise::{Attentions, Supervisor};
 use tokio::sync::mpsc;
 use vega_herdr::state::{self as st, Outcome};
-use vega_herdr::{cell, collapse_home, herdr, local_time, me, print_failure, Failure};
+use vega_herdr::{cell, collapse_home, herdr, local_time, print_failure, Failure};
 
 #[derive(Parser)]
 #[command(
@@ -1516,13 +1516,15 @@ fn send(
     };
     let me = match me {
         Ok(m) => m,
-        Err(f) if f.code == "not_in_herdr" && done.is_none() => vega_herdr::Me {
-            pane: String::new(),
-            workspace: String::new(),
-            agent: "the user".into(),
-            program: String::new(),
-            cwd: cwd(),
-        },
+        Err(f) if (f.code == "not_in_herdr" || f.code == "not_in_terminal") && done.is_none() => {
+            vega_herdr::Me {
+                pane: String::new(),
+                workspace: String::new(),
+                agent: "the user".into(),
+                program: String::new(),
+                cwd: cwd(),
+            }
+        }
         Err(f) => return Err(f),
     };
     let my_host = self::host();
@@ -2073,14 +2075,35 @@ async fn connect_patiently() -> Result<async_nats::Client, Failure> {
     }
 }
 
+// Mail needs caller metadata, but no TUI workspace or target operation.
+fn me() -> Result<vega_herdr::Me, Failure> {
+    let terminal = vega_herdr::own_terminal()?;
+    match terminal {
+        vega_herdr::Terminal::Herdr(_) => vega_herdr::me(),
+        vega_herdr::Terminal::Hc(ref pane) => {
+            let a = terminal.agent()?;
+            Ok(vega_herdr::Me {
+                pane: pane.clone(),
+                workspace: String::new(),
+                program: String::new(),
+                agent: a["kind"].as_str().unwrap_or("").into(),
+                cwd: a["cwd"].as_str().unwrap_or("").into(),
+            })
+        }
+    }
+}
+
+fn own_parent() -> Option<st::Parent> {
+    let terminal = vega_herdr::own_terminal().ok()?;
+    terminal.parent(&terminal.agent().ok()?)
+}
+
 fn inbox(keep: bool, max: usize) -> Result<(), Failure> {
     let me = me()?;
     let host = self::host();
     // The agent that spawned or adopted this one: its mail is the task
     // channel, not a stranger's request (small models refused it otherwise).
-    let parent = vega_herdr::herdr_local(&["agent", "get", &me.pane])
-        .ok()
-        .and_then(|v| st::parent_of(&me.pane, vega_herdr::agent_name(&v["result"]["agent"])));
+    let parent = own_parent();
     runtime()?.block_on(async {
         let client = connect("inbox", None).await?;
         let js = jetstream::new(client.clone());
@@ -2147,9 +2170,7 @@ fn inbox(keep: bool, max: usize) -> Result<(), Failure> {
 fn inbox_show(id: u64) -> Result<(), Failure> {
     let me = me()?;
     let host = self::host();
-    let parent = vega_herdr::herdr_local(&["agent", "get", &me.pane])
-        .ok()
-        .and_then(|v| st::parent_of(&me.pane, vega_herdr::agent_name(&v["result"]["agent"])));
+    let parent = own_parent();
     runtime()?.block_on(async {
         let client = connect("inbox", None).await?;
         let js = jetstream::new(client);
@@ -6456,6 +6477,7 @@ mod tests {
                 .env("PATH", format!("{}:/bin:/usr/bin", root.path().display()))
                 .env_remove("HERDR_PANE_ID")
                 .env_remove("HERDR_SOCKET_PATH")
+                .env_remove("HC_TERMINAL_ID")
                 .env("VEGA_NATS_URL", "nats://must-not-connect.invalid:4222")
                 .output()
                 .unwrap();
@@ -6468,9 +6490,9 @@ mod tests {
             return;
         }
         for f in [inbox(false, 10).unwrap_err(), inbox_show(1).unwrap_err()] {
-            assert_eq!(f.code, "not_in_herdr");
-            assert_eq!(f.message, "no herdr pane hosts this process");
-            assert!(f.hint.contains("vega mux spawn"), "{}", f.hint);
+            assert_eq!(f.code, "not_in_terminal");
+            assert_eq!(f.message, "no terminal hosts this process");
+            assert!(f.hint.contains("ancestry"), "{}", f.hint);
         }
     }
 

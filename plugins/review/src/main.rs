@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::{json, Value};
-use vega_herdr::state::{mode_of, parent_of, redirects_questions, state_file};
-use vega_herdr::{agent_name, cell, herdr_local, machine, me, print_failure, Failure};
+use vega_herdr::state::{mode_of, redirects_questions, state_file};
+use vega_herdr::{agent_name, cell, machine, own_terminal, print_failure, Failure};
 
 use inbox::{
     mail_text, read_request, valid_patch_name, write_response, Inbox, MAX_PATCH, STATUSES,
@@ -251,19 +251,21 @@ fn session_dir(pane: &str) -> Result<PathBuf, Failure> {
 }
 
 fn my_pane() -> Result<String, Failure> {
-    me().map(|m| m.pane)
+    own_terminal().map(|m| m.pane().to_string())
 }
 
 /// Whether the owner works in this pane: no parent, or a headed child.
 fn owner_works_here(pane: &str) -> bool {
-    let Ok(a) = herdr_local(&["agent", "get", pane]) else {
+    let terminal = if vega_herdr::pane::is_hc_id(pane) {
+        vega_herdr::Terminal::Hc(pane.into())
+    } else {
+        vega_herdr::Terminal::Herdr(pane.into())
+    };
+    let Ok(a) = terminal.agent() else {
         return false;
     };
-    let name = agent_name(&a["result"]["agent"]);
-    !redirects_questions(
-        parent_of(pane, name).as_ref(),
-        mode_of(machine(), pane, name),
-    )
+    let name = agent_name(&a);
+    !redirects_questions(terminal.parent(&a).as_ref(), mode_of(machine(), pane, name))
 }
 
 fn random_hex(bytes: usize) -> Result<String, Failure> {

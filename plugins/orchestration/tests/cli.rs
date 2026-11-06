@@ -131,6 +131,8 @@ fn local_wait_and_clear_cli_survive_restarts_and_fence_reused_waiter_sessions() 
         &herdr,
         r#"#!/bin/sh
 case "$*" in
+  *"pane list"*) printf '%s\n' '{"result":{"panes":[{"pane_id":"w1:p1","agent":"codex"}]}}' ;;
+  *"pane process-info"*) printf '{"result":{"process_info":{"shell_pid":%s}}}\n' "$TEST_PARENT_PID" ;;
   *"agent get w1:p1"*) printf '%s\n' '{"result":{"agent":{"pane_id":"w1:p1","name":"child"}}}' ;;
   *"agent get w2:p1"*) printf '%s\n' '{"result":{"agent":{"pane_id":"w2:p1","name":"parent"}}}' ;;
   *) exit 1 ;;
@@ -156,6 +158,7 @@ esac
             .env("XDG_STATE_HOME", &state)
             .env("VEGA_POST_HOST", "worker")
             .env("HERDR_PANE_ID", "w1:p1")
+            .env("TEST_PARENT_PID", std::process::id().to_string())
             .env("CODEX_THREAD_ID", session)
             .env(
                 "PATH",

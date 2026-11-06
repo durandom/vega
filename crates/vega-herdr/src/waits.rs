@@ -92,12 +92,13 @@ fn storage(_: impl std::fmt::Display) -> Failure {
     )
 }
 fn pane(p: &str) -> bool {
-    p.split_once(':').is_some_and(|(a, b)| {
-        !a.is_empty()
-            && !b.is_empty()
-            && a.chars().all(|c| c.is_ascii_alphanumeric())
-            && b.chars().all(|c| c.is_ascii_alphanumeric())
-    })
+    crate::pane::is_hc_id(p)
+        || p.split_once(':').is_some_and(|(a, b)| {
+            !a.is_empty()
+                && !b.is_empty()
+                && a.chars().all(|c| c.is_ascii_alphanumeric())
+                && b.chars().all(|c| c.is_ascii_alphanumeric())
+        })
 }
 fn endpoint(e: &Endpoint) -> bool {
     !e.host.is_empty()
