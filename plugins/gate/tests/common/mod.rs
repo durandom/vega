@@ -207,7 +207,8 @@ esac
 printf '%s\n' "$*" >> $L/vega.log
 case "$1 $2" in
   "lanista pin") echo "model: m-$3" ;;
-  "post send") if [ -f $L/block-mail ]; then
+  "post send") [ -f "$L/fail-mail" ] && exit 1
+    if [ -f $L/block-mail ]; then
     touch $L/mail-entered
     n=0
     while [ ! -f $L/release-mail ]; do
@@ -225,9 +226,31 @@ esac
         r#"L=${FAKE_LOG:?}
 printf '%s\n' "$*" >> $L/herdr.log
 case "$1 $2" in
+  "pane list") printf '{"result":{"panes":[{"pane_id":"%s","agent":"claude","cwd":"/nonexistent"}]}}\n' "$HERDR_PANE_ID" ;;
+  "pane process-info") printf '{"result":{"process_info":{"shell_pid":%s}}}\n' "$PPID" ;;
   "pane current") echo '{"result":{"pane":{"agent":"claude","agent_session":{"value":"s-author"},"cwd":"/nonexistent"}}}' ;;
   "pane close") rm -f $L/old-pane-alive ;;
   "pane get") if [ -f $L/revoke-state ]; then rm -f "$(cat $L/revoke-state)"; fi; cat $L/herdr-get.json 2>/dev/null || exit 1 ;;
+esac
+"#,
+    );
+    let hc = shared_script(
+        "gate-fakes",
+        "hc",
+        r#"L=${FAKE_LOG:?}
+printf '%s\n' "$*" >> "$L/hc.log"
+[ "$1" = --json ] && shift
+case "$1" in
+  get)
+    if [ -f "$L/hc-$2.json" ]; then cat "$L/hc-$2.json"; exit; fi
+    pid=$PPID
+    review=$(cat "$L/hc-review" 2>/dev/null || echo none)
+    [ -f "$L/hc-stale" ] && pid=2
+    printf '{"address":"%s","state":"live","pid":%s,"status":{"app":"claude-code","state":"working"},"foreground":{"cwd":"/nonexistent"},"labels":{"herdr.space":"space-1","vega.review":"%s"}}\n' "$2" "$pid" "$review" ;;
+  run)
+    n=$(( $(cat "$L/hc-n" 2>/dev/null || echo 10) + 1 )); echo "$n" > "$L/hc-n"
+    printf '{"address":"t%s"}\n' "$n" ;;
+  send|kill|rm) echo '{}' ;;
 esac
 "#,
     );
@@ -236,6 +259,14 @@ esac
         harness = shared_script("gate-harness", kind, "exit 0\n");
     }
     vec![
+        (
+            "PATH".into(),
+            std::env::join_paths(std::iter::once(hc.parent().unwrap().to_path_buf()).chain(
+                std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+            ))
+            .unwrap()
+            .into(),
+        ),
         ("VEGA_GATE_BD".into(), bd),
         (
             "VEGA_GATE_HARNESS_PATH".into(),

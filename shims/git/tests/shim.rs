@@ -37,11 +37,19 @@ fn cmd(bin: &str, dir: &Path, tmp: &Path, env: &[(&str, &str)], args: &[&str]) -
         .env("VEGA_TOKEN_BURN", "/nonexistent/token-burn")
         .env("CLAUDE_CODE_SESSION_ID", "test-session")
         .env_remove("HERDR_PANE_ID")
+        .env_remove("HC_TERMINAL_ID")
         .env_remove("VEGA_GATE")
         .env_remove("VEGA_GATE_ROLE")
         .env_remove("VEGA_GATE_GIT");
     for (k, v) in fakes(tmp) {
-        c.env(k, v);
+        if k == "PATH" {
+            c.env(
+                k,
+                format!("{}:{}", path().split(':').next().unwrap(), v.display()),
+            );
+        } else {
+            c.env(k, v);
+        }
     }
     for (k, v) in env {
         c.env(k, v);
@@ -214,7 +222,7 @@ fn skip_and_no_herdr_are_recorded_and_let_through() {
     let e = stderr(&o);
     assert!(o.status.success(), "{e}");
     assert!(
-        e.contains("vega gate: no herdr, push not reviewed, recorded as gate-2"),
+        e.contains("vega gate: no terminal, push not reviewed, recorded as gate-2"),
         "{e}"
     );
 }

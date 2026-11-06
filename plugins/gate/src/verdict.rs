@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
+use crate::terminal;
 use serde_json::Value;
+use vega_herdr::pane::Backend;
 
 use crate::state::{self, Review};
 use crate::{record, run, run_ok, segments::short, start, tool};
@@ -63,11 +65,12 @@ pub fn parse_findings(text: &str) -> Result<Vec<Finding>, String> {
 }
 
 /// The caller is the reviewer pane `gate start` spawned: a state file for
-/// its `HERDR_PANE_ID`, and herdr's session id of that pane equal to the
+/// its verified terminal identity, and herdr's session id of that pane equal to the
 /// caller's harness session id. A pi reviewer exports no session id; its
-/// pane and state file must do.
+/// pane and state file must do. hc uses ancestry and the review label instead.
 pub fn authorize() -> Result<Review, String> {
-    let pane = std::env::var("HERDR_PANE_ID").unwrap_or_default();
+    let identity = terminal::own()?;
+    let (backend, pane) = identity.unwrap_or((Backend::Herdr, String::new()));
     let refuse = |why: &str| {
         let owners: Vec<String> = state::all().into_iter().map(|r| r.pane).collect();
         let who = if owners.is_empty() {
@@ -78,11 +81,22 @@ pub fn authorize() -> Result<Review, String> {
         Err(format!("only {who} gives the verdict ({why})"))
     };
     if pane.is_empty() {
-        return refuse("no HERDR_PANE_ID");
+        return refuse("no terminal");
     }
     let Some(r) = state::load(&pane) else {
         return refuse(&format!("pane {pane} runs no gate review"));
     };
+    if r.backend != backend {
+        return refuse("terminal backend differs from review");
+    }
+    if backend == Backend::Hc {
+        let info = terminal::get(&pane)?;
+        return if info["labels"]["vega.review"].as_str() == Some(&r.review) {
+            Ok(r)
+        } else {
+            refuse("terminal review label differs from state")
+        };
+    }
     let caller = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"]
         .iter()
         .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()));
@@ -163,6 +177,15 @@ pub fn give(pass: bool, findings: &[Finding], r: &Review) -> Result<Vec<String>,
             Some(Duration::from_secs(15)),
         )
         .is_ok_and(|o| o.ok);
+    let mailed = mailed
+        || (r.backend == Backend::Hc
+            && !r.author_pane.is_empty()
+            && vega_herdr::hc_on(
+                None,
+                &["send", &r.author_pane, &text],
+                Some(Duration::from_secs(15)),
+            )
+            .is_ok());
     start::cleanup_detached(r);
     // A replacing start may now close this finished pane immediately: all
     // verdict side effects, including author mail, are complete.
@@ -176,7 +199,7 @@ pub fn give(pass: bool, findings: &[Finding], r: &Review) -> Result<Vec<String>,
             if mailed {
                 format!("{} mailed", r.author_pane)
             } else {
-                format!("{} not mailed (vega post send failed)", r.author_pane)
+                format!("{} not mailed (verdict delivery failed)", r.author_pane)
             }
         ),
         "cleanup: this pane closes in 5 s; clone and state removed".into(),
@@ -219,6 +242,7 @@ mod tests {
 
     fn review() -> Review {
         Review {
+            backend: Backend::Herdr,
             pane: "w1:p3".into(),
             repo: "/r".into(),
             branch: "gate-fixes".into(),

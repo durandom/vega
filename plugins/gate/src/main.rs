@@ -334,7 +334,7 @@ fn gc() -> Result<(), Failure> {
             })
         };
         if now - r.started_at > DAY || !r.repo.exists() || closed() {
-            start::cleanup(&r, start::pane_alive(&r.pane));
+            start::cleanup(&r, start::pane_alive(&r));
             removed += 1;
         } else {
             owned.push(r.clone.clone());
