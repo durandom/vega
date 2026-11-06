@@ -21,7 +21,9 @@ run = [
   # Catch socket client feature assumptions hidden by workspace feature unification.
   "cargo check -p vega-herdr",
   "cargo clippy --workspace --all-targets -- -D warnings",
-  "cargo test --workspace",
+  # nextest runs all test binaries in parallel (cargo test: one after another).
+  # It skips doc tests; the workspace has none (doc code blocks are TOML).
+  "cargo nextest run --workspace --status-level fail --final-status-level slow",
   "cd vscode && node --test",
   "sh githooks/wt-guard.test.sh",
   "sh shims/activate.test.sh",
@@ -68,3 +70,5 @@ nats-server = "2.15.0"
 "github:nats-io/natscli" = "0.5.0"
 # Compiler cache behind scripts/rustc-wrapper.sh (RUSTC_WRAPPER above).
 sccache = "0.19.0"
+# Test runner for `mise run check`: runs all test binaries in parallel.
+"github:nextest-rs/nextest" = "cargo-nextest-0.9.150"

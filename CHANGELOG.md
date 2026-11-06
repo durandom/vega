@@ -11,7 +11,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   (no fat LTO any more) and copies them; `mise run install` skips `check` when it already passed on
   this clean tree. Dev builds keep line tables only (the old `target/debug` can be removed once:
   `cargo clean`). Worktrees compile through sccache (`mise install` fetches it; without it rustc runs
-  unchanged); the main checkout builds incrementally.
+  unchanged); the main checkout builds incrementally. `mise run check` runs the tests with
+  `cargo nextest` (`mise install` fetches it).
 
 ## 114 · 2026-11-06
 
