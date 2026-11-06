@@ -1,7 +1,7 @@
 //! Version stamping for the vega binaries.
 //!
 //! Each binary crate has a one-line `build.rs` calling [`emit`], which runs git and exports
-//! `VEGA_VERSION` (`<ver> (release, <sha>)` or `<ver>-dev (...)`). Binaries print it with
+//! `VEGA_VERSION` (`<ver> (release, <sha>)` or `<ver>-dev (...)`; debug builds `<ver>-dev (debug build)`). Binaries print it with
 //! [`version_line!`]. `env!` resolves per crate, so every binary crate needs its own build script.
 
 use std::path::PathBuf;
@@ -101,6 +101,14 @@ fn watch_paths() -> Vec<PathBuf> {
 /// Call from `build.rs`: exports `VEGA_VERSION` and sets the re-run triggers.
 pub fn emit() {
     let ver = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    // Debug builds (clippy, tests, dev binaries) carry no git stamp: watching HEAD and the
+    // index re-ran every binary crate's build after each commit or `git add`, so clippy and
+    // the tests rebuilt all 25 binary crates (vega-919z). Installed binaries are release.
+    if std::env::var("PROFILE").as_deref() != Ok("release") {
+        println!("cargo:rerun-if-changed=Cargo.toml");
+        println!("cargo:rustc-env=VEGA_VERSION={ver}-dev (debug build)");
+        return;
+    }
     for p in watch_paths() {
         println!("cargo:rerun-if-changed={}", p.display());
     }
