@@ -211,7 +211,7 @@ pub const TOPICS: [&Topic; 22] = [
 /// known kind, OTHER_AGENT for the rest.
 pub fn agent_topic(kind: &str) -> &'static Topic {
     match kind {
-        "claude" => &CLAUDE,
+        "claude" | "claude-code" => &CLAUDE,
         "codex" => &CODEX,
         "copilot" => &COPILOT,
         "pi" => &PI,
@@ -684,6 +684,7 @@ mod tests {
     #[test]
     fn agent_kinds_map_to_their_topic_and_override() {
         assert_eq!(agent_topic("claude"), &CLAUDE);
+        assert_eq!(agent_topic("claude-code"), &CLAUDE);
         assert_eq!(agent_topic("codex"), &CODEX);
         assert_eq!(agent_topic("copilot"), &COPILOT);
         assert_eq!(agent_topic("pi"), &PI);

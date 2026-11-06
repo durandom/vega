@@ -115,11 +115,41 @@ pub fn pane_key() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-/// herdr pane ids look like `w3V:p17`: alphanumerics, one colon. Session
-/// keys (`codex:01a1-…`, a bare UUID) and `unknown` are not panes.
+/// Recognize bare or backend-qualified herdr/hc addresses. Session keys
+/// (`codex:01a1-…`, a bare UUID) and `unknown` are not terminal addresses.
 pub fn is_pane(key: &str) -> bool {
-    let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric());
-    matches!(key.split_once(':'), Some((w, p)) if ok(w) && ok(p))
+    let id = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric());
+    let herdr = |s: &str| {
+        let Some((w, p)) = s.split_once(':') else {
+            return false;
+        };
+        w.strip_prefix('w').is_some_and(id) && p.strip_prefix('p').is_some_and(id)
+    };
+    if let Some(p) = key.strip_prefix("herdr:") {
+        return herdr(p);
+    }
+    let p = key.strip_prefix("hc:").unwrap_or(key);
+    let hc = |s: &str| {
+        s.strip_prefix('t').is_some_and(|n| {
+            n.as_bytes().first().is_some_and(u8::is_ascii_digit)
+                && n.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+    };
+    let label = |s: &str| {
+        !s.is_empty()
+            && s != "."
+            && s != ".."
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    };
+    if hc(p) || p.split_once('/').is_some_and(|(m, t)| label(m) && hc(t)) {
+        return true;
+    }
+    !key.starts_with("hc:")
+        && (herdr(key)
+            || key
+                .split_once(':')
+                .is_some_and(|(m, p)| label(m) && herdr(p)))
 }
 
 /// True the first time `key` is seen in `session` (P4: each hint once per
@@ -255,9 +285,36 @@ pub mod calls {
 mod tests {
     use super::*;
 
-    // One test touches the env: the state and cache dirs are process-wide.
+    #[test]
+    fn terminal_address_grammar() {
+        for good in [
+            "w1:p2",
+            "herdr:w1:p2",
+            "io:w1:p2",
+            "t7",
+            "hc:t7",
+            "hc:io/t1b",
+            "io/t7",
+            "hc:io/t7",
+        ] {
+            assert!(is_pane(good), "{good}");
+        }
+        for bad in [
+            "unknown",
+            "codex:123",
+            "hc:t",
+            "herdr:t7",
+            "hc:w1:p2",
+            "../t7",
+            "io/t7/x",
+        ] {
+            assert!(!is_pane(bad), "{bad}");
+        }
+    }
+
     #[test]
     fn calls_and_first_time_use_the_xdg_dirs() {
+        // This test alone touches the process-wide state and cache environment.
         let tmp = tempfile::tempdir().unwrap();
         env::set_var("XDG_STATE_HOME", tmp.path().join("state"));
         env::set_var("XDG_CACHE_HOME", tmp.path().join("cache"));

@@ -26,7 +26,7 @@ impl Kind {
     /// without its `herdr:` prefix).
     pub fn from_herdr(kind: &str) -> Option<Kind> {
         match kind.trim_start_matches("herdr:") {
-            "claude" => Some(Kind::Claude),
+            "claude" | "claude-code" => Some(Kind::Claude),
             "codex" => Some(Kind::Codex),
             "pi" => Some(Kind::Pi),
             "agy" | "antigravity" | "antigravity_cli" => Some(Kind::Agy),
@@ -619,6 +619,7 @@ mod tests {
     #[test]
     fn kind_from_herdr_names() {
         assert_eq!(Kind::from_herdr("claude"), Some(Kind::Claude));
+        assert_eq!(Kind::from_herdr("claude-code"), Some(Kind::Claude));
         assert_eq!(Kind::from_herdr("herdr:antigravity_cli"), Some(Kind::Agy));
         assert_eq!(Kind::from_herdr("aider"), None);
     }

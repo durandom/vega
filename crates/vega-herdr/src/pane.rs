@@ -44,10 +44,17 @@ pub fn peel(s: &str) -> &str {
 /// Bound on one herdr call; another machine answers over ssh.
 const HERDR_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Herdr,
+    Hc,
+}
+
 /// A pane id as written on screen, not yet looked up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneRef {
     pub pane: String,
+    pub backend: Backend,
     pub machine: Option<String>,
     /// The machine came from prose (`w1:p2 on io`); an unknown one is
     /// ignored, so "on this machine" does not fail the lookup.
@@ -85,6 +92,42 @@ pub fn is_pane_id(s: &str) -> bool {
     id(w) && id(p)
 }
 
+/// hc ids such as `t7` and `t1b`; arbitrary names need a registry lookup.
+pub fn is_hc_id(s: &str) -> bool {
+    s.strip_prefix('t').is_some_and(|n| {
+        n.as_bytes().first().is_some_and(u8::is_ascii_digit)
+            && n.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
+}
+
+/// Strict address grammar, independent of prose parsing or terminal lookup.
+pub fn is_address(s: &str) -> bool {
+    if let Some(p) = s.strip_prefix("herdr:") {
+        return is_pane_id(p);
+    }
+    let p = s.strip_prefix("hc:").unwrap_or(s);
+    if is_hc_id(p) {
+        return true;
+    }
+    if let Some((m, t)) = p.split_once('/') {
+        return is_label(m) && m != "." && m != ".." && is_hc_id(t);
+    }
+    if s.starts_with("hc:") {
+        return false;
+    }
+    is_pane_id(s)
+        || s.split_once(':')
+            .is_some_and(|(m, p)| is_label(m) && is_pane_id(p))
+}
+
+/// Lossless, one-component encoding for hc state/KV addresses. Legacy TUI
+/// storage keeps its existing names; canonical and bare hc forms share a key.
+pub fn hc_storage_token(s: &str) -> Option<String> {
+    let p = s.strip_prefix("hc:").unwrap_or(s);
+    (is_address(s) && (is_hc_id(p) || p.contains('/')))
+        .then(|| format!("hc-{}", crate::project::encode_component(p)))
+}
+
 /// A herdr machine label as `herdr machine list` saves it.
 fn is_label(s: &str) -> bool {
     !s.is_empty()
@@ -97,6 +140,24 @@ fn is_label(s: &str) -> bool {
 pub fn parse(text: &str) -> Option<PaneRef> {
     let words: Vec<&str> = text.split_whitespace().map(peel).collect();
     words.iter().enumerate().find_map(|(i, w)| {
+        if (w.starts_with("herdr:") || w.starts_with("hc:")) && !is_address(w) {
+            return None;
+        }
+        let w = w.strip_prefix("herdr:").unwrap_or(w);
+        let hc = w.strip_prefix("hc:").unwrap_or(w);
+        if is_hc_id(hc) || (hc.contains('/') && is_address(w)) {
+            let (machine, pane) = match hc.split_once('/') {
+                Some((m, p)) => (Some(m.to_string()), p),
+                None => (None, hc),
+            };
+            return Some(PaneRef {
+                pane: pane.into(),
+                machine,
+                loose: false,
+                backend: Backend::Hc,
+            });
+        }
+
         if is_pane_id(w) {
             let machine = (words.get(i + 1) == Some(&"on"))
                 .then(|| words.get(i + 2).copied())
@@ -104,6 +165,7 @@ pub fn parse(text: &str) -> Option<PaneRef> {
                 .filter(|m| is_label(m));
             return Some(PaneRef {
                 pane: w.to_string(),
+                backend: Backend::Herdr,
                 loose: machine.is_some(),
                 machine: machine.map(String::from),
             });
@@ -111,6 +173,7 @@ pub fn parse(text: &str) -> Option<PaneRef> {
         let (m, pane) = w.split_once(':')?;
         (is_label(m) && is_pane_id(pane)).then(|| PaneRef {
             pane: pane.to_string(),
+            backend: Backend::Herdr,
             machine: Some(m.to_string()),
             loose: false,
         })
@@ -126,6 +189,12 @@ pub fn resolve(
     machines: &[String],
     exists: impl Fn(Option<&str>, &str) -> bool + Sync,
 ) -> Result<Vec<Hit>, Miss> {
+    if r.backend == Backend::Hc {
+        return Err((
+            "unsupported_backend",
+            "hc UI lookup is not available yet".into(),
+        ));
+    }
     let not_found = |place: String| ("pane_not_found", format!("no pane {} {place}", r.pane));
     match r.machine.as_deref() {
         Some(m) if m.eq_ignore_ascii_case(here) => {
@@ -258,9 +327,39 @@ mod tests {
     fn r(pane: &str, machine: Option<&str>, loose: bool) -> Option<PaneRef> {
         Some(PaneRef {
             pane: pane.into(),
+            backend: Backend::Herdr,
             machine: machine.map(Into::into),
             loose,
         })
+    }
+
+    #[test]
+    fn hc_addresses_are_distinct_and_keep_backend() {
+        for address in ["hc:t7", "t7", "hc:io/t7", "io/t7"] {
+            assert!(is_address(address));
+            let p = parse(address).unwrap();
+            assert_eq!(p.backend, Backend::Hc);
+            assert_eq!(p.pane, "t7");
+        }
+        assert!(is_address("hc:io/t1b"));
+        assert_eq!(parse("t1b").unwrap().pane, "t1b");
+        assert_eq!(parse("herdr:w1:p2"), r("w1:p2", None, false));
+        for bad in [
+            "hc:w1:p2",
+            "herdr:t7",
+            "hc:t",
+            "hc:../t7",
+            "hc:io/x/t7",
+            "codex:123",
+            "hc:io/t7/x",
+        ] {
+            assert!(!is_address(bad), "{bad}");
+            assert!(parse(bad).is_none(), "{bad}");
+        }
+        assert_eq!(hc_storage_token("hc:io/t7"), hc_storage_token("io/t7"));
+        let a = hc_storage_token("io.a/t7").unwrap();
+        assert!(!a.contains('/'));
+        assert_ne!(a, hc_storage_token("io_a/t7").unwrap());
     }
 
     #[test]
