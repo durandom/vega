@@ -127,7 +127,9 @@ impl State {
         self.wanted
             .iter()
             .filter(|(k, cmds)| match self.sent.get(k) {
-                Some((last, at)) => last != cmds || now.duration_since(*at) >= RENEW_AFTER,
+                Some((last, at)) => {
+                    last != cmds || now.duration_since(*at) >= crate::pace::of(RENEW_AFTER)
+                }
                 None => true,
             })
             .cloned()
@@ -159,7 +161,7 @@ pub fn submit(cmds: Vec<Cmd>) {
 fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
     let mut state = State::default();
     loop {
-        match rx.recv_timeout(TICK) {
+        match rx.recv_timeout(crate::pace::of(TICK)) {
             Ok(mut cmds) => {
                 // Only the newest refresh counts.
                 while let Ok(newer) = rx.try_recv() {

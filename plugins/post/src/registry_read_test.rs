@@ -24,30 +24,53 @@ impl Drop for Server {
 }
 
 /// A local nats-server with JetStream in `dir` and the rendered
-/// authorization block; returns it (killed on drop) and its URL.
+/// authorization block; returns it (killed on drop) and its URL once it is
+/// ready. A port picked free can be taken by a parallel test's broker before
+/// this one binds it; that nats-server exits, and another port is tried.
 pub fn start(dir: &std::path::Path, authz: &str) -> (Server, String) {
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
     let conf = dir.join("nats.conf");
-    std::fs::write(
-        &conf,
-        format!(
-            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n{authz}",
-            dir.join("js").display()
-        ),
-    )
-    .unwrap();
-    let child = Command::new("nats-server")
-        .arg("-c")
-        .arg(&conf)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("nats-server not on PATH: run the tests via `mise run check`");
-    (Server(child), format!("nats://127.0.0.1:{port}"))
+    let log = dir.join("nats.log");
+    for _ in 0..5 {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        std::fs::write(
+            &conf,
+            format!(
+                "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n{authz}",
+                dir.join("js").display()
+            ),
+        )
+        .unwrap();
+        let mut child = Server(
+            Command::new("nats-server")
+                .arg("-c")
+                .arg(&conf)
+                .stdout(Stdio::null())
+                .stderr(std::fs::File::create(&log).unwrap())
+                .spawn()
+                .expect("nats-server not on PATH: run the tests via `mise run check`"),
+        );
+        // Its own log, not a connect: a connect may reach the other broker.
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while std::time::Instant::now() < until {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            if text.contains("Server is ready") {
+                return (child, format!("nats://127.0.0.1:{port}"));
+            }
+            if child.0.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        eprintln!(
+            "nats-server on {port} not ready, retrying:\n{}",
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+    }
+    panic!("no local nats-server came up in {}", dir.display());
 }
 
 pub fn user() -> (String, String) {
@@ -56,7 +79,11 @@ pub fn user() -> (String, String) {
 }
 
 pub async fn connect(url: &str, seed: &str, inbox: &str) -> async_nats::Client {
-    for _ in 0..50 {
+    // A deadline, not a try count: on a loaded host nats-server's start and
+    // each connect attempt take longer. Only a broker that never comes up
+    // waits it out.
+    let until = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < until {
         if let Ok(c) = async_nats::ConnectOptions::with_nkey(seed.into())
             .custom_inbox_prefix(inbox)
             .request_timeout(Some(Duration::from_millis(500)))
@@ -652,7 +679,10 @@ fn registry_ttl_removal_and_owner_cleanup() {
                         keys.push(key);
                     }
                 }
-                let mut cleanup = vega_registry::DeadSubjects::default();
+                // Batches 3 s apart, not 15 s: long enough for the immediate second
+                // run below to fall inside one, short enough to wait one out.
+                let pace = Duration::from_secs(3);
+                let mut cleanup = vega_registry::DeadSubjects::paced(pace);
                 cleanup.run(&kv, "proteus", &keys).await.unwrap();
                 let dead = kv.entry("proteus.agent.dead").await.unwrap().unwrap();
                 assert_eq!(
@@ -699,7 +729,7 @@ fn registry_ttl_removal_and_owner_cleanup() {
                     // This key appeared after the one-time snapshot.
                     kv.put("proteus.agent.late", "old".into()).await.unwrap();
                     kv.delete("proteus.agent.late").await.unwrap();
-                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    tokio::time::sleep(pace).await;
                     cleanup.run(&kv, "proteus", &keys).await.unwrap();
                     assert_eq!(
                         kv.entry("proteus.agent.batch32")

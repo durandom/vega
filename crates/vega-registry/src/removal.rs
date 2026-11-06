@@ -66,9 +66,19 @@ pub async fn remove(kv: &kv::Store, key: &str) -> Result<(), String> {
 pub struct DeadSubjects {
     pending: Option<VecDeque<String>>,
     next: Option<Instant>,
+    /// The pace between batches; None is CLEANUP_EVERY.
+    every: Option<Duration>,
 }
 
 impl DeadSubjects {
+    /// A cleanup with batches `every` apart instead of 15 s, for tests.
+    pub fn paced(every: Duration) -> Self {
+        DeadSubjects {
+            every: Some(every),
+            ..Default::default()
+        }
+    }
+
     pub async fn run(
         &mut self,
         kv: &kv::Store,
@@ -86,7 +96,7 @@ impl DeadSubjects {
         if self.next.is_some_and(|next| Instant::now() < next) {
             return Ok(());
         }
-        self.next = Some(Instant::now() + CLEANUP_EVERY);
+        self.next = Some(Instant::now() + self.every.unwrap_or(CLEANUP_EVERY));
         for _ in 0..CLEANUP_BATCH {
             let Some(key) = pending.front() else { break };
             if let Some(entry) = kv.entry(key.clone()).await.map_err(|e| e.to_string())? {

@@ -24,6 +24,7 @@ case "$1 $2" in
   "agent list") echo '{"result":{"agents":[{"pane_id":"w1:p1","agent_status":"idle","agent":"claude"}]}}' ;;
   "pane list") printf '{"result":{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","cwd":"%s","agent":"claude"}]}}\n' "$FAKE_CHECKOUT" ;;
   "agent prompt") printf '%s %s\n' "$3" "$4" >> "$FAKE_LOG/prompts"; echo '{"result":{}}' ;;
+  "pane read") printf 'done\n────────\n❯ \n────────\n  status\n' ;;
   *) echo '{"result":{}}' ;;
 esac
 "#;
@@ -143,8 +144,9 @@ fn without_a_broker_vegad_stays_up_and_types_the_upgrade_proposal() {
     let mut relay = Relay(cmd.spawn().unwrap());
 
     let prompts = home.join("prompts");
-    // The fake pane shows no input box: typing waits for 20 s of quiet
-    // screen, so 30 s left a loaded host only a few seconds.
+    // The fake pane shows Claude's empty input box, so nothing holds the
+    // typing (the quiet wait on a screen without a known box is unit-tested:
+    // main.rs, unknown_holds). The bound is for a loaded host.
     let typed = wait_for("the upgrade proposal", Duration::from_secs(45), || {
         fs::read_to_string(&prompts)
             .ok()
