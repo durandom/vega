@@ -323,26 +323,33 @@ fn both_strategies_and_completed_resume_keep_one_merge() {
 }
 #[test]
 fn gate_closure_and_cleanup_failures_resume_without_remerging() {
-    for phase in ["authority", "gate", "close", "pane", "worktree"] {
-        let mut f = Fixture::new("no-ff");
-        f.add_sentinel();
-        let mut svc = Fake {
-            fail: phase.into(),
-            ..Fake::default()
-        };
-        let e = f.run(&mut svc).unwrap_err();
-        assert_eq!(e.status, Some(23));
-        if matches!(phase, "authority" | "gate") {
-            assert_eq!(remote_head(&f.repo, &f.r.policy).unwrap(), f.r.before);
+    // The phases are independent fixtures of ~110 git calls each: run them side by side, as
+    // one serial test this was the suite's longest by far.
+    std::thread::scope(|s| {
+        for phase in ["authority", "gate", "close", "pane", "worktree"] {
+            s.spawn(move || fail_and_resume_once(phase));
         }
-        if phase == "pane" {
-            assert!(!svc.removed);
-        }
-        svc.fail.clear();
-        f.run(&mut svc).unwrap();
-        assert_eq!(f.count_merges(), 1, "{phase}");
-        assert!(svc.closed && svc.pane_closed && svc.removed);
+    });
+}
+fn fail_and_resume_once(phase: &str) {
+    let mut f = Fixture::new("no-ff");
+    f.add_sentinel();
+    let mut svc = Fake {
+        fail: phase.into(),
+        ..Fake::default()
+    };
+    let e = f.run(&mut svc).unwrap_err();
+    assert_eq!(e.status, Some(23), "{phase}");
+    if matches!(phase, "authority" | "gate") {
+        assert_eq!(remote_head(&f.repo, &f.r.policy).unwrap(), f.r.before);
     }
+    if phase == "pane" {
+        assert!(!svc.removed);
+    }
+    svc.fail.clear();
+    f.run(&mut svc).unwrap();
+    assert_eq!(f.count_merges(), 1, "{phase}");
+    assert!(svc.closed && svc.pane_closed && svc.removed, "{phase}");
 }
 #[test]
 fn check_uses_actual_exit_status_and_resume_reruns_failure() {

@@ -56,6 +56,9 @@ pub fn run(mut cmd: Command, limit: Duration) -> Run {
             .map(|r| Box::new(r) as Box<dyn Read + Send>),
     );
     let start = Instant::now();
+    // Poll in short steps (up to 10 ms): most dolt calls end within ~100 ms, and the former
+    // fixed 50 ms step added up to half of that again to each of them.
+    let mut pause = Duration::from_millis(1);
     let (ok, timed_out) = loop {
         match child.try_wait() {
             Ok(Some(st)) => break (st.success(), false),
@@ -64,7 +67,10 @@ pub fn run(mut cmd: Command, limit: Duration) -> Run {
                 let _ = child.wait();
                 break (false, true);
             }
-            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Ok(None) => {
+                thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(10));
+            }
             Err(_) => break (false, false),
         }
     };

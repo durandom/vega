@@ -193,6 +193,9 @@ mod tests {
                 ])
                 .env("VEGA_REOPEN_TEST", "1")
                 .env("XDG_STATE_HOME", &dir)
+                // Every spawn reads capacity: a missing token-burn answers at once,
+                // the real one takes about a second per spawn.
+                .env("VEGA_TOKEN_BURN", dir.join("no-token-burn"))
                 .env_remove("VEGA_POST_HOST")
                 .output()
                 .unwrap();
@@ -212,7 +215,7 @@ mod tests {
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let fake = bin.join("herdr");
-        std::fs::write(&fake, include_str!("../tests/fixtures/reopen-herdr.py")).unwrap();
+        std::fs::write(&fake, include_str!("../tests/fixtures/reopen-herdr.pl")).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut paths = vec![bin];

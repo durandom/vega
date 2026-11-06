@@ -436,9 +436,21 @@ mod tests {
         let t = 1_800_000_000_000;
         s.add(note("h", "x", None, "old"), t).unwrap();
         let later = t + (KEEP_SECS as u64 + 1) * 1000;
-        for _ in 0..KEEP + 3 {
-            s.add(note("h", "x", None, "new"), later).unwrap();
+        // Store KEEP + 2 notes as `add` writes them, then let one `add` prune: KEEP + 3 adds
+        // re-read the whole store each time and took seconds.
+        for i in 0..KEEP as u64 + 2 {
+            let n = Note {
+                id: later + i,
+                ..note("h", "x", None, "new")
+            };
+            std::fs::write(
+                s.dir.join(format!("{}.json", n.id)),
+                n.to_json().to_string(),
+            )
+            .unwrap();
         }
+        assert_eq!(s.list().len(), KEEP + 3);
+        s.add(note("h", "x", None, "new"), later).unwrap();
         let l = s.list();
         assert_eq!(l.len(), KEEP);
         assert!(l.iter().all(|n| n.title == "new"));

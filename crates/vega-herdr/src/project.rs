@@ -252,19 +252,28 @@ fn output_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<Option
     }))
 }
 
+/// The budget of one local Git call: 2 s. `VEGA_PROJECT_GIT_TIMEOUT_MS` overrides it, so a
+/// test with a stalling fake Git need not wait out the full budget.
+fn git_timeout() -> Duration {
+    std::env::var("VEGA_PROJECT_GIT_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map_or(Duration::from_secs(2), Duration::from_millis)
+}
+
 fn git(path: &Path, args: &[&str]) -> Result<Output, Failure> {
-    let result =
-        output_within(&mut git_command(path, args), Duration::from_secs(2)).map_err(|_| {
-            failure(
-                "project_git_io",
-                "Could not run local Git",
-                "check Git installation and repository permissions",
-            )
-        })?;
+    let limit = git_timeout();
+    let result = output_within(&mut git_command(path, args), limit).map_err(|_| {
+        failure(
+            "project_git_io",
+            "Could not run local Git",
+            "check Git installation and repository permissions",
+        )
+    })?;
     result.ok_or_else(|| {
         failure(
             "project_git_timeout",
-            "Local Git exceeded two seconds",
+            &format!("Local Git exceeded {} ms", limit.as_millis()),
             "check the local repository and retry",
         )
     })
@@ -1128,6 +1137,8 @@ esac
                     },
                 )
                 .env("VEGA_PROJECT_TEST_MODE", mode)
+                // The hang mode stalls on purpose: a short budget covers the same deadline.
+                .env("VEGA_PROJECT_GIT_TIMEOUT_MS", "200")
                 .output()
                 .unwrap();
             assert!(
