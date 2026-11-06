@@ -5,7 +5,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 
 pub const CONFIG: &str = r#"timeout = "20m"
 tier = "budget"
@@ -148,72 +148,99 @@ pub fn warm_with_backoff(
     unreachable!()
 }
 
-/// Fake bd, vega and herdr writing their argv to `<log>/<tool>.log`.
+/// Like `script`, in one directory shared by every test and test binary.
+/// macOS assesses each new executable on its first exec, seconds per script
+/// on a loaded host, so the fakes are written once and only rewritten when
+/// their text changes (atomically: test binaries may run in parallel).
+pub fn shared_script(dir: &str, name: &str, body: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(dir);
+    fs::create_dir_all(&dir).unwrap();
+    let p = dir.join(name);
+    let text = format!("#!/bin/sh\n[ \"$1\" = --vega-test-warmup ] && exit 0\n{body}");
+    if fs::read_to_string(&p).ok().as_deref() != Some(text.as_str()) {
+        let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+        fs::write(&tmp, &text).unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&tmp, &p).unwrap();
+        let status = warm_with(|| Command::new(&p).arg("--vega-test-warmup").status())
+            .unwrap_or_else(|e| panic!("warm {}: {e}", p.display()));
+        assert!(status.success(), "warm {}: {status}", p.display());
+    }
+    p
+}
+
+/// Fake bd, vega and herdr writing their argv to `<log>/<tool>.log`, where
+/// `<log>` is `dir`, passed as `FAKE_LOG`.
 /// bd list answers `<log>/bd-list.json` (else `[]`); bd create numbers ids;
 /// vega pins `m-<lane>` and spawns fresh panes starting at w9:p5; a
 /// `<log>/spawn-fail-<kind>` file makes that kind's spawn fail; fake harness binaries
-/// sit in `<log>/harness` (`VEGA_GATE_HARNESS_PATH`); herdr's `pane get` answers
+/// sit in a shared dir (`VEGA_GATE_HARNESS_PATH`); herdr's `pane get` answers
 /// `<log>/herdr-get.json`.
 pub fn fakes(dir: &Path) -> Vec<(String, PathBuf)> {
-    let log = dir.display().to_string();
-    let bd = script(
-        dir,
+    static TOOLS: OnceLock<Vec<(String, PathBuf)>> = OnceLock::new();
+    let mut env = vec![("FAKE_LOG".to_string(), dir.to_path_buf())];
+    env.extend(TOOLS.get_or_init(fake_tools).iter().cloned());
+    env
+}
+
+fn fake_tools() -> Vec<(String, PathBuf)> {
+    let bd = shared_script(
+        "gate-fakes",
         "bd",
-        &format!(
-            r#"printf '%s\n' "$*" >> {log}/bd.log
-if [ -f {log}/fail-supersede ] && [ "$1" = update ] && [ "$4" = verdict=superseded ]; then
+        r#"L=${FAKE_LOG:?}
+printf '%s\n' "$*" >> $L/bd.log
+if [ -f $L/fail-supersede ] && [ "$1" = update ] && [ "$4" = verdict=superseded ]; then
   echo "injected storage failure" >&2
   exit 1
 fi
 case "$1" in
-  list) if [ -f "{log}/bd-key-$3.json" ]; then cat "{log}/bd-key-$3.json"; else cat {log}/bd-list.json 2>/dev/null || echo '[]'; fi ;;
-  create) n=$(( $(cat {log}/bd-n 2>/dev/null || echo 0) + 1 )); echo $n > {log}/bd-n; echo "gate-$n" ;;
-  show) echo '[{{"status":"closed"}}]' ;;
+  list) if [ -f "$L/bd-key-$3.json" ]; then cat "$L/bd-key-$3.json"; else cat $L/bd-list.json 2>/dev/null || echo '[]'; fi ;;
+  create) n=$(( $(cat $L/bd-n 2>/dev/null || echo 0) + 1 )); echo $n > $L/bd-n; echo "gate-$n" ;;
+  show) echo '[{"status":"closed"}]' ;;
 esac
-"#
-        ),
+"#,
     );
-    let vega = script(
-        dir,
+    let vega = shared_script(
+        "gate-fakes",
         "vega",
-        &format!(
-            r#"printf '%s\n' "$*" >> {log}/vega.log
+        r#"L=${FAKE_LOG:?}
+printf '%s\n' "$*" >> $L/vega.log
 case "$1 $2" in
   "lanista pin") echo "model: m-$3" ;;
-  "post send") if [ -f {log}/block-mail ]; then
-    touch {log}/mail-entered
+  "post send") if [ -f $L/block-mail ]; then
+    touch $L/mail-entered
     n=0
-    while [ ! -f {log}/release-mail ]; do
+    while [ ! -f $L/release-mail ]; do
       n=$((n + 1)); [ "$n" -lt 500 ] || exit 1
       sleep 0.01
     done
   fi ;;
-  "mux spawn") if [ -f {log}/old-pane-alive ]; then echo "error: name_taken"; exit 1; fi; if [ -f {log}/spawn-fail-$5 ]; then printf "error{{code,message,hint}}:\n  timeout,\"last output: zsh: command not found: $5\",\"check --kind\"\n"; exit 1; fi; n=$(( $(cat {log}/spawn-n 2>/dev/null || echo 4) + 1 )); echo $n > {log}/spawn-n; echo "spawned: x (codex)"; echo "pane: w9:p$n" ;;
+  "mux spawn") if [ -f $L/old-pane-alive ]; then echo "error: name_taken"; exit 1; fi; if [ -f $L/spawn-fail-$5 ]; then printf "error{code,message,hint}:\n  timeout,\"last output: zsh: command not found: $5\",\"check --kind\"\n"; exit 1; fi; n=$(( $(cat $L/spawn-n 2>/dev/null || echo 4) + 1 )); echo $n > $L/spawn-n; echo "spawned: x (codex)"; echo "pane: w9:p$n" ;;
 esac
-"#
-        ),
+"#,
     );
-    let herdr = script(
-        dir,
+    let herdr = shared_script(
+        "gate-fakes",
         "herdr",
-        &format!(
-            r#"printf '%s\n' "$*" >> {log}/herdr.log
+        r#"L=${FAKE_LOG:?}
+printf '%s\n' "$*" >> $L/herdr.log
 case "$1 $2" in
-  "pane current") echo '{{"result":{{"pane":{{"agent":"claude","agent_session":{{"value":"s-author"}},"cwd":"/nonexistent"}}}}}}' ;;
-  "pane close") rm -f {log}/old-pane-alive ;;
-  "pane get") if [ -f {log}/revoke-state ]; then rm -f "$(cat {log}/revoke-state)"; fi; cat {log}/herdr-get.json 2>/dev/null || exit 1 ;;
+  "pane current") echo '{"result":{"pane":{"agent":"claude","agent_session":{"value":"s-author"},"cwd":"/nonexistent"}}}' ;;
+  "pane close") rm -f $L/old-pane-alive ;;
+  "pane get") if [ -f $L/revoke-state ]; then rm -f "$(cat $L/revoke-state)"; fi; cat $L/herdr-get.json 2>/dev/null || exit 1 ;;
 esac
-"#
-        ),
+"#,
     );
-    let harness = dir.join("harness");
-    fs::create_dir_all(&harness).unwrap();
+    let mut harness = PathBuf::new();
     for kind in ["codex", "claude", "pi", "agy"] {
-        script(&harness, kind, "exit 0\n");
+        harness = shared_script("gate-harness", kind, "exit 0\n");
     }
     vec![
         ("VEGA_GATE_BD".into(), bd),
-        ("VEGA_GATE_HARNESS_PATH".into(), harness),
+        (
+            "VEGA_GATE_HARNESS_PATH".into(),
+            harness.parent().unwrap().into(),
+        ),
         ("VEGA_GATE_VEGA".into(), vega),
         ("VEGA_GATE_HERDR".into(), herdr),
     ]
