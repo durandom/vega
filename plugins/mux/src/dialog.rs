@@ -48,6 +48,20 @@ use std::thread;
 use std::time::{Duration, Instant};
 use vega_herdr::dialog::Kind;
 
+/// How long a selection move or a typed answer may take to show on screen. Tests
+/// use fakes that answer at once, so their limits only bound the refusal paths.
+const STEP_LIMIT: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(2)
+};
+/// How long the question screen may take to move on after Enter.
+const VERIFY_LIMIT: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(5)
+};
+
 fn refusal(message: impl Into<String>) -> Failure {
     Failure::new(
         "usage",
@@ -145,7 +159,7 @@ fn navigate(pane: &mut impl Pane, original: &Dialog, index: usize) -> Result<(),
             if selected(&after)? != at {
                 break;
             }
-            if start.elapsed() > Duration::from_secs(2) {
+            if start.elapsed() > STEP_LIMIT {
                 return Err(refusal("selection did not move; no answer submitted"));
             }
         }
@@ -161,7 +175,7 @@ fn verify_moved(pane: &mut impl Pane, original: &Dialog) -> Result<(), Failure> 
             Some(d) if !same_question(original, &d) => return Ok(()),
             _ => {}
         }
-        if start.elapsed() >= Duration::from_secs(5) {
+        if start.elapsed() >= VERIFY_LIMIT {
             return Err(Failure::new(
                 "answer_unverified",
                 "the question screen has not moved on",
@@ -211,7 +225,7 @@ fn act(pane: &mut impl Pane, option: Option<usize>, text: Option<&str>) -> Resul
             if same_question(&d, &expected) && d.options[selected(&d)?].index == index {
                 break d;
             }
-            if !same_question(&d, &original) || start.elapsed() >= Duration::from_secs(2) {
+            if !same_question(&d, &original) || start.elapsed() >= STEP_LIMIT {
                 return Err(refusal("could not verify the typed answer; no Enter sent"));
             }
         };
