@@ -13,6 +13,11 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   later layout choices stay yours. `vega config` reports source version/hash drift; regenerate with
   `python3 scripts/herdr-app-layout.py --write`, review and commit the result before applying.
   See [config](docs/design/config.md) "Vega layout and startup mod".
+- feature: `vega gate start` and gated pushes now work from hc/herdr-app terminals. Reviewers
+  run in detached hc terminals visible in the author's space, with the same harness defaults
+  and repo trust propagation as TUI reviewers. hc verdict delivery uses `hc send` during
+  the migration; the `VEGA_GATE=skip` workaround for hc terminals is no longer needed.
+  See [gate](docs/design/gate.md) and [hc migration](docs/design/hc-migration.md).
 
 ## 115 · 2026-11-06
 

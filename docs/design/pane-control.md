@@ -293,7 +293,7 @@ Route (simplest that keeps the rules above):
 
 A trust dialog is never answered by vega; spawn avoids it instead. Trust is per agent kind, so a repo the user
 trusted in codex still stops a claude spawn (rally-ng, 2026-10-10). Before a local claude or codex agent starts,
-`vega mux spawn` (`plugins/mux/src/trust.rs`) gives it the trust its repo already has, from either kind, and prints
+`vega mux spawn` (`crates/vega-herdr/src/launch.rs`) gives it the trust its repo already has, from either kind, and prints
 a `claude trust:` or `codex trust:` line. Sources: the spawn folder, its git toplevel, the repo root (parent of the
 git common dir) and the main checkout (on `main`/`master`). A repo no kind trusts still asks; codex's explicit
 `untrusted` entries are kept. `--machine` spawns are skipped (the files are local).

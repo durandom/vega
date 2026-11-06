@@ -37,6 +37,25 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{json, Value};
 
+/// Agent args added by `spawn`, per herdr kind. Spawned agents run without
+/// approval prompts; codex also needs `--no-daemon`, because its shared daemon
+/// keeps the `HERDR_*` env of the pane it first started in, and skips its
+/// startup update check, whose "Update available" screen blocks the start.
+pub fn default_args(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "codex" => &[
+            "--no-daemon",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-c",
+            "check_for_update_on_startup=false",
+        ],
+        "claude" => &["--dangerously-skip-permissions"],
+        "agy" => &["--dangerously-skip-permissions", "--sandbox"],
+        "pi" => &["--approve"],
+        _ => &[],
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Claude,
@@ -445,7 +464,7 @@ fn main_in(porcelain: &str) -> Option<String> {
 }
 
 fn short(path: &str) -> String {
-    vega_herdr::collapse_home(path)
+    crate::collapse_home(path)
 }
 
 fn git(dir: &str, args: &[&str]) -> Option<String> {

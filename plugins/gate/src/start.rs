@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use crate::terminal;
 use serde_json::Value;
+use vega_herdr::pane::Backend;
 
 use crate::author::{self, Author};
 use crate::config::Config;
@@ -24,7 +26,7 @@ pub enum Outcome {
     Passed,
     /// A review runs (started now or before): the push waits for its verdict.
     Running(String),
-    /// Recorded and let through (no herdr, no reviewer, abandoned twice).
+    /// Recorded and let through (no terminal, no reviewer, abandoned twice).
     FailOpen(String),
     /// The reviewer could not start: the push fails once with this.
     Failed(String),
@@ -164,7 +166,7 @@ pub fn skip(dir: &Path, plan: &Plan, branch: &str) -> Result<Vec<String>, String
         "skipped",
         &[
             ("actor", who("BEADS_ACTOR")),
-            ("pane", who("HERDR_PANE_ID")),
+            ("pane", terminal::own()?.map(|(_, p)| p).unwrap_or_default()),
             ("reason", who("VEGA_GATE_REASON")),
         ],
     )
@@ -288,8 +290,12 @@ fn capacity_thin(kind: &str, args: &[String]) -> bool {
         .is_some()
 }
 
-/// The pane is alive in herdr.
-pub fn pane_alive(pane: &str) -> bool {
+/// The reviewer is alive in its recorded backend.
+pub fn pane_alive(r: &Review) -> bool {
+    if r.backend == Backend::Hc {
+        return terminal::get(&r.pane).is_ok_and(|v| v["state"] == "live");
+    }
+    let pane = &r.pane;
     run(
         &tool("herdr"),
         &["pane", "get", pane],
@@ -302,7 +308,19 @@ pub fn pane_alive(pane: &str) -> bool {
 /// Removes a review's clone, rubric export and state file now; closes its
 /// pane when asked. Only paths under the gate's cache dir are removed.
 pub fn cleanup(r: &Review, close_pane: bool) {
-    if close_pane {
+    if r.backend == Backend::Hc {
+        if close_pane {
+            let _ = vega_herdr::hc_on(None, &["kill", &r.pane], Some(Duration::from_secs(5)));
+        }
+        // Killing one's own terminal can return before the core publishes
+        // its finished state. Retry only that transition, never other errors.
+        for _ in 0..50 {
+            match vega_herdr::hc_on(None, &["rm", &r.pane], Some(Duration::from_secs(5))) {
+                Err(e) if e.code == "hc_live" => std::thread::sleep(Duration::from_millis(100)),
+                _ => break,
+            }
+        }
+    } else if close_pane {
         let _ = run(
             &tool("herdr"),
             &["pane", "close", &r.pane],
@@ -329,12 +347,23 @@ pub fn cleanup_detached(r: &Review) {
         .map(|p| q(p))
         .collect();
     // Remove first: closing the pane may end this script with it.
+    let close = if r.backend == Backend::Hc {
+        format!(
+            "{0} kill {1} >/dev/null 2>&1; n=0; until {0} rm {1} >/dev/null 2>&1; do n=$((n + 1)); [ \"$n\" -ge 50 ] && break; sleep 0.1; done",
+            q(Path::new("hc")),
+            q(Path::new(&r.pane))
+        )
+    } else {
+        format!(
+            "{} pane close {} >/dev/null 2>&1",
+            q(Path::new(&tool("herdr"))),
+            q(Path::new(&r.pane))
+        )
+    };
     let script = format!(
-        "sleep 5; rm -f {}; rm -rf {}; {} pane close {} >/dev/null 2>&1",
+        "sleep 5; rm -f {}; rm -rf {}; {close}",
         q(&state::file(&r.pane)),
         rm.join(" "),
-        q(Path::new(&tool("herdr"))),
-        q(Path::new(&r.pane)),
     );
     use std::os::unix::process::CommandExt;
     let _ = Command::new("nohup")
@@ -397,7 +426,8 @@ pub fn start_from(
     if let Some((k, m)) = author::from_pane() {
         author.add(Some(k), m);
     }
-    let author_pane = std::env::var("HERDR_PANE_ID").unwrap_or_default();
+    let identity = terminal::own()?;
+    let author_pane = identity.map(|(_, pane)| pane).unwrap_or_default();
     let repo = toplevel(dir)?;
     let mut reviews = l.reviews.clone();
     // A pane's task is immutable. Lock it while closing its beads, then
@@ -437,7 +467,7 @@ pub fn start_from(
             |r| r.started_at,
         );
         let timeout = st.map_or(cfg.timeout_secs, |r| r.timeout_secs);
-        let alive = st.is_none_or(|r| pane_alive(&r.pane));
+        let alive = st.is_none_or(pane_alive);
         if alive && now() - started <= timeout {
             running_msg.get_or_insert_with(|| match st {
                 Some(r) => running_line(r),
@@ -445,7 +475,7 @@ pub fn start_from(
                     "review running elsewhere ({}, since {}); verdict by mail; then {}",
                     b.id,
                     crate::age(now() - started),
-                    next_step(&std::env::var("HERDR_PANE_ID").unwrap_or_default())
+                    next_step(&author_pane)
                 ),
             });
             continue;
@@ -478,7 +508,7 @@ pub fn start_from(
     if author_pane.is_empty() {
         let ids = record_closed(dir, plan, &missing, branch, "unreviewed", &[])?;
         return Ok(Outcome::FailOpen(format!(
-            "no herdr, push not reviewed, recorded as {}",
+            "no terminal, push not reviewed, recorded as {}",
             ids.join(", ")
         )));
     }
@@ -587,6 +617,10 @@ pub fn next_step(author_pane: &str) -> &'static str {
 }
 
 pub fn is_sentinel(pane: &str) -> bool {
+    if vega_herdr::pane::is_hc_id(pane) {
+        return terminal::get(pane)
+            .is_ok_and(|v| v["parent"].is_string() || v["labels"]["vega.role"] == "sentinel");
+    }
     vega_herdr::state::children()
         .iter()
         .any(|c| c.machine.is_none() && c.pane == pane)
@@ -604,6 +638,20 @@ fn step_for(sentinel: bool) -> &'static str {
 /// reviewer at a dialog, or idle without ever taking its prompt, is stuck and
 /// the text says how to look.
 pub fn reviewer_state(r: &Review) -> String {
+    if r.backend == Backend::Hc {
+        return match terminal::get(&r.pane) {
+            Ok(v) if v["state"] == "live" => {
+                match v["status"]["state"].as_str().unwrap_or("unknown") {
+                    "blocked" => format!("blocked at a dialog or question: hc read {}", r.pane),
+                    "idle" if v["turn"] == 0 || v["first_message"]["sent"] == false => {
+                        format!("stuck: idle without taking its prompt: hc read {}", r.pane)
+                    }
+                    status => status.to_string(),
+                }
+            }
+            _ => "gone".into(),
+        };
+    }
     let pane = run_ok(
         &tool("herdr"),
         &["pane", "get", &r.pane],
@@ -806,6 +854,53 @@ pub fn spawn_args(
     a
 }
 
+/// hc owns the terminal lifecycle; the task is argv, never shell text.
+#[allow(clippy::too_many_arguments)]
+pub fn hc_spawn_args(
+    tab: &str,
+    review: &str,
+    kind: &str,
+    clone: &Path,
+    task: &str,
+    model: &[String],
+    space: Option<&str>,
+) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "run",
+        "--bg",
+        "--no-parent",
+        "--outlive-parent",
+        "--name",
+        tab,
+        "--cwd",
+        &clone.to_string_lossy(),
+        "--label",
+        "vega.role=gate-reviewer",
+        "--label",
+        &format!("vega.review={review}"),
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(space) = space {
+        args.extend(["--label".into(), format!("herdr.space={space}")]);
+    }
+    args.extend([
+        "--".into(),
+        "env".into(),
+        "VEGA_GATE_ROLE=reviewer".into(),
+        kind.into(),
+    ]);
+    args.extend(
+        vega_herdr::launch::default_args(kind)
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    args.extend(model.iter().filter(|s| !s.is_empty()).cloned());
+    args.push(task.into());
+    args
+}
+
 /// The cause of a failed spawn: the rows of its `error{code,message,hint}:`
 /// block (code, message with the agent's last output, hint), else its
 /// last non-empty lines.
@@ -843,17 +938,30 @@ fn spawn_review(
     let work = cache_dir().join(&review);
     make_clone(dir, &clone, &plan.head)?;
     let rubrics = export_rubrics(dir, plan, cfg, segs, &work)?;
-    let author_pane = std::env::var("HERDR_PANE_ID").unwrap_or_default();
+    let (backend, author_pane) = terminal::own()?.ok_or("no terminal")?;
     let repo = toplevel(dir)?;
     let name = repo
         .file_name()
         .map_or("this repo".into(), |n| n.to_string_lossy().into_owned());
     let prompt_file = work.join("prompt.md");
-    fs::write(
-        &prompt_file,
-        prompt(&name, plan, cfg, segs, &rubrics, &author_pane),
-    )
-    .map_err(|e| format!("prompt: {e}"))?;
+    let mut task = prompt(&name, plan, cfg, segs, &rubrics, &author_pane);
+    if backend == Backend::Hc {
+        // A locally built gate can review itself without installing. The git
+        // shim shares this library, so only reuse the executable when it is gate.
+        let bin = std::env::current_exe()
+            .ok()
+            .filter(|p| p.file_name().is_some_and(|n| n == "vega-gate"));
+        let verdict = bin
+            .map(|p| format!("'{}'", p.display().to_string().replace('\'', "'\\''")))
+            .unwrap_or_else(|| "vega-gate".into());
+        task = task
+            .replace("vega gate verdict", &format!("{verdict} verdict"))
+            .replace(
+                &format!("vega post send {author_pane}"),
+                &format!("hc send {author_pane}"),
+            );
+    }
+    fs::write(&prompt_file, task).map_err(|e| format!("prompt: {e}"))?;
 
     let who = format!("{}/{model}", cand.kind);
     let mut beads = Vec::new();
@@ -882,29 +990,61 @@ fn spawn_review(
         )?);
     }
 
-    let tab = tab_name(branch);
-    let args = spawn_args(
-        &tab,
-        &cand.kind,
-        &clone,
-        &prompt_file,
-        &model_args(cand, model),
-    );
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = run(
-        &tool("vega"),
-        &argv,
-        Some(&repo),
-        Some(Duration::from_secs(180)),
-    );
-    let (ok, text) = match out {
-        Ok(o) => (o.ok, format!("{}{}", o.stdout, o.stderr)),
-        Err(e) => (false, e),
+    let tab = if backend == Backend::Hc {
+        format!("gate-{review}")
+    } else {
+        tab_name(branch)
     };
-    let pane = text
-        .lines()
-        .find_map(|l| l.strip_prefix("pane: "))
-        .map(|p| p.trim().to_string());
+    let (ok, text, pane) = if backend == Backend::Hc {
+        let info = terminal::get(&author_pane)?;
+        if let Some(line) = vega_herdr::launch::apply(&cand.kind, &clone.to_string_lossy()) {
+            eprintln!("vega gate: {line}");
+        }
+        let task = format!(
+            "Read {} and carry out the gate review.",
+            prompt_file.display()
+        );
+        let args = hc_spawn_args(
+            &tab,
+            &review,
+            &cand.kind,
+            &clone,
+            &task,
+            &model_args(cand, model),
+            info["labels"]["herdr.space"].as_str(),
+        );
+        match vega_herdr::hc_on(
+            None,
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            Some(Duration::from_secs(30)),
+        ) {
+            Ok(v) => (true, String::new(), v["address"].as_str().map(String::from)),
+            Err(e) => (false, e.message, None),
+        }
+    } else {
+        let args = spawn_args(
+            &tab,
+            &cand.kind,
+            &clone,
+            &prompt_file,
+            &model_args(cand, model),
+        );
+        let out = run(
+            &tool("vega"),
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            Some(&repo),
+            Some(Duration::from_secs(180)),
+        );
+        let (ok, text) = match out {
+            Ok(o) => (o.ok, format!("{}{}", o.stdout, o.stderr)),
+            Err(e) => (false, e),
+        };
+        let pane = text
+            .lines()
+            .find_map(|l| l.strip_prefix("pane: "))
+            .map(|p| p.trim().to_string());
+        (ok, text, pane)
+    };
     let Some(pane) = pane else {
         let e = spawn_error(&text);
         for b in &beads {
@@ -928,6 +1068,7 @@ fn spawn_review(
         );
     }
     let r = Review {
+        backend,
         pane: pane.clone(),
         repo,
         branch: branch.to_string(),
@@ -1095,6 +1236,50 @@ mod tests {
             choose(&reviewers, "budget", &author, &none, &resolve, &never).unwrap_err(),
             vec!["codex: codex not on PATH", "pi:xai: pi not on PATH"]
         );
+    }
+
+    #[test]
+    fn hc_spawn_shares_harness_defaults_and_passes_real_model_arguments() {
+        let args = hc_spawn_args(
+            "gate-r",
+            "r",
+            "pi",
+            Path::new("/clone"),
+            "task",
+            &[
+                "--provider".into(),
+                "zai".into(),
+                "".into(),
+                "--model".into(),
+                "glm-5.3".into(),
+            ],
+            None,
+        );
+        assert!(args.ends_with(
+            &[
+                "pi",
+                "--approve",
+                "--provider",
+                "zai",
+                "--model",
+                "glm-5.3",
+                "task"
+            ]
+            .map(String::from)
+        ));
+        assert!(!args.iter().any(String::is_empty));
+        let args = hc_spawn_args(
+            "gate-r",
+            "r",
+            "codex",
+            Path::new("/clone"),
+            "task",
+            &[],
+            None,
+        );
+        assert!(args
+            .windows(2)
+            .any(|a| a == ["-c", "check_for_update_on_startup=false"]));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::state_dir;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Review {
+    pub backend: vega_herdr::pane::Backend,
     pub pane: String,
     /// The author's checkout, where bd and git run.
     pub repo: PathBuf,
@@ -33,12 +34,16 @@ pub struct Review {
 }
 
 pub fn file(pane: &str) -> PathBuf {
-    state_dir().join(format!("{}.json", vega_shim::safe(pane)))
+    state_dir().join(format!(
+        "{}.json",
+        vega_herdr::pane::hc_storage_token(pane).unwrap_or_else(|| vega_shim::safe(pane))
+    ))
 }
 
 impl Review {
     pub fn to_json(&self) -> Value {
         json!({
+            "backend": match self.backend { vega_herdr::pane::Backend::Herdr => "herdr", vega_herdr::pane::Backend::Hc => "hc" },
             "pane": self.pane,
             "repo": self.repo,
             "branch": self.branch,
@@ -72,6 +77,11 @@ impl Review {
                 .unwrap_or_default()
         };
         Some(Review {
+            backend: match s("backend").as_deref() {
+                None | Some("herdr") => vega_herdr::pane::Backend::Herdr,
+                Some("hc") => vega_herdr::pane::Backend::Hc,
+                _ => return None,
+            },
             pane: s("pane")?,
             repo: s("repo")?.into(),
             branch: s("branch").unwrap_or_default(),
@@ -167,6 +177,7 @@ mod tests {
     #[test]
     fn round_trips_through_json() {
         let r = Review {
+            backend: vega_herdr::pane::Backend::Herdr,
             pane: "w1:p2".into(),
             repo: "/r".into(),
             branch: "b".into(),
@@ -185,7 +196,15 @@ mod tests {
             started_at: 5,
             timeout_secs: 60,
         };
-        assert_eq!(Review::from_json(&r.to_json()), Some(r));
+        assert_eq!(Review::from_json(&r.to_json()), Some(r.clone()));
+        let mut legacy = r.to_json();
+        legacy.as_object_mut().unwrap().remove("backend");
+        assert_eq!(Review::from_json(&legacy), Some(r.clone()));
+        let mut hc = r;
+        hc.backend = vega_herdr::pane::Backend::Hc;
+        hc.pane = "t7".into();
+        assert_eq!(Review::from_json(&hc.to_json()), Some(hc));
+        assert_ne!(file("io.a/t7"), file("io_a/t7"));
         assert!(file("w1:p2").ends_with("vega/gate/w1_p2.json"));
     }
 }

@@ -19,6 +19,7 @@ fn run(work: &Path, tmp: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
         .env("VEGA_TOKEN_BURN", "/nonexistent/token-burn")
         .env("FAKE_LOG", tmp)
         .env_remove("HERDR_PANE_ID")
+        .env_remove("HC_TERMINAL_ID")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         .env_remove("CODEX_THREAD_ID");
     for (k, v) in fakes(tmp) {
@@ -330,7 +331,7 @@ fn start_without_herdr_records_unreviewed_and_lets_it_through() {
     let s = out(&o);
     assert!(o.status.success(), "{s}");
     assert!(
-        s.contains("not reviewed: no herdr, push not reviewed, recorded as gate-1"),
+        s.contains("not reviewed: no terminal, push not reviewed, recorded as gate-1"),
         "{s}"
     );
     let bd = log(tmp.path(), "bd");
@@ -524,4 +525,192 @@ fn a_failed_spawn_falls_through_and_the_last_one_shows_its_cause() {
         .filter(|l| l.starts_with("create") && l.contains("\"verdict\":\"abandoned\""))
         .count();
     assert_eq!(creates, 1);
+}
+
+#[test]
+fn hc_start_launches_visible_detached_reviewer_and_keeps_backend() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
+    assert!(o.status.success(), "{}", out(&o));
+    let calls = log(tmp.path(), "hc");
+    let spawn = calls.lines().find(|l| l.contains("run --bg")).unwrap();
+    assert!(
+        spawn.contains("--no-parent --outlive-parent --name gate-"),
+        "{spawn}"
+    );
+    assert!(spawn.contains("--label herdr.space=space-1 -- env VEGA_GATE_ROLE=reviewer codex --no-daemon --dangerously-bypass-approvals-and-sandbox"), "{spawn}");
+    assert!(spawn.contains("--label vega.role=gate-reviewer --label vega.review="));
+    assert!(!log(tmp.path(), "vega").contains("mux spawn"));
+    let state: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(tmp.path().join("state/vega/gate/hc-743131.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["backend"], "hc");
+    assert_eq!(state["author_pane"], "t1");
+    assert_eq!(
+        git(
+            Path::new(state["clone"].as_str().unwrap()),
+            &["rev-parse", "HEAD"]
+        ),
+        git(&work, &["rev-parse", "HEAD"])
+    );
+}
+
+#[test]
+fn hc_stale_context_is_an_error_not_no_terminal_fail_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    fs::write(tmp.path().join("hc-stale"), "").unwrap();
+    let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
+    assert!(!o.status.success(), "{}", out(&o));
+    assert!(!log(tmp.path(), "bd").contains("unreviewed"));
+    assert!(!log(tmp.path(), "hc").contains("run --bg"));
+}
+
+#[test]
+fn hc_verdict_requires_label_and_ancestry_and_routes_directly_to_hc() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
+    assert!(o.status.success(), "{}", out(&o));
+    let state_file = tmp.path().join("state/vega/gate/hc-743131.json");
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_file).unwrap()).unwrap();
+    let env = [("HC_TERMINAL_ID", "t11")];
+    let before = log(tmp.path(), "bd");
+    let wrong_label = run(&work, tmp.path(), &env, &["verdict", "pass"]);
+    assert!(!wrong_label.status.success(), "{}", out(&wrong_label));
+    assert!(out(&wrong_label).contains("review label differs"));
+    assert_eq!(log(tmp.path(), "bd"), before);
+    fs::write(
+        tmp.path().join("hc-review"),
+        state["review"].as_str().unwrap(),
+    )
+    .unwrap();
+    fs::write(tmp.path().join("hc-stale"), "").unwrap();
+    let stale = run(&work, tmp.path(), &env, &["verdict", "pass"]);
+    assert!(!stale.status.success());
+    assert_eq!(log(tmp.path(), "bd"), before);
+    fs::remove_file(tmp.path().join("hc-stale")).unwrap();
+    fs::write(tmp.path().join("hc-rm-busy"), "2").unwrap();
+    let verdict = run(&work, tmp.path(), &env, &["verdict", "pass"]);
+    assert!(verdict.status.success(), "{}", out(&verdict));
+    assert!(out(&verdict).contains("t1 mailed"));
+    assert!(log(tmp.path(), "hc").contains("send t1 gate pass"));
+    // Fake post would report success; it must not hide missing hc delivery.
+    assert!(!log(tmp.path(), "vega").contains("post send"));
+    assert!(log(tmp.path(), "hc").contains("Next: push again."));
+    assert!(log(tmp.path(), "bd").contains("verdict=pass"));
+    assert!(!state_file.exists());
+    // Wait only for this detached cleanup, never a real core.
+    for _ in 0..70 {
+        if log(tmp.path(), "hc")
+            .lines()
+            .filter(|l| l.contains("rm t11"))
+            .count()
+            >= 3
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let calls = log(tmp.path(), "hc");
+    assert!(calls.contains("kill t11"), "{calls}");
+    assert!(
+        calls.lines().filter(|l| l.contains("rm t11")).count() >= 3,
+        "{calls}"
+    );
+}
+
+#[test]
+fn hc_replacement_cleans_up_using_recorded_backend() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
+    assert!(o.status.success(), "{}", out(&o));
+    common::commit(&work, "src/a.rs", "fn a() { 2 }", "second");
+    fs::write(tmp.path().join("hc-rm-busy"), "2").unwrap();
+    // A TUI caller retires the old hc review using its stored backend.
+    let o = run(&work, tmp.path(), &[("HERDR_PANE_ID", "w1:p1")], &["start"]);
+    assert!(o.status.success(), "{}", out(&o));
+    let calls = log(tmp.path(), "hc");
+    assert!(calls.contains("kill t11"), "{calls}");
+    assert!(
+        calls.lines().filter(|l| l.contains("rm t11")).count() >= 3,
+        "{calls}"
+    );
+    assert!(!log(tmp.path(), "herdr").contains("pane close t11"));
+}
+
+#[test]
+fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    let env = [("HC_TERMINAL_ID", "t1")];
+    let started = run(&work, tmp.path(), &env, &["start"]);
+    assert!(started.status.success(), "{}", out(&started));
+    let state: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(tmp.path().join("state/vega/gate/hc-743131.json")).unwrap(),
+    )
+    .unwrap();
+    let record = serde_json::json!([{"id": state["beads"][0], "status": "in_progress", "metadata": {"verdict": "running", "started_at": state["started_at"].as_i64().unwrap().to_string()}}]);
+    fs::write(
+        tmp.path().join(format!(
+            "bd-key-gate:{}.json",
+            state["keys"][0].as_str().unwrap()
+        )),
+        record.to_string(),
+    )
+    .unwrap();
+    for (status, turn, sent, expected) in [
+        (
+            "blocked",
+            0,
+            true,
+            "blocked at a dialog or question: hc read t11",
+        ),
+        (
+            "idle",
+            0,
+            true,
+            "stuck: idle without taking its prompt: hc read t11",
+        ),
+        (
+            "idle",
+            1,
+            false,
+            "stuck: idle without taking its prompt: hc read t11",
+        ),
+        ("working", 0, true, "working"),
+        ("idle", 1, true, "idle"),
+    ] {
+        let info = serde_json::json!({"address": "t11", "state": "live", "status": {"state": status}, "turn": turn, "first_message": {"sent": sent}});
+        fs::write(tmp.path().join("hc-t11.json"), info.to_string()).unwrap();
+        let home = run(&work, tmp.path(), &env, &[]);
+        assert!(home.status.success(), "{}", out(&home));
+        assert!(out(&home).contains(expected), "{}", out(&home));
+        if status == "working" || (status == "idle" && turn == 1 && sent) {
+            assert!(!out(&home).contains("stuck:"), "{}", out(&home));
+        }
+    }
+    for (parent, role, expected) in [
+        (Some("t2"), "", "name the verdict in your done report"),
+        (None, "sentinel", "name the verdict in your done report"),
+        (None, "", "push again"),
+    ] {
+        let author = serde_json::json!({"address": "t1", "state": "live", "pid": std::process::id(), "parent": parent, "labels": {"vega.role": role}, "status": {"app": "claude-code"}});
+        fs::write(tmp.path().join("hc-t1.json"), author.to_string()).unwrap();
+        let running = run(&work, tmp.path(), &env, &["start"]);
+        assert!(running.status.success(), "{}", out(&running));
+        assert!(out(&running).contains(expected), "{}", out(&running));
+    }
+    fs::write(
+        tmp.path().join("hc-t11.json"),
+        r#"{"address":"t11","state":"finished"}"#,
+    )
+    .unwrap();
+    let home = run(&work, tmp.path(), &env, &[]);
+    assert!(home.status.success(), "{}", out(&home));
+    assert!(out(&home).contains(",gone"), "{}", out(&home));
 }

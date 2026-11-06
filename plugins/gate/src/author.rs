@@ -45,6 +45,24 @@ impl Author {
 /// The pushing pane's kind and model: herdr's view of the pane, its model
 /// from the agent's session log. Ok(None) outside herdr.
 pub fn from_pane() -> Option<(String, Option<String>)> {
+    if let Some((vega_herdr::pane::Backend::Hc, pane)) = crate::terminal::own().ok()? {
+        let info = crate::terminal::get(&pane).ok()?;
+        let kind = match info["status"]["app"].as_str()? {
+            "claude-code" => "claude",
+            k => k,
+        }
+        .to_string();
+        let session = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"]
+            .iter()
+            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()));
+        let cwd = info["foreground"]["cwd"].as_str().unwrap_or("");
+        let model = vega_transcript::Kind::from_herdr(&kind).and_then(|k| {
+            let home = std::env::var_os("HOME")?;
+            let log = vega_transcript::locate(k, session.as_deref(), cwd, Path::new(&home)).ok()?;
+            last_model(&log)
+        });
+        return Some((kind, model));
+    }
     std::env::var("HERDR_PANE_ID")
         .ok()
         .filter(|p| !p.is_empty())?;

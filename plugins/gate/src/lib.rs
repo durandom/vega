@@ -13,6 +13,7 @@ pub mod record;
 pub mod segments;
 pub mod start;
 pub mod state;
+mod terminal;
 pub mod verdict;
 
 use std::io::Read;
