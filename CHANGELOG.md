@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 115 · 2026-11-06
+
+- optional: faster builds. `scripts/install-cli.sh` builds every binary in one `cargo build --release`
+  (no fat LTO any more) and copies them; `mise run install` skips `check` when it already passed on
+  this clean tree. Dev builds keep line tables only (the old `target/debug` can be removed once:
+  `cargo clean`). Worktrees compile through sccache (`mise install` fetches it; without it rustc runs
+  unchanged); the main checkout builds incrementally.
+
 ## 114 · 2026-11-06
 
 - unit: `herdr-app.keys`, `herdr-app.settings`, `herdr-app.themes` (group `herdr-app`) own

@@ -14,6 +14,9 @@ if [ "$top" != "$main" ]; then
   exit 0
 fi
 
-cargo install --quiet --locked --path . --root .
+# The binary scripts/install-cli.sh just built (VEGA_INSTALL_EXTRA), not a second build.
+mkdir -p bin
+install -m 755 "$HOME/.local/bin/vega-board" bin/.vega-board.new
+mv -f bin/.vega-board.new bin/vega-board
 herdr plugin link "$PWD" >/dev/null
 echo "vega board: linked $PWD"

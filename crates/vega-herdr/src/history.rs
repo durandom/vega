@@ -99,7 +99,7 @@ pub fn emit(kind: &str, data: Value) {
     }
 }
 
-/// Nonblocking cross-process lock. Count and bytes are bounded; a full queue
+/// Cross-process lock, waiting at most ~100 ms. Count and bytes are bounded; a full queue
 /// rejects new events rather than deleting already accepted events.
 pub fn enqueue(dir: &Path, event: &Value) -> io::Result<()> {
     let bytes = serde_json::to_vec(event)?;
@@ -115,8 +115,16 @@ pub fn enqueue(dir: &Path, event: &Value) -> io::Result<()> {
         .truncate(false)
         .mode(0o600)
         .open(dir.join("lock"))?;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(io::Error::other("outbox busy; event not queued"));
+    // A fork elsewhere in this process briefly shares the previous call's lock
+    // until its child execs (CLOEXEC); a few short retries ride that out, a
+    // real holder still fails within ~100 ms (vega-0ckc).
+    let mut tries = 0;
+    while unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        tries += 1;
+        if tries == 20 {
+            return Err(io::Error::other("outbox busy; event not queued"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let id = event["id"]
         .as_str()

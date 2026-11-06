@@ -12,44 +12,51 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # installed).
 export CARGO_TARGET_DIR="$root/target"
 
-cargo install --locked --path "$root/vega" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/mux" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/post" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/history" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/notify" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/deploy" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/skills" --root "$HOME/.local"
+# One release build for every binary, then copied (vega-919z): a `cargo
+# install --path` per package resolved features and linked each on its own.
+# Shims go to the agent-only dir: they must not shadow tools for humans (P3);
+# the git shim is the push gate (docs/design/gate.md), the bd shim sets a
+# per-worktree BEADS_ACTOR (docs/design/beads-sync.md).
+# VEGA_INSTALL_EXTRA adds packages (mise run install: vega-open, vega-board).
+bins="$HOME/.local/bin"
+shims="$HOME/.local/share/vega/shims/bin"
+pkgs="vega vega-mux vega-post vega-history vega-notify vega-deploy vega-skills
+vega-orchestration vega-uac vega-ci vega-theme vega-uber vega-config vega-onboard
+vega-lanista vega-capacity vega-janitor vega-review vega-gate vega-bd vega-secrets-cli
+herdr-shim gh-shim tea-shim git-shim bd-shim ${VEGA_INSTALL_EXTRA:-}"
+args=""
+for p in $pkgs; do args="$args -p $p"; done
+mkdir -p "$bins" "$shims"
+built=$(mktemp)
+trap 'rm -f "$built" "$built.json"' EXIT
+# To a file, not a pipe: sh has no pipefail, a failed build must stop here.
+# shellcheck disable=SC2086 # $args is a word list
+cargo build --locked --release $args --message-format=json-render-diagnostics >"$built.json"
+sed -n 's/.*"package_id":"\([^"]*\)".*"executable":"\([^"]*\)".*/\1 \2/p' "$built.json" >"$built"
+[ -s "$built" ] || {
+	echo "install-cli: cargo build reported no binaries" >&2
+	exit 1
+}
+while read -r id exe; do
+	case $id in
+	*/shims/*) dest=$shims ;;
+	*) dest=$bins ;;
+	esac
+	name=$(basename "$exe")
+	# A new inode, never an overwrite in place: a running vegad keeps its binary.
+	install -m 755 "$exe" "$dest/.$name.new"
+	mv -f "$dest/.$name.new" "$dest/$name"
+done <"$built"
+echo "install-cli: $(wc -l <"$built" | tr -d ' ') binaries installed" >&2
 # vega-skill was renamed vega-skills and `vega skill` is gone; a stale binary
 # would answer `vega skill` with an old guide. Drop it with its cargo install record.
-if [ -e "$HOME/.local/bin/vega-skill" ]; then
-	cargo uninstall --root "$HOME/.local" vega-skill >/dev/null 2>&1 || rm -f "$HOME/.local/bin/vega-skill"
+if [ -e "$bins/vega-skill" ]; then
+	cargo uninstall --root "$HOME/.local" vega-skill >/dev/null 2>&1 || rm -f "$bins/vega-skill"
 fi
-cargo install --locked --path "$root/plugins/orchestration" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/uac" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/ci" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/theme" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/uber" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/config" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/onboard" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/lanista" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/capacity" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/janitor" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/review" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/gate" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/bd" --root "$HOME/.local"
-cargo install --locked --path "$root/plugins/secrets" --root "$HOME/.local"
 # direnv: `use vega <tool>` in an .envrc loads that tool's secrets (docs/design/secrets.md).
 direnv_lib="${XDG_CONFIG_HOME:-$HOME/.config}/direnv/lib"
 mkdir -p "$direnv_lib"
 install -m 644 "$root/plugins/secrets/direnv/vega.sh" "$direnv_lib/vega.sh"
-# Shims must not shadow tools for humans (P3); only agent sessions put this dir on PATH.
-cargo install --locked --path "$root/shims/herdr" --root "$HOME/.local/share/vega/shims"
-cargo install --locked --path "$root/shims/gh" --root "$HOME/.local/share/vega/shims"
-cargo install --locked --path "$root/shims/tea" --root "$HOME/.local/share/vega/shims"
-# git push gate (docs/design/gate.md); every other git command is a plain exec.
-cargo install --locked --path "$root/shims/git" --root "$HOME/.local/share/vega/shims"
-# Per-worktree BEADS_ACTOR (docs/design/beads-sync.md, Claim identity).
-cargo install --locked --path "$root/shims/bd" --root "$HOME/.local/share/vega/shims"
 
 # Agent hooks (docs/design/config.md, units claude.hooks, codex.hooks, pi.prefix):
 # the ask-parent PreToolUse hook (a spawned agent asks its parent, not the user
