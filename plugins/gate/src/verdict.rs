@@ -161,31 +161,31 @@ pub fn give(pass: bool, findings: &[Finding], r: &Review) -> Result<Vec<String>,
     // The review is over: `vega gate` must not list it while the pane closes.
     state::remove(&r.pane);
     let text = mail_text(pass, r, findings, start::is_sentinel(&r.author_pane));
-    // As a tool, not as this pane: the pane closes, so the mail offers no reply.
+    // Until slice 3, post can acknowledge hc mail without delivering it:
+    // --from-tool skips reachability. Select transport by the saved backend.
     let mailed = !r.author_pane.is_empty()
-        && run(
-            &tool("vega"),
-            &[
-                "post",
-                "send",
-                "--from-tool",
-                "vega-gate",
-                &r.author_pane,
-                &text,
-            ],
-            None,
-            Some(Duration::from_secs(15)),
-        )
-        .is_ok_and(|o| o.ok);
-    let mailed = mailed
-        || (r.backend == Backend::Hc
-            && !r.author_pane.is_empty()
-            && vega_herdr::hc_on(
+        && match r.backend {
+            Backend::Hc => vega_herdr::hc_on(
                 None,
                 &["send", &r.author_pane, &text],
                 Some(Duration::from_secs(15)),
             )
-            .is_ok());
+            .is_ok(),
+            Backend::Herdr => run(
+                &tool("vega"),
+                &[
+                    "post",
+                    "send",
+                    "--from-tool",
+                    "vega-gate",
+                    &r.author_pane,
+                    &text,
+                ],
+                None,
+                Some(Duration::from_secs(15)),
+            )
+            .is_ok_and(|o| o.ok),
+        };
     start::cleanup_detached(r);
     // A replacing start may now close this finished pane immediately: all
     // verdict side effects, including author mail, are complete.

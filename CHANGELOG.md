@@ -9,7 +9,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: `vega gate start` and gated pushes now work from hc/herdr-app terminals. Reviewers
   run in detached hc terminals visible in the author's space, with the same harness defaults
-  and repo trust propagation as TUI reviewers. Verdict delivery falls back to `hc send` during
+  and repo trust propagation as TUI reviewers. hc verdict delivery uses `hc send` during
   the migration; the `VEGA_GATE=skip` workaround for hc terminals is no longer needed.
   See [gate](docs/design/gate.md) and [hc migration](docs/design/hc-migration.md).
 

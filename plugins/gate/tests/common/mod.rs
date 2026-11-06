@@ -207,8 +207,7 @@ esac
 printf '%s\n' "$*" >> $L/vega.log
 case "$1 $2" in
   "lanista pin") echo "model: m-$3" ;;
-  "post send") [ -f "$L/fail-mail" ] && exit 1
-    if [ -f $L/block-mail ]; then
+  "post send") if [ -f $L/block-mail ]; then
     touch $L/mail-entered
     n=0
     while [ ! -f $L/release-mail ]; do

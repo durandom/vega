@@ -569,7 +569,7 @@ fn hc_stale_context_is_an_error_not_no_terminal_fail_open() {
 }
 
 #[test]
-fn hc_verdict_requires_label_and_ancestry_then_falls_back_to_hc_mail() {
+fn hc_verdict_requires_label_and_ancestry_and_routes_directly_to_hc() {
     let tmp = tempfile::tempdir().unwrap();
     let work = feature(tmp.path());
     let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
@@ -593,12 +593,13 @@ fn hc_verdict_requires_label_and_ancestry_then_falls_back_to_hc_mail() {
     assert!(!stale.status.success());
     assert_eq!(log(tmp.path(), "bd"), before);
     fs::remove_file(tmp.path().join("hc-stale")).unwrap();
-    fs::write(tmp.path().join("fail-mail"), "").unwrap();
     fs::write(tmp.path().join("hc-rm-busy"), "2").unwrap();
     let verdict = run(&work, tmp.path(), &env, &["verdict", "pass"]);
     assert!(verdict.status.success(), "{}", out(&verdict));
     assert!(out(&verdict).contains("t1 mailed"));
     assert!(log(tmp.path(), "hc").contains("send t1 gate pass"));
+    // Fake post would report success; it must not hide missing hc delivery.
+    assert!(!log(tmp.path(), "vega").contains("post send"));
     assert!(log(tmp.path(), "hc").contains("Next: push again."));
     assert!(log(tmp.path(), "bd").contains("verdict=pass"));
     assert!(!state_file.exists());
