@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 116 · 2026-11-07
+
+- unit: `herdr-app.mods` and `herdr-app.layouts` add a maintained vega clone of Herdr's main layout
+  with a small vegad status row. The row starts vegad when instantiated. With herdr-app running,
+  `vega config apply herdr-app` validates the mod and selects the vega layout on first apply;
+  later layout choices stay yours. `vega config` reports source version/hash drift; regenerate with
+  `python3 scripts/herdr-app-layout.py --write`, review and commit the result before applying.
+  See [config](docs/design/config.md) "Vega layout and startup mod".
+
 ## 115 · 2026-11-06
 
 - optional: faster builds. `scripts/install-cli.sh` builds every binary in one `cargo build --release`

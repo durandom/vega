@@ -31,9 +31,15 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
    stopped vegad. The core outlives the app (macOS starts it as a one-shot launchd job), so vegad must
    detach; `relay start` already does (setsid).
    Amended (Slayer, 2026-11-06, vega-0h4c.13): slice 0 found that a mod no layout shows never runs
-   `init()`. The vega mod is therefore a small, always visible vega status element in the main layout
-   (it shows vega state in slice 5 anyway); being shown starts vegad. The layout file becomes a vega
-   config unit too.
+   `init()`. The vega mod is therefore a small, always visible vega status element. The Slayer chose
+   a **vega-owned clone** of main: `config/herdr-app/layouts/vega.json`, unit `herdr-app.layouts`.
+   Shipped main is restored at every start and rejects structural edits; a personal clone persists.
+   First apply selects vega through `layout.switch`, which persists the choice in app-owned
+   `shared.json` (not settings). The clone records its source app version; `vega config` reports
+   version/hash drift. An explicit maintenance generator inserts the block at main's status anchor;
+   its output is committed and reviewed. Apply never regenerates it. No automatic rebase.
+   The element's `init()` starts vegad; it shows minimal relay state now, with labels, toasts and
+   focus in slice 5. See [config](config.md) "Vega layout and startup mod".
 6. **hc notes stay on; done goes through vega post (Slayer, 2026-11-06).** hc types a note into the parent
    only when a child cannot report itself (blocked, error, exit), never a done. A sentinel's done report
    stays a `vega post` mail: it crosses machines and survives a UAC handoff into a new terminal. vega's own

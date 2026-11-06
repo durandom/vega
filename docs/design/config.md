@@ -40,10 +40,13 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `herdr-app.keys` | `~/.config/herdr-app/keys.json` | whole file; actions checked against `herdr-app commands` | `herdr-app/keys.json` |
 | `herdr-app.settings` | `~/.config/herdr-app/settings.json` | seeded keys (the app's Settings screen writes the file too) | `herdr-app/settings.json` |
 | `herdr-app.themes` | `~/.config/herdr-app/themes/<name>.json` | whole file each; other themes untouched | `herdr-app/themes/` |
+| `herdr-app.mods` | `~/.config/herdr-app/mods/vega/` | whole folder, staged `herdr-app check` required | `herdr-app/mods/vega/{main.js,mod.json}` |
+| `herdr-app.layouts` | `~/.config/herdr-app/layouts/vega.json` | whole file; first apply selects it through the app | `herdr-app/layouts/vega.json` |
 | `agentsview` | `LOCAL-SETUP.md` in `~/.claude/skills/agentsview-finding-history/` and `~/.agents/skills/agentsview-finding-history/` | whole file each, only where agentsview generated the skill (`SKILL.md` exists) | `agentsview/LOCAL-SETUP.md` |
 
 Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks codex.hooks pi.prefix`;
-`herdr-app` = `herdr-app.keys herdr-app.settings herdr-app.themes`.
+`herdr-app` = `herdr-app.keys herdr-app.themes herdr-app.mods herdr-app.layouts herdr-app.settings`
+(in apply order; mods precede layouts, both precede settings).
 
 ### herdr-app (vega-0h4c.1)
 
@@ -66,6 +69,46 @@ reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units
 - After writing `keys.json` or `settings.json` with the app running (`herdr-app.sock`), vega waits
   up to 3 s for a fresh `<stem>.error`. The app keeps its last good version running; vega restores
   the previous file and reports `rejected`.
+
+### Vega layout and startup mod (vega-0h4c.13)
+
+`herdr-app.mods` replaces the whole `mods/vega/` folder from the two source files; local overrides
+resolve per file. It stages both files together and requires the installed `herdr-app check` to pass
+before touching the target. A missing checker or a failed check reports `rejected`. Replacement moves
+the old folder, including stale files, to `~/.config/herdr-app/.vega-mod.vega-bak`; other mods stay
+untouched. Any chezmoi-managed descendant prevents replacement.
+
+`herdr-app.layouts` owns `layouts/vega.json`: a clone of the installed 0.1.13 `main`, with its
+`cloned_from` provenance and a small, always visible vega status row below the work area's status bar.
+Shipped layouts are replaced on every app start and reject structural changes, so this clone is
+maintained by vega. `vega config` compares its `cloned_from.version` with `herdr-app --version` and
+its `vega_source.installed_hash` with `installed.json["layout:main"]["json"]`. A changed or
+missing fingerprint reports drift, even within the same app version. Shipped mod references remain
+upstream-owned.
+
+For explicit maintenance, run `python3 scripts/herdr-app-layout.py --write`, review the generated
+diff and commit `config/herdr-app/layouts/vega.json`. Without `--write`, the script previews provenance.
+It reads the installed `layouts/main.json`, inserts the vega block after the unique `status` block
+in its column, and records app version, the installed fingerprint and a SHA-256 of the source bytes.
+A missing, duplicated or changed anchor refuses without touching the old output. `--app-home`,
+`--app-version` and `--output` support isolated maintenance/tests. Config apply only writes the
+reviewed source; it never runs the generator. There is no automatic rebase.
+
+Layout selection is **not a settings key** in 0.1.13: `layout.switch` persists `shared("layout")` in
+app-owned `shared.json`. First apply requires a running app and the installed vega mod, writes the
+layout, calls `layout.switch --name vega`, then verifies the selected name and empty error list. A
+failed activation restores the old file and reports `rejected`; a missing app rejects before writing.
+Successful selection is recorded in `$XDG_STATE_HOME/vega/herdr-app-layout-selected`; later applies
+preserve the user's layout choice. To return explicitly: `herdr-app do layout.switch --name vega`.
+Vega never edits `shared.json` or layout click state. The app has no standalone layout checker in
+0.1.13; vega checks JSON/root shape and verifies the first activation in the app. Updates to the
+currently selected vega layout are also verified through the app; rejection restores the old file
+and prior layout selection. An inactive layout update is checked when next selected by the app.
+
+The mod's `init()` invokes `~/.local/bin/vega-post relay start` once per instantiated copy. That
+idempotent command detaches vegad; a startup failure cannot break the element. The row polls
+`relay status --json` every 15 seconds and shows running, stopped or unavailable. It redraws only
+when that state changes. Labels, toasts and focus integration follow in migration slice 5.
 
 ### Destructive Command Guard
 
