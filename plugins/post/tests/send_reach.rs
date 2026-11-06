@@ -297,15 +297,17 @@ fn send_uber_reaches_the_live_claim_and_checks_typed_bodies() {
 
 #[test]
 fn send_finds_uac_of_plain_clone_by_origin() {
-    check_send("~/src/spellkave/main/.git", Some("spellkave"));
+    check_send("~/src/spellkave/main/.git", Some("spellkave"), true);
 }
 
+/// Only the role lookup depends on the layout; the rest of the send path is
+/// covered once, by the plain clone above.
 #[test]
 fn send_finds_uac_of_bare_layout_by_folder() {
-    check_send("~/src/spellkave/.bare", None);
+    check_send("~/src/spellkave/.bare", None, false);
 }
 
-fn check_send(local_common: &str, origin_name: Option<&str>) {
+fn check_send(local_common: &str, origin_name: Option<&str>, full: bool) {
     let project = "github.com/b4arena/spellkave";
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
@@ -349,6 +351,14 @@ fn check_send(local_common: &str, origin_name: Option<&str>) {
                 .messages
         })
     };
+    if !full {
+        // By role: the project's UAC on another host.
+        let (ok, out) = send(home, &url, &["--uac", "spellkave", "hi"]);
+        assert!(ok, "{out}");
+        assert!(out.contains("sent: w3V:p1 on proteus"), "{out}");
+        assert_eq!(count("proteus"), 1);
+        return;
+    }
 
     let (ok, out) = send(home, &url, &["--uac", ".", "outside git"]);
     assert!(!ok, "{out}");

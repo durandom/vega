@@ -3,9 +3,11 @@
 //! again on the same port. vegad keeps labelling herdr's panes, logs the
 //! outage once, notes it for the human and reconnects. Temp HOME, fake herdr.
 //!
-//! Each phase may meet any step of the probe backoff, so the waits below come
-//! from vegad's own bounds. The sidebar renewal takes 60 s of local mode, which
-//! leaves the broker's return in the slow part of the backoff: about 135 s.
+//! vegad runs with its loop cadences at 1/SPEEDUP (`VEGA_POST_TEST_SPEEDUP`,
+//! src/pace.rs): the loss, the probe backoff, the sidebar renewal and the
+//! bounce retry take seconds, not the minutes of production. Each phase may
+//! meet any step of the backoff, so the bounds below come from vegad's own;
+//! the waits end on their condition, only a failure waits a bound out.
 
 use std::fs;
 use std::net::TcpListener;
@@ -14,16 +16,22 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// The divisor of vegad's loop cadences in this test.
+const SPEEDUP: u64 = 20;
 /// Local mode's longest gap between probes (`PROBE_EVERY`, main.rs).
-const PROBE_GAP: Duration = Duration::from_secs(60);
-/// One bounded broker step: the probe's connect, the setup (`outage::CALL`).
+const PROBE_GAP: Duration = Duration::from_secs(60 / SPEEDUP);
+/// One bounded broker step: the probe's connect, the setup (`outage::CALL`,
+/// not sped up).
 const BROKER_CALL: Duration = Duration::from_secs(10);
 /// Two local-mode reports of an unchanged row. The sidebar sends one again
 /// after 60 s (`RENEW_AFTER`) on a 5 s tick (`TICK`, sidebar.rs). A row sent
 /// just before the switch needs that twice; one that changes at the first local
 /// refresh, up to one `REGISTRY_EVERY` (15 s, main.rs) in, needs it once.
-const RENEWAL: Duration = Duration::from_secs(2 * (60 + 5) + 15);
-/// Headroom for a machine busy with a full check. Only a failure waits this.
+const RENEWAL: Duration = Duration::from_secs((2 * (60 + 5) + 15) / SPEEDUP);
+/// The retry of a bounce the broker could not check (`CI_RETRY`, main.rs).
+const BOUNCE_RETRY: Duration = Duration::from_secs(30 / SPEEDUP);
+/// Headroom for a machine busy with a full check, and vegad's 1 s loop tick.
+/// Only a failure waits this.
 const LOAD: Duration = Duration::from_secs(20);
 
 /// The next probe at the worst backoff step, its connect and the setup.
@@ -183,6 +191,7 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
             .env("PATH", &path)
             .env("VEGA_NATS_URL", &url)
             .env("VEGA_POST_HOST", "testhost")
+            .env("VEGA_POST_TEST_SPEEDUP", SPEEDUP.to_string())
             .env("FAKE_LOG", home)
             .current_dir(home);
         c
@@ -311,7 +320,7 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     wait_for(
         &log_file,
         "the bounce",
-        Duration::from_secs(30) + BROKER_CALL + LOAD,
+        BOUNCE_RETRY + BROKER_CALL + LOAD,
         || log().contains("bounce: w1:p1 unread, mailed w1:p2 on testhost"),
     );
 }

@@ -57,7 +57,7 @@ impl Backoff {
 
     pub fn new(max: Duration) -> Self {
         Backoff {
-            next: Self::FIRST.min(max),
+            next: crate::pace::of(Self::FIRST).min(max),
             max,
         }
     }

@@ -34,6 +34,8 @@ fn post_command(home: &Path, url: &str, host: &str, args: &[&str]) -> Command {
         .env("XDG_CONFIG_HOME", home.join("config"))
         .env("VEGA_POST_HOST", host)
         .env("VEGA_NATS_URL", url)
+        // vegad's cadences (identity retry, registry refresh) at 1/20.
+        .env("VEGA_POST_TEST_SPEEDUP", "20")
         .env(
             "PATH",
             format!(
@@ -387,8 +389,9 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
             .contains("heartbeat only")
     });
     // Make A's one-shot startup beat stale without sleeping for FRESH. A
-    // continuing guard block must refresh it on the normal 15-second cadence,
-    // rather than the 120-second failure backoff that exceeds FRESH (90 s).
+    // continuing guard block must refresh it on the normal 15-second cadence
+    // (sped up here), rather than the 120-second failure backoff that exceeds
+    // FRESH (90 s) and that VEGA_POST_TEST_SPEEDUP leaves alone.
     rt.block_on(async {
         kv.put("a.beat", json!({"schema":2,"at":1}).to_string().into())
             .await

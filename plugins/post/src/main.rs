@@ -42,6 +42,7 @@ mod notes;
 mod notify_delivery;
 mod notify_state;
 mod outage;
+mod pace;
 mod pagerduty;
 mod probes;
 #[cfg(test)]
@@ -2417,7 +2418,7 @@ async fn wait_for_identity(
         }
         for _ in 0..5 {
             upgrade_if_due(upgrade, lock, true, &carry.d, &carry.sup, &carry.mail);
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(pace::of(Duration::from_secs(1))).await;
         }
     }
 }
@@ -2501,7 +2502,7 @@ impl Jobs {
             ci,
             bd,
             broker_jobs: (!once).then_some((ctx, btx)),
-            backoff: outage::Backoff::new(PROBE_EVERY),
+            backoff: outage::Backoff::new(pace::of(PROBE_EVERY)),
         }
     }
 
@@ -2794,7 +2795,7 @@ async fn local(
                 mail.extend(due);
             }
             slow("metadata", t);
-            meta_next = Some(Instant::now() + REGISTRY_EVERY);
+            meta_next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
         }
         for p in sup.ripe(SILENT_AFTER) {
             turn_ended(&p, &mut d);
@@ -2988,7 +2989,7 @@ async fn serve(
         // archive, never shown unverified, and its first pass reads them.
         let mut uber_in = None;
         // Only a broker that took the setup ends an outage (vega-lhc.205).
-        jobs.backoff = outage::Backoff::new(PROBE_EVERY);
+        jobs.backoff = outage::Backoff::new(pace::of(PROBE_EVERY));
         jobs.notify_mode
             .store(2, std::sync::atomic::Ordering::Relaxed);
         service::write_broker("connected");
@@ -3050,7 +3051,7 @@ async fn serve(
             let up = connected(&client);
             if up {
                 away = None;
-            } else if away.get_or_insert(started).elapsed() >= outage::LOST_AFTER {
+            } else if away.get_or_insert(started).elapsed() >= pace::of(outage::LOST_AFTER) {
                 let why = format!(
                     "broker: lost ({} unreachable for {} s); switching to local mode",
                     url(),
@@ -3150,7 +3151,7 @@ async fn serve(
                         (now_ms() / 1000) as i64,
                     ));
                 }
-                meta_next = Some(Instant::now() + REGISTRY_EVERY);
+                meta_next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
             }
             for p in sup.ripe(SILENT_AFTER) {
                 turn_ended(&p, &mut d);
@@ -3538,7 +3539,7 @@ async fn retry_bounces(
             later.len(),
             CI_RETRY.as_secs()
         ));
-        *retry_at = Instant::now() + CI_RETRY;
+        *retry_at = Instant::now() + pace::of(CI_RETRY);
     }
     d.keep_bounces(later);
 }
@@ -5663,7 +5664,7 @@ impl Registry {
     async fn run(&mut self, client: &async_nats::Client, host: &str, sup: &mut Supervisor) {
         match self.reconcile(client, host).await {
             Ok(RegistryUpdate::Synced(n)) => {
-                self.next = Some(Instant::now() + REGISTRY_EVERY);
+                self.next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
                 self.note(&format!("registry: in sync ({n} entries of {host})"));
                 if let Some(v) = &self.view {
                     observe_remote(sup, v, &mut self.turns);
@@ -5674,7 +5675,7 @@ impl Registry {
                 // This completed v2 owner is alive, even while peers still
                 // have legacy records. Keep its beat fresh before FRESH; do
                 // not publish projects or expose an unsafe aggregate view.
-                self.next = Some(Instant::now() + REGISTRY_EVERY);
+                self.next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
                 self.view = None;
                 self.note(&format!(
                     "registry: identity blocked ({why}); heartbeat only"
@@ -5695,7 +5696,7 @@ impl Registry {
     async fn run_theme_only(&mut self, client: &async_nats::Client, remote: &theme::Remote) {
         match theme::control_mode(client).await {
             Ok(modes) => {
-                self.next = Some(Instant::now() + REGISTRY_EVERY);
+                self.next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
                 self.note(&format!(
                     "registry: theme only ({})",
                     modes
