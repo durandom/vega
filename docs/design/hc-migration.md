@@ -30,6 +30,10 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
    ([vegad](vegad.md) "Lifecycle", vega-lhc.54); on a host without a window, `vega deploy` already starts a
    stopped vegad. The core outlives the app (macOS starts it as a one-shot launchd job), so vegad must
    detach; `relay start` already does (setsid).
+   Amended (Slayer, 2026-11-06, vega-0h4c.13): slice 0 found that a mod no layout shows never runs
+   `init()`. The vega mod is therefore a small, always visible vega status element in the main layout
+   (it shows vega state in slice 5 anyway); being shown starts vegad. The layout file becomes a vega
+   config unit too.
 6. **hc notes stay on; done goes through vega post (Slayer, 2026-11-06).** hc types a note into the parent
    only when a child cannot report itself (blocked, error, exit), never a done. A sentinel's done report
    stays a `vega post` mail: it crosses machines and survives a UAC handoff into a new terminal. vega's own
