@@ -598,6 +598,7 @@ fn hc_verdict_requires_label_and_ancestry_then_falls_back_to_hc_mail() {
     assert!(verdict.status.success(), "{}", out(&verdict));
     assert!(out(&verdict).contains("t1 mailed"));
     assert!(log(tmp.path(), "hc").contains("send t1 gate pass"));
+    assert!(log(tmp.path(), "hc").contains("Next: push again."));
     assert!(log(tmp.path(), "bd").contains("verdict=pass"));
     assert!(!state_file.exists());
     // Wait only for this detached cleanup, never a real core.
@@ -626,4 +627,76 @@ fn hc_replacement_cleans_up_using_recorded_backend() {
     assert!(calls.contains("kill t11"), "{calls}");
     assert!(calls.contains("rm t11"), "{calls}");
     assert!(!log(tmp.path(), "herdr").contains("pane close t11"));
+}
+
+#[test]
+fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    let env = [("HC_TERMINAL_ID", "t1")];
+    let started = run(&work, tmp.path(), &env, &["start"]);
+    assert!(started.status.success(), "{}", out(&started));
+    let state: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(tmp.path().join("state/vega/gate/hc-743131.json")).unwrap(),
+    )
+    .unwrap();
+    let record = serde_json::json!([{"id": state["beads"][0], "status": "in_progress", "metadata": {"verdict": "running", "started_at": state["started_at"].as_i64().unwrap().to_string()}}]);
+    fs::write(
+        tmp.path().join(format!(
+            "bd-key-gate:{}.json",
+            state["keys"][0].as_str().unwrap()
+        )),
+        record.to_string(),
+    )
+    .unwrap();
+    for (status, turn, sent, expected) in [
+        (
+            "blocked",
+            0,
+            true,
+            "blocked at a dialog or question: hc read t11",
+        ),
+        (
+            "idle",
+            0,
+            true,
+            "stuck: idle without taking its prompt: hc read t11",
+        ),
+        (
+            "idle",
+            1,
+            false,
+            "stuck: idle without taking its prompt: hc read t11",
+        ),
+        ("working", 0, true, "working"),
+        ("idle", 1, true, "idle"),
+    ] {
+        let info = serde_json::json!({"address": "t11", "state": "live", "status": {"state": status}, "turn": turn, "first_message": {"sent": sent}});
+        fs::write(tmp.path().join("hc-t11.json"), info.to_string()).unwrap();
+        let home = run(&work, tmp.path(), &env, &[]);
+        assert!(home.status.success(), "{}", out(&home));
+        assert!(out(&home).contains(expected), "{}", out(&home));
+        if status == "working" || (status == "idle" && turn == 1 && sent) {
+            assert!(!out(&home).contains("stuck:"), "{}", out(&home));
+        }
+    }
+    for (parent, role, expected) in [
+        (Some("t2"), "", "name the verdict in your done report"),
+        (None, "sentinel", "name the verdict in your done report"),
+        (None, "", "push again"),
+    ] {
+        let author = serde_json::json!({"address": "t1", "state": "live", "pid": std::process::id(), "parent": parent, "labels": {"vega.role": role}, "status": {"app": "claude-code"}});
+        fs::write(tmp.path().join("hc-t1.json"), author.to_string()).unwrap();
+        let running = run(&work, tmp.path(), &env, &["start"]);
+        assert!(running.status.success(), "{}", out(&running));
+        assert!(out(&running).contains(expected), "{}", out(&running));
+    }
+    fs::write(
+        tmp.path().join("hc-t11.json"),
+        r#"{"address":"t11","state":"finished"}"#,
+    )
+    .unwrap();
+    let home = run(&work, tmp.path(), &env, &[]);
+    assert!(home.status.success(), "{}", out(&home));
+    assert!(out(&home).contains(",gone"), "{}", out(&home));
 }

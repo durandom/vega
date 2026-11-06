@@ -184,6 +184,29 @@ The shim calls it (and an agent may, to review before handing work back). Steps:
 6. **Record**: a gate bead, status `in_progress` (section 6); state file
    `~/.local/state/vega/gate/<reviewer pane>.json` (key, bead, repo path, author pane, clone).
 
+### Terminal backends during the hc migration
+
+`own_terminal()` verifies the author's process ancestry and chooses herdr or hc; a TUI pane takes
+precedence over an enclosing hc terminal. TUI reviewers still use `vega mux spawn`. An hc author
+starts a reviewer with `hc run --bg --json --no-parent --outlive-parent --name gate-<review id>
+--cwd <clone> --label vega.role=gate-reviewer --label vega.review=<review id>`, inheriting the author's
+`herdr.space` label. The program argv begins `env VEGA_GATE_ROLE=reviewer <kind>` and includes the shared
+harness defaults and model arguments. Both paths use `vega-herdr::launch` for defaults and existing
+repo trust propagation; no trust dialog is answered automatically.
+
+Review state stores `backend`; old files default to `herdr`. hc state filenames use the lossless
+`hc-<hex address>` token. Liveness and status come from `hc get`: `state=live`, `status.state`, `turn`
+and `first_message.sent`. An idle reviewer at turn zero or with an unsent first message is shown as
+`stuck`; `blocked` and `stuck` guidance points to `hc read <terminal>`. Cleanup uses `hc kill` and
+`hc rm`, including detached cleanup after a verdict. For hc authors, a parent link or
+`vega.role=sentinel` label selects the sentinel's done-report guidance.
+
+An hc verdict requires the saved review, a matching `vega.review` label and ancestry verified by
+`own_terminal()`; hc supplies no harness session ID. The generation lock below still applies.
+Until hc mail routing lands, a failed `vega post send` falls back to `hc send <author>`. Reviewer
+questions likewise use `hc send`; the prompt names the gate executable to record the verdict.
+See [hc migration, slice 1](hc-migration.md#slices).
+
 **Read-only, checked 2026-10-19:**
 
 - codex 0.163.0 has `--sandbox read-only`. Not used: Codex's sandbox blocks the herdr socket (P7, battle
@@ -222,8 +245,8 @@ Do not send vega post done or any other report: the verdict is your report.
   by mail. A fresh reviewer gets every pending segment, including unchanged running segments. The old
   beads become `superseded`, then its state is revoked and its pane closes; its clone never moves to the new head.
 - **`vega gate verdict pass|fail [--findings <json>]`** is accepted only from the pane `gate start` spawned:
-  its `HERDR_PANE_ID` must have a state file, and herdr's view of that pane (`agent_session.value`) must match
-  the caller's session id (`CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`). The pane remains bound to its
+  its verified terminal must have a state file. For the TUI, herdr's view of that pane (`agent_session.value`) must match
+  the caller's session id (`CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`); hc uses the label and ancestry checks above. The pane remains bound to its
   original head, generation and bead ids. Before recording, the saved state must still match the
   authorized snapshot; a revoked or replaced generation is refused. Recording and revocation share
   a per-pane file lock: a verdict in flight either finishes for the old head before revocation, or
@@ -269,11 +292,12 @@ closed bead with `verdict=pass`. Only a pass lets the push through; `fail` beads
 | Case | Behaviour |
 |---|---|
 | No capacity / no candidate left after the author exclusion | fail open: push proceeds, stderr line, bead `no-reviewer` (visible in `vega gate log`) |
-| No herdr (no `HERDR_PANE_ID`, socket down) | fail open (Slayer, 2026-10-19): push proceeds, stderr `vega gate: no herdr, push not reviewed, recorded as <bead>`, a closed bead per segment with verdict `unreviewed`. No headless fallback |
+| No terminal (neither `HERDR_PANE_ID` nor `HC_TERMINAL_ID`) | fail open: push proceeds, stderr `vega gate: no terminal, push not reviewed, recorded as <bead>`, a closed bead per segment with verdict `unreviewed`. No headless fallback |
+| Stale terminal context or unavailable terminal backend | identity error, not absence; `gate start` reports the error, and the git shim follows its own-error fail-open rule |
 | Spawn brings up no pane (binary missing, startup timeout) | the next candidate tries (section 4, step 5); none left: the push fails with every spawn's cause and records one `abandoned` bead per segment |
-| Spawn stops at a dialog (trust, login) | the push fails once with `vega mux spawn --resume <pane>`; the bead stays `running` until the timeout |
+| TUI spawn stops at a dialog (trust, login) | the push fails once with `vega mux spawn --resume <pane>`; the bead stays `running` until the timeout |
 | Push again, same head and key, review running | exit 1 at once, `review running in tab gate-<branch> since 6 min`; no second reviewer |
-| Reviewer idle without ever taking its prompt (no prompt in its session log), or at a dialog | `vega gate` and the running line say `stuck` or `blocked` with `vega mux show <pane>`; the timeout still applies |
+| Reviewer idle without ever taking its prompt (no prompt in its session log), or at a dialog | `vega gate` and the running line say `stuck` or `blocked` with `vega mux show <pane>` for TUI or `hc read <terminal>` for hc; the timeout still applies |
 | Push again or `vega gate start`, new head, review running | lock the old review, mark its beads `superseded`, revoke its state, close the old pane and start a fresh reviewer bound to the new head/generation. Include unchanged running segments; never re-point a reviewer by mail. A stale verdict cannot apply to the new generation |
 | Reviewer dies (pane gone) or silent past `timeout` | on the next push: bead `abandoned`, cleanup, start a new review with the next candidate. A second abandon for the same key fails open (infrastructure, spike input 7) |
 | Target ref missing locally | uses `<remote>/HEAD`; none either: fail open |
@@ -300,7 +324,7 @@ branch with `vega gate start` before their done report (section 3, Segments), an
 
 1. **Per-branch passes:** a sentinel runs `vega gate start` before its done report; the UAC's `main` push
    needs a pass per merged branch (section 3, Segments), not one review of the union.
-2. **No herdr:** fail open with a stderr line and an `unreviewed` bead (section 7).
+2. **No terminal:** fail open with a stderr line and an `unreviewed` bead (section 7); hc migration extends this original no-herdr decision.
 3. **claude reviewers:** yolo in the clone, no `dontAsk` (section 4).
 4. **Clone:** `git clone --shared` instead of a worktree (section 4).
 5. Approved as designed: no codex read-only sandbox; config and rubric read from the push target; author
@@ -348,7 +372,8 @@ Each step a bead under vega-lhc.146, after this design lands.
 - A sentinel branch that merged main into itself is walked like a push (runs plus the merge's combined
   diff), so its keys differ from the UAC's `merge-base(P1, P2)..P2` segment; that branch is reviewed again
   at the UAC's push.
-- A pi reviewer exports no session id; `verdict` then checks only its pane and state file.
+- A TUI pi reviewer exports no session id; `verdict` checks its verified pane and state file.
+  hc reviewers of every kind additionally require the matching review label.
 
 ## Rejected
 

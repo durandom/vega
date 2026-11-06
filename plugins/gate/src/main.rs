@@ -231,7 +231,7 @@ fn start_cmd(target: Option<&str>) -> Result<(), Failure> {
         Outcome::Passed => println!("result: pass (every segment has one)"),
         Outcome::Running(m) => println!("result: {m}"),
         Outcome::FailOpen(m) => println!("result: not reviewed: {m}"),
-        Outcome::Failed(m) => return Err(Failure::new("spawn", m, "vega mux spawn --help")),
+        Outcome::Failed(m) => return Err(Failure::new("spawn", m, "check the reviewer harness is installed and the terminal backend is up; then vega gate start")),
     }
     Ok(())
 }
