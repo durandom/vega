@@ -20,6 +20,7 @@ Agent guide: `vega skills gate`
 
 Gate uses the author's terminal backend. In hc/herdr-app it starts a detached reviewer with the
 `vega.role` and `vega.review` labels and inherits the author's `herdr.space` for visibility.
+Both backends share harness defaults and existing repo trust propagation from `vega-herdr::launch`.
 Review state records the backend; old records default to herdr. An hc verdict requires matching
 review state and label plus verified process ancestry. Until hc mail routing is available,
 verdict delivery falls back to `hc send`. With neither terminal context present, the gate records

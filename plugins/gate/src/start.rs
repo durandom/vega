@@ -888,15 +888,12 @@ pub fn hc_spawn_args(
         "VEGA_GATE_ROLE=reviewer".into(),
         kind.into(),
     ]);
-    match kind {
-        "codex" => args.extend([
-            "--no-daemon".into(),
-            "--dangerously-bypass-approvals-and-sandbox".into(),
-        ]),
-        "claude" => args.push("--dangerously-skip-permissions".into()),
-        _ => {}
-    }
-    args.extend_from_slice(model);
+    args.extend(
+        vega_herdr::launch::default_args(kind)
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    args.extend(model.iter().filter(|s| !s.is_empty()).cloned());
     args.push(task.into());
     args
 }
@@ -997,6 +994,9 @@ fn spawn_review(
     };
     let (ok, text, pane) = if backend == Backend::Hc {
         let info = terminal::get(&author_pane)?;
+        if let Some(line) = vega_herdr::launch::apply(&cand.kind, &clone.to_string_lossy()) {
+            eprintln!("vega gate: {line}");
+        }
         let task = format!(
             "Read {} and carry out the gate review.",
             prompt_file.display()
@@ -1233,6 +1233,50 @@ mod tests {
             choose(&reviewers, "budget", &author, &none, &resolve, &never).unwrap_err(),
             vec!["codex: codex not on PATH", "pi:xai: pi not on PATH"]
         );
+    }
+
+    #[test]
+    fn hc_spawn_shares_harness_defaults_and_passes_real_model_arguments() {
+        let args = hc_spawn_args(
+            "gate-r",
+            "r",
+            "pi",
+            Path::new("/clone"),
+            "task",
+            &[
+                "--provider".into(),
+                "zai".into(),
+                "".into(),
+                "--model".into(),
+                "glm-5.3".into(),
+            ],
+            None,
+        );
+        assert!(args.ends_with(
+            &[
+                "pi",
+                "--approve",
+                "--provider",
+                "zai",
+                "--model",
+                "glm-5.3",
+                "task"
+            ]
+            .map(String::from)
+        ));
+        assert!(!args.iter().any(String::is_empty));
+        let args = hc_spawn_args(
+            "gate-r",
+            "r",
+            "codex",
+            Path::new("/clone"),
+            "task",
+            &[],
+            None,
+        );
+        assert!(args
+            .windows(2)
+            .any(|a| a == ["-c", "check_for_update_on_startup=false"]));
     }
 
     #[test]

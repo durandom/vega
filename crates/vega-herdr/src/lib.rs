@@ -12,6 +12,7 @@ pub mod dialog;
 pub mod gather;
 pub mod hc;
 pub mod hosts;
+pub mod launch;
 pub use hc::{hc, hc_local, hc_on, own_terminal, Terminal};
 pub mod lanes;
 pub mod mail;

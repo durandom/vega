@@ -126,7 +126,7 @@ tests verify apply, backups, local overrides, idempotence and chezmoi refusal in
 |---|---|---|
 | herdr | `[ui] agent_panel_sort` (UI toggle) | `HERDR_OWNED`: the live value replaces the template's |
 | Claude Code | everything else in `settings.json` (plugins, permissions, statusLine, survey state, other hooks) | key-merge |
-| codex | other hooks in `hooks.json`; `config.toml` (trust, hook approvals) | key-merge; `config.toml` is not a unit (folder trust stays in `vega mux spawn`, plugins/mux/src/trust.rs) |
+| codex | other hooks in `hooks.json`; `config.toml` (trust, hook approvals) | key-merge; `config.toml` is not a unit (folder trust stays in `vega mux spawn`, crates/vega-herdr/src/launch.rs) |
 | pi | `settings.json` except the prefix line; an existing prefix stays after vega's line | key-merge |
 | agentsview | the generated `SKILL.md` (and its LOCAL-SETUP pointer) | not a target; vega owns only the sidecar |
 | skills.sh | skill copies, links and `.skill-lock.json` | `vega skills lib` owns them |
