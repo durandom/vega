@@ -127,12 +127,20 @@ pub fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
 /// Retry only this transient spawn error, before any budgeted fixture work.
 /// A persistent writer or any other error still fails the test.
 pub fn warm_with(
+    run: impl FnMut() -> std::io::Result<std::process::ExitStatus>,
+) -> std::io::Result<std::process::ExitStatus> {
+    warm_with_backoff(std::time::Duration::from_millis(20), run)
+}
+
+/// `warm_with` with the pause between attempts given (tests of the retry use zero).
+pub fn warm_with_backoff(
+    backoff: std::time::Duration,
     mut run: impl FnMut() -> std::io::Result<std::process::ExitStatus>,
 ) -> std::io::Result<std::process::ExitStatus> {
     for attempt in 0..50 {
         match run() {
             Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 49 => {
-                std::thread::sleep(std::time::Duration::from_millis(20));
+                std::thread::sleep(backoff);
             }
             result => return result,
         }

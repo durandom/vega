@@ -11,6 +11,9 @@ fn setup(tmp: &Path) -> (std::path::PathBuf, config::Config, state::Review) {
     std::env::set_var("XDG_STATE_HOME", tmp.join("state"));
     std::env::set_var("XDG_CACHE_HOME", tmp.join("cache"));
     std::env::set_var("HERDR_PANE_ID", "w1:p1");
+    // Unknown capacity, as in cli.rs: the real token-burn takes over a second
+    // per start and reads the developer's own usage.
+    std::env::set_var("VEGA_TOKEN_BURN", "/nonexistent/token-burn");
     for (key, value) in common::fakes(tmp) {
         std::env::set_var(key, value);
     }
