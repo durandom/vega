@@ -3,6 +3,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -16,6 +17,48 @@ struct Fixture {
 fn executable(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Fake `ssh`, `hostname`, `herdr` and `vega`, shared by all fixtures: they keep
+/// their state under `$HOME`. Written once and only when changed, because the
+/// first exec of a new script costs up to 0.1 s on macOS.
+fn fixture_bin() -> &'static Path {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("deploy-checkout-bin");
+        fs::create_dir_all(&bin).unwrap();
+        for (name, text) in [
+            (
+                "ssh",
+                "#!/bin/sh\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",
+            ),
+            ("hostname", "#!/bin/sh\necho deploying-host\n"),
+            (
+                "herdr",
+                "#!/bin/sh\necho '[{\"label\":\"target\",\"target\":\"fixture\",\"enabled\":true}]'\n",
+            ),
+            (
+                "vega",
+                r#"#!/bin/sh
+case "$*" in
+  --version) echo fixture ;;
+  'config apply') echo config >> "$HOME/actions"; echo 'evidence[1]{unit,event}:'; echo '  claude.settings,"deploy unchanged"'; echo 'summary: fixture config'; exit "${CONFIG_EXIT:-0}" ;;
+  'post relay status')
+    if [ -f "$HOME/started" ]; then echo 'vegad: running, binary current'
+    else echo 'vegad: stopped'; fi ;;
+  'post relay start') echo start >> "$HOME/actions"; touch "$HOME/started" ;;
+  *) exit 1 ;;
+esac
+"#,
+            ),
+        ] {
+            let path = bin.join(name);
+            if fs::read_to_string(&path).ok().as_deref() != Some(text) {
+                executable(&path, text);
+            }
+        }
+        bin
+    })
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -46,11 +89,9 @@ impl Fixture {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let source = tmp.path().join("origin");
-        let bin = tmp.path().join("bin");
         let config = tmp.path().join("gitconfig");
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(home.join(".local/bin")).unwrap();
-        fs::create_dir_all(&bin).unwrap();
         git(&source, &["init", "-b", "main"]);
         fs::create_dir_all(source.join("scripts")).unwrap();
         executable(
@@ -62,7 +103,7 @@ echo install >> "$HOME/actions"
 echo 'evidence[1]{unit,event}:'
 echo '  claude.hooks,"install /hooks/PreToolUse added"'
 echo 'summary: fixture hooks'
-cp "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
+ln -sf "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
 "#,
         );
         fs::write(source.join("content"), "main").unwrap();
@@ -73,44 +114,25 @@ cp "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
         git(&source, &["commit", "-am", "feature"]);
         git(&source, &["checkout", "main"]);
         // Redirect the production clone URL to this local source; never use the network.
+        // A configured identity keeps Git from guessing one for reflog entries: on
+        // macOS that guess resolves the hostname over mDNS, which stalls 5 s when
+        // several clones run at once.
         fs::write(
             &config,
             format!(
-                "[url \"{}\"]\n insteadOf = git@github.com:durandom/vega.git\n",
+                "[url \"{}\"]\n insteadOf = git@github.com:durandom/vega.git\n\
+                 [user]\n name = Fixture\n email = fixture@example.test\n",
                 source.display()
             ),
         )
         .unwrap();
-        executable(
-            &bin.join("ssh"),
-            "#!/bin/sh\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",
-        );
-        executable(&bin.join("hostname"), "#!/bin/sh\necho deploying-host\n");
-        executable(
-            &bin.join("herdr"),
-            "#!/bin/sh\necho '[{\"label\":\"target\",\"target\":\"fixture\",\"enabled\":true}]'\n",
-        );
-        executable(
-            &bin.join("vega"),
-            r#"#!/bin/sh
-case "$*" in
-  --version) echo fixture ;;
-  'config apply') echo config >> "$HOME/actions"; echo 'evidence[1]{unit,event}:'; echo '  claude.settings,"deploy unchanged"'; echo 'summary: fixture config'; exit "${CONFIG_EXIT:-0}" ;;
-  'post relay status')
-    if [ -f "$HOME/started" ]; then echo 'vegad: running, binary current'
-    else echo 'vegad: stopped'; fi ;;
-  'post relay start') echo start >> "$HOME/actions"; touch "$HOME/started" ;;
-  *) exit 1 ;;
-esac
-"#,
-        );
         let checkout = home.join("src/durandom/vega");
         Self {
             _tmp: tmp,
             home,
             source,
             checkout,
-            bin,
+            bin: fixture_bin().to_path_buf(),
             config,
         }
     }
@@ -121,7 +143,10 @@ esac
         if let Some(branch) = branch {
             cmd.args(["--from-branch", branch]);
         }
-        cmd.env("HOME", &self.home)
+        // A cwd outside any Git repository keeps history enrichment from probing
+        // the checkout the tests run in.
+        cmd.current_dir(&self.home)
+            .env("HOME", &self.home)
             .env("XDG_CONFIG_HOME", self.home.join("deployer-config"))
             .env("XDG_STATE_HOME", self.home.join("state"))
             .env("GIT_CONFIG_GLOBAL", &self.config)
@@ -170,18 +195,19 @@ fn fresh_clone_of_default_and_feature_branch() {
 #[test]
 fn missing_local_branch_existing_branch_and_back_to_default() {
     let f = Fixture::new();
-    f.success(None);
+    // Every deploy, clone or fetch, reports evidence from both config phases.
+    assert_config_evidence(&f.success(None));
     // An ordinary clone has no local feature branch yet.
-    f.success(Some("feature/test"));
+    assert_config_evidence(&f.success(Some("feature/test")));
     git(&f.source, &["checkout", "feature/test"]);
     fs::write(f.source.join("content"), "updated feature").unwrap();
     git(&f.source, &["commit", "-am", "advance"]);
-    f.success(Some("feature/test"));
+    assert_config_evidence(&f.success(Some("feature/test")));
     assert_eq!(
         fs::read_to_string(f.checkout.join("content")).unwrap(),
         "updated feature"
     );
-    f.success(None);
+    assert_config_evidence(&f.success(None));
     assert_eq!(git(&f.checkout, &["branch", "--show-current"]), "main");
     assert_eq!(
         fs::read_to_string(f.checkout.join("content")).unwrap(),
@@ -248,6 +274,15 @@ fn missing_remote_branch_fails_before_install() {
     let f = Fixture::new();
     assert_eq!(f.apply(Some("missing"), false).status.code(), Some(1));
     assert!(f.actions().is_empty());
+    // The failed checkout is recorded without an invented commit or units.
+    let event = history(&f);
+    assert_eq!(event["data"]["success"], false);
+    let machine = &event["data"]["machines"][0];
+    assert_eq!(machine["success"], false);
+    assert!(machine["commit"].is_null());
+    assert!(machine["install_success"].is_null());
+    assert!(machine["error"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(machine["units"].as_array().unwrap().is_empty());
     f.success(None);
     let before = f.actions();
     assert_eq!(f.apply(Some("missing"), false).status.code(), Some(1));
@@ -272,51 +307,8 @@ fn overrides_replace_target_and_config_failure_is_nonfatal() {
     );
     assert_eq!(f.actions(), "install\nconfig\nstart\n");
     assert!(String::from_utf8_lossy(&out.stdout).contains(",current,1,fixture config,ok"));
-}
 
-#[test]
-fn reports_both_config_phases_across_deploys() {
-    let f = Fixture::new();
-    for _ in 0..2 {
-        let out = f.success(None);
-        assert!(
-            out.contains("config_evidence[2]{name,unit,event}:"),
-            "{out}"
-        );
-        for expected in [
-            "install",
-            "deploy",
-            "claude.hooks",
-            "claude.settings",
-            "/hooks/PreToolUse",
-            "added",
-        ] {
-            assert!(out.contains(expected), "{out}");
-        }
-    }
-}
-
-fn history(f: &Fixture) -> serde_json::Value {
-    let root = f.home.join("state/vega/history-outbox");
-    let mut events = Vec::new();
-    for host in fs::read_dir(root).unwrap() {
-        for item in fs::read_dir(host.unwrap().path()).unwrap() {
-            let path = item.unwrap().path();
-            if path.extension().is_some_and(|s| s == "json") {
-                events.push(
-                    serde_json::from_slice::<serde_json::Value>(&fs::read(path).unwrap()).unwrap(),
-                );
-            }
-        }
-    }
-    assert_eq!(events.len(), 1);
-    events.remove(0)
-}
-
-#[test]
-fn history_records_real_remote_success_and_nonfatal_unit_failure() {
-    let f = Fixture::new();
-    assert!(f.apply(Some("feature/test"), true).status.success());
+    // History records the real remote result, including the nonfatal unit failure.
     let event = history(&f);
     assert_eq!(event["kind"], "deploy");
     assert_eq!(event["data"]["success"], true);
@@ -342,25 +334,46 @@ fn history_records_real_remote_success_and_nonfatal_unit_failure() {
     );
 }
 
-#[test]
-fn history_records_checkout_failure_without_inventing_commit_or_units() {
-    let f = Fixture::new();
-    assert_eq!(f.apply(Some("missing"), false).status.code(), Some(1));
-    let event = history(&f);
-    assert_eq!(event["data"]["success"], false);
-    let machine = &event["data"]["machines"][0];
-    assert_eq!(machine["success"], false);
-    assert!(machine["commit"].is_null());
-    assert!(machine["install_success"].is_null());
-    assert!(machine["error"].as_str().is_some_and(|s| !s.is_empty()));
-    assert!(machine["units"].as_array().unwrap().is_empty());
+/// Both config phases (install-cli and `vega config apply`) report evidence.
+fn assert_config_evidence(out: &str) {
+    assert!(
+        out.contains("config_evidence[2]{name,unit,event}:"),
+        "{out}"
+    );
+    for expected in [
+        "install",
+        "deploy",
+        "claude.hooks",
+        "claude.settings",
+        "/hooks/PreToolUse",
+        "added",
+    ] {
+        assert!(out.contains(expected), "{out}");
+    }
+}
+
+fn history(f: &Fixture) -> serde_json::Value {
+    let root = f.home.join("state/vega/history-outbox");
+    let mut events = Vec::new();
+    for host in fs::read_dir(root).unwrap() {
+        for item in fs::read_dir(host.unwrap().path()).unwrap() {
+            let path = item.unwrap().path();
+            if path.extension().is_some_and(|s| s == "json") {
+                events.push(
+                    serde_json::from_slice::<serde_json::Value>(&fs::read(path).unwrap()).unwrap(),
+                );
+            }
+        }
+    }
+    assert_eq!(events.len(), 1);
+    events.remove(0)
 }
 
 #[test]
 fn unavailable_outbox_does_not_change_deploy_success_or_failure() {
-    for branch in ["main", "missing"] {
-        let f = Fixture::new();
-        fs::write(f.home.join("state"), "not a directory").unwrap();
+    let f = Fixture::new();
+    fs::write(f.home.join("state"), "not a directory").unwrap();
+    for branch in ["missing", "main"] {
         let out = f.apply(Some(branch), false);
         assert_eq!(out.status.success(), branch == "main");
         assert!(String::from_utf8_lossy(&out.stderr).contains("history: event not queued:"));
