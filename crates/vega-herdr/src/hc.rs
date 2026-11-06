@@ -84,6 +84,33 @@ pub fn own_terminal() -> Result<Terminal, Failure> {
         .filter(|p| *p > 1)
         .collect();
     if crate::reaches(std::process::id(), &pids, crate::parent_of) {
+        // Only an ancestry-verified caller may bind its harness session.
+        let kind = match info["status"]["app"].as_str().unwrap_or("") {
+            "claude-code" => "claude",
+            k => k,
+        };
+        let key = match kind {
+            "claude" => "CLAUDE_CODE_SESSION_ID",
+            "codex" => "CODEX_THREAD_ID",
+            _ => "",
+        };
+        if let (Ok(session), Some(mut r)) = (
+            env::var(key),
+            crate::state::spawn_of_on(None, &id, info["name"].as_str().unwrap_or(""), kind),
+        ) {
+            if !session.is_empty() && r.session.as_deref() != Some(&session) {
+                r.session = Some(session);
+                if let Some(file) = crate::state::state_file_on("spawns", None, &id) {
+                    // Independent of the command's remote --machine scope.
+                    let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
+                    if let Ok(bytes) = serde_json::to_vec(&r) {
+                        if std::fs::write(&tmp, bytes).is_ok() {
+                            let _ = std::fs::rename(tmp, file);
+                        }
+                    }
+                }
+            }
+        }
         Ok(Terminal::Hc(id))
     } else {
         Err(missing())
@@ -175,4 +202,40 @@ pub fn hc_on(
             "check hc --version",
         )
     })
+}
+
+/// hc owns the fleet. Before migration starts, retain the TUI inventory.
+/// Errors are not an empty fleet: never deploy against a stale fallback.
+pub fn machines() -> Result<Value, Failure> {
+    let v = match hc_local(&["machine", "ls"]) {
+        Err(f) if f.code == "hc_not_found" => {
+            return crate::herdr_local(&["machine", "list", "--json"])
+        }
+        v => v?,
+    };
+    let rows = v["machines"].as_array().ok_or_else(|| {
+        Failure::new(
+            "hc_bad_output",
+            "machine list has no machines array",
+            "check hc --version",
+        )
+    })?;
+    if rows.is_empty() {
+        return crate::herdr_local(&["machine", "list", "--json"]);
+    }
+    Ok(Value::Array(rows.iter().map(|m| serde_json::json!({"label":m["name"],"target":m["target"],"host":m["host"],"enabled":true,"via":m["via"],"backend":"hc"})).collect()))
+}
+
+/// A corp/inbox-only host must never acquire command access to a private host.
+pub fn check_direction(target: &str) -> Result<(), Failure> {
+    if crate::state::is_inbox_only(&crate::state::post_host())
+        && !crate::state::is_inbox_only(target)
+    {
+        return Err(Failure::new(
+            "machine_direction",
+            "a corporate host cannot control a private host",
+            "run this operation from the private host",
+        ));
+    }
+    Ok(())
 }

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use vega_herdr::{cell, collapse_home, herdr, machine, print_failure, str_of, Failure};
+use vega_herdr::{cell, collapse_home, machine, print_failure, str_of, Failure};
 use vega_transcript::{
     civil, locate, one_line, truncate, utc_offset, Entry, Kind, LocateError, Role,
 };
@@ -60,14 +60,17 @@ type Loaded = (String, Kind, PathBuf, Vec<Entry>, bool);
 
 fn load(target: &str, session: Option<&str>) -> Result<Loaded, (Failure, Vec<PathBuf>)> {
     let plain = |f| (f, Vec::new());
-    if let Some(m) = machine() {
+    if let Some(m) = machine()
+        .map(String::from)
+        .or_else(|| vega_herdr::pane::parse(target).and_then(|p| p.machine))
+    {
         return Err(plain(Failure::new(
             "unsupported",
             format!("transcript reads session files on this machine only, not on {m}"),
             "run `vega mux transcript` on that machine, e.g. over ssh",
         )));
     }
-    let a = herdr(&["agent", "get", target]).map_err(plain)?["result"]["agent"].clone();
+    let a = crate::backend::agent(target).map_err(plain)?["result"]["agent"].clone();
     let pane = str_of(&a, "pane_id").to_string();
     let kind_name = str_of(&a, "agent");
     let kind = Kind::from_herdr(kind_name).ok_or_else(|| {

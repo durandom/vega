@@ -52,6 +52,22 @@ pub fn open(repo: &str, branch: &str, base: Option<&str>) -> Result<Opened, Fail
     open_workspace(&path, branch, how)
 }
 
+/// hc needs only the worktree path; herdr-app owns its visual space.
+pub fn hc_worktree(
+    repo: &str,
+    branch: &str,
+    base: Option<&str>,
+) -> Result<(String, String), Failure> {
+    if !wt_installed() {
+        return Err(Failure::new(
+            "wt_not_found",
+            "hc worktrees require worktrunk",
+            "install worktrunk, or pass --cwd for an existing checkout",
+        ));
+    }
+    wt_switch(repo, branch, base)
+}
+
 /// wt when installed; else herdr, unless a worktrunk config asks for wt.
 fn backend(wt: bool, project_config: bool, user_config: bool) -> Result<Backend, Failure> {
     match (wt, project_config || user_config) {

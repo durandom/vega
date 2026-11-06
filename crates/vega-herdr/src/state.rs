@@ -949,6 +949,8 @@ pub fn drop_kept_brief(pane: &str) {
 /// Durable spawn identity, retained when supervision records are forgotten.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SpawnRecord {
+    #[serde(default = "legacy_backend")]
+    pub backend: String,
     pub pane: String,
     pub name: String,
     pub kind: String,
@@ -962,6 +964,10 @@ pub struct SpawnRecord {
     pub tier: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+}
+
+fn legacy_backend() -> String {
+    "herdr".into()
 }
 
 /// Recorded selection for the current occupant; reused panes must not inherit it.
@@ -1085,6 +1091,7 @@ mod tests {
         write(&state_file_on("spawns", None, pane), "not json");
         assert!(spawn_of_on(None, pane, "fix", "codex").is_none());
         let record = SpawnRecord {
+            backend: "herdr".into(),
             pane: pane.into(),
             name: "fix".into(),
             kind: "codex".into(),

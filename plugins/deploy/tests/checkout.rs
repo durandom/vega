@@ -28,6 +28,7 @@ fn fixture_bin() -> &'static Path {
         let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("deploy-checkout-bin");
         fs::create_dir_all(&bin).unwrap();
         for (name, text) in [
+            ("hc", "#!/bin/sh\necho '{\"machines\":[]}'\n"),
             (
                 "ssh",
                 "#!/bin/sh\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",

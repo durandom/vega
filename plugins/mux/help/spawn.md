@@ -1,3 +1,9 @@
+The backend follows the caller's verified terminal; --backend herdr|hc overrides it.
+In hc, spawn opens a tab in the caller's herdr-app space, keeps the native parent link,
+and uses --outlive-parent. --worktree uses wt and a new app space. Explicit --at split
+or --at workspace is currently TUI-only. hc receives env as argv and the task at launch;
+show reports startup output. Session IDs are captured when the child next calls vega.
+
 Choose --tier flagship|balanced|budget (no default): flagship for design/root-cause,
 balanced for normal implementation, budget for mechanical work. Models resolve through
 `vega lanista pin <lane> --tier <tier>` including active project overrides; Pi uses zai.

@@ -1,12 +1,19 @@
 use std::process::ExitCode;
 use vega_herdr::dialog::{classify, Dialog};
-use vega_herdr::{cell, herdr, herdr_text, print_failure, str_of, Failure};
+use vega_herdr::{cell, herdr_text, print_failure, str_of, Failure};
 
+fn screen(pane: &str) -> Result<String, Failure> {
+    if crate::backend::is_hc_target(pane)? {
+        crate::backend::read(pane, 0)
+    } else {
+        herdr_text(&["pane", "read", pane, "--source", "visible"])
+    }
+}
 pub fn read(target: &str) -> Result<(String, Option<Dialog>), Failure> {
-    let info = herdr(&["agent", "get", target])?;
+    let info = crate::backend::agent(target)?;
     let a = &info["result"]["agent"];
     let pane = str_of(a, "pane_id").to_string();
-    let raw = herdr_text(&["pane", "read", &pane, "--source", "visible"])?;
+    let raw = screen(&pane)?;
     Ok((
         pane,
         classify(&raw, str_of(a, "agent"), str_of(a, "agent_status")),
@@ -104,8 +111,8 @@ impl Pane for LivePane {
     }
     fn after_dialog(&mut self) -> Result<Option<Dialog>, Failure> {
         // Verify visible text, independently of herdr's lagging status detector.
-        let info = herdr(&["agent", "get", &self.0])?;
-        let raw = herdr_text(&["pane", "read", &self.0, "--source", "visible"])?;
+        let info = crate::backend::agent(&self.0)?;
+        let raw = screen(&self.0)?;
         Ok(classify(
             &raw,
             str_of(&info["result"]["agent"], "agent"),
@@ -113,10 +120,23 @@ impl Pane for LivePane {
         ))
     }
     fn key(&mut self, key: &str) -> Result<(), Failure> {
-        herdr_text(&["pane", "send-keys", &self.0, key]).map(|_| ())
+        if crate::backend::is_hc_target(&self.0)? {
+            vega_herdr::hc::hc_local(&["keys", &crate::backend::address(&self.0), key]).map(|_| ())
+        } else {
+            herdr_text(&["pane", "send-keys", &self.0, key]).map(|_| ())
+        }
     }
     fn text(&mut self, text: &str) -> Result<(), Failure> {
-        herdr_text(&["pane", "send-text", &self.0, text]).map(|_| ())
+        if crate::backend::is_hc_target(&self.0)? {
+            // hc keys accepts one literal Unicode character per key, without Enter.
+            let chars: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+            let addr = crate::backend::address(&self.0);
+            let mut args = vec!["keys", addr.as_str()];
+            args.extend(chars.iter().map(String::as_str));
+            vega_herdr::hc::hc_local(&args).map(|_| ())
+        } else {
+            herdr_text(&["pane", "send-text", &self.0, text]).map(|_| ())
+        }
     }
 }
 fn checked(pane: &mut impl Pane, original: &Dialog) -> Result<Dialog, Failure> {

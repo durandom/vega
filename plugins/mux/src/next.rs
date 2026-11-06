@@ -17,10 +17,22 @@ use vega_herdr::{agent_name, herdr_local, Failure};
 pub const STATUSES: [&str; 2] = ["done", "blocked"];
 
 pub fn run(statuses: &[String]) -> Result<(), Failure> {
-    let agents = herdr_local(&["agent", "list"])
+    let mut agents = herdr_local(&["agent", "list"])
         .ok()
         .and_then(|v| v["result"]["agents"].as_array().cloned())
         .unwrap_or_default();
+    if let Ok(list) = vega_herdr::hc::hc_local(&["ls"]) {
+        agents.extend(
+            list["terminals"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|t| {
+                    t["state"] == "live" && t["address"].as_str().is_some_and(pane::is_hc_id)
+                })
+                .map(crate::backend::normalize),
+        );
+    }
     let registry = match vega_registry::read_blocking(Duration::from_secs(3)) {
         Ok(view) => view.waiting(),
         Err(why) => {
@@ -41,6 +53,27 @@ pub fn run(statuses: &[String]) -> Result<(), Failure> {
         "" | "-" => &c.pane,
         n => n,
     };
+    if pane::parse(&c.pane).is_some_and(|p| p.backend == pane::Backend::Hc) {
+        let target = if c.host == here {
+            c.pane.clone()
+        } else {
+            let machines = vega_herdr::hc::machines()?;
+            let m = machine_for(&c.host, &machines).ok_or_else(|| {
+                Failure::new(
+                    "unknown_machine",
+                    "waiting host has no saved machine",
+                    "configure the machine before focusing it",
+                )
+            })?;
+            format!("{m}/{}", c.pane)
+        };
+        crate::hc_spawn::app(&["do", "agent.focus", "--terminal", &target])?;
+        println!(
+            "focused {} ({label}) on {}: {} for {age}",
+            c.pane, c.host, c.status
+        );
+        return Ok(());
+    }
     if c.host == here {
         pane::focus(&Hit::Local(c.pane.clone())).map_err(|e| focus_failed(c, &e))?;
         println!(

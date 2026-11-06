@@ -151,17 +151,16 @@ struct Machine {
 }
 
 fn machines() -> Result<Vec<Machine>, Failure> {
-    let out = Command::new("herdr")
-        .args(["machine", "list", "--json"])
-        .output()
-        .map_err(|e| Failure::new("herdr_not_found", e.to_string(), "install herdr"))?;
-    let list: Value = serde_json::from_slice(&out.stdout).map_err(|_| {
-        Failure::new(
-            "herdr_bad_output",
-            "herdr machine list returned non-JSON output",
-            "check `herdr --version`",
-        )
-    })?;
+    let list = vega_herdr::hc::machines().map_err(|f| Failure::new(&f.code, f.message, &f.hint))?;
+    for m in list.as_array().into_iter().flatten() {
+        if m["via"] == true {
+            return Err(Failure::new(
+                "unsupported_transport",
+                "deploy requires an SSH machine",
+                "use an SSH target for deployment",
+            ));
+        }
+    }
     Ok(list
         .as_array()
         .cloned()
@@ -406,6 +405,10 @@ fn apply_inner(
     }
     if all {
         chosen = list.iter().collect();
+    }
+    for m in &chosen {
+        vega_herdr::hc::check_direction(&m.label)
+            .map_err(|f| Failure::new(&f.code, f.message, &f.hint))?;
     }
     let sync = overrides::script(&overrides::local_dir()).map_err(|e| {
         Failure::new(

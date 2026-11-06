@@ -37,6 +37,14 @@ pub fn save_best_effort(record: &SpawnRecord) -> bool {
 }
 
 pub fn capture(record: &mut SpawnRecord) {
+    if record.backend == "hc" {
+        if let Some(saved) =
+            vega_herdr::state::spawn_of_on(machine(), &record.pane, &record.name, &record.kind)
+        {
+            record.session = saved.session;
+        }
+        return;
+    }
     if let Ok(v) = herdr(&["pane", "get", &record.pane]) {
         let p = &v["result"]["pane"];
         if p["agent"] == record.kind {
@@ -124,6 +132,9 @@ pub fn run(target: &str) -> Result<(), Failure> {
             format!("recorded cwd {} no longer exists", cell(&r.cwd)),
             "restore the directory or worktree before reopening",
         ));
+    }
+    if r.backend == "hc" {
+        return crate::hc_spawn::reopen(&r, &extra);
     }
     match herdr(&["agent", "get", &r.name]) {
         Ok(_) => {

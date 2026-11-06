@@ -4,7 +4,9 @@
 //! new prompt via `herdr agent prompt`, with a footer that tells the receiver
 //! how to reply. No coordinator, no mailbox: the reply is just another `send`.
 
+mod backend;
 mod dialog;
+mod hc_spawn;
 mod hook;
 mod next;
 mod reopen;
@@ -31,9 +33,8 @@ use vega_herdr::state::{
     KeptBrief, Mode,
 };
 use vega_herdr::{
-    agent_name, cell, collapse_home, herdr, herdr_local, herdr_text, local_time, machine, me,
-    me_line, mflag, print_failure, qualify, set_machine, status_counts, status_rank, str_of,
-    Failure, Me,
+    agent_name, cell, collapse_home, herdr, herdr_text, local_time, machine, me, me_line, mflag,
+    print_failure, qualify, set_machine, status_counts, status_rank, str_of, Failure, Me,
 };
 
 #[derive(Parser)]
@@ -51,6 +52,9 @@ struct Cli {
     /// Act on the agents of another herdr machine (label from `herdr machine list`)
     #[arg(long, global = true)]
     machine: Option<String>,
+    /// Spawn backend (default: caller’s verified terminal world)
+    #[arg(long, global = true, value_parser = ["herdr", "hc"])]
+    backend: Option<String>,
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
     #[arg(long)]
     skill: bool,
@@ -348,6 +352,10 @@ fn main() -> ExitCode {
         print_failure(&f);
         return ExitCode::from(2);
     }
+    backend::set_override(cli.backend);
+    if std::env::var_os("HERDR_PANE_ID").is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
+        let _ = vega_herdr::hc::own_terminal();
+    }
     let result = match cli.cmd {
         None => home(cli.all),
         Some(Cmd::Hook {
@@ -490,6 +498,9 @@ fn validate(cmd: &Cmd) -> Option<Failure> {
 }
 
 fn home(all: bool) -> Result<(), Failure> {
+    if backend::spawn_hc()? {
+        return backend::home(all);
+    }
     let Me {
         pane: me,
         workspace: my_workspace,
@@ -605,6 +616,9 @@ fn closing(workspace: &Value, others_in_workspace: usize) -> Closing {
 }
 
 fn close(target: &str) -> Result<(), Failure> {
+    if backend::is_hc_target(target)? {
+        return backend::close(target);
+    }
     let a = match herdr(&["agent", "get", target]) {
         Ok(v) => v["result"]["agent"].clone(),
         // A sentinel whose pane is gone (`exited` in `vega uac`): closing
@@ -662,7 +676,7 @@ fn close(target: &str) -> Result<(), Failure> {
 /// `vega mux mode <target> [headless|headed]`: records the mode for the
 /// agent that runs in the pane now; without a mode prints it.
 fn set_mode(target: &str, mode: Option<ModeArg>) -> Result<(), Failure> {
-    let a = herdr(&["agent", "get", target])?["result"]["agent"].clone();
+    let a = backend::agent(target)?["result"]["agent"].clone();
     let pane = str_of(&a, "pane_id");
     let (name, mode) = agent_mode(&a, mode)?;
     let name = name.as_str();
@@ -720,7 +734,7 @@ fn has_records(pane: &str) -> bool {
 }
 
 fn show(target: &str, lines: u32) -> Result<(), Failure> {
-    let info = herdr(&["agent", "get", target])?;
+    let info = backend::agent(target)?;
     let a = &info["result"]["agent"];
     let pane = str_of(a, "pane_id");
     let name = mode_agent_name(a);
@@ -732,9 +746,13 @@ fn show(target: &str, lines: u32) -> Result<(), Failure> {
     };
     // herdr refuses the history of a working agent that uses the alternate
     // screen (agent_not_idle): show what is visible instead of failing.
-    let raw = match read("recent-unwrapped") {
-        Err(f) if f.code == "agent_not_idle" => read("visible")?,
-        r => r?,
+    let raw = if backend::is_hc_target(target)? {
+        backend::read(pane, lines)?
+    } else {
+        match read("recent-unwrapped") {
+            Err(f) if f.code == "agent_not_idle" => read("visible")?,
+            r => r?,
+        }
     };
     // herdr pads a short history with blank rows at the top. If the window is
     // full and its first row has content, older output exists.
@@ -990,7 +1008,7 @@ fn send(target: &str, text: &str, now: bool) -> Result<(), Failure> {
     deliver(target, text, Footer::Peer)?;
     vega_herdr::history::emit(
         "mux.send",
-        serde_json::json!({"target":target,"target_host":machine(),"body":text,"transport":"herdr","cwd":env::current_dir().ok()}),
+        serde_json::json!({"target":target,"target_host":machine(),"body":text,"transport":if backend::is_hc_target(target).unwrap_or(false) { "hc" } else { "herdr" },"cwd":env::current_dir().ok()}),
     );
     println!("sent: {target} (pasted)");
     println!("help: the reply arrives as a new prompt in this session; do not poll");
@@ -999,14 +1017,17 @@ fn send(target: &str, text: &str, now: bool) -> Result<(), Failure> {
 
 /// `vega post send` to the target's pane; returns the pane id.
 fn send_post(target: &str, text: &str) -> Result<String, Failure> {
-    let a = herdr(&["agent", "get", target])?["result"]["agent"].clone();
+    let a = backend::agent(target)?["result"]["agent"].clone();
     let pane = str_of(&a, "pane_id").to_string();
     let mut args = vec!["post".to_string(), "send".into()];
     if let Some(m) = machine() {
         args.push("--host".into());
         args.push(m.to_lowercase());
     }
-    args.push(pane.clone());
+    let destination = vega_herdr::pane::parse(&pane)
+        .map(|p| p.pane)
+        .unwrap_or_else(|| pane.clone());
+    args.push(destination);
     args.push(text.to_string());
     let out = Command::new("vega")
         .args(&args)
@@ -1238,6 +1259,12 @@ fn spawn(
     extra: &[String],
     tier: Option<&str>,
 ) -> Result<(), Failure> {
+    if backend::spawn_hc()? {
+        return hc_spawn::spawn(
+            name, kind, cwd, place, prompt, user_env, no_parent, mode, extra, tier, None,
+        )
+        .map(|_| ());
+    }
     spawn_inner(
         name, kind, cwd, place, prompt, user_env, no_parent, mode, extra, tier, None,
     )
@@ -1455,6 +1482,7 @@ fn spawn_inner(
     let mut lineage = reopening
         .cloned()
         .unwrap_or_else(|| vega_herdr::state::SpawnRecord {
+            backend: "herdr".into(),
             pane: pane.clone(),
             name: name.into(),
             kind: kind.into(),
@@ -1706,6 +1734,9 @@ fn deliver_brief(pane: &str, record: &KeptBrief, kept: &str) -> Result<(), Failu
 /// `spawn --resume`: delivers the brief a spawn saved when it stopped at a
 /// dialog, once the user has answered it. Never touches the dialog itself.
 fn resume_spawn(pane: &str) -> Result<(), Failure> {
+    if backend::is_hc_target(pane)? {
+        return hc_spawn::resume(pane);
+    }
     let record = kept_brief(pane).ok_or_else(|| {
         Failure::new(
             "no_brief",
@@ -1837,7 +1868,7 @@ fn remove_hint(checkout: &str) -> String {
 
 /// The ssh target herdr uses for a machine label.
 fn ssh_target(label: &str) -> Option<String> {
-    herdr_local(&["machine", "list", "--json"])
+    vega_herdr::hc::machines()
         .ok()?
         .as_array()?
         .iter()
@@ -1847,7 +1878,7 @@ fn ssh_target(label: &str) -> Option<String> {
 }
 
 fn remote_home(label: &str) -> Result<String, Failure> {
-    let list = herdr_local(&["machine", "list", "--json"])?;
+    let list = vega_herdr::hc::machines()?;
     let target = list
         .as_array()
         .and_then(|ms| ms.iter().find(|m| m["label"] == label))
@@ -2013,6 +2044,9 @@ enum Footer {
 /// Sends `text` plus the reply footer as a new prompt and confirms the target
 /// took it.
 fn deliver(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
+    if backend::is_hc_target(target)? {
+        return backend::send(target, text, footer);
+    }
     let Me {
         pane: me,
         agent: kind,

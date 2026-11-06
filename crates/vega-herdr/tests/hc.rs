@@ -141,3 +141,51 @@ esac
         }
     }
 }
+
+#[test]
+fn fleet_prefers_hc_and_only_falls_back_when_empty() {
+    if let Ok(case) = env::var("VEGA_FLEET_TEST") {
+        let result = vega_herdr::hc::machines();
+        match case.as_str() {
+            "hc" => {
+                let list = result.unwrap();
+                assert_eq!(list[0]["label"], "corp");
+                assert_eq!(list[0]["target"], "user@corp:22");
+                assert_eq!(list[0]["backend"], "hc");
+            }
+            "empty" => assert_eq!(result.unwrap()[0]["label"], "legacy"),
+            "bad" => assert_eq!(result.unwrap_err().code, "hc_bad_output"),
+            _ => assert_eq!(result.unwrap_err().code, "hc_error"),
+        }
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    for (name,text) in [("hc",r#"#!/bin/sh
+case "$VEGA_FLEET_TEST" in
+hc) echo '{"machines":[{"name":"corp","target":"user@corp:22","host":"corp","via":false}]}' ;;
+empty) echo '{"machines":[]}' ;;
+bad) echo '{}' ;;
+*) exit 1 ;;
+esac
+"#),("herdr","#!/bin/sh\necho '[{\"label\":\"legacy\",\"target\":\"old\",\"enabled\":true}]'\ntouch \"$HOME/fallback\"\n")] {
+        fs::write(d.path().join(name),text).unwrap();fs::set_permissions(d.path().join(name),fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    for case in ["hc", "empty", "bad", "failed"] {
+        let _ = fs::remove_file(d.path().join("fallback"));
+        let o = Command::new(env::current_exe().unwrap())
+            .args(["--exact", "fleet_prefers_hc_and_only_falls_back_when_empty"])
+            .env_clear()
+            .env("HOME", d.path())
+            .env("PATH", format!("{}:/usr/bin:/bin", d.path().display()))
+            .env("VEGA_FLEET_TEST", case)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+        assert_eq!(d.path().join("fallback").exists(), case == "empty");
+    }
+}
