@@ -61,6 +61,7 @@ fn post(home: &Path, url: &str, command: &str, args: &[&str]) -> (bool, String) 
         .arg(command)
         .args(args)
         .env_clear()
+        .env("HERDR_PANE_ID", "w1:pR")
         .env("HOME", home)
         .env("XDG_STATE_HOME", home.join("state"))
         .env("XDG_CONFIG_HOME", home.join("config"))
@@ -530,4 +531,49 @@ esac
             assert!(out.contains("hop_limit"), "{out}");
         }
     }
+}
+
+#[path = "../../../crates/vega-herdr/tests/fixtures/own-terminal.rs"]
+mod hc_fixture;
+#[test]
+fn hc_inbox_reads_only_own_mail_and_marks_native_parent() {
+    let (dir, mut c) = hc_fixture::fixture(env!("CARGO_BIN_EXE_vega-post"));
+    let (_server, url, rt, js, _kv) = broker(dir.path());
+    c.env("VEGA_NATS_URL", &url)
+        .env("VEGA_POST_HOST", "ganymede");
+    let sequence = rt.block_on(async {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("Vega-From-Pane", "t2");
+        headers.insert("Vega-From-Host", "ganymede");
+        headers.insert("Vega-From-Agent", "claude");
+        js.publish_with_headers("vega.inbox.ganymede.t7.ganymede", headers, "hc task".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap()
+            .sequence
+    });
+    let o = c
+        .args(["inbox", "--show", &sequence.to_string()])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{text}");
+    assert!(
+        text.contains("hc task") && text.contains("from_parent: yes"),
+        "{text}"
+    );
+    let (_other, mut c) = hc_fixture::fixture(env!("CARGO_BIN_EXE_vega-post"));
+    let o = c
+        .env("VEGA_NATS_URL", &url)
+        .env("VEGA_POST_HOST", "ganymede")
+        .args(["inbox"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{text}");
+    assert!(
+        text.contains("hc task") && text.contains("from_parent: yes"),
+        "{text}"
+    );
 }

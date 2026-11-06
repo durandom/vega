@@ -9,6 +9,50 @@ pub enum Terminal {
     Hc(String),
 }
 
+impl Terminal {
+    pub fn pane(&self) -> &str {
+        match self {
+            Self::Herdr(pane) | Self::Hc(pane) => pane,
+        }
+    }
+
+    /// Local agent metadata, in the existing TUI agent shape.
+    pub fn agent(&self) -> Result<Value, Failure> {
+        match self {
+            Self::Herdr(pane) => {
+                Ok(crate::herdr_local(&["agent", "get", pane])?["result"]["agent"].clone())
+            }
+            Self::Hc(pane) => {
+                let info = hc_local(&["get", pane])?;
+                let kind = match info["status"]["app"].as_str().unwrap_or("") {
+                    "claude-code" => "claude",
+                    k => k,
+                };
+                Ok(serde_json::json!({
+                    "pane_id": info["address"], "name": info["name"],
+                    "kind": kind, "parent": info["parent"],
+                    "cwd": info["foreground"]["cwd"].as_str().or(info["cwd"].as_str()).unwrap_or("")
+                }))
+            }
+        }
+    }
+
+    /// An adoption in vega overrides the native hc parent link.
+    pub fn parent(&self, agent: &Value) -> Option<crate::state::Parent> {
+        crate::state::parent_of(self.pane(), crate::agent_name(agent)).or_else(|| {
+            if !matches!(self, Self::Hc(_)) {
+                return None;
+            }
+            let parent = agent["parent"].as_str().filter(|p| !p.is_empty())?;
+            let address = crate::pane::parse(parent)?;
+            Some(crate::state::Parent {
+                pane: address.pane,
+                host: address.machine.unwrap_or_else(crate::state::post_host),
+            })
+        })
+    }
+}
+
 /// Select the most specific environment first; stale TUI context never falls
 /// through to an enclosing hc terminal. No environment means no terminal.
 pub fn own_terminal() -> Result<Terminal, Failure> {

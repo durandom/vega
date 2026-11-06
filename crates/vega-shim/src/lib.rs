@@ -99,9 +99,14 @@ pub fn path_without_self(tool: &str, self_path: &Path) -> OsString {
 
 /// The agent session (P3): the harness's session id, else the herdr pane.
 pub fn session_id() -> Option<String> {
-    ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "HERDR_PANE_ID"]
-        .iter()
-        .find_map(|k| env::var(k).ok().filter(|v| !v.is_empty()))
+    [
+        "CLAUDE_CODE_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "HERDR_PANE_ID",
+        "HC_TERMINAL_ID",
+    ]
+    .iter()
+    .find_map(|k| env::var(k).ok().filter(|v| !v.is_empty()))
 }
 
 /// The herdr pane this call runs in, else the session marked with its
@@ -110,6 +115,7 @@ pub fn session_id() -> Option<String> {
 pub fn pane_key() -> String {
     let var = |k: &str| env::var(k).ok().filter(|v| !v.is_empty());
     var("HERDR_PANE_ID")
+        .or_else(|| var("HC_TERMINAL_ID"))
         .or_else(|| var("CODEX_THREAD_ID").map(|t| format!("codex:{t}")))
         .or_else(|| var("CLAUDE_CODE_SESSION_ID").map(|t| format!("claude:{t}")))
         .unwrap_or_else(|| "unknown".into())

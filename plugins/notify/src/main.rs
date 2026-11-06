@@ -183,7 +183,7 @@ fn store() -> Result<Store, Failure> {
     })
 }
 fn context() -> Result<(String, String), Failure> {
-    let pane = vega_herdr::me()?.pane;
+    let pane = vega_herdr::own_terminal()?.pane().to_string();
     let cwd = env::current_dir().map_err(io_error)?;
     let project = vega_herdr::project::resolve(&cwd, &vega_herdr::state::post_host())?;
     Ok((pane, project.id.to_string()))
@@ -232,7 +232,7 @@ fn run(cmd: Cmd) -> Result<(), Failure> {
                 // Resolve only missing context: explicit pane works outside herdr.
                 let pane = match flags.remove("--pane") {
                     Some(p) => p,
-                    None => vega_herdr::me()?.pane,
+                    None => vega_herdr::own_terminal()?.pane().to_string(),
                 };
                 let project = match flags.remove("--project") {
                     Some(p) => p,

@@ -165,53 +165,77 @@ fn post(r: &Received, body: &str) -> Result<(), Failure> {
     ))
 }
 
-/// This pane's Claude Code session log: the harness's record of what the
+/// This terminal's harness session log: the harness's record of what the
 /// Slayer typed and picked, which the model cannot write (§4).
-fn session_log() -> Result<String, Failure> {
+fn session_log(terminal: &vega_herdr::Terminal) -> Result<String, Failure> {
     let unknown = |why: String| {
         Failure::new(
             "no_session_log",
             why,
-            "the Uber-UAC is a Claude Code session in a herdr pane",
+            "run in the Uber-UAC terminal with its harness session environment intact",
         )
     };
-    let v = vega_herdr::herdr_local(&["pane", "current", "--current"])?;
-    let pane = &v["result"]["pane"];
-    if pane["agent"] != "claude" {
-        return Err(unknown(format!(
-            "this pane runs {}, not claude",
-            pane["agent"]
-        )));
-    }
-    let session = pane["agent_session"]["value"].as_str();
-    let cwd = pane["cwd"].as_str().unwrap_or("");
+    let (kind, session, cwd) = match terminal {
+        vega_herdr::Terminal::Hc(_) => {
+            let (kind, session) = [
+                (vega_transcript::Kind::Claude, "CLAUDE_CODE_SESSION_ID"),
+                (vega_transcript::Kind::Codex, "CODEX_THREAD_ID"),
+            ]
+            .into_iter()
+            .find_map(|(kind, key)| {
+                std::env::var(key)
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| (kind, s))
+            })
+            .ok_or_else(|| unknown("harness session identity is unavailable".into()))?;
+            let a = terminal.agent()?;
+            (
+                kind,
+                Some(session),
+                a["cwd"].as_str().unwrap_or("").to_string(),
+            )
+        }
+        vega_herdr::Terminal::Herdr(_) => {
+            let v = vega_herdr::herdr_local(&["pane", "current", "--current"])?;
+            let pane = &v["result"]["pane"];
+            if pane["agent"] != "claude" {
+                return Err(unknown(format!(
+                    "this pane runs {}, not claude",
+                    pane["agent"]
+                )));
+            }
+            let session = pane["agent_session"]["value"].as_str();
+            let cwd = pane["cwd"].as_str().unwrap_or("");
+            (
+                vega_transcript::Kind::Claude,
+                session.map(String::from),
+                cwd.to_string(),
+            )
+        }
+    };
     let home = std::env::var_os("HOME").ok_or_else(|| unknown("no HOME".into()))?;
-    let path = vega_transcript::locate(
-        vega_transcript::Kind::Claude,
-        session,
-        cwd,
-        Path::new(&home),
-    )
-    .map_err(|e| unknown(format!("session log not found: {e:?}")))?;
+    let path = vega_transcript::locate(kind, session.as_deref(), &cwd, Path::new(&home))
+        .map_err(|e| unknown(format!("session log not found: {e:?}")))?;
     std::fs::read_to_string(&path).map_err(|e| unknown(format!("{}: {e}", path.display())))
 }
 
 /// `vega uber answer <id|#tag> --capture <n>`: only the live claim's pane.
 pub fn answer(key: &str, n: Option<usize>) -> Result<(), Failure> {
     let dir = uber_dir()?;
-    let me = vega_herdr::me()?;
+    let me = vega_herdr::own_terminal()?;
     let host = st::post_host();
     let claim = uber_state::file()
         .and_then(|f| uber_state::local(&f, &host))
-        .filter(|c| c["pane"] == me.pane.as_str());
+        .filter(|c| c["pane"] == me.pane());
     let Some(epoch) = claim.and_then(|c| c["epoch"].as_u64()) else {
         return Err(Failure::new(
             "not_uber",
-            format!("{} on {host} holds no Uber claim", me.pane),
+            format!("{} on {host} holds no Uber claim", me.pane()),
             "only the Uber-UAC answers: vega uber claim",
         ));
     };
-    let transcript = session_log()?;
+    let transcript = session_log(&me)?;
     let s = answer_in(&dir, key, n, epoch, &transcript, &now(), post)?;
     let yes = |b: bool| if b { "yes" } else { "no" };
     println!(

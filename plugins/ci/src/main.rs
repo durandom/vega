@@ -227,23 +227,23 @@ fn github_run(t: Result<Target, String>) -> Result<Target, Failure> {
 }
 
 /// The pane a watch mails: `--for`, else ours. Ours comes from
-/// `vega_herdr::me`, which checks `HERDR_PANE_ID` against the process tree:
+/// `vega_herdr::own_terminal`, which verifies the terminal against the process tree:
 /// the var is stale in a long-lived process and missing in tool shells that
 /// filter the env (Codex `inherit = "core"`); either would mail someone else.
 fn my_pane(pane: Option<String>) -> Result<String, Failure> {
-    my_pane_with(pane, vega_herdr::me)
+    my_pane_with(pane, vega_herdr::own_terminal)
 }
 
 fn my_pane_with(
     pane: Option<String>,
-    me: impl FnOnce() -> Result<vega_herdr::Me, Failure>,
+    me: impl FnOnce() -> Result<vega_herdr::Terminal, Failure>,
 ) -> Result<String, Failure> {
     if let Some(p) = pane.filter(|p| !p.is_empty()) {
         return Ok(p);
     }
-    me().map(|m| m.pane).map_err(|f| match f.code.as_str() {
-        "not_in_herdr" => Failure::new(
-            "not_in_herdr",
+    me().map(|m| m.pane().to_string()).map_err(|f| match f.code.as_str() {
+        "not_in_herdr" | "not_in_terminal" => Failure::new(
+            &f.code,
             format!("no pane to mail: {}", f.message),
             "run it in your agent's pane; --for <pane> mails that pane instead, so pass your own pane id (`vega mux` lists panes), not the one you report to",
         ),
@@ -545,17 +545,9 @@ mod tests {
     fn my_pane_trusts_only_for_and_the_process_tree() {
         let me = |pane: &str| {
             let pane = pane.to_string();
-            move || {
-                Ok(vega_herdr::Me {
-                    pane,
-                    workspace: String::new(),
-                    agent: String::new(),
-                    program: String::new(),
-                    cwd: String::new(),
-                })
-            }
+            move || Ok(vega_herdr::Terminal::Herdr(pane))
         };
-        let none = || -> Result<vega_herdr::Me, Failure> {
+        let none = || -> Result<vega_herdr::Terminal, Failure> {
             Err(Failure::new(
                 "not_in_herdr",
                 "no herdr pane hosts this process",

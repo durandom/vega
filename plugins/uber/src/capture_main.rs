@@ -48,7 +48,7 @@ fn main() {
         Some((
             Store::local()?,
             vega_herdr::state::post_host(),
-            vega_herdr::me().ok()?.pane,
+            vega_herdr::own_terminal().ok()?.pane().to_string(),
         ))
     }) {
         eprintln!("vega_uber_capture: resolve ask: {e}");
