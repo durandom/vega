@@ -182,7 +182,7 @@ pub fn wakes(a: Attention, mode: Mode) -> bool {
 }
 
 /// Reports already deliver durable mail. Gate/CI waits are quiet unless there
-/// is concrete input, failure or decision evidence to act on.
+/// is concrete input, decision or unanswered-ask evidence to act on.
 pub fn actionable(a: Option<Attention>, reported: bool, waiting: bool) -> Option<Attention> {
     match a {
         Some(Attention::Input | Attention::Decided | Attention::Unanswered) => a,

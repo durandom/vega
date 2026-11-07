@@ -65,7 +65,6 @@ esac"#,
         );
         script(&bin, "vega", "printf '%s\\n' \"$*\" >> \"$HOME/mail\"");
         script(&bin, "gh", "echo '{}'");
-        let me = if hc { "t1" } else { "w1:p1" };
         let child = if hc { "t2" } else { "w1:p2" };
         let tui = |p: &str| json!({"pane_id":p,"name":p,"agent":"codex","agent_status":"idle","cwd":root});
         let terminal = |p: &str| json!({"address":p,"name":p,"state":"live","pid":std::process::id(),"status":{"app":"codex","state":"idle"},"cwd":root});
@@ -85,7 +84,7 @@ esac"#,
         ] {
             fs::write(root.join(format!("{name}.json")), value.to_string()).unwrap();
         }
-        let call = |args: &[&str]| {
+        let invoke = |args: &[&str], hc_caller: bool| {
             let mut cmd = Command::new(env!("CARGO_BIN_EXE_vega-uac"));
             cmd.args(args)
                 .current_dir(root)
@@ -101,14 +100,17 @@ esac"#,
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_NOSYSTEM", "1")
                 .env(
-                    if hc {
+                    if hc_caller {
                         "HC_TERMINAL_ID"
                     } else {
                         "HERDR_PANE_ID"
                     },
-                    me,
+                    if hc_caller { "t1" } else { "w1:p1" },
                 );
-            let out = cmd.output().unwrap();
+            cmd.output().unwrap()
+        };
+        let call = |args: &[&str]| {
+            let out = invoke(args, hc);
             let text = String::from_utf8_lossy(&out.stdout).into_owned();
             assert!(
                 out.status.success(),
@@ -127,6 +129,7 @@ esac"#,
         assert!(call(&["unpark", child]).contains("unparked:"));
         fs::rename(bin.join("bd"), bin.join("bd-off")).unwrap();
         assert!(call(&["hold", child]).contains("held:"));
+        // Repeating a hold is an idempotent success.
         assert!(call(&["hold", child]).contains("held:"));
         assert!(call(&[]).contains("on hold"));
         assert!(call(&["unpark", child]).contains("unparked:"));
@@ -136,6 +139,31 @@ esac"#,
         assert!(fs::read_to_string(root.join("mail"))
             .unwrap()
             .contains("post ask"));
+        let conflicting = invoke(&["hold", "hc:io/t7", "--machine", "deimos"], hc);
+        assert!(!conflicting.status.success());
+        let error = String::from_utf8_lossy(&conflicting.stdout);
+        assert!(
+            error.contains("usage") && error.contains("different machines"),
+            "{error}"
+        );
+
+        // A healthy caller in the other world cannot take over an unverifiable UAC.
+        let unavailable = if hc { "hc" } else { "herdr" };
+        let saved = bin.join("original-backend");
+        fs::rename(bin.join(unavailable), &saved).unwrap();
+        script(&bin, unavailable, "exit 1");
+        let refused = invoke(&["claim"], !hc);
+        assert!(!refused.status.success());
+        assert!(
+            String::from_utf8_lossy(&refused.stdout).contains("inventory_unavailable"),
+            "{}",
+            String::from_utf8_lossy(&refused.stdout)
+        );
+        fs::rename(saved, bin.join(unavailable)).unwrap();
+        assert!(
+            call(&["claim"]).contains("(you, already registered)"),
+            "refusal must preserve the owner"
+        );
         call(&["release"]);
         if hc {
             script(&bin, "herdr", "exit 1");

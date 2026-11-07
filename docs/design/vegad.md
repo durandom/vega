@@ -395,7 +395,9 @@ Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestrat
 
 - **Completion is explicit.** A sentinel reports exactly once with an outcome:
   `vega post done --outcome succeeded|failed "<summary>"` to its parent (the spawn footer says so).
-  Failure is never only prose.
+  Failure is never only prose. Reports arrive as durable mail, without an additional attention
+  wake. Spawn briefs request only done, blocked, or a CI verdict the parent asked for: no
+  acknowledgement or progress mail.
 - **Absence proves nothing.** No status, an old status or an unchanged screen is `unverifiable`:
   keep waiting or inspect, never stop, retry or clean up. Act only on proof: the pane closed or the
   agent exited, or the sentinel went idle/done after its prompt without sending `done`.
@@ -406,13 +408,13 @@ Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestrat
 | `input` | herdr status `blocked` (approval or other UI) |
 | `asking` | a question dialog, or idle after its prompt without `done` or reply, and the last output paragraph of the turn ends with `?` (the question shows in `vega uac`) |
 | `quota` | idle after its prompt without `done`, and the turn ended on a provider abort (below) |
-| `failure` | `done --outcome failed` |
-| `waiting` | would be `silent`, but a `vega ci watch` of its pane still owes it a verdict mail (docs/design/ci-watch.md); no wake |
+| `failure` | `done --outcome failed`; delivered by mail, no duplicate attention wake |
+| `waiting` | would be `silent`, but a local CI watch still owes a verdict mail (docs/design/ci-watch.md), or a local gate review awaits a verdict; no wake. Removed or expired gate records stop suppressing silence |
 | `unanswered` | a known idle child is an unresolved post ask target; requires a resolved host and positive current-name mode record; wakes once per actionable transition |
 | `silent` | idle/done since its last prompt, no `done` sent (its last 1-2 lines show in `vega uac`) |
 | `exited` | `pane.closed`, `pane.exited`, or the agent left the pane |
-| `completed` | `done --outcome succeeded`, waiting for the parent to land or release it |
-| `parked` | the parent parked it on an open decision bead (`vega uac park`); no wake |
+| `completed` | `done --outcome succeeded`, waiting for the parent to land or release it; delivered by mail, no duplicate attention wake |
+| `parked` | the parent parked it on an open decision bead (`vega uac park`) or explicitly held it without a bead (`vega uac hold`); no wake |
 | `decided` | its park's bead closed: the parent resumes or settles it |
 | `all_done` | every sentinel of a parent is completed |
 
@@ -421,8 +423,10 @@ Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestrat
   question, the idle turn end or the dialog in the pane, and the parent must not answer an
   approval or trust dialog anyway. vegad keeps them out of the wake set (`state::for_user`), so
   they never wake the parent; `vega uac` still lists them with next `for the user (headed pane,
-  no wake)`. `exited`, `failure`, `quota`, `completed` and `decided` still wake. Headless
-  children are unchanged.
+  no wake)`. TUI `exited`, unreported `quota` and `decided` still wake. A reported child only
+  adds a wake for fresh input, a closed decision or an unanswered explicit ask; both succeeded
+  and failed reports themselves arrive by mail. hc owns exit notes: closed hc terminals do
+  not add attention wakes. Explicit holds suppress all attention wakes in either mode.
 - **Provider aborts** (vega-lhc.58, `plugins/post/src/quota.rs`). A turn that ends on a rate limit,
   overload or used-up quota looks like `silent`, but the next step differs. When vegad confirms a
   silent child on its machine, it reads the agent's session log (vega-transcript): an error as the
@@ -448,26 +452,33 @@ Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestrat
 - **Settlement.** After a `done`, the parent decides exactly one: give the sentinel follow-up work,
   keep it, or close it. `vega uac` lists sentinels that still wait for this decision.
 - **No heartbeats.** herdr's status events give liveness without worker tokens.
-- **Parking** (vega-lhc.32). A completed or asking sentinel that waits on a Slayer decision
-  otherwise stays in its parent's attention set, and every change elsewhere in that set wakes the
-  parent again for it. `vega uac park <pane> --bead <id> [--machine <m>]` writes a `parked/` record
+- **Parking** (vega-lhc.32). A sentinel waiting on a Slayer decision can leave the actionable
+  attention set. `vega uac park <pane> --bead <id> [--machine <m>]` writes a `parked/` record
   on the parent's machine (bead, title, the checkout and the `bd` binary that found it: vegad's
   PATH has no bd). A park hides every attention but `exited` and `input`, and the relay keeps
   `parked` out of the wake set, so the earlier attention leaves the `woke/` memory as any vanished
-  attention does. On the metadata clock (15 s) vegad runs one `bd show` per open park, none
-  without parks; a closed bead marks the record closed, the attention turns `decided`, which is
+  attention does. On the metadata clock (15 s) vegad runs one `bd show` per open bead park, none
+  for holds or without parks; a closed bead marks the record closed, the attention turns `decided`, which is
   new, so the parent gets one line (`a decision closed; resume your parked sentinel`). A bead bd
   cannot show proves nothing: the park stays, logged once. New work from the parent (the settle
   that clears `done`, `silent`, `replied`) removes the park, so a resumed sentinel is supervised
   as before; so do `vega uac unpark` and `vega mux close`. Polling over hooks: `vega uac answer`
   does not close the bead and `bd close` has no hook, so only vegad sees every close. Auto-park
   (an open decision bead naming the pane) is not built: a bead does not name panes reliably.
+- **Hold** (vega-0h4c.23). `vega uac hold <pane> [--machine <m>]` writes a `parked/` record
+  with `held: true` and no decision bead. Old records without `held` remain bead parks. Holds
+  suppress every attention wake, including blocked input, until `vega uac unpark` or new parent
+  work clears the record; live status remains inspectable. Holds never poll bd. The UAC view
+  labels an idle held child `on hold`, and orchestration routes its next step to `unpark`.
 
 vegad wakes the parent, never mid-turn: when the parent is idle/done and at least one of its
-sentinels has new attention, it types one line, e.g. `[vega] 2 sentinels need you. Run: vega uac`, or with a question
-`[vega] 1 sentinel asks: Should I also cover Hamburg? Run: vega uac`.
+sentinels has new actionable attention, it types one line, e.g.
+`[vega] 2 sentinels need you. Run: vega uac. Act, record, reply in ≤10 words; longer only for urgent blockers.`,
+or with a question before the same command and reminder.
 `vega uac` shows an `attention` column and the next command per row. One notice per new attention
-state; nothing repeats while the state is unchanged.
+state; nothing repeats while the state is unchanged. The set contains child identities and
+attention kinds, not a count: a different actionable child can wake even at the same count;
+reported, waiting and held children do not inflate that set.
 
 ## Order of work
 
