@@ -73,7 +73,8 @@ pub fn spawn(
         cwd = expand_home(&cwd, &env::var("HOME").unwrap_or_default());
     }
     let selection = tier::select(kind, tier, extra, Some(&cwd))?;
-    let mut space = if let Some(Terminal::Hc(p)) = &own {
+    // Space IDs belong to the local app; they do not identify remote spaces.
+    let mut space = if let Some(Terminal::Hc(p)) = &own.as_ref().filter(|_| machine().is_none()) {
         hc_local(&["get", p])?["labels"]["herdr.space"]
             .as_str()
             .map(String::from)

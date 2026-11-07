@@ -21,13 +21,14 @@ if cmd=='run':
  if any(t['name']==n and t['state']=='live' for t in ts.values()): err('name_taken')
  i='t'+str(int((root/'counter').read_text())+1 if (root/'counter').exists() else 8)
  (root/'counter').write_text(i[1:])
+ if '--on' in a: i=a[a.index('--on')+1]+'/'+i
  labels=dict(a[j+1].split('=',1) for j,x in enumerate(a) if x=='--label')
  t={'address':i,'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':labels['vega.kind'],'state':'idle'},'cwd':a[a.index('--cwd')+1],'labels':labels,'turn':0}
  ts[i]=t;save()
  if os.environ.get('TEST_UNDELIVERED'): t['first_message']={'sent':False,'reason':'blocked'}
  print(json.dumps(t))
 elif cmd=='get': print(json.dumps(get(a[1])))
-elif cmd=='ls': print(json.dumps({'terminals':[parent]+list(ts.values())}))
+elif cmd=='ls': print(json.dumps({'terminals':([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())}))
 elif cmd=='machine': print(os.environ.get('TEST_MACHINES','{"machines":[]}'))
 elif cmd=='read':
  t=get(a[1]);q=os.environ.get('TEST_DIALOG','')

@@ -408,3 +408,84 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
         .windows(2)
         .any(|w| w[0] == "--base" && w[1] == "main")));
 }
+
+#[test]
+fn remote_hc_spawn_routes_to_machine_without_local_space_label() {
+    let f = Fixture::new();
+    let out = success(
+        f.cmd()
+            .env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","target":"user@remote","via":false}]}"#)
+            .args(["spawn", "worker", "--kind", "codex", "--machine", "remote", "--cwd", "/remote/repo", "--", "-m", "chosen"])
+            .output().unwrap(),
+    );
+    assert!(out.contains("remote/t8"), "{out}");
+    let calls = f.calls();
+    let run = calls
+        .iter()
+        .find(|v| v[0] == "run")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    let separator = run.iter().position(|v| v == "--").unwrap();
+    assert!(run[..separator]
+        .windows(2)
+        .any(|w| w[0] == "--on" && w[1] == "remote"));
+    assert!(run
+        .windows(2)
+        .any(|w| w[0] == "--cwd" && w[1] == "/remote/repo"));
+    assert!(!run
+        .iter()
+        .any(|v| v.as_str().is_some_and(|s| s.starts_with("herdr.space="))));
+    for label in ["vega.kind=codex", "vega.mode=headed", "vega.role=sentinel"] {
+        assert!(run.windows(2).any(|w| w[0] == "--label" && w[1] == label));
+    }
+    assert!(!f.root().join("app-calls").exists());
+}
+
+#[test]
+fn hc_home_filters_space_and_finished_rows_and_reports_empty_state() {
+    let f = Fixture::new();
+    f.spawn();
+    let path = f.root().join("terminals.json");
+    let mut ts: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let mut other = ts["t8"].clone();
+    other["address"] = "t9".into();
+    other["name"] = "other-space".into();
+    other["labels"]["herdr.space"] = "s2".into();
+    ts["t9"] = other;
+    let mut finished = ts["t8"].clone();
+    finished["address"] = "ta".into();
+    finished["name"] = "finished-worker".into();
+    finished["state"] = "finished".into();
+    ts["ta"] = finished;
+    fs::write(&path, ts.to_string()).unwrap();
+
+    let home = success(f.cmd().output().unwrap());
+    assert!(home.contains("agents[2]"), "{home}");
+    assert!(home.contains("t7,codex,parent,"), "{home}");
+    assert!(home.contains("t8,codex,worker,"), "{home}");
+    assert!(
+        !home.contains("other-space") && !home.contains("finished-worker"),
+        "{home}"
+    );
+    let all = f.run(&["--all"]);
+    assert!(all.contains("agents[3]"), "{all}");
+    assert!(all.contains("t9,codex,other-space,"), "{all}");
+    assert!(!all.contains("finished-worker"), "{all}");
+
+    ts["t8"]["state"] = "finished".into();
+    fs::write(&path, ts.to_string()).unwrap();
+    // A snapshot may omit the caller while get still verifies its identity.
+    let empty = success(f.cmd().env("TEST_HIDE_PARENT", "1").output().unwrap());
+    assert!(empty.contains("agents: 0 live agents"), "{empty}");
+    ts["t9"]["state"] = "finished".into();
+    fs::write(&path, ts.to_string()).unwrap();
+    let empty_all = success(
+        f.cmd()
+            .env("TEST_HIDE_PARENT", "1")
+            .arg("--all")
+            .output()
+            .unwrap(),
+    );
+    assert!(empty_all.contains("agents: 0 live agents"), "{empty_all}");
+}
