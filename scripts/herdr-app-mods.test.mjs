@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 function load(name) {
-  const state = new Map(), calls = [], tasks = [], commands = [];
+  const state = new Map(), storage = new Map(), calls = [], tasks = [], commands = [];
   let props = {}, rendering = false;
   function el() {
     const obj={items:[],handlers:{}};let proxy;
@@ -14,7 +14,7 @@ function load(name) {
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
       if(k==='id'||k==='tooltip')return v=>{o[k+'Value']=v;return proxy;};
-      if(k==='on_click'||k==='on_mouse_down')return (...a)=>{o.handlers[k]=a.at(-1);return proxy;};
+      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up')return (...a)=>{o.handlers[k]=a.at(-1);return proxy;};
       return ()=>proxy;
     }});return proxy;
   }
@@ -29,12 +29,12 @@ function load(name) {
     closeOverlay:s=>calls.push(['close',s]),notify:s=>calls.push(['toast',s]),
     nextCommand:()=>new Promise(r=>commands.push(r)),watchFolder:()=>new Promise(()=>{}),
     exec:async (...a)=>{calls.push(['exec',...a]);return {code:0,stdout:'{}'};},
-    localStorage:{getItem:()=>null,removeItem(){},setItem(){}},Date,Map,Set,JSON};
+    localStorage:{getItem:k=>storage.get(k)??null,removeItem:k=>storage.delete(k),setItem:(k,v)=>storage.set(k,v)},Date,Map,Set,JSON};
   let code=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
   code=code.replace(/^import .*;\n/gm,'').replace('export default class','globalThis.Mod = class');
   const context=vm.createContext(api);vm.runInContext(code,context);
   const mod=new context.Mod();
-  return {mod,state,calls,cx,api:context,setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
+  return {mod,state,storage,calls,cx,api:context,setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
 }
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
@@ -78,12 +78,14 @@ test('answer and dismiss use argv and the recorded project cwd; inputs never aut
 });
 
 test('each agent icon stops row propagation and routes its own action',()=>{
-  const h=load('vega-agents');
+  const h=load('vega-sidebar');
   h.mod.vegaTerminals=new Map([['t7',{labels:{'vega.mail':'2','vega.decisions':'1','vega.waiting':'1','vega.kind':'C','vega.uac':'UAC','vega.git':'dirty'}}]]);
   const icons=h.mod.vegaIcons('t7',{}).items;
-  assert.equal(icons.length,6);
+  assert.equal(icons.length,4,'uac and kind sit before the name, as in the TUI row');
   for(const icon of icons)icon.handlers.on_click({},h.cx);
-  assert.equal(h.calls.filter(c=>c[0]==='stop').length,6);
+  assert.equal(h.calls.filter(c=>c[0]==='stop').length,4);
+  h.mod.vegaTerminals.set('t8',{labels:{'vega.git':'\u2800'}});
+  assert.equal(h.mod.vegaIcons('t8',{}).items.length,0,'a blank token draws nothing');
   assert(h.calls.some(c=>c[0]==='open'&&c[1].mod==='vega-inbox'));
   assert(h.calls.some(c=>c[0]==='open'&&c[1].props?.mail==='t7'));
   assert(h.calls.some(c=>c[0]==='run'&&c[1]==='agent.focus'));
@@ -162,7 +164,7 @@ test('same decision on two machines has separate inputs and notifications; remot
 });
 
 test('project group totals match source machine as well as project and expire',()=>{
-  const h=load('vega-agents');
+  const h=load('vega-sidebar');
   const local={...row(),decisions:2},remote={...row(),machine:'ganymede',decisions:5};
   // Remote first catches a regression to project-only matching for the local group.
   h.state.set('vega.badges',[remote,local]);
@@ -181,32 +183,51 @@ function elements(node) {
 }
 function texts(node) { return elements(node).flatMap(n=>n.items.filter(i=>typeof i==='string')); }
 
-test('machine/project tree has one child row, short names and positive totals only',()=>{
-  const h=load('vega-agents');
-  const agent=(address,space_name)=>({address,space_name,space:'s',tab:'tb',pane:address,status:'idle',program:{},seq:1});
-  h.api.agents=()=>[agent('ganymede/t4','vega'),agent('ganymede/t2','vega'),agent('ganymede/t3','worker')];
-  h.api.terminals=()=>[
-    {address:'ganymede/t2',state:'live',labels:{'vega.project-id':'github.com/team/vega','vega.project':'github.com/team/vega'}},
-    {address:'ganymede/t3',state:'live',parent:'ganymede/t2',labels:{'vega.project':'file:host:/tmp/gate'}},
-    {address:'ganymede/t4',state:'live',labels:{}},
+test('UAC projects hold their agents across machines in dragged order; other spaces follow',()=>{
+  const h=load('vega-sidebar');
+  const agent=(address,space)=>({address,space_name:'x',space,tab:'tb',pane:address,status:'idle',program:{key:'claude'},seq:1});
+  h.api.spaces=()=>[
+    {id:'sp1',name:'lanista',machine:null,branch:null,active:false,tabs:[]},
+    {id:'ganymede/sp2',name:'lanista',machine:'ganymede',branch:'feat/x',active:false,tabs:[]},
+    {id:'sp3',name:'scratch',machine:null,branch:null,active:false,tabs:[]},
+    {id:'sp4',name:'vega',machine:null,branch:null,active:false,tabs:[]},
   ];
-  h.state.set('vega-agents.sort','project');h.state.set('vega.badges',[
-    {...row(),project:'github.com/team/vega',notes:9,decisions:0,waiting:0},
-    {...row(),machine:'ganymede',project:'github.com/team/vega',notes:2,decisions:0,waiting:0},
+  h.api.agents=()=>[agent('t5','sp1'),agent('ganymede/t2','ganymede/sp2'),agent('t7','sp4')];
+  h.api.terminals=()=>[
+    {address:'ganymede/t2',state:'live',labels:{'herdr.space':'sp2','vega.host':'♃₃','vega.role':'uac','vega.uac':'u▲c','vega.git':'✓','vega.project-id':'github.com/team/lanista','vega.project':'github.com/team/lanista'}},
+    {address:'ganymede/t3',state:'live',parent:'ganymede/t2',labels:{'herdr.space':'sp2','vega.project':'lanista','vega.label':'⚙ feat/x'}},
+    {address:'t5',state:'live',labels:{'herdr.space':'sp1','vega.host':'♆₈','vega.project':'lanista'}},
+    {address:'t6',state:'live',labels:{'herdr.space':'sp3','vega.host':'♆₈'}},
+    {address:'t7',state:'live',labels:{'herdr.space':'sp4','vega.host':'♆₈','vega.role':'uac','vega.project':'github.com/team/vega'}},
+  ];
+  h.state.set('vega.badges',[
+    {...row(),project:'github.com/team/lanista',notes:9,decisions:0,waiting:0},
+    {...row(),machine:'ganymede',project:'github.com/team/lanista',notes:2,decisions:0,waiting:0},
   ]);
-  h.mod.init({},h.cx);const tree=h.render(), nodes=elements(tree), text=texts(tree);
-  assert.equal(nodes.filter(n=>n.idValue==='sub-ganymede/t3').length,1);
-  assert.equal(nodes.filter(n=>typeof n.idValue==='string'&&n.idValue.startsWith('project-')).length,1);
-  assert(text.includes('ganymede · vega'));
-  assert(text.includes('✉ 2'));assert(!text.includes('⚖ 0'));assert(!text.includes('✋ 0'));
-  assert(!text.includes('✉ 9'),'another machine cannot supply this group total');
-  const order=h.calls.find(c=>c[0]==='order')[1];assert.equal(order.length,3);
-  assert.equal(new Set(order).size,3,'navigation includes the child once in tree order');
+  h.mod.init({},h.cx);let tree=h.render(), nodes=elements(tree), text=texts(tree);
+  let ids=nodes.map(n=>n.idValue).filter(i=>typeof i==='string');
+  const at=i=>ids.indexOf(i);
+  assert.equal(ids.filter(i=>i.startsWith('uac-')).length,2,'one group per UAC project');
+  assert(at('uac-lanista')<at('ag-ganymede/t2')&&at('ag-ganymede/t2')<at('ag-t5')&&at('ag-t5')<at('uac-vega'),'UAC first, then the project\'s agents on other machines');
+  assert(at('sub-ganymede/t3')>at('ag-ganymede/t2'),'sentinel is a branch of its UAC');
+  assert(text.includes('feat/x')&&!text.some(s=>s.includes('⚙')),'sentinel name without the cog');
+  assert(text.includes('♃₃')&&text.includes('♆₈'),'machine symbol on every row');
+  assert(text.includes('Spaces')&&at('space-sp3')>at('uac-vega'),'a space without a UAC follows under Spaces');
+  assert(!ids.includes('space-sp1'),'no folder rows inside a UAC project');
+  assert(text.includes('✉ 2'));assert(!text.includes('✉ 9'),'totals come from the UAC\'s machine');
+  // Drag vega above lanista; the order is kept.
+  const press=(id,ev)=>elements(h.render()).find(n=>n.idValue===id).handlers[ev]({},h.cx);
+  press('uac-vega','on_mouse_down');press('uac-lanista','on_mouse_move');press('uac-lanista','on_mouse_up');
+  ids=elements(h.render()).map(n=>n.idValue).filter(i=>typeof i==='string');
+  assert(ids.indexOf('uac-vega')<ids.indexOf('uac-lanista'),'dragged project moves up');
+  assert.deepEqual(JSON.parse(h.storage.get('project-order')),['vega','lanista']);
+  const click=elements(h.render()).find(n=>n.idValue==='space-sp3');click.handlers.on_click({},h.cx);
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='space.select'&&c[2].id==='sp3'),'a space row selects that space');
 });
 
 test('mail archive and notification JSON render readable cards and empty/error states',async()=>{
   for(const notes of [false,true]) {
-    const h=load('vega-agents');h.setProps({mail:'ganymede/t7',notes,overlay:'mail-window'});
+    const h=load('vega-sidebar');h.setProps({mail:'ganymede/t7',notes,overlay:'mail-window'});
     const message={from:'t2@io',host:'io',time:'2026-11-07T10:00:00Z',read:false,unread:true,title:'Notice',body:'Line one\nLine two',text:'Line one\nLine two'};
     h.api.exec=async(...a)=>{h.calls.push(['exec',...a]);return {code:0,stdout:notes?JSON.stringify(message)+'\n':JSON.stringify({total:1,messages:[message]})};};
     h.mod.init({},h.cx);await h.flush();
@@ -220,7 +241,7 @@ test('mail archive and notification JSON render readable cards and empty/error s
 });
 
 test('a finished intermediate parent cannot hide a live child below a listed grandparent',()=>{
-  const h=load('vega-agents');
+  const h=load('vega-sidebar');
   const agent=address=>({address,space_name:'vega',space:'s',tab:'tb',pane:address,status:'idle',program:{},seq:1,pinned:false});
   h.api.agents=()=>[agent('t1'),agent('t3')];
   h.api.terminals=()=>[
@@ -271,7 +292,7 @@ test('empty initial mod check has null props and no overlay to close',()=>{
 });
 
 test('pinned listed child stays once under its live parent and once in navigation',()=>{
-  const h=load('vega-agents');
+  const h=load('vega-sidebar');
   const agent=(address,pinned)=>({address,pinned,space:'s',space_name:'vega',tab:'tb',pane:address,status:'idle',program:{},seq:1});
   h.api.agents=()=>[agent('t1',false),agent('t2',true)];
   h.api.terminals=()=>[{address:'t1',state:'live',parent:null,labels:{}},{address:'t2',state:'live',parent:'t1',labels:{'herdr.pinned':'true'}}];
@@ -314,4 +335,18 @@ test('only the qualified remote waiting terminal keeps an otherwise empty inbox 
   assert.equal(h.mod.waiting(h.mod.rows())[0].machine,'ganymede');
   h.api.terminals=()=>[{address:'t7',state:'live'}];h.mod.prepare(h.cx);
   assert(h.calls.some(c=>c[0]==='close'&&c[1]==='waiting-window'),'same bare ID on this machine is unrelated');
+});
+
+test('worktree placeholder shells stay out of the list and the tree',()=>{
+  const h=load('vega-sidebar');
+  const agent=address=>({address,space_name:'vega',space:'s',tab:'tb',pane:address,status:'done',program:{},seq:1,pinned:false});
+  h.api.agents=()=>[agent('t1'),agent('t3c')];
+  h.api.terminals=()=>[
+    {address:'t1',state:'live',parent:null,labels:{}},
+    {address:'t3c',state:'live',parent:'t1',labels:{'vega.worktree-owner':'t3d'}},
+    {address:'t3d',state:'live',parent:'t1',labels:{}},
+  ];
+  h.mod.init({},h.cx);const nodes=elements(h.render());
+  assert(!nodes.some(n=>n.idValue==='ag-t3c'||n.idValue==='sub-t3c'),'placeholder has no row');
+  assert(nodes.some(n=>n.idValue==='sub-t3d'),'its sentinel still shows');
 });

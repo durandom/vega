@@ -1,6 +1,6 @@
-import { View } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, home, theme, watchFolder, shared, setShared, openOverlay, notify, nextCommand, run } from "herdr";
+import { exec, home, theme, watchFolder, shared, setShared, openOverlay, notify, nextCommand, run, spaces, agents } from "herdr";
 
 // Assumes the same user and XDG_STATE_HOME as vegad; this reads the mod's environment,
 // not the app config home. Both processes must share that state directory.
@@ -122,13 +122,18 @@ export default class Vega extends View {
     cx.notify();
   }
 
+  // The shipped status line (workspace-status) without the palette hint; vega's own
+  // work (badges, vegad, inbox) runs in the background and shows nothing here.
   render(_cx) {
     const t = theme();
-    const rows = (shared("vega.badges") ?? []).filter(r => Date.now()/1000-r.at <= 60);
-    const decisions = rows.reduce((n,r) => n+(r.decisions || 0),0);
-    return h_flex().id("vega-inbox-open").size_full().items_center().px(12).text_size(12)
-      .bg(t.chrome).text_color(this.error ? t.blocked : this.state === "running" ? t.muted : t.working)
-      .cursor_pointer().tooltip(this.error || "Open Vega inbox")
-      .on_click(() => this.open()).child(`vega · vegad ${this.state} · ⚖ ${decisions}`);
+    const space = spaces().find(s => s.active);
+    const list = agents();
+    const needs = list.filter(a => a.status === "blocked").length;
+    const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
+    return h_flex().size_full().px(14).gap(16).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
+      .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
+      .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
+      .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
+        .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))));
   }
 }

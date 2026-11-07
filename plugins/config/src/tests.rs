@@ -973,7 +973,7 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
     ));
     for unit in [
         Unit::HerdrAppMods,
-        Unit::HerdrAppAgents,
+        Unit::HerdrAppSidebar,
         Unit::HerdrAppInbox,
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
@@ -1023,7 +1023,7 @@ fn app_selected_layout_update_reverifies_and_restores_on_false_success() {
     let managed = BTreeSet::new();
     for unit in [
         Unit::HerdrAppMods,
-        Unit::HerdrAppAgents,
+        Unit::HerdrAppSidebar,
         Unit::HerdrAppInbox,
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");

@@ -173,7 +173,7 @@ const MOD_FILES: [&str; 2] = ["main.js", "mod.json"];
 fn mod_name(unit: crate::Unit) -> Option<&'static str> {
     match unit {
         crate::Unit::HerdrAppMods => Some("vega"),
-        crate::Unit::HerdrAppAgents => Some("vega-agents"),
+        crate::Unit::HerdrAppSidebar => Some("vega-sidebar"),
         crate::Unit::HerdrAppInbox => Some("vega-inbox"),
         _ => None,
     }
@@ -310,7 +310,7 @@ pub fn apply(
     // switch command validates activation, and owns persistence in shared.json.
     let mut previous_layout = None;
     if plan.herdr_app_pending {
-        for name in ["vega", "vega-agents", "vega-inbox"] {
+        for name in ["vega", "vega-sidebar", "vega-inbox"] {
             if !home(&ctx.env)
                 .join("mods")
                 .join(name)

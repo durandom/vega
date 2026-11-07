@@ -3,7 +3,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -25,6 +25,30 @@ function toggleSidebar() {
   setShared("sidebar.collapsed", !narrow());
   run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 268) : window()?.platform === "macos" ? 76 : 44 });
 }
+
+// vega's default symbol colours (crates/vega-herdr/src/theme.rs COLORS) plus git.
+const DEFAULT_COLORS = {
+  uac: "#b56d0c", notes: "#2f7fd8", decisions: "#9a5cf0", waiting: "#d9465f",
+  claude: "#c96442", codex: "#0e8f6f", copilot: "#8957e5", pi: "#1f8fb0", other_agent: "#808080",
+  git_clean: "#40a02b", git_dirty: "#df8e1d",
+};
+
+// [symbols.colors], [symbols.hosts], [symbols.host_colors] of theme.toml: flat `key = "value"` lines.
+function parseSymbols(text) {
+  const out = {};
+  let section = null;
+  for (const line of text.split("\n")) {
+    const head = line.match(/^\s*\[symbols\.(colors|hosts|host_colors)\]\s*$/);
+    if (head) { section = head[1]; out[section] = {}; continue; }
+    if (/^\s*\[/.test(line)) { section = null; continue; }
+    const kv = section && line.match(/^\s*([\w-]+)\s*=\s*"([^"]*)"/);
+    if (kv) out[section][kv[1]] = kv[2];
+  }
+  return out;
+}
+
+// A machine's $host label: the one vegad wrote on any of its terminals.
+const labelOfMachine = (machine, live) => live.find(x => x.address.startsWith(`${machine}/`) && x.labels?.["vega.host"])?.labels["vega.host"] ?? machine;
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 
@@ -53,11 +77,12 @@ const kidStatus = (k, listed) => {
   return s === "error" ? "blocked" : s === "done" ? "idle" : s;
 };
 const SORTS = [
+  // The first is the default: the TUI machines tree.
+  { id: "project", label: "UAC / spaces", icon: "layers" },
   { id: "priority", label: "Priority", icon: "clock" },
-  { id: "project", label: "Machine / project", icon: "layers" },
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
-const sortOf = () => SORTS.find((s) => s.id === shared("vega-agents.sort")) ?? SORTS[0];
+const sortOf = () => SORTS.find((s) => s.id === shared("vega-sidebar.view")) ?? SORTS[0];
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
@@ -104,6 +129,13 @@ export default class Agents extends View {
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
     cx.timer.every(30000, (cx) => cx.notify());
+    try { this.order = JSON.parse(localStorage.getItem("project-order") ?? "[]"); } catch (_) { this.order = []; }
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("cat", [`${home()}/.config/vega/theme.toml`]);
+        if (r.code === 0) { this.symbols = parseSymbols(r.stdout); cx.notify(); }
+      } catch (_) {}
+    });
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -179,7 +211,7 @@ export default class Agents extends View {
         .text_color(t.foreground)
         .hover((el) => el.bg(t.hover))
         .on_click(() => {
-          setShared("vega-agents.sort", s.id);
+          setShared("vega-sidebar.view", s.id);
           closeOverlay(props().overlay);
         })
         .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
@@ -193,7 +225,7 @@ export default class Agents extends View {
 
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
   tree(all, addr, lead = []) {
-    const kids = all.filter((k) => k.parent === addr && k.state === "live");
+    const kids = all.filter((k) => k.parent === addr && k.state === "live" && !k.labels?.["vega.worktree-owner"]);
     return kids.flatMap((k, i) => {
       const last = i === kids.length - 1;
       return [
@@ -241,18 +273,189 @@ export default class Agents extends View {
     return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? color : t.dim + "00");
   }
 
+  // The space a terminal shows in: its herdr.space label, machine-qualified like spaces() ids.
+  spaceOfTerminal(term) {
+    const id = term.labels?.["herdr.space"];
+    if (!id) return null;
+    const slash = term.address.indexOf("/");
+    return slash < 0 ? id : `${term.address.slice(0, slash)}/${id}`;
+  }
+
+  // UAC projects in the Slayer's order: one group per project with a UAC on any machine, holding
+  // that project's agents on every machine (UAC first, its sentinels as branches). Then the
+  // spaces without a UAC. Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
+  projectTree(t, all, list, shown, now) {
+    const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
+    const live = all.filter(x => x.state === "live");
+    const labelsOf = address => this.vegaTerminals.get(address)?.labels ?? {};
+    const uacs = new Map();
+    for (const x of live) if (x.labels?.["vega.role"] === "uac" && x.labels?.["vega.project"]) uacs.set(short(x.labels["vega.project"]), x);
+    const projectOfSpace = new Map();
+    for (const x of live) {
+      const sp = this.spaceOfTerminal(x), p = short(x.labels?.["vega.project"]);
+      if (sp && p && uacs.has(p) && !projectOfSpace.has(sp)) projectOfSpace.set(sp, p);
+    }
+    const projectOfAgent = a => {
+      const p = short(labelsOf(a.address)["vega.project"]);
+      return uacs.has(p) ? p : projectOfSpace.get(a.space) ?? null;
+    };
+    const saved = this.order ?? [];
+    const projects = [...uacs.keys()].sort((a, b) => {
+      const i = saved.indexOf(a), j = saved.indexOf(b);
+      return (i < 0 ? Infinity : i) - (j < 0 ? Infinity : j) || a.localeCompare(b);
+    });
+    const C = this.colors();
+    const kindOf = (k) => {
+      const key = (labelsOf(k.address)["vega.harness"] || k.program?.key || k.app || "").toLowerCase();
+      for (const [name, glyph] of [["claude", "✳"], ["codex", "֍"], ["copilot", "✈"], ["pi", "π"]]) if (key.includes(name)) return [glyph, C[name]];
+      return ["◇", C.other_agent];
+    };
+    const host = (address) => {
+      const label = labelsOf(address)["vega.host"];
+      return label ? div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[label] ?? t.dim).child(label) : div().w(22).flex_none();
+    };
+    const tokens = (address, uac) => this.vegaIcons(address, t, uac ? ["uac", "kind", "git"] : ["uac", "kind"]);
+    const agentRow = (a, subs, depth, lines = []) => {
+      const l = labelsOf(a.address);
+      const uac = l["vega.role"] === "uac";
+      const [glyph, color] = kindOf(a);
+      const st = depth ? { status: kidStatus(a, this.listed) } : a;
+      const when = depth ? 0 : this.since(a);
+      const name = uac ? "" : depth
+        ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
+        : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
+      const on = a.address === shown;
+      return h_flex()
+        .id(depth ? `sub-${a.address}` : `ag-${a.address}`)
+        .pl(depth ? 18 : 18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
+        .when(on, el => el.bg(t.selected))
+        .cursor_pointer().hover(s => s.bg(t.hover))
+        .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
+        .on_click(() => depth ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
+        .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
+          .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
+          .when(x === "└" || x === "├", el => el.border_b(1.5).rounded_bl(6))))
+        .child(this.status(t, st, true))
+        .when(uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(l["vega.uac"] || "u▲c")))
+        .child(div().flex_none().text_color(color).child(glyph))
+        .when(Boolean(name), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(a.status === "idle" ? t.muted : t.foreground).child(name)))
+        .child(tokens(a.address, uac))
+        .child(div().flex_1())
+        .when(!depth && subs.length > 0 && this.folded.has(a.address), el => el.child(div().text_size(11).text_color(t.dim).child(`+${subs.length}`)))
+        .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
+        .child(host(a.address));
+    };
+    const withTree = (a) => {
+      const subs = this.tree(all, a.address);
+      return [agentRow(a, subs, 0), ...(this.folded.has(a.address) ? [] : subs.map(s => agentRow(s.t, [], 1, s.lines)))];
+    };
+    const badge = (key, glyph, n, action, gid) => div().id(`total-${gid}-${key}`).flex_none().text_size(11).font_semibold().text_color(C[key])
+      .tooltip(`Project ${key}`).child(`${glyph} ${n}`)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); action(); });
+    const out = [];
+    for (const p of projects) {
+      const gid = `uac-${p}`;
+      const uac = uacs.get(p);
+      const ul = uac.labels ?? {};
+      const project = ul["vega.project-id"];
+      const totals = this.vegaTotals(uac.address, project) ?? {};
+      const members = list.filter(a => projectOfAgent(a) === p)
+        .sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
+      const open = !this.folded.has(gid);
+      const git = ul["vega.git"];
+      out.push(h_flex().id(gid).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
+        .when(this.dragFrom === p && this.dragOver !== p, el => el.opacity(0.5))
+        .when(Boolean(this.dragFrom) && this.dragOver === p && this.dragFrom !== p, el => el.border_t(2).border_color(t.accent))
+        .on_mouse_down("left", () => { this.dragFrom = p; this.dragOver = p; })
+        .on_mouse_move((_e, cx) => { if (this.dragFrom && this.dragOver !== p) { this.dragOver = p; cx.notify(); } })
+        .on_mouse_up("left", (_e, cx) => {
+          const from = this.dragFrom;
+          this.dragFrom = null; this.dragOver = null;
+          if (from && from !== p) this.move(projects, from, p);
+          else if (from === p) open ? this.folded.add(gid) : this.folded.delete(gid);
+          cx.notify();
+        })
+        .child(div().flex_none().text_size(12).text_color(t.dim).child("⠿"))
+        .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(p))
+        .when(Boolean(git), el => el.child(div().flex_none().text_size(11.5).text_color(git === "✓" ? C.git_clean : C.git_dirty).child(git)))
+        .child(div().flex_1())
+        .when(totals.notes >= 1, el => el.child(badge("notes", "✉", totals.notes, () => openOverlay({ mod: "vega-sidebar", kind: "window", key: `vega-notes-${project}`, width: 700, height: 500, props: { mail: uac.address, notes: true } }), gid)))
+        .when(totals.decisions >= 1, el => el.child(badge("decisions", "⚖", totals.decisions, () => openOverlay({ mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true, width: 620, height: 520, props: { project } }), gid)))
+        .when(totals.waiting >= 1, el => el.child(badge("waiting", "✋", totals.waiting, () => run("agent.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address }), gid)))
+        .when(!open, el => el.child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim))));
+      if (open) for (const a of members) out.push(...withTree(a));
+    }
+    const all_spaces = spaces();
+    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id));
+    if (rest.length) {
+      out.push(div().px(6).pt(12).pb(2).text_size(11).font_medium().text_color(t.dim).child("Spaces"));
+      for (const sp of rest) {
+        out.push(h_flex().id(`space-${sp.id}`).pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
+          .when(sp.active, el => el.bg(t.selected))
+          .cursor_pointer().hover(s => s.bg(t.hover))
+          .on_click(() => run("space.select", { id: sp.id }))
+          .child(div().min_w(0).flex_shrink_1().truncate().text_color(t.muted).child(sp.name))
+          .child(div().flex_1())
+          .child(div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live)] ?? t.dim)
+            .child(sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live))));
+        for (const a of list.filter(a => a.space === sp.id && !projectOfAgent(a))) out.push(...withTree(a));
+      }
+    }
+    // Agents whose space this window doesn't know yet still show.
+    const known = new Set(all_spaces.map(s => s.id));
+    for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a))) out.push(...withTree(a));
+    return out;
+  }
+
+  // The local machine's $host label: the one vegad wrote on a local terminal.
+  localHost(live) {
+    return live.find(x => !x.address.includes("/") && x.labels?.["vega.host"])?.labels["vega.host"] ?? "";
+  }
+
+  // Drag one project above another; the order stays across restarts.
+  move(projects, from, to) {
+    const order = projects.filter(p => p !== from);
+    order.splice(order.indexOf(to), 0, from);
+    this.order = order;
+    try { localStorage.setItem("project-order", JSON.stringify(order)); } catch (_) {}
+  }
+
+  // Colours from ~/.config/vega/theme.toml [symbols.colors] and [symbols.host_colors], else
+  // vega's defaults (crates/vega-herdr/src/theme.rs COLORS). Host colours are keyed by label.
+  colors() {
+    const s = this.symbols ?? {};
+    const c = { ...DEFAULT_COLORS, ...(s.colors ?? {}) };
+    const hosts = {};
+    for (const [name, label] of Object.entries(s.hosts ?? {})) if (s.host_colors?.[name]) hosts[label] = s.host_colors[name];
+    return { ...c, hosts };
+  }
+
+  // Project totals from the badge files: mail, decisions, waiting panes; positive ones only.
+  totalIcons(t, a, totals, project) {
+    return h_flex().gap(4).flex_none().children([
+      ["notes", "✉", () => openOverlay({mod:"vega-sidebar",kind:"window",key:`vega-notes-${project}`,width:700,height:500,props:{mail:a.address,notes:true}})],
+      ["decisions", "⚖", () => openOverlay({mod:"vega-inbox",kind:"window",key:"vega-inbox",keep:true,width:620,height:520,props:{project}})],
+      ["waiting", "✋", () => run("agent.focus",{terminal:totals?.waiting_panes?.[0]?.pane?.replace(/^hc:/,"") || a.address})],
+    ].filter(([key]) => totals[key] >= 1).map(([key,icon,action]) => div().id(`total-${a.address}-${key}`).text_size(11).text_color(t.muted)
+      .tooltip(`Project ${key}`).child(`${icon} ${totals[key]}`)
+      .on_mouse_down("left",(_e,cx) => cx.stop_propagation())
+      .on_click((_e,cx) => {cx.stop_propagation();action();})));
+  }
+
   vegaTotals(address, project) {
     const machine = address?.includes("/") ? address.split("/")[0] : "";
     return (shared("vega.badges") ?? []).find(r => r.project === project &&
       (r.machine || "") === machine && Date.now()/1000-r.at <= 60);
   }
 
-  vegaIcons(address, t) {
+  // uac and kind are drawn before the name, as in the TUI row.
+  vegaIcons(address, t, skip = ["uac", "kind"]) {
     const labels = this.vegaTerminals?.get(address)?.labels ?? {};
     const focus = () => run("agent.focus", {terminal: address});
     const inbox = () => openOverlay({mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true,
       width: 620, height: 520, props: {project: labels["vega.project-id"]}});
-    const mail = (notes) => openOverlay({mod: "vega-agents", kind: "window", key: `vega-mail-${address}`,
+    const mail = (notes) => openOverlay({mod: "vega-sidebar", kind: "window", key: `vega-mail-${address}`,
       width: 700, height: 500, props: {mail: address, notes}});
     const controls = [
       ["uac", "UAC", focus], ["kind", "Harness", focus],
@@ -261,7 +464,7 @@ export default class Agents extends View {
       ["waiting", "Waiting panes", focus], ["decisions", "Decisions", inbox],
       ["git", "Git changes", () => { focus(); run("layout.show", {id:"panel"}); run("layout.select", {stack:"panel-body", child:"changes"}); }],
     ];
-    return h_flex().gap(4).flex_none().children(controls.filter(([key]) => labels[`vega.${key}`]).map(([key, tip, action]) =>
+    return h_flex().gap(4).flex_none().children(controls.filter(([key]) => !skip.includes(key) && /[^\s\u2800]/u.test(labels[`vega.${key}`] ?? "")).map(([key, tip, action]) =>
       div().id(`vega-${address}-${key}`).text_size(11).text_color(t.muted).cursor_pointer().tooltip(tip)
         .child(key === "attention" ? "✋" : labels[`vega.${key}`])
         .on_mouse_down("left", (_e,cx) => cx.stop_propagation())
@@ -285,6 +488,9 @@ export default class Agents extends View {
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     this.vegaTerminals = new Map(all.map(t => [t.address, t]));
+    // A worktree's placeholder shell holds the checkout for its sentinel; the TUI never listed it.
+    const placeholder = (address) => Boolean(this.vegaTerminals.get(address)?.labels?.["vega.worktree-owner"]);
+    list = list.filter(a => !placeholder(a.address));
     this.migratePins(all);
     const shown = focused()?.agent;
     const now = Date.now();
@@ -307,9 +513,11 @@ export default class Agents extends View {
     });
     const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
     const projectOf = a => short(this.vegaTerminals.get(a.address)?.labels?.["vega.project"]) || a.space_name || "Unassigned";
-    const machineOf = a => a.address.includes("/") ? a.address.split("/")[0] : "This machine";
-    const groupOf = a => `${machineOf(a)} · ${projectOf(a)}`;
-    if (sort.id === "project") list = [...list].sort((a,b) => groupOf(a).localeCompare(groupOf(b)) || rankOf(b)-rankOf(a));
+    // Machines as group headers, projects as rows: the TUI machines tree. This machine first.
+    const machineOf = a => a.address.includes("/") ? a.address.split("/")[0] : "Local";
+    const groupOf = machineOf;
+    const machineKey = a => a.address.includes("/") ? `1${machineOf(a)}` : "0";
+    if (sort.id === "project") list = [...list].sort((a,b) => machineKey(a).localeCompare(machineKey(b)) || projectOf(a).localeCompare(projectOf(b)) || rankOf(b)-rankOf(a));
     const pinned = list.filter((a) => a.pinned);
     const rest = list.filter((a) => !a.pinned);
     list = [...pinned, ...rest];
@@ -405,14 +613,20 @@ export default class Agents extends View {
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
-      return v_flex().flex_none().child(h_flex()
+      // One line as in the TUI: status · u▲c · harness · name · vega tokens.
+      const vlabels = this.vegaTerminals.get(a.address)?.labels ?? {};
+      const byProject = sort.id === "project";
+      // Under a space row the agent says what it does: its tab name or title.
+      const shownName = byProject && !isPinned ? (more ?? label(a)) : name;
+      const totals = byProject ? this.vegaTotals(a.address, vlabels["vega.project-id"]) : null;
+      return h_flex()
         .id(`ag-${a.address}`)
-        .px(8)
-        .h(30)
+        .px(6)
+        .h(26)
         .flex_none()
-        .rounded(8)
+        .rounded(6)
         .items_center()
-        .gap(9)
+        .gap(6)
         .when(a.focused, (el) => el.bg(t.selected))
         .cursor_pointer()
         .hover((s) => s.bg(t.hover))
@@ -422,21 +636,27 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
+        .tooltip(more ? `${a.space_name} · ${more}` : a.space_name || label(a))
+        .child(this.status(t, a, true))
+        .when(Boolean(vlabels["vega.uac"]), el => el.child(div().id(`vega-${a.address}-uac`).flex_none().text_size(12).text_color(t.ansi1 ?? t.blocked)
+          .on_mouse_down("left", (_e,cx) => cx.stop_propagation())
+          .on_click((_e,cx) => {cx.stop_propagation(); run("agent.focus", {terminal: a.address});})
+          .child(vlabels["vega.uac"])))
         .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
           })).child(pic)))
-        .child(h_flex().flex_1().min_w(0).gap(5).items_center()
-          .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
-        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
+        .child(div().min_w(0).flex_shrink_1().truncate().text_color(idle ? t.muted : t.foreground).child(shownName))
+        .when(full && !byProject && Boolean(more), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(t.dim).child(`\u00b7 ${more}`)))
+        .child(this.vegaIcons(a.address, t))
+        .when(Boolean(totals), el => el.child(this.totalIcons(t, a, totals, vlabels["vega.project-id"])))
+        .child(div().flex_1())
+        .when(Boolean(machine) && !byProject, el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))
-        .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .child(this.status(t, a, byPriority && !isPinned)))
-        .child(h_flex().pl(33).pb(4).child(this.vegaIcons(a.address, t)));
+        .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))));
     };
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
@@ -452,8 +672,6 @@ export default class Agents extends View {
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
     const header = (g) => {
       const open = !this.folded.has(g.id);
-      const project = g.members.map(a => this.vegaTerminals.get(a.address)?.labels?.["vega.project-id"]).find(Boolean);
-      const totals = this.vegaTotals(g.members[0]?.address, project);
       const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       return h_flex()
         .id(g.id)
@@ -473,22 +691,17 @@ export default class Agents extends View {
         })
         .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
         .when(byPriority || sort.id === "project" || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
-        .when(sort.id === "project" && Boolean(totals), el => el.child(h_flex().gap(4).children([
-          ["notes", "✉", () => openOverlay({mod:"vega-agents",kind:"window",key:`vega-notes-${project}`,width:700,height:500,props:{mail:g.members[0].address,notes:true}})],
-          ["decisions", "⚖", () => openOverlay({mod:"vega-inbox",kind:"window",key:"vega-inbox",keep:true,width:620,height:520,props:{project}})],
-          ["waiting", "✋", () => run("agent.focus",{terminal:totals?.waiting_panes?.[0]?.pane?.replace(/^hc:/,"") || g.members[0].address})],
-        ].filter(([key]) => totals[key] >= 1).map(([key,icon,action]) => div().id(`total-${g.id}-${key}`).text_size(10).text_color(t.muted)
-          .tooltip(`Project ${key}`).child(`${icon} ${totals?.[key] ?? 0}`)
-          .on_mouse_down("left",(_e,cx) => cx.stop_propagation())
-          .on_click((_e,cx) => {cx.stop_propagation();action();})))))
         .child(div().flex_1())
         .when(!open, (el) => el
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
           .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
     };
+    this.rowLabel = a => detail.get(a.address) ?? label(a);
     const rows = collapsed
       ? list.flatMap(withKids)
-      : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
+      : sort.id === "project"
+        ? this.projectTree(t, all, list, shown, now)
+        : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
 
     return v_flex()
       .size_full()
@@ -507,14 +720,14 @@ export default class Agents extends View {
             .flex_none()
             .items_center()
             .justify_between()
-            .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
+            .child(div().text_size(11.5).font_medium().text_color(t.dim).child("VEGA"))
             .child(
               div()
                 .id("ag-sort")
                 .text_size(11)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "vega-agents", kind: "popup", width: 200, height: 170, props: { sortMenu: true } }))
+                .on_click(() => openOverlay({ mod: "vega-sidebar", kind: "popup", width: 200, height: 170, props: { sortMenu: true } }))
                 .tooltip(`Sort agents: ${sort.label}`)
                 .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
             ),

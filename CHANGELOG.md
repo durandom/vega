@@ -5,6 +5,17 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 125 · 2026-11-07
+
+- unit: The herdr-app sidebar mod is renamed `vega-agents` -> `vega-sidebar` (unit
+  `herdr-app.vega-sidebar`) and is now the only sidebar list, titled VEGA: UAC
+  projects in dragged order with their agents on every machine, then spaces without
+  a UAC, in the herdr TUI's symbols. The layout drops the spaces list and the
+  Settings / Add machine footer; the status line is the shipped one without the
+  palette hint. Run `vega config apply herdr-app`.
+- migration: Delete the old mod folder `~/.config/herdr-app/mods/vega-agents`
+  (and its `.vega-mod.vega-agents-bak`) after the apply.
+
 ## 124 · 2026-11-07
 
 - feature: hc calls use the versioned RPC API, including remote preparation and

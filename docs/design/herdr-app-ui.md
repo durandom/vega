@@ -7,15 +7,23 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
 
 ## Decisions
 
-1. **`vega-agents` replaces the shipped `agents` mod** in the vega layout (`config/herdr-app/layouts/vega.json`).
-   It starts as `herdr-app do mod.clone '{"name":"agents","as":"vega-agents"}'` and keeps what the original
+1. **`vega-sidebar` replaces the shipped `agents` mod** in the vega layout (`config/herdr-app/layouts/vega.json`).
+   It starts as `herdr-app do mod.clone '{"name":"agents","as":"vega-sidebar"}'` and keeps what the original
    does: sub-agent tree from `terminals().parent`, priority sort, "Needs you", click to focus. vega adds:
    grouping by machine and project (a sort option, replacing the TUI "machines" tree), the UAC badge, the
    harness icon, mail count, hand (waiting), scale (decisions) and git state.
 2. **Every vega icon is clickable on its own** (`on_click` with `cx.stop_propagation()`): mail opens that
    agent's inbox, hand focuses the agent's tab, scale opens the decision in `vega-inbox`. In the TUI sidebar
    these icons were not clickable.
-3. **The shipped `spaces` mod stays unchanged.** Project totals show on the group rows of `vega-agents`.
+3. **`vega-sidebar` is the only sidebar list (Slayer, 2026-11-07, revises "spaces mod stays").** The layout
+   drops the shipped `spaces` list and the Settings / Add machine footer. The default view "UAC / spaces":
+   one group per project with a UAC on any machine, in an order the Slayer drags (kept in the mod's
+   localStorage); under it the UAC first, its sentinels as tree branches, then the project's other agents on
+   any machine. Below, "Spaces": every space without a UAC, a click selects it. Rows follow the TUI symbols
+   ([theme-symbols](theme-symbols.md)): status, `u▲c` only on the UAC row, the harness glyph (`✳` `֍` `✈`
+   `π`) in its colour, name, git, badges, duration and the machine's `$host` label (`♆₈`) right-aligned in
+   its host colour from `~/.config/vega/theme.toml`. No sentinel cog: the tree line marks a child. The
+   project row carries git and the positive totals `✉ ⚖ ✋`.
 4. **Decisions go to a `vega-inbox` window, not the chat.** An overlay of `kind: "window"` with `key` and
    `keep: true`, so it stays until closed and survives a restart. It shows decision cards with an answer
    input and Answer / Dismiss buttons (`vega uac answer <bead> "<text>"`, `bd close <id> --reason ...`), and
@@ -26,6 +34,10 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
    keyboard focus; if it does, fall back to toast plus badge.
 6. **Notes (unread mail) are not in `vega-inbox`.** They stay a mail count in the sidebar; a click opens them.
    This keeps the noise of GitHub durandom/vega#8 out of the window.
+
+7. **The status line is the shipped one without the palette hint.** The `vega` mod draws it in place of
+   `workspace-status` and keeps its background work (badge collection, vegad start, inbox auto-open); the
+   former `vega · vegad running · ⚖ N` line is gone.
 
 ## Data path
 

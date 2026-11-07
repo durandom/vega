@@ -43,17 +43,6 @@
           "type": "column",
           "children": [
             {
-              "id": "spaces",
-              "type": "block",
-              "size": {
-                "weight": 1
-              },
-              "min": 90,
-              "content": {
-                "mod": "spaces"
-              }
-            },
-            {
               "id": "agents",
               "type": "block",
               "size": {
@@ -61,23 +50,10 @@
               },
               "min": 90,
               "content": {
-                "mod": "vega-agents"
+                "mod": "vega-sidebar"
               }
             }
           ]
-        },
-        {
-          "id": "sidebar-footer",
-          "type": "block",
-          "size": {
-            "px": 69
-          },
-          "content": {
-            "mod": "workspace-chrome",
-            "props": {
-              "footer": true
-            }
-          }
         }
       ]
     },
@@ -172,16 +148,6 @@
           "type": "block",
           "size": {
             "px": 28
-          },
-          "content": {
-            "mod": "workspace-status"
-          }
-        },
-        {
-          "id": "vega-status",
-          "type": "block",
-          "size": {
-            "px": 24
           },
           "content": {
             "mod": "vega"

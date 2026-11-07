@@ -23,12 +23,14 @@ def generate(app_home, version):
         raise ValueError("installed.json has no layout:main fingerprint")
     anchors = []
     agent_anchors = []
+    space_anchors = []
+    footer_anchors = []
 
     def walk(node):
         if not isinstance(node, dict):
             raise ValueError("main contains a non-object node")
-        if node.get("id") == "vega-status":
-            raise ValueError("main already contains vega-status")
+        if node.get("content", {}).get("mod") == "vega":
+            raise ValueError("main already contains the vega mod")
         if node.get("content", {}).get("mod") == "agents":
             agent_anchors.append(node)
         children = node.get("children", [])
@@ -37,6 +39,10 @@ def generate(app_home, version):
         for index, child in enumerate(children):
             if not isinstance(child, dict):
                 raise ValueError("main contains a non-object child")
+            if child.get("id") == "sidebar-footer":
+                footer_anchors.append((children, child))
+            if child.get("content", {}).get("mod") == "spaces":
+                space_anchors.append((children, child))
             if child.get("id") == "status":
                 content = child.get("content")
                 if node.get("type") != "column" or not isinstance(content, dict) or content.get("mod") != "workspace-status":
@@ -49,12 +55,18 @@ def generate(app_home, version):
         raise ValueError("expected exactly one status anchor; old output kept")
     if len(agent_anchors) != 1:
         raise ValueError("expected exactly one agents block; review the upstream layout")
-    agent_anchors[0]["content"]["mod"] = "vega-agents"
+    agent_anchors[0]["content"]["mod"] = "vega-sidebar"
+    # vega-sidebar is the only sidebar list: it shows projects, so the spaces list goes.
+    if len(space_anchors) != 1:
+        raise ValueError("expected exactly one spaces block; review the upstream layout")
+    space_anchors[0][0].remove(space_anchors[0][1])
+    # No Settings / Add machine footer under the sidebar.
+    if len(footer_anchors) != 1:
+        raise ValueError("expected exactly one sidebar-footer block; review the upstream layout")
+    footer_anchors[0][0].remove(footer_anchors[0][1])
+    # The vega mod draws the status line itself (the shipped one minus the palette hint).
     children, index = anchors[0]
-    children.insert(index + 1, {
-        "id": "vega-status", "type": "block", "size": {"px": 24},
-        "content": {"mod": "vega"},
-    })
+    children[index]["content"] = {"mod": "vega"}
     tree["cloned_from"] = {"name": "main", "version": version}
     tree["vega_source"] = {
         "installed_hash": fingerprint,

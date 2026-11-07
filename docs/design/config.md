@@ -72,7 +72,7 @@ reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units
 
 ### Vega layout and startup mod (vega-0h4c.13)
 
-`herdr-app.mods`, `herdr-app.vega-agents` and `herdr-app.vega-inbox` each replace their
+`herdr-app.mods`, `herdr-app.vega-sidebar` and `herdr-app.vega-inbox` each replace their
 whole mod folder from two source files; local overrides
 resolve per file. It stages both files together and requires the installed `herdr-app check` to pass
 before touching the target. A missing checker or a failed check reports `rejected`. Replacement moves
@@ -89,8 +89,8 @@ the vega-owned clone; other shipped mod references remain upstream-owned.
 
 For explicit maintenance, run `python3 scripts/herdr-app-layout.py --write`, review the generated
 diff and commit `config/herdr-app/layouts/vega.json`. Without `--write`, the script previews provenance.
-It reads the installed `layouts/main.json`, inserts the vega block after the unique `status` block
-in its column, replaces the unique agents reference with vega-agents, and records app version,
+It reads the installed `layouts/main.json`, puts the vega mod into the unique `status` block, replaces
+the unique agents reference with vega-sidebar, removes the `spaces` list and the `sidebar-footer`, and records app version,
 the installed fingerprint and a SHA-256 of the source bytes.
 A missing, duplicated or changed anchor refuses without touching the old output. `--app-home`,
 `--app-version` and `--output` support isolated maintenance/tests. Config apply only writes the

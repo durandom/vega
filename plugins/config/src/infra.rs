@@ -57,7 +57,7 @@ pub const COMPONENTS: [Component; 25] = [
     c("agent", Required, "the coding agents vega runs and configures", "install Claude Code, Codex or pi and start it once"),
     c("vegad-start", Optional, "vegad at login without herdr-app or the TUI", "vega post relay install; runtime status: vega post relay status"),
     c("hc", Optional, "hc terminals, agent labels and the herdr-app backend", "install herdr-core (hc): https://github.com/herdrdev/herdr-core"),
-    c("herdr-app", Optional, "vega-agents sidebar and vega-inbox decisions; apply the herdr-app config group", "install herdr-app, then vega config apply herdr-app"),
+    c("herdr-app", Optional, "vega-sidebar sidebar and vega-inbox decisions; apply the herdr-app config group", "install herdr-app, then vega config apply herdr-app"),
     c("python3", Optional, "herdr-app vega badge file reader and layout maintenance", "install Python 3 with the OS package manager"),
     c("herdr", Optional, "legacy TUI backend: board and agents in panes", "install herdr: https://github.com/herdrdev/herdr"),
     c("chezmoi", Optional, "vega config apply writes every unit", "drop vega's targets from the dotfiles; vega config lists them"),

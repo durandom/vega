@@ -45,7 +45,7 @@ hc/herdr-app and the legacy herdr TUI are alternative terminal interfaces.
 | `agent` | required | one of `~/.claude`, `~/.codex`, `~/.pi/agent` | the coding agents vega runs and configures | install Claude Code, Codex or pi and start it once |
 | `hc` | optional | `hc` on PATH | hc terminals, agent labels and the herdr-app backend | https://github.com/herdrdev/herdr-core |
 | `vegad-start` | optional | login job file installed | vegad at login without either UI | `vega post relay install`; `vega post relay status` for runtime state |
-| `herdr-app` | optional | `herdr-app` on PATH | vega-agents sidebar and vega-inbox decisions | install herdr-app, then `vega config apply herdr-app` |
+| `herdr-app` | optional | `herdr-app` on PATH | vega-sidebar sidebar and vega-inbox decisions | install herdr-app, then `vega config apply herdr-app` |
 | `python3` | optional | `python3` on PATH | herdr-app badge reader and layout maintenance | the OS package manager |
 | `herdr` | optional | `herdr` on PATH (or `HERDR_BIN_PATH`) | legacy TUI backend: board and agents in panes | https://github.com/herdrdev/herdr |
 | `chezmoi` | optional | absent, or managing none of vega's config targets | `vega config apply` writes every unit | drop vega's targets from the dotfiles (config.md, cut-over) |
