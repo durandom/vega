@@ -47,7 +47,8 @@ export default class Vega extends View {
     if (serialized !== this.lastBadges) {
       this.lastBadges = serialized;
       setShared("vega.badges", rows);
-      run("vega-inbox.refresh");
+      // The command exists only while the inbox window runs; a closed one would toast an error.
+      if (shared("vega.inbox-open")) run("vega-inbox.refresh");
     }
     const fresh = rows.flatMap(r => r.decision_texts ?? []).filter(d => !this.seen.has(`${d.project}/${d.id}`));
     if (fresh.length) {
