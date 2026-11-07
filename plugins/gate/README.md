@@ -22,6 +22,7 @@ Gate uses the author's terminal backend. In hc/herdr-app it starts a detached re
 `vega.role` and `vega.review` labels and inherits the author's `herdr.space` for visibility.
 Both backends share harness defaults and existing repo trust propagation from `vega-herdr::launch`.
 Review state records the backend; old records default to herdr. An hc verdict requires matching
-review state and label plus verified process ancestry. Until hc mail routing is available,
-hc verdict delivery uses `hc send` directly (`vega post` stays the TUI transport). With neither terminal context present, the gate records
+review state and label plus verified process ancestry. hc verdict delivery keeps using `hc send`
+directly until hc offers an atomic idle-or-done guard (vega-0h4c.17); direct `hc send` proves
+synchronous delivery (`vega post` stays the TUI transport). With neither terminal context present, the gate records
 "no terminal"; stale context is an error rather than absence.

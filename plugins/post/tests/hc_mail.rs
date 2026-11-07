@@ -28,7 +28,13 @@ case "$1 $2" in
    printf '{"result":{"%s":[{"pane_id":"w1:p1","agent":"codex","agent_status":"idle","cwd":"%s"},{"pane_id":"w1:p2","name":"shared-worker","agent":"codex","agent_status":"idle","cwd":"%s"}]}}\n' "$key" "$HOME" "$HOME" ;;
  'workspace list') echo '{"result":{"workspaces":[]}}' ;;
  'pane process-info') printf '{"result":{"process_info":{"shell_pid":%s}}}\n' "$FAKE_PID" ;;
- 'agent get') test "$3" = shared-worker && set -- agent get w1:p2; printf '{"result":{"agent":{"pane_id":"%s","agent":"codex"}}}\n' "$3" ;;
+ 'agent get')
+   case "$3" in
+     shared-worker) set -- agent get w1:p2 ;;
+     w1:p1|w1:p2) ;;
+     *) echo '{"error":{"code":"not_found","message":"no such agent"}}'; exit 1 ;;
+   esac
+   printf '{"result":{"agent":{"pane_id":"%s","agent":"codex"}}}\n' "$3" ;;
  'agent prompt') printf '{"pane":"%s","text":"pointer"}\n' "$3" >> "$HOME/prompts"; echo '{"result":{}}' ;;
  'pane read') printf 'done\n────────\n❯ \n────────\n status\n' ;;
  *) echo '{"result":{}}' ;;
@@ -528,5 +534,31 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
     assert!(f
         .log()
         .contains("claude pane(s) get /config theme=light when idle"));
+    assert!(f.prompts("w1:p2").is_empty());
+}
+
+#[test]
+fn inbox_only_hc_name_resolves_without_a_herdr_match() {
+    let f = Fixture::new();
+    let file = f.home.path().join("hc.json");
+    let mut terminals: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    terminals["terminals"][1]["name"] = json!("hc-worker");
+    write(&file, &terminals);
+    let out = f
+        .command(&["send", "hc-worker", "hc-name-body"], Some("w1:p1"))
+        .env("VEGA_POST_INBOX_ONLY", "testhost")
+        .env("VEGA_NATS_URL", "nats://127.0.0.1:9")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let prompts = f.prompts("t2");
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("hc-name-body"));
+    let args = prompts[0]["args"].as_array().unwrap();
+    assert_eq!(args[0], "send");
+    assert_eq!(args[args.len() - 2], "t2");
     assert!(f.prompts("w1:p2").is_empty());
 }
