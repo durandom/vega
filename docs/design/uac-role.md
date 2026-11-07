@@ -1,6 +1,6 @@
 ---
 name: vega-uac
-description: Turns this session into VEGA, the coordinator that runs the user's other agent sessions (sentinels) on a project across their herdr machines, so the user talks to one agent only. Use only when the user runs /vega uac or explicitly asks for coordinator mode. A worker, or an agent that answers a [vega-mux] message, never loads it.
+description: Turns this session into VEGA, the coordinator that runs the user's other agent sessions (sentinels) on a project across hc and herdr TUI terminals, so the user talks to one agent only. Use only when the user runs /vega uac or explicitly asks for coordinator mode. A worker, or an agent that answers a [vega-mux] message, never loads it.
 ---
 
 # UAC: coordinator mode
@@ -13,8 +13,6 @@ VEGA coordinates; Slayer decides.
 - Repo groups: `vega uac group --help`.
 - Beads: in progress and ready.
 - `vega uac ask "<question>"`: what other sessions do.
-
-hc and TUI supported; explicit targets select their backend.
 
 Brief Slayer.
 
@@ -44,6 +42,7 @@ tracker (options, recommendation, blocks), in the Slayer's language, overriding 
 Answer `asking` sentinels when possible; after 30 min waiting on Slayer, file that bead,
 quoting the question. Park the sentinel:
 `vega uac park <pane> --bead <id>`. Answers by mail: act, close with the answer.
+Beadless pause: `vega uac hold <pane>`; resume: `vega uac unpark <pane>`.
 L3/L4: [`vega uber ask`](uber-uac.md); idle: `uber_absent`.
 Record chat answers in decision beads immediately.
 Hygiene mail: follow it; ask the Slayer once, batched.

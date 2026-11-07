@@ -117,6 +117,8 @@ fn main() -> ExitCode {
             done(park(t, b, Some(m)))
         }
         [a, t] if a == "unpark" && !t.starts_with('-') => done(unpark(t, None)),
+        [a, t] if a == "hold" && !t.starts_with('-') => done(hold(t, None)),
+        [a, t, mf, m] if a == "hold" && mf == "--machine" => done(hold(t, Some(m))),
         [a, t, mf, m] if a == "unpark" && mf == "--machine" => done(unpark(t, Some(m))),
         [a, q] if a == "ask" && !q.starts_with('-') => run(Mode::Ask(q.clone(), None)),
         [a, w, d, q] if a == "ask" && w == "--within" => run(Mode::Ask(q.clone(), Some(d.clone()))),
@@ -138,7 +140,7 @@ fn main() -> ExitCode {
         }
         _ => {
             let message = format!(
-                "unknown argument {}; vega uac takes `status`, `ask [--within <d>] \"<question>\"`, `claim`, `release`, `adopt <pane>`, `answer <bead> \"<answer>\"`, `capacity [...]`, `park <pane> --bead <id>`, `unpark <pane>`, `rules` or no argument",
+                "unknown argument {}; vega uac takes `status`, `ask [--within <d>] \"<question>\"`, `claim`, `release`, `adopt <pane>`, `answer <bead> \"<answer>\"`, `capacity [...]`, `park <pane> --bead <id>`, `hold <pane>`, `unpark <pane>`, `rules` or no argument",
                 args[0]
             );
             print_failure(&Failure::new("usage", message, "valid usage below"));
@@ -1107,6 +1109,7 @@ fn park(target: &str, bead: &str, machine: Option<&str>) -> Result<(), Failure> 
         ));
     }
     let p = st::Park {
+        held: false,
         bead: bead.to_string(),
         title,
         dir: cwd.display().to_string(),
@@ -1118,6 +1121,39 @@ fn park(target: &str, bead: &str, machine: Option<&str>) -> Result<(), Failure> 
     println!(
         "help: vegad wakes you once when {bead} closes; new work you send {pane} unparks it; vega uac unpark {pane} ends it now"
     );
+    Ok(())
+}
+
+/// Explicit hold shares park's lifecycle, without a bead to poll.
+fn hold(target: &str, machine: Option<&str>) -> Result<(), Failure> {
+    let (target, machine) = terminal::scope(target, machine)?;
+    let machine = machine.as_deref();
+    let a = terminal::agent(&target, machine)?;
+    let pane = str_of(&a, "pane_id");
+    if parent_of_on(machine, pane, agent_name(&a)).is_none() {
+        return Err(Failure::new(
+            "not_supervised",
+            format!("{pane} has no parent on this machine"),
+            &format!("adopt it first: vega uac adopt {target}"),
+        ));
+    }
+    st::save_park(
+        machine,
+        pane,
+        &st::Park {
+            held: true,
+            bead: String::new(),
+            title: "on hold".into(),
+            dir: String::new(),
+            bd: String::new(),
+            closed: false,
+        },
+    );
+    println!("held: {pane} (no decision bead)");
+    let flag = machine
+        .map(|m| format!(" --machine {m}"))
+        .unwrap_or_default();
+    println!("help: vega uac unpark {pane}{flag} resumes attention; new work from the parent also clears the hold");
     Ok(())
 }
 
@@ -1749,7 +1785,9 @@ fn attention_table(rows: &[Row], host: &str) -> Vec<String> {
             } else {
                 format!("ci watch: {}", r.ci.join(" "))
             }
-        } else if let Some(p) = park {
+        } else if let Some(p) = park.as_ref().filter(|p| p.held) {
+            p.title.clone()
+        } else if let Some(p) = &park {
             let closed = if p.closed { " (closed)" } else { "" };
             shorten(&format!("{}{closed}: {}", p.bead, p.title), 200)
         } else if let Some(q) = quota.filter(|_| a == Attention::Quota) {
@@ -1771,6 +1809,8 @@ fn attention_table(rows: &[Row], host: &str) -> Vec<String> {
             cell(&report),
             cell(&match quota.filter(|_| a == Attention::Quota) {
                 Some(q) => q.next(&r.pane, &mflag),
+                None if park.is_some_and(|p| p.held) =>
+                    format!("vega uac unpark {}{mflag}", r.pane),
                 // Headed: the owner answers in the pane; vegad does not wake.
                 None if st::Mode::parse(&r.mode).is_some_and(|m| st::for_user(a, m)) => {
                     "for the user (headed pane; no wake)".to_string()

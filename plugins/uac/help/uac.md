@@ -86,7 +86,10 @@ Commands:
                a sentinel waits on an open decision bead: vegad stops waking
                you for it and wakes you once when the bead closes; new work
                you send it unparks it
-  unpark <pane> [--machine <m>]  ends the park without waiting for the bead
+  hold <pane> [--machine <m>]
+               pause a supervised sentinel's attention without a decision bead;
+               no bead polling; unpark or new parent work clears the hold
+  unpark <pane> [--machine <m>]  ends a hold or park without waiting for a bead
   rules        the generic coordinator rules (briefing, branches, landing, cleanup)
 
 Flags:

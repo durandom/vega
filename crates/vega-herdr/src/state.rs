@@ -705,6 +705,8 @@ pub fn quota_json(machine: Option<&str>, pane: &str) -> Option<Value> {
 /// does not wake its parent for it until the bead closes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Park {
+    /// Explicit hold without a decision bead; resumed by unpark/new work.
+    pub held: bool,
     pub bead: String,
     pub title: String,
     /// Where `bd show <bead>` finds the bead: the checkout `park` ran in.
@@ -717,7 +719,7 @@ pub struct Park {
 
 pub fn save_park(machine: Option<&str>, pane: &str, p: &Park) {
     let record = json!({
-        "bead": p.bead, "title": p.title, "dir": p.dir, "bd": p.bd, "closed": p.closed
+        "held": p.held, "bead": p.bead, "title": p.title, "dir": p.dir, "bd": p.bd, "closed": p.closed
     });
     write(&state_file_on("parked", machine, pane), &record.to_string());
 }
@@ -742,6 +744,7 @@ pub fn parks() -> Vec<(Option<String>, String, Park)> {
 fn parse_park(text: &str) -> Option<Park> {
     let v: Value = serde_json::from_str(text).ok()?;
     Some(Park {
+        held: v["held"] == true,
         bead: v["bead"].as_str()?.to_string(),
         title: v["title"].as_str().unwrap_or("").to_string(),
         dir: v["dir"].as_str().unwrap_or("").to_string(),
@@ -1291,6 +1294,7 @@ mod tests {
     #[test]
     fn park_records_round_trip() {
         let p = Park {
+            held: false,
             bead: "sk-w8zx.7".into(),
             title: "Golden or patterns?".into(),
             dir: "/Users/x/src/spellkave".into(),
@@ -1367,6 +1371,7 @@ mod tests {
         );
         // Parked: only exited and input still count; a closed bead decides.
         let mut park = Park {
+            held: false,
             bead: "sk-1".into(),
             title: "Which colour?".into(),
             dir: "/repo".into(),

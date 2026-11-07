@@ -91,6 +91,7 @@ fn quiet_attention_uses_durable_evidence_and_item_identity() {
             None,
             pane,
             &st::Park {
+                held: false,
                 bead: "decision".into(),
                 title: "hold".into(),
                 dir: "/r".into(),
@@ -102,7 +103,29 @@ fn quiet_attention_uses_durable_evidence_and_item_identity() {
             .0
             .iter()
             .any(|(p, _)| p == pane));
-        st::unpark(None, pane);
+        let mut hold = st::park_of(None, pane).unwrap();
+        hold.held = true;
+        hold.bead.clear();
+        hold.bd = "must-not-run".into();
+        st::save_park(None, pane, &hold);
+        let mut failing = HashSet::new();
+        check_parks(&mut failing);
+        assert!(failing.is_empty(), "a hold never polls bd");
+        d.status(pane, "blocked");
+        assert!(!attentions(&sup, &d, None)["t1"]
+            .0
+            .iter()
+            .any(|(p, _)| p == pane));
+        d.status(pane, "idle");
+        assert!(st::unpark(None, pane));
+        assert!(attentions(&sup, &d, None)["t1"]
+            .0
+            .iter()
+            .any(|(p, _)| p == pane));
+        st::save_park(None, pane, &hold);
+        st::settle(None, pane); // New parent work resumes held children too.
+        assert!(st::park_of(None, pane).is_none());
+        st::save_silence(None, pane, &st::Silence::default());
     }
     // kill/rm is proven absence in hc; native notes own those exits.
     sup.gone("t2");

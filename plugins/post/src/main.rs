@@ -4324,11 +4324,14 @@ fn attentions(
             continue;
         }
         let done = st::done_of(m, &c.pane).map(|x| x.outcome);
+        let park = st::park_of(m, &c.pane);
+        if park.as_ref().is_some_and(|p| p.held) {
+            continue; // An explicit hold suppresses wakes until the parent resumes it.
+        }
         let dialog = (m.is_none() && alive == Some(true))
             .then(|| local_dialog(&c.pane, d.status_of(&c.pane)))
             .flatten();
         let silence = st::silence_of(m, &c.pane);
-        let park = st::park_of(m, &c.pane);
         let (attention, question) = match dialog {
             Some(x) => asking_dialog(&x),
             None => (
@@ -5653,7 +5656,10 @@ const PARK_BD_TIMEOUT: Duration = Duration::from_secs(5);
 /// park, on the metadata clock; nothing runs without parks. A bead bd cannot
 /// show proves nothing: the park stays (logged once).
 fn check_parks(failing: &mut HashSet<String>) {
-    for (m, pane, mut p) in st::parks().into_iter().filter(|(_, _, p)| !p.closed) {
+    for (m, pane, mut p) in st::parks()
+        .into_iter()
+        .filter(|(_, _, p)| !p.closed && !p.held)
+    {
         let key = m.as_ref().map_or(pane.clone(), |m| format!("{m}/{pane}"));
         let out = vega_herdr::output_within(
             std::process::Command::new(&p.bd)

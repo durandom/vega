@@ -125,6 +125,12 @@ esac"#,
         assert!(call(&["adopt", child, "--headless"]).contains("told: yes"));
         assert!(call(&["park", child, "--bead", "decision-1"]).contains("parked:"));
         assert!(call(&["unpark", child]).contains("unparked:"));
+        fs::rename(bin.join("bd"), bin.join("bd-off")).unwrap();
+        assert!(call(&["hold", child]).contains("held:"));
+        assert!(call(&["hold", child]).contains("held:"));
+        assert!(call(&[]).contains("on hold"));
+        assert!(call(&["unpark", child]).contains("unparked:"));
+        fs::rename(bin.join("bd-off"), bin.join("bd")).unwrap();
         call(&["ask", "status?"]);
         assert!(call(&["answer", "decision-1", "yes"]).contains("you (no mail)"));
         assert!(fs::read_to_string(root.join("mail"))

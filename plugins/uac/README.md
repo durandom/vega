@@ -9,7 +9,10 @@ age, or `unknown` without mail metadata. Unknown does not prove an empty inbox;
 inspect `vega post log --pane <pane>` on the owning host for broker read status.
 
 Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`,
-`grant`, `revoke`, `grants`, `group`, `park`, `unpark`.
+`grant`, `revoke`, `grants`, `group`, `park`, `hold`, `unpark`.
+
+`vega uac hold <pane>` pauses attention without a decision bead. Resume with
+`vega uac unpark <pane>`; new work from the parent also clears a hold.
 
 Done reports arrive by mail without a duplicate attention wake. Silent gate/CI
 waits, parked children and closed hc terminals remain quiet. Spawn briefs request
