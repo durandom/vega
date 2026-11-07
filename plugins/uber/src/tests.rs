@@ -14,6 +14,7 @@ fn here(dir: &Path, host: &str, pane: &str) -> Here {
         host: host.into(),
         pane: pane.into(),
         panes: vec![pane.into()],
+        unavailable: [None, None],
         file: dir.join(host).join("claim.json"),
     }
 }
@@ -106,6 +107,7 @@ fn hc_and_herdr_on_one_host_share_the_claim_and_writer_lock() {
             host: hc.host.clone(),
             pane: "w1:p1".into(),
             panes: hc.panes.clone(),
+            unavailable: [None, None],
             file: hc.file.clone(),
         };
         for (a, b) in [(&hc, &tui), (&tui, &hc)] {
@@ -132,6 +134,33 @@ fn hc_and_herdr_on_one_host_share_the_claim_and_writer_lock() {
 }
 
 struct Server(Child);
+
+#[test]
+fn a_claim_appearing_after_sampling_in_an_unavailable_world_is_not_taken_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let (_server, client, kv) = broker(dir.path()).await;
+        for (index, caller, incumbent, code) in [
+            (0, "t7", "w1:p1", "herdr_not_found"),
+            (1, "w1:p1", "t7", "hc_not_found"),
+        ] {
+            // Identity and inventory were sampled with no claim present.
+            let mut sampled = here(&dir.path().join(index.to_string()), "worker", caller);
+            sampled.unavailable[index] = Some(Failure::new(code, "inventory unavailable", "retry"));
+            assert!(sampled.check_incumbent().is_ok());
+            // The other world claims before this caller acquires the writer lock.
+            let record = uber_state::value(incumbent, "worker", 0, 50);
+            uber_state::save(&sampled.file, &record).unwrap();
+            let e = claim_on(&client, &kv, &sampled, 100).await.unwrap_err();
+            assert_eq!(e.code, code);
+            assert_eq!(uber_state::local(&sampled.file, "worker"), Some(record));
+        }
+    });
+}
 
 impl Drop for Server {
     fn drop(&mut self) {

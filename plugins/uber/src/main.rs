@@ -136,6 +136,8 @@ struct Here {
     pane: String,
     /// Live local terminals across hc and herdr.
     panes: Vec<String>,
+    /// Sampled inventory errors: herdr, hc. Retained for claims appearing later.
+    unavailable: [Option<Failure>; 2],
     /// This host's claim file.
     file: PathBuf,
 }
@@ -143,6 +145,18 @@ struct Here {
 impl Here {
     fn mine(&self, c: &UberClaim) -> bool {
         c.pane == self.pane && vega_registry::token(&c.host) == vega_registry::token(&self.host)
+    }
+
+    fn check_incumbent(&self) -> Result<(), Failure> {
+        if let Some(claim) = uber_state::local(&self.file, &self.host) {
+            let hc = claim["pane"]
+                .as_str()
+                .is_some_and(vega_herdr::pane::is_hc_id);
+            if let Some(e) = &self.unavailable[usize::from(hc)] {
+                return Err(Failure::new(&e.code, &e.message, &e.hint));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -152,24 +166,29 @@ fn here() -> Result<Here, Failure> {
     let file = uber_state::file()
         .ok_or_else(|| Failure::new("no_home", "no state dir", "set HOME or XDG_STATE_HOME"))?;
     let host = st::post_host();
-    let claim = uber_state::local(&file, &host);
-    let claimed_hc = claim
-        .as_ref()
-        .and_then(|c| c["pane"].as_str())
-        .map(vega_herdr::pane::is_hc_id);
-    let tui = herdr_local(&["pane", "list"]);
+    let tui = herdr_local(&["pane", "list"]).and_then(|v| {
+        v["result"]["panes"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|p| p["pane_id"].as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .ok_or_else(|| {
+                Failure::new(
+                    "herdr_bad_output",
+                    "pane list has no panes array",
+                    "check herdr --version",
+                )
+            })
+    });
     let hc = terminal_list();
     let mut panes = Vec::new();
+    let mut unavailable = [None, None];
     match tui {
-        Ok(v) => panes.extend(
-            v["result"]["panes"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|p| p["pane_id"].as_str().map(String::from)),
-        ),
-        Err(e) if matches!(me, Terminal::Herdr(_)) || claimed_hc == Some(false) => return Err(e),
-        Err(_) => {}
+        Ok(rows) => panes.extend(rows),
+        Err(e) if matches!(me, Terminal::Herdr(_)) => return Err(e),
+        Err(e) => unavailable[0] = Some(e),
     }
     match hc {
         Ok(v) => panes.extend(
@@ -183,15 +202,18 @@ fn here() -> Result<Here, Failure> {
                 .filter(|p| vega_herdr::pane::is_hc_id(p))
                 .map(String::from),
         ),
-        Err(e) if matches!(me, Terminal::Hc(_)) || claimed_hc == Some(true) => return Err(e),
-        Err(_) => {}
+        Err(e) if matches!(me, Terminal::Hc(_)) => return Err(e),
+        Err(e) => unavailable[1] = Some(e),
     }
-    Ok(Here {
+    let here = Here {
         host,
         pane: me.pane().into(),
         panes,
+        unavailable,
         file,
-    })
+    };
+    here.check_incumbent()?;
+    Ok(here)
 }
 
 /// Serialize this host's claim/release across both terminal worlds.
@@ -300,6 +322,8 @@ async fn claim_on(
     now: u64,
 ) -> Result<Claimed, Failure> {
     let _lock = claim_lock(here)?;
+    // The incumbent may have appeared or changed worlds since inventory sampling.
+    here.check_incumbent()?;
     let view = read_view(client, kv, here).await.map_err(no_broker)?;
     if let Some(w) = view.live_uber() {
         if here.mine(&w) {

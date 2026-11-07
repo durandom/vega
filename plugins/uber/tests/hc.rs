@@ -214,6 +214,13 @@ esac
     let stdout = String::from_utf8_lossy(&o.stdout);
     assert!(stdout.contains("herdr_not_found"), "{o:?}");
     assert!(!stdout.contains("took_over:"), "{o:?}");
+    std::fs::rename(dir.path().join("bin/herdr-disabled"), &herdr).unwrap();
+    std::fs::write(&herdr, "#!/bin/sh\nprintf '%s\\n' '{\"result\":{}}'\n").unwrap();
+    let o = run(&c, &["claim"]);
+    assert!(
+        String::from_utf8_lossy(&o.stdout).contains("herdr_bad_output"),
+        "{o:?}"
+    );
     assert_eq!(
         vega_registry::uber_state::local(&dir.path().join("state/vega/uber/claim.json"), "worker")
             .unwrap()["pane"],
