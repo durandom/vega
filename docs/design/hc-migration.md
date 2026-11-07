@@ -130,7 +130,8 @@ dirs for a real core (never the user's core).
    hc explicit split/workspace placement is tracked in vega-0h4c.20; tab and wt-created
    spaces are implemented. Guides and README descriptions change with this slice.
 5. **UAC and the UI.** UAC commands over both backends, the vega herdr-app mod, board and open, config
-   doctor rows for `hc`/`herdr-app`, skills and help texts.
+   doctor rows for `hc`/`herdr-app`, skills and help texts. Split: 5a `vega uac` over hc plus quieter
+   attention (vega-0h4c.23, GitHub #8); 5b the UI, see [herdr-app UI](herdr-app-ui.md).
 6. **Retire the TUI** (vega-0h4c.4): once no TUI agent runs on any host, delete the herdr backend, the
    `herdr` config unit, the herdr plugins, `shims/herdr` and `link-herdr.sh`.
 
