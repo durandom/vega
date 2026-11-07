@@ -428,7 +428,7 @@ export default class Agents extends View {
     const header = (g) => {
       const open = !this.folded.has(g.id);
       const project = this.vegaTerminals.get(g.members[0]?.address)?.labels?.["vega.project-id"];
-      const totals = (shared("vega.badges") ?? []).find(r => r.project === project && Date.now()/1000-r.at <= 60);
+      const totals = (shared("vega.badges") ?? []).find(r => r.project === project && (r.machine || "") === (g.members[0]?.address.includes("/") ? g.members[0].address.split("/")[0] : "") && Date.now()/1000-r.at <= 60);
       const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       return h_flex()
         .id(g.id)

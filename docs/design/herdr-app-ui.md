@@ -66,3 +66,29 @@ Answers use the recorded checkout, independent of the app's current tab. Dismiss
 uses the entered text as the mandatory close reason. Agent mail opens a separate
 read-only archive (`vega post log --pane`); notification counts open `vega post notes`.
 Neither acknowledges an agent's mail.
+
+## Remote machines (vega-0h4c.26)
+
+The status mod reads the same badge files from every connected `hc machine ls`
+machine with `hc exec --on <machine> --json -- python3 -c <reader>`, every 15 seconds.
+Reads are bounded (8 seconds remotely, 12 seconds for each local subprocess), with
+up to eight parallel readers. This uses the app host's existing hc access and needs
+no additional NATS publication or ACL. Python 3 must be on PATH on both ends.
+Machine names equal registry hosts by convention. Disconnected machines are not
+read; their cards disappear. A failing reader does not hide local or other hosts'
+rows, and the status tooltip reports read errors. Original snapshot timestamps
+still expire after 60 seconds; reads never renew them. Hosts need synchronized clocks.
+
+Rows carry the source machine independently of project ID; decision seen/input/result
+keys include that machine, so identical project and bead IDs on two hosts do not
+collide. Remote hc waiting IDs become `hc:<machine>/tN`, and focusing uses the
+qualified hc address. Legacy TUI waiters are not presented as hc terminals.
+Group totals match both machine and project.
+
+Answer and Dismiss run through `hc exec --on <machine> --cwd <recorded checkout>`
+on that machine, passing program and arguments without a shell. The transport
+decodes hc's base64 stdout/stderr and inner exit code; an outer success does not
+mean the decision command succeeded. Local answers retain their existing execution
+path. No remote checkout is opened locally. After merge/apply, verify that a new
+remote decision opens the inbox without stealing focus, its answer reaches the
+remote UAC, and a remote waiting card focuses its terminal.

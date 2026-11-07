@@ -9,6 +9,13 @@ Agent mail through a NATS broker, also across machines. A message is stored in t
 target pane; vegad, the relay on each host, types a one-line pointer into the pane and the target pulls its mail.
 This keeps long messages out of busy panes and lets agents on different machines talk.
 
+`vega post relay install` installs a login starter (launchd on macOS, systemd user
+on Linux), so vegad runs without either UI. The optional herdr startup hook stays.
+The starter calls `relay start` once; vegad detaches and self-upgrades as before.
+`relay status` reports the login job separately from the running daemon;
+`vega config infra` checks its installation. hc machine/SSH retains core ownership.
+See [Lifecycle](../../docs/design/vegad.md#lifecycle-vega-lhc54) for live login checks.
+
 hc machine names must equal vega registry hosts. `vega post send ganymede/t7 "ping"`
 (also `hc:ganymede/t7`) routes to host `ganymede` and terminal `t7` without `--host`.
 The registry must contain that host; unknown hosts or unavailable checks fail before

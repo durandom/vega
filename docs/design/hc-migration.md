@@ -26,10 +26,14 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
    and vega keeps its own lineage ledger.
 5. **The vega herdr-app mod starts vegad (Slayer, 2026-11-06).** herdr-app has no startup hooks; a mod has
    `init()` and `exec()`, so the vega mod runs the idempotent `vega-post relay start` when it loads, as the
-   `vega.vegad` herdr plugin's `[[startup]]` hook does today. launchd/systemd stay gone
-   ([vegad](vegad.md) "Lifecycle", vega-lhc.54); on a host without a window, `vega deploy` already starts a
-   stopped vegad. The core outlives the app (macOS starts it as a one-shot launchd job), so vegad must
-   detach; `relay start` already does (setsid).
+   `vega.vegad` herdr plugin's `[[startup]]` hook does today. Amendment vega-0h4c.25:
+   `relay install` also installs a login starter on macOS and Linux for hosts without
+   either UI. It calls the same detached, idempotent starter; vegad retains its lock
+   and self-exec lifecycle. No hc core job is installed or changed. See
+   [vegad](vegad.md) "Lifecycle".
+   Core ownership decision (Slayer, 2026-11-07): `hc machine`/SSH keeps starting
+   remote cores, including on reconnect. Vega installs only vegad's login job;
+   the operator removes the experimental `dev.vega.hc-core` job on ganymede.
    Amended (Slayer, 2026-11-06, vega-0h4c.13): slice 0 found that a mod no layout shows never runs
    `init()`. The vega mod is therefore a small, always visible vega status element. The Slayer chose
    a **vega-owned clone** of main: `config/herdr-app/layouts/vega.json`, unit `herdr-app.layouts`.

@@ -4,8 +4,8 @@
 //!
 //! herdr starts vegad (plugin vega.vegad, a `[[startup]]` hook running
 //! `relay start`); vegad runs detached in its own session and outlives the
-//! hook and the herdr server. launchd / systemd units from before are only
-//! removed (`relay install` migrates) or, until then, kickstarted.
+//! hook and the herdr server. A login job also runs the idempotent starter
+//! on hosts with no terminal UI; it does not supervise the detached daemon.
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -24,6 +24,8 @@ use crate::host;
 
 const LABEL: &str = "vega.post-relay";
 const UNIT: &str = "vega-post-relay.service";
+const LOGIN_LABEL: &str = "vega.vegad-start";
+const LOGIN_UNIT: &str = "vega-vegad-start.service";
 const PLUGIN_ID: &str = "vega.vegad";
 /// Env vegad keeps from the installing shell, if set there (`vegad.env`).
 /// `DOLT_REMOTE_USER` is the beads sync's remote user (no secret; the password stays with the
@@ -773,13 +775,6 @@ fn plan() -> Result<Plan, Failure> {
             "install vega first (`mise run install`), then run `vega post relay install`",
         ));
     }
-    if dir_of("herdr").is_none() {
-        return Err(Failure::new(
-            "herdr_not_found",
-            "herdr is not on PATH",
-            "install herdr, then run install again",
-        ));
-    }
     let env = PINNED_ENV
         .iter()
         .filter_map(|k| {
@@ -821,6 +816,9 @@ fn plugin_dir() -> Result<PathBuf, Failure> {
 /// Writes plugin vega.vegad and links it once. herdr re-reads a linked
 /// manifest from disk, so a rewrite needs no new link.
 fn link_herdr_plugin(exe: &str, container: Option<&str>) -> String {
+    if dir_of("herdr").is_none() {
+        return "skipped (herdr not installed)".into();
+    }
     let Ok(dir) = plugin_dir() else {
         return "skipped (no HOME)".into();
     };
@@ -858,6 +856,184 @@ fn write_env_file(env: &[(String, String)]) -> Result<PathBuf, Failure> {
     Ok(p)
 }
 
+// Login jobs only invoke the existing detached starter. No hc core ownership,
+// no competing supervisor, and `relay stop` remains stopped until next login.
+fn login_path(m: Manager) -> Result<PathBuf, Failure> {
+    let old = unit_path(m)?;
+    Ok(old.with_file_name(match m {
+        Manager::Launchd => format!("{LOGIN_LABEL}.plist"),
+        Manager::Systemd => LOGIN_UNIT.into(),
+    }))
+}
+
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn systemd_quote(s: &str) -> String {
+    format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('%', "%%")
+            .replace('$', "$$")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+    )
+}
+
+fn login_body(m: Manager, argv: &[String], vars: &[(String, String)]) -> String {
+    match m {
+        Manager::Launchd => {
+            let args = argv
+                .iter()
+                .map(|a| format!("<string>{}</string>", xml(a)))
+                .collect::<String>();
+            let env = vars
+                .iter()
+                .map(|(k, v)| format!("<key>{}</key><string>{}</string>", xml(k), xml(v)))
+                .collect::<String>();
+            format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>Label</key><string>{LOGIN_LABEL}</string><key>ProgramArguments</key><array>{args}</array><key>EnvironmentVariables</key><dict>{env}</dict><key>RunAtLoad</key><true/><key>AbandonProcessGroup</key><true/></dict></plist>\n")
+        }
+        Manager::Systemd => {
+            let args = argv
+                .iter()
+                .map(|a| systemd_quote(a))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let env = vars
+                .iter()
+                .map(|(k, v)| {
+                    format!(
+                        "Environment={}\n",
+                        systemd_quote(&format!("{k}={v}")).replace("$$", "$")
+                    )
+                })
+                .collect::<String>();
+            format!("[Unit]\nDescription=Start vegad at user login\n[Service]\nType=oneshot\nRemainAfterExit=yes\nKillMode=process\n{env}ExecStart={args}\n[Install]\nWantedBy=default.target\n")
+        }
+    }
+}
+
+fn install_login(p: &Plan) -> Result<PathBuf, Failure> {
+    let m = manager().ok_or_else(|| {
+        Failure::new(
+            "unsupported_os",
+            "no login service for this OS",
+            "use vega post relay start",
+        )
+    })?;
+    install_login_for(m, p)
+}
+
+fn install_login_for(m: Manager, p: &Plan) -> Result<PathBuf, Failure> {
+    let path = login_path(m)?;
+    let mut argv = Vec::new();
+    if let Some(c) = &p.container {
+        argv.extend([
+            "/usr/bin/toolbox".into(),
+            "run".into(),
+            "-c".into(),
+            c.clone(),
+        ]);
+    }
+    argv.extend([p.exe.display().to_string(), "relay".into(), "start".into()]);
+    let mut vars = vec![(
+        "PATH".into(),
+        daemon_path(
+            &p.exe,
+            &env::var("PATH").unwrap_or_default(),
+            env::var("HERDR_BIN_PATH").ok().as_deref(),
+        ),
+    )];
+    for key in ["HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
+        if let Ok(v) = env::var(key) {
+            vars.push((key.into(), v));
+        }
+    }
+    let body = login_body(m, &argv, &vars);
+    let changed = fs::read_to_string(&path).ok().as_deref() != Some(&body);
+    fs::create_dir_all(path.parent().unwrap()).map_err(|e| io_err(&path, e))?;
+    fs::write(&path, body).map_err(|e| io_err(&path, e))?;
+    let (ok, detail) = match m {
+        Manager::Launchd => {
+            let domain = format!("gui/{}", uid());
+            let service = format!("{domain}/{LOGIN_LABEL}");
+            let loaded = run("launchctl", &["print", &service]).0;
+            if loaded && changed {
+                let (ok, detail) = run("launchctl", &["bootout", &service]);
+                if !ok {
+                    return Err(Failure::new(
+                        "login_service",
+                        detail,
+                        "retry vega post relay install in a logged-in user session",
+                    ));
+                }
+            }
+            if loaded && !changed {
+                (true, String::new())
+            } else {
+                run(
+                    "launchctl",
+                    &["bootstrap", &domain, &path.display().to_string()],
+                )
+            }
+        }
+        Manager::Systemd => {
+            let reload = run("systemctl", &["--user", "daemon-reload"]);
+            if !reload.0 {
+                reload
+            } else {
+                run("systemctl", &["--user", "enable", "--now", LOGIN_UNIT])
+            }
+        }
+    };
+    if !ok {
+        return Err(Failure::new("login_service", detail, "retry vega post relay install in a logged-in user session (Linux toolbox: run on a host with access to the user systemd bus)"));
+    }
+    Ok(path)
+}
+
+fn remove_login() -> Result<(), Failure> {
+    let Some(m) = manager() else {
+        return Ok(());
+    };
+    remove_login_for(m)
+}
+
+fn remove_login_for(m: Manager) -> Result<(), Failure> {
+    let path = login_path(m)?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let result = match m {
+        Manager::Launchd => {
+            let service = format!("gui/{}/{LOGIN_LABEL}", uid());
+            if run("launchctl", &["print", &service]).0 {
+                run("launchctl", &["bootout", &service])
+            } else {
+                (true, String::new())
+            }
+        }
+        Manager::Systemd => run("systemctl", &["--user", "disable", "--now", LOGIN_UNIT]),
+    };
+    if !result.0 {
+        return Err(Failure::new(
+            "login_service",
+            result.1,
+            "retry vega post relay uninstall in a logged-in user session",
+        ));
+    }
+    fs::remove_file(&path).map_err(|e| io_err(&path, e))?;
+    if m == Manager::Systemd {
+        let _ = run("systemctl", &["--user", "daemon-reload"]);
+    }
+    Ok(())
+}
+
 /// `relay install`: migrates from a launchd / systemd unit, pins the env,
 /// links herdr's startup hook and starts vegad. Idempotent.
 pub fn install() -> Result<(), Failure> {
@@ -888,6 +1064,11 @@ pub fn install() -> Result<(), Failure> {
         Some(pid) => println!("relay: running (pid {pid})"),
         None => start_exe(&p.exe)?,
     }
+    let login = install_login(&p)?;
+    println!(
+        "login_service: {}",
+        collapse_home(&login.display().to_string())
+    );
     println!("help: vega post relay status");
     Ok(())
 }
@@ -896,6 +1077,7 @@ pub fn install() -> Result<(), Failure> {
 /// legacy unit and the env file.
 pub fn uninstall() -> Result<(), Failure> {
     load_env_file();
+    remove_login()?;
     if let Some(unit) = remove_legacy_unit()? {
         println!(
             "legacy_unit: {} (removed)",
@@ -951,6 +1133,7 @@ fn status_value() -> Result<Value, Failure> {
         "mode": holder.as_ref().and_then(|_| read_mode()),
         "broker": holder.as_ref().and_then(|_| read_broker()),
         "legacy_unit": legacy,
+        "login_service": manager().and_then(|m| login_path(m).ok()).filter(|p| p.is_file()).map(|p| collapse_home(&p.display().to_string())),
         "log": collapse_home(&log_path()?.display().to_string()),
     }))
 }
@@ -983,6 +1166,7 @@ pub fn status(as_json: bool) -> Result<(), Failure> {
     if let Some(u) = v["legacy_unit"].as_str() {
         println!("legacy_unit: {u} (installed; `vega post relay install` migrates)");
     }
+    println!("login_service: {}", s("login_service"));
     let log = log_path()?;
     let tail = fs::read_to_string(&log)
         .map(|t| {
@@ -1009,6 +1193,104 @@ pub fn status(as_json: bool) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn login_units_escape_arguments_and_preserve_detached_daemon() {
+        let args = vec![
+            "/home/A & B/vega-post".into(),
+            "relay".into(),
+            "start".into(),
+        ];
+        let vars = vec![("PATH".into(), "/home/A & B/bin:/usr/bin".into())];
+        let mac = login_body(Manager::Launchd, &args, &vars);
+        assert!(mac.contains("<string>/home/A &amp; B/vega-post</string>"));
+        assert!(mac.contains("<key>AbandonProcessGroup</key><true/>"));
+        assert!(mac.contains("<key>RunAtLoad</key><true/>"));
+        assert!(!mac.contains("KeepAlive"));
+        let linux = login_body(Manager::Systemd, &args, &vars);
+        assert!(linux.contains("Type=oneshot\nRemainAfterExit=yes\nKillMode=process"));
+        assert!(linux.contains("ExecStart=\"/home/A & B/vega-post\" \"relay\" \"start\""));
+        assert_eq!(systemd_quote("a%$\"\\b"), "\"a%%$$\\\"\\\\b\"");
+        assert!(!linux.contains("Restart="));
+    }
+
+    #[test]
+    fn login_install_repair_and_remove_with_fake_managers() {
+        use std::os::unix::fs::PermissionsExt;
+        if env::var_os("VEGA_LOGIN_TEST").is_none() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = d.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            for (name, body) in [
+                ("id", "echo 123"),
+                (
+                    "launchctl",
+                    r#"echo "$*" >> "$HOME/calls"
+case "$1" in
+ print) test -f "$HOME/loaded" ;;
+ bootstrap) /usr/bin/touch "$HOME/loaded" ;;
+ bootout) /bin/rm -f "$HOME/loaded" ;;
+esac"#,
+                ),
+                (
+                    "systemctl",
+                    r#"echo "$*" >> "$HOME/calls"
+test -z "$FAIL_SYSTEMCTL""#,
+                ),
+            ] {
+                let p = bin.join(name);
+                fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+                fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            let status = Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "service::tests::login_install_repair_and_remove_with_fake_managers",
+                ])
+                .env("VEGA_LOGIN_TEST", "1")
+                .env("HOME", d.path())
+                .env("XDG_CONFIG_HOME", d.path().join("config"))
+                .env("XDG_STATE_HOME", d.path().join("state"))
+                .env("PATH", &bin)
+                .env_remove("FAIL_SYSTEMCTL")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let mut plan = Plan {
+            exe: home().unwrap().join("bin/vega-post"),
+            container: None,
+            env: vec![],
+        };
+        let mac = install_login_for(Manager::Launchd, &plan).unwrap();
+        install_login_for(Manager::Launchd, &plan).unwrap();
+        let calls = || fs::read_to_string(home().unwrap().join("calls")).unwrap();
+        assert_eq!(
+            calls().matches("bootstrap").count(),
+            1,
+            "unchanged job is not reloaded"
+        );
+        plan.exe = home().unwrap().join("new bin/vega-post");
+        install_login_for(Manager::Launchd, &plan).unwrap();
+        assert_eq!(calls().matches("bootout").count(), 1);
+        assert_eq!(calls().matches("bootstrap").count(), 2);
+        remove_login_for(Manager::Launchd).unwrap();
+        remove_login_for(Manager::Launchd).unwrap();
+        assert!(!mac.exists());
+        plan.container = Some("code".into());
+        let linux = install_login_for(Manager::Systemd, &plan).unwrap();
+        let text = fs::read_to_string(&linux).unwrap();
+        assert!(text.contains("\"/usr/bin/toolbox\" \"run\" \"-c\" \"code\""));
+        assert!(calls().contains("--user enable --now vega-vegad-start.service"));
+        remove_login_for(Manager::Systemd).unwrap();
+        assert!(!linux.exists());
+        // This subprocess is the only reader/writer of its environment.
+        unsafe {
+            env::set_var("FAIL_SYSTEMCTL", "yes");
+        }
+        assert!(install_login_for(Manager::Systemd, &plan).is_err());
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = env::temp_dir().join(format!("vega-service-{name}-{}", std::process::id()));

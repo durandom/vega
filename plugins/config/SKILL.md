@@ -44,5 +44,6 @@ NATS needs `VEGA_NATS_URL` or `vega/nats.url`; Dolt needs `VEGA_BD_REMOTE` or
 Files are first-line values under `$XDG_CONFIG_HOME` (normally `~/.config`);
 environment overrides win. A tailnet alone does not configure either service.
 Janitor embeddings similarly need `VEGA_JANITOR_EMBED_ENDPOINT` or
-`vega/janitor-embed.url`. Before upgrading hosts, preserve their existing
-endpoints in these files or their environment overrides.
+`vega/janitor-embed.url`. Preserve host endpoints when upgrading.
+
+`vegad-start` login setup: `vega post relay install`.

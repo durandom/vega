@@ -25,7 +25,7 @@ main path.
 ## Shape
 
 `vegad` is the existing `vega post relay` service, grown up. One per machine. herdr starts it, it
-upgrades itself in place, and no OS service manager is involved (see Lifecycle).
+upgrades itself in place, and a login job also starts it without either UI (see Lifecycle).
 
 On Silverblue the binaries are built in a toolbox (newer glibc) but herdr's startup hook runs on the
 host, where they fail with `GLIBC_x not found`. `relay install` detects a toolbox
@@ -141,8 +141,32 @@ The socket client uses socket2 for a portable connect deadline on Unix sockets.
 
 ## Lifecycle (vega-lhc.54)
 
-vegad needs starting, not supervising: a restart loses little, and herdr is where vegad is needed.
-So herdr and the board start it, it upgrades itself in place, and launchd / systemd are gone.
+vegad needs starting, not supervising. herdr, herdr-app and the board can start it;
+it upgrades itself in place. Amendment vega-0h4c.25: hosts used remotely need an
+independent login starter, even with neither UI open. `relay install` now writes
+`~/Library/LaunchAgents/vega.vegad-start.plist` (macOS GUI login domain) or
+`$XDG_CONFIG_HOME/systemd/user/vega-vegad-start.service` (Linux user manager).
+Both run `vega-post relay start` once. launchd uses RunAtLoad and
+AbandonProcessGroup; systemd uses Type=oneshot, RemainAfterExit and KillMode=process
+so completion of the starter leaves the detached daemon alive. Neither restarts a
+stopped daemon. The existing lock arbitrates simultaneous UI/login starts.
+`relay stop` remains stopped until another explicit start, UI start or login.
+No hc core jobs are installed or changed.
+
+The login job records the installing user's HOME, XDG directories and PATH without
+agent shims. Broker/host/socket settings remain in `vegad.env`. Toolbox installs
+enter the original container with `toolbox run`; installation must have access to
+the host user systemd bus. Failed activation is a command failure, with the written
+unit retained for repair. Reinstall repairs changed jobs; an unchanged loaded
+launchd job is not unloaded. `relay status --json` reports `login_service` separately
+from `running`; `vega config infra` reports the installed `vegad-start` file, not
+proof that the daemon or user service manager is running.
+
+Login is the contract, not boot before login. Linux boot without login requires the
+operator to configure lingering separately; macOS requires a GUI login session.
+After merge, the operator must install and verify startup after login on macOS and
+Linux (including toolbox), with neither UI open. These live checks cannot be done
+from the implementation worktree without changing the user's services.
 
 **What herdr does with a plugin's children** (herdr 0.9.3 source and a live probe, 2026-10-10):
 startup hooks, actions and event hooks are plain child processes of the server (no process group,
@@ -155,6 +179,7 @@ plugin pane is no host either: a PTY, closed by the user, gone after a server re
 
 **Who starts it**
 
+- Login: the launchd/systemd user starter installed by `relay install`.
 - herdr: plugin `vega.vegad` (written and linked by `relay install`) runs `vega-post relay start`
   as its `[[startup]]` hook, at every server start and again on every live handoff.
 - The board: it shows vegad's state (running, pid, version, binary current or stale) and `V`
@@ -182,8 +207,8 @@ loser fails on the lock and exits.
 handoff (the old server exits each herdr update) and drop its delivery state each time. Mail,
 commands and the registry do not need herdr; agent status falls back to `herdr agent list` polling
 (one log line per outage, not per poll) and retries the stream, so vegad picks up the next server
-by itself. After a reboot nothing runs until herdr starts; mail waits in JetStream and the start
-rescans it.
+by itself. After a reboot the login job starts vegad; before login mail waits in
+JetStream. The start rescans it.
 
 **Upgrade in place.** vegad records the identity of its executable (device, inode, size, mtime of
 `current_exe`) at start and checks it every tick (1 s). When the file changed and is the same on
@@ -208,8 +233,10 @@ shows as stopped (`V` starts it). `cargo install` replaces by rename (new inode)
 changes size or mtime. On macOS the first launch of a new file takes a few seconds (seen: 5 s).
 
 **Migration.** `relay install` (the user runs it once per host): stops and removes the launchd
-plist / systemd unit if present, writes `vegad.env`, writes and links plugin vega.vegad, starts
-vegad. `relay uninstall`: stops vegad, unlinks the plugin, removes a leftover unit. Until a host
+plist / systemd supervising unit if present, writes `vegad.env`, writes and links
+plugin vega.vegad when herdr is installed, starts vegad and installs the new login
+starter. herdr is optional. `relay uninstall`: removes the login job, stops vegad,
+unlinks the plugin, and removes any leftover old supervising unit. Until a host
 is migrated, `relay start` with no relay running kickstarts its old unit as before. A relay from
 before self-exec does not upgrade itself: `relay status` shows it `stale` until `relay install`.
 

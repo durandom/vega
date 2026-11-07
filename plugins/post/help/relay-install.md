@@ -1,0 +1,18 @@
+Installs a login starter: launchd user agent on macOS, systemd user service on Linux.
+It invokes `vega-post relay start` once; vegad detaches, keeps its lock and self-upgrades.
+No herdr-app window or herdr binary is required. It does not start or restart hc cores.
+
+Also writes/links the herdr startup hook when herdr is installed (TUI stays supported).
+Pins broker, host, herdr socket and Dolt env in ~/.local/state/vega/vegad.env.
+The login job preserves HOME, XDG directories and a PATH without agent shims.
+Toolbox installations invoke the starter via toolbox run in the installing container.
+Older supervising vega.post-relay units are removed; the new login job is vega.vegad-start
+(macOS) or vega-vegad-start.service (Linux). Requires a logged-in user service manager.
+
+Examples:
+  vega post relay install
+  vega post relay status --json
+  vega config infra
+
+Use `vega post relay uninstall` to remove the login job and hook and stop vegad.
+`relay stop` stops vegad until another explicit start, UI startup or login.

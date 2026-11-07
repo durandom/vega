@@ -15,6 +15,39 @@ for p in root.glob('*.json'):
  except (OSError,ValueError): pass
 print(json.dumps({'folder':str(root),'rows':rows}))`;
 
+// Only saved, connected hc machines are read. No reverse link or registry ACL
+// change is needed; hc's SSH connection already authorizes execution there.
+const collectBadges = `import sys,json,subprocess,base64,concurrent.futures
+reader=sys.argv[1]
+def command(args):
+ p=subprocess.run(args,capture_output=True,text=True,timeout=12)
+ if p.returncode: raise ValueError(p.stderr or p.stdout or 'command failed')
+ return json.loads(p.stdout)
+local=command([sys.executable,'-c',reader])
+for row in local['rows']: row['machine']=''
+errors=[]
+try: machines=command(['hc','machine','ls','--json'])['machines']
+except (OSError,ValueError,KeyError,subprocess.TimeoutExpired) as e:
+ machines=[]; errors.append('hc machines: '+str(e))
+def remote(m):
+ name=m['name']
+ try:
+  wrapped=command(['hc','exec','--json','--on',name,'--timeout','8','--','python3','-c',reader])
+  if wrapped.get('code')!=0: raise ValueError(base64.b64decode(wrapped.get('stderr','')).decode('utf-8',errors='replace') or 'remote badge reader failed')
+  data=json.loads(base64.b64decode(wrapped['stdout'],validate=True))
+  rows=data['rows']
+  for row in rows:
+   row['machine']=name
+   row['waiting_panes']=[dict(w,pane='hc:'+name+'/'+w['pane'].removeprefix('hc:')) for w in row.get('waiting_panes',[]) if w.get('pane','').removeprefix('hc:').startswith('t') and '/' not in w['pane']]
+  return rows,None
+ except (OSError,ValueError,KeyError,TypeError,subprocess.TimeoutExpired) as e: return [],name+': '+str(e)
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+ for rows,error in pool.map(remote,[m for m in machines if m.get('state')=='connected']):
+  local['rows'].extend(rows)
+  if error: errors.append(error)
+local['errors']=errors
+print(json.dumps(local))`;
+
 export default class Vega extends View {
   init(_props, cx) {
     this.state = "checking";
@@ -37,9 +70,10 @@ export default class Vega extends View {
   }
 
   async badges(cx) {
-    const result = await exec("python3", ["-c", readBadges]);
+    const result = await exec("python3", ["-c", collectBadges, readBadges]);
     if (result.code !== 0) throw new Error(result.stderr || "Cannot read badges");
     const data = JSON.parse(result.stdout);
+    this.error = data.errors?.length ? data.errors.join("; ") : null;
     const now = Date.now()/1000;
     const rows = data.rows.filter(r => now-r.at <= 60);
     // A changed timestamp renews freshness, but never reopens an old decision.
@@ -50,9 +84,9 @@ export default class Vega extends View {
       // The command exists only while the inbox window runs; a closed one would toast an error.
       if (shared("vega.inbox-open")) run("vega-inbox.refresh");
     }
-    const fresh = rows.flatMap(r => r.decision_texts ?? []).filter(d => !this.seen.has(`${d.project}/${d.id}`));
+    const fresh = rows.flatMap(r => (r.decision_texts ?? []).map(d => ({...d, key: `${r.machine || ""}/${r.project}/${d.id}`}))).filter(d => !this.seen.has(d.key));
     if (fresh.length) {
-      for (const d of fresh) this.seen.add(`${d.project}/${d.id}`);
+      for (const d of fresh) this.seen.add(d.key);
       setShared("vega.seen-decisions", [...this.seen]);
       setShared("vega.inbox-project", null);
       if (!shared("vega.inbox-open")) this.open(); // Scratch-app probe: kind window preserves keyboard focus.
@@ -81,7 +115,7 @@ export default class Vega extends View {
         if (typeof status.running === "boolean") state = status.running ? "running" : "stopped";
       }
     } catch (_) {}
-    try { await this.badges(cx); this.error = null; }
+    try { await this.badges(cx); }
     catch (e) { this.error = String(e); }
     finally { this.refreshing = false; }
     this.state = state;

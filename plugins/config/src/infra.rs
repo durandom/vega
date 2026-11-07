@@ -49,12 +49,13 @@ const fn c(
 use Level::{Optional, Required};
 
 /// Required first; the order of the views.
-pub const COMPONENTS: [Component; 24] = [
+pub const COMPONENTS: [Component; 25] = [
     c("mise", Required, "mise run install-cli, mise run check", "install mise: https://mise.jdx.dev/installing-mise.html"),
     c("cargo", Required, "building vega (toolchain pinned in rust-toolchain.toml)", "install rustup: https://rustup.rs"),
     c("git", Required, "clone, upgrade, worktrees (>= 2.54: the wt-guard hook)", "install git with the OS package manager"),
     c("vega", Required, "every vega <plugin> call", "mise run install-cli in the vega checkout; put ~/.local/bin on PATH"),
     c("agent", Required, "the coding agents vega runs and configures", "install Claude Code, Codex or pi and start it once"),
+    c("vegad-start", Optional, "vegad at login without herdr-app or the TUI", "vega post relay install; runtime status: vega post relay status"),
     c("hc", Optional, "hc terminals, agent labels and the herdr-app backend", "install herdr-core (hc): https://github.com/herdrdev/herdr-core"),
     c("herdr-app", Optional, "vega-agents sidebar and vega-inbox decisions; apply the herdr-app config group", "install herdr-app, then vega config apply herdr-app"),
     c("python3", Optional, "herdr-app vega badge file reader and layout maintenance", "install Python 3 with the OS package manager"),
@@ -401,6 +402,23 @@ pub fn check(p: &Probe, ctx: &Ctx) -> Vec<Row> {
         .iter()
         .map(|comp| {
             let (ok, state) = match comp.name {
+                "vegad-start" => {
+                    let path = if cfg!(target_os = "macos") {
+                        p.env
+                            .home
+                            .join("Library/LaunchAgents/vega.vegad-start.plist")
+                    } else {
+                        p.env.config.join("systemd/user/vega-vegad-start.service")
+                    };
+                    if path.is_file() {
+                        (
+                            true,
+                            "installed (login job; runtime: vega post relay status)".into(),
+                        )
+                    } else {
+                        (false, "not installed".into())
+                    }
+                }
                 "git" => git(p),
                 "dcg" => dcg(p),
                 "herdr" => match p.var("HERDR_BIN_PATH") {
@@ -486,6 +504,22 @@ mod tests {
         (d, probe, ctx)
     }
 
+    #[test]
+    fn login_job_is_reported_without_a_terminal_backend() {
+        let (_d, p, ctx) = setup(&[]);
+        let path = if cfg!(target_os = "macos") {
+            p.env
+                .home
+                .join("Library/LaunchAgents/vega.vegad-start.plist")
+        } else {
+            p.env.config.join("systemd/user/vega-vegad-start.service")
+        };
+        assert!(!row(&check(&p, &ctx), "vegad-start").ok);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "login job").unwrap();
+        assert!(row(&check(&p, &ctx), "vegad-start").ok);
+    }
+
     fn row<'a>(rows: &'a [Row], name: &str) -> &'a Row {
         rows.iter().find(|r| r.name() == name).unwrap()
     }
@@ -549,7 +583,7 @@ mod tests {
     fn bare_home_misses_everything_with_a_next_step() {
         let (_d, p, ctx) = setup(&[]);
         let rows = check(&p, &ctx);
-        assert_eq!(summary(&rows), "required 0/5, optional 1/19");
+        assert_eq!(summary(&rows), "required 0/5, optional 1/20");
         // chezmoi absent is fine: nothing manages vega's targets.
         assert!(row(&rows, "chezmoi").ok);
         for r in rows.iter().filter(|r| !r.ok) {

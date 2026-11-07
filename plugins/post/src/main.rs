@@ -254,7 +254,7 @@ enum Cmd {
     /// Watch this machine's inboxes and type a pointer into each target pane
     #[command(
         args_conflicts_with_subcommands = true,
-        after_help = "Types a pointer only when the target agent is idle or done (herdr agent status), one line for all pending mail; `send --now` skips the wait.\nAgent status: herdr event stream (socket), else `herdr agent list` polling; `relay status` shows the mode.\nOne relay per host: a lock (~/.local/state/vega/post-relay-<host>.lock) stops a second one.\nherdr starts it (plugin vega.vegad, linked by `relay install`); it outlives herdr and execs a replaced binary by itself.\n\nExamples:\n  vega post relay start          # start vegad detached unless it runs (herdr's startup hook does this)\n  vega post relay status         # running or not, pid, version, binary current/stale, last log lines\n  vega post relay install        # once per machine: herdr hook, pinned env, migrates a launchd/systemd unit\n  vega post relay                # foreground; fails if a relay already runs\n  vega post relay --once         # notify pending mail now (ignores agent status), then exit"
+        after_help = "Types a pointer only when the target agent is idle or done (herdr agent status), one line for all pending mail; `send --now` skips the wait.\nAgent status: herdr event stream (socket), else `herdr agent list` polling; `relay status` shows the mode.\nOne relay per host: a lock (~/.local/state/vega/post-relay-<host>.lock) stops a second one.\nLogin starts it (`relay install`); the optional herdr hook and app mod also start it. It outlives either UI and self-upgrades.\n\nExamples:\n  vega post relay start          # start vegad detached unless it runs (herdr's startup hook does this)\n  vega post relay status         # running or not, pid, version, binary current/stale, last log lines\n  vega post relay install        # once per machine: login job, optional herdr hook, pinned env\n  vega post relay                # foreground; fails if a relay already runs\n  vega post relay --once         # notify pending mail now (ignores agent status), then exit"
     )]
     Relay {
         /// Notify pending mail now, whatever the agent status, then exit
@@ -338,12 +338,12 @@ enum RelayAction {
     Start,
     /// Stop the running relay (SIGTERM to the lock holder)
     Stop,
-    /// Once per machine: herdr startup hook, pinned env, start; removes a launchd/systemd unit (idempotent)
+    /// Once per machine: login job, optional herdr hook, pinned env and start (idempotent)
     #[command(
-        after_help = "Writes ~/.local/share/vega/herdr-plugin (plugin vega.vegad: [[startup]] `vega-post relay start`) and links it.\nVEGA_NATS_URL, VEGA_NATS_NKEY, VEGA_POST_HOST, HERDR_SOCKET_PATH and DOLT_REMOTE_USER go to ~/.local/state/vega/vegad.env if set.\nMigration: stops and removes ~/Library/LaunchAgents/vega.post-relay.plist or the systemd --user unit.\n\nExamples:\n  vega post relay install"
+        after_help = include_str!("../help/relay-install.md")
     )]
     Install,
-    /// Stop the relay, remove the herdr startup hook, a legacy unit and the env file
+    /// Stop the relay, remove the login job, herdr hook, legacy unit and env file
     Uninstall,
     /// Show whether vegad runs: pid, version, binary current or stale, delivery mode, last log lines
     Status {

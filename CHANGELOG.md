@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 121 · 2026-11-07
+
+- optional: `vegad-start` starts vegad at login without herdr-app or herdr TUI;
+  `vega config infra` reports the installed login job.
+- migration: Run `vega post relay install` after upgrading on each host to install
+  its launchd/systemd user login job. The herdr TUI hook stays supported.
+- feature: vega-inbox reads decisions and waiting panes from connected hc machines;
+  answers and dismissals execute in that machine's recorded checkout.
+
 ## 120 · 2026-11-07
 
 - migration: Remote hc spawns prepare repository trust and inherited hook approvals

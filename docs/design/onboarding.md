@@ -44,6 +44,7 @@ hc/herdr-app and the legacy herdr TUI are alternative terminal interfaces.
 | `vega` | required | `vega` on PATH | every `vega <plugin>` call | `mise run install-cli`; put `~/.local/bin` on PATH |
 | `agent` | required | one of `~/.claude`, `~/.codex`, `~/.pi/agent` | the coding agents vega runs and configures | install Claude Code, Codex or pi and start it once |
 | `hc` | optional | `hc` on PATH | hc terminals, agent labels and the herdr-app backend | https://github.com/herdrdev/herdr-core |
+| `vegad-start` | optional | login job file installed | vegad at login without either UI | `vega post relay install`; `vega post relay status` for runtime state |
 | `herdr-app` | optional | `herdr-app` on PATH | vega-agents sidebar and vega-inbox decisions | install herdr-app, then `vega config apply herdr-app` |
 | `python3` | optional | `python3` on PATH | herdr-app badge reader and layout maintenance | the OS package manager |
 | `herdr` | optional | `herdr` on PATH (or `HERDR_BIN_PATH`) | legacy TUI backend: board and agents in panes | https://github.com/herdrdev/herdr |
@@ -83,7 +84,27 @@ screen; approving it on the initiating machine does not resolve it.
 If terminals were created before the signed Core bundle upgrade, recreate those
 terminals after the user has resolved access; restarting only the core does not
 repair their old holders. Do not restart other users’ terminals to diagnose this.
-Core startup and launchd ownership are tracked separately in vega-0h4c.25.
+The vegad login job does not start an hc core or alter an existing core LaunchAgent.
+`hc machine`/SSH owns remote core startup, including reconnects (Slayer decision,
+2026-11-07). Do not install a competing hc login job; the operator removes the
+experimental `dev.vega.hc-core` job on ganymede separately.
+
+### Remote-only hosts
+
+After upgrading, run `vega post relay install` once on each host, from the logged-in
+user session. It installs the macOS launchd or Linux systemd user login starter,
+preserves the herdr TUI hook when available, and needs no herdr-app window.
+`vega config infra` reports `vegad-start`; `vega post relay status` reports whether
+the daemon actually runs. Log out/in and verify it with neither UI open. Linux
+before-login startup needs operator-configured lingering; the macOS job needs GUI
+login. For toolbox installs, verify the host user systemd bus is accessible and the
+container still exists. Do not run installers from sentinel worktrees.
+
+For remote inbox cards, install Python 3 on both machines and apply the updated
+herdr-app mods on the app host. Existing connected hc machines supply their badge
+files automatically. Answers and dismissals use that host's recorded checkout and
+CLI versions; no additional registry grants are needed. Verify a remote decision
+and answer after deployment. Keep machine names equal to vega registry host names.
 
 ### Degrading cleanly
 
