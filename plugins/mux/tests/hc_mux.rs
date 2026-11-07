@@ -11,7 +11,7 @@ impl Fixture {
         let d = tempfile::tempdir().unwrap();
         let bin = d.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for (name, text) in [("renice","#!/bin/sh\nexit 0\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app","#!/bin/sh\necho \"$*\" >> \"$HOME/app-calls\"\necho '{\"space\":\"s2\"}'\n"),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
+        for (name, text) in [("renice","#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/renice-calls\"\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app","#!/bin/sh\necho \"$*\" >> \"$HOME/app-calls\"\necho '{\"space\":\"s2\"}'\n"),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
             fs::write(bin.join(name),text).unwrap();fs::set_permissions(bin.join(name),fs::Permissions::from_mode(0o755)).unwrap();
         }
         Self(d)
@@ -77,6 +77,10 @@ fn success(o: Output) -> String {
 fn hc_spawn_show_send_capture_close_reopen_and_transcript() {
     let f = Fixture::new();
     f.spawn();
+    assert_eq!(
+        fs::read_to_string(f.root().join("renice-calls")).unwrap(),
+        format!("10 -p {}\n", std::process::id())
+    );
     let calls = f.calls();
     let run = calls.iter().find(|v| v[0] == "run").unwrap();
     let p = &run[1];
@@ -291,7 +295,7 @@ fn explicitly_undelivered_brief_can_resume_without_spawning_twice() {
 }
 
 #[test]
-fn qualified_mail_keeps_its_alias_and_never_guesses_a_registry_host() {
+fn qualified_mail_fails_closed_without_a_registry_mapping() {
     let f = Fixture::new();
     f.spawn();
     let path = f.root().join("terminals.json");
@@ -313,11 +317,8 @@ fn qualified_mail_keeps_its_alias_and_never_guesses_a_registry_host() {
         .args(["send", "corp/t8", "remote mail"])
         .output()
         .unwrap();
-    success(out);
-    assert_eq!(
-        fs::read_to_string(f.root().join("mail-registry-corp-t8")).unwrap(),
-        "remote mail"
-    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("registry host"));
     assert!(!f.root().join("mail-local-t8").exists());
     let calls: Vec<Value> = fs::read_to_string(f.root().join("post-calls"))
         .unwrap()
@@ -328,11 +329,13 @@ fn qualified_mail_keeps_its_alias_and_never_guesses_a_registry_host() {
         calls[0],
         serde_json::json!(["post", "send", "corp/t8", "remote mail"])
     );
-    f.run(&["--machine", "corp", "send", "t8", "explicit host"]);
-    assert_eq!(
-        fs::read_to_string(f.root().join("mail-registry-corp-t8")).unwrap(),
-        "explicit host"
-    );
+    let scoped = f
+        .cmd()
+        .args(["--machine", "corp", "send", "t8", "scoped mail"])
+        .output()
+        .unwrap();
+    assert_eq!(scoped.status.code(), Some(2));
+    assert!(!f.root().join("mail-corp-t8").exists());
     assert!(!f.root().join("mail-local-t8").exists());
     f.run(&["send", "hc:corp/t8", "direct remote", "--now"]);
     let calls = f.calls();
@@ -420,6 +423,7 @@ fn remote_hc_spawn_routes_to_machine_without_local_space_label() {
     assert_eq!(run["labels"]["vega.mode"], "headed");
     assert_eq!(run["labels"]["vega.role"], "sentinel");
     assert!(!f.root().join("app-calls").exists());
+    assert!(!f.root().join("renice-calls").exists());
 }
 
 #[test]

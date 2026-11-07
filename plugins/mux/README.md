@@ -6,7 +6,9 @@ own git worktree. It is how the UAC runs its sentinels.
 
 `spawn` selects the caller's ancestry-verified terminal world (`--backend herdr|hc`
 can override it). hc launches use `--outlive-parent`, the shared harness defaults and
-repo trust, argv-based env, and the caller's `herdr.space` label. `--worktree` uses
+repo trust, a separate API environment map, and the caller's `herdr.space` label.
+Remote launches run the target's `vega-mux prepare` helper to inherit its existing
+repository trust and hook approvals; matching vega versions are needed on both ends. `--worktree` uses
 worktrunk and `herdr-app do space.new`; explicit `--at split|workspace` is TUI-only.
 Target commands accept `hc:t7` or `hc:machine/t7` independently of the caller's world.
 `--machine` lookup uses `hc machine ls`, falling back to `herdr machine list` when hc

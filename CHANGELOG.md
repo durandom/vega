@@ -13,6 +13,9 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 - feature: hc spawns pass environment settings separately from the direct harness
   argv. Status still requires a harness that reports OSC 7501; unknown status waits
   for delivery rather than being treated as idle.
+- migration: hc `mux --machine <alias> send` preserves the qualified address instead
+  of assuming the alias is a registry host. Until alias resolution is available,
+  use `post send alias/t7 --host <registry-host>`; mux mail fails closed.
 
 ## 119 · 2026-11-07
 

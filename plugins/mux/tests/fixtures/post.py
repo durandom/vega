@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Capture mux -> post argv; post owns hc alias resolution.
+# Mirror the real post qualified-address guard; capture mux -> post argv.
 import json, os, sys
 from pathlib import Path
 root=Path(os.environ['HOME'])
@@ -9,7 +9,7 @@ assert a[:2]==['post','send']
 host=a[a.index('--host')+1] if '--host' in a else None
 target=a[-2]
 if '/' in target and host is None:
- assert target.split('/')[0]=='corp'
- host='registry-corp'
+ print('error{code,message,hint}:\n  usage,qualified address needs registry host,use --host')
+ sys.exit(2)
 (root/('mail-'+(host or 'local')+'-'+target.rsplit('/',1)[-1])).write_text(a[-1])
 print('sent: queued')

@@ -1048,7 +1048,7 @@ fn send_post(target: &str, text: &str) -> Result<String, Failure> {
         args.push("--host".into());
         args.push(m.to_lowercase());
     }
-    // Post owns the registry-host mapping. Keep a qualified address intact so
+    // Preserve the qualified address for post's fail-closed host requirement;
     // an hc machine alias is never assumed to be a registry host.
     args.push(pane.clone());
     args.push(text.to_string());
