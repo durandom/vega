@@ -366,3 +366,21 @@ test('vega mod draws the shipped status line without the palette hint',()=>{
   h.mod.error='hc machines: timeout';
   assert(texts(h.render()).includes('vega: hc machines: timeout'),'a badge read error shows in the status line');
 });
+
+test('theme.toml symbol colours override defaults and key host colours by label',async()=>{
+  const h=load('vega-sidebar');
+  const toml='[symbols]\nset = "nerd"\n[symbols.colors]\nnotes = "#e0a020"\n[symbols.hosts]\nproteus = "♆₈"\nganymede = "♃₃"\n[symbols.host_colors]\nproteus = "#3d73cc"\n[other]\nnotes = "#000000"\n';
+  h.api.exec=async(cmd,args)=>{h.calls.push(['exec',cmd,args]);return {code:0,stdout:toml};};
+  h.mod.init({},h.cx);await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec'&&c[2][0]==='/scratch/.config/vega/theme.toml'),'reads the vega theme file');
+  const c=h.mod.colors();
+  assert.equal(c.notes,'#e0a020','an override wins');
+  assert.equal(c.codex,'#0e8f6f','a default stays');
+  assert.equal(c.hosts['♆₈'],'#3d73cc','host colour keyed by its label');
+  assert.equal(c.hosts['♃₃'],undefined,'a host without a colour falls back to the theme');
+  // A remote space row shows its machine's label, taken from that machine's terminals.
+  h.api.spaces=()=>[{id:'ganymede/sp9',name:'tmp',machine:'ganymede',branch:null,active:false,tabs:[]}];
+  h.api.terminals=()=>[{address:'ganymede/t9',state:'live',labels:{'vega.host':'♃₃'}},{address:'t1',state:'live',labels:{'vega.host':'♆₈'}}];
+  const text=texts(h.render());
+  assert(text.includes('♃₃'),'remote space row names its machine by label');
+});

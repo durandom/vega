@@ -328,7 +328,7 @@ export default class Agents extends View {
       const on = a.address === shown;
       return h_flex()
         .id(depth ? `sub-${a.address}` : `ag-${a.address}`)
-        .pl(depth ? 18 : 18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
+        .pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
         .when(on, el => el.bg(t.selected))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
