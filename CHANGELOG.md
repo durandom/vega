@@ -10,8 +10,10 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 - migration: `vega uac` status, claim/release, adopt, park/unpark and ask/answer
   work from hc terminals alongside the herdr TUI. Local views include both
   backends; explicit `hc:t7` and `herdr:w1:p2` targets select their own backend.
+  Answer lookup failures report `unknown`; the answer remains in the bead.
 - feature: `vega uac hold <pane>` pauses sentinel attention without a decision
-  bead or bead polling. `unpark` or new work from the parent resumes it.
+  bead or bead polling, replacing any decision park. `unpark` or new work from
+  the parent resumes it.
 - feature: vegad attention wakes exclude already mailed done reports and silent
   children waiting on gate or CI verdicts. Parked children and closed hc terminals
   remain quiet. Wakes track actionable item identities and remind the UAC to reply

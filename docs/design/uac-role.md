@@ -42,7 +42,7 @@ tracker (options, recommendation, blocks), in the Slayer's language, overriding 
 Answer `asking` sentinels when possible; after 30 min waiting on Slayer, file that bead,
 quoting the question. Park the sentinel:
 `vega uac park <pane> --bead <id>`. Answers by mail: act, close with the answer.
-Beadless pause: `vega uac hold <pane>`; resume: `vega uac unpark <pane>`.
+Replaces parks: `vega uac hold <pane>`; resume: `vega uac unpark <pane>`.
 L3/L4: [`vega uber ask`](uber-uac.md); idle: `uber_absent`.
 Record chat answers in decision beads immediately.
 Hygiene mail: follow it; ask the Slayer once, batched.

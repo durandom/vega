@@ -1182,11 +1182,18 @@ fn answer_here(id: &str, text: &str) -> Result<(), Failure> {
         .map(|t| t.pane().to_string())
         .unwrap_or_default();
     let reg = thread::spawn(|| vega_registry::read_blocking(Duration::from_secs(4)));
-    let agents = terminal::local().map(|s| s.agents).unwrap_or_default();
+    let agents = terminal::local().map(|s| s.agents);
     let registry = reg
         .join()
         .unwrap_or_else(|_| Err("registry read crashed".into()));
-    answer(&key, id, text, &me, &agents, registry.as_ref().ok())
+    answer(
+        &key,
+        id,
+        text,
+        &me,
+        agents.as_deref(),
+        registry.as_ref().ok(),
+    )
 }
 
 /// `vega uac answer <bead> "<text>"`: the Slayer's answer to a decision. It
@@ -1197,9 +1204,11 @@ fn answer(
     id: &str,
     text: &str,
     me: &str,
-    agents: &[Value],
+    inventory: Result<&[Value], &Failure>,
     view: Option<&vega_registry::View>,
 ) -> Result<(), Failure> {
+    let inventory_error = inventory.as_ref().err().copied();
+    let agents = inventory.unwrap_or_default();
     if text.trim().is_empty() {
         return Err(Failure::new(
             "usage",
@@ -1232,7 +1241,14 @@ fn answer(
         _ => remote_uac(key, view),
     };
     let Some((pane, host)) = uac else {
-        println!("uac: none alive; the answer waits in the bead");
+        if let Some(f) = inventory_error {
+            println!(
+                "uac: unknown ({}); the answer waits in the bead",
+                cell(&f.code)
+            );
+        } else {
+            println!("uac: none alive; the answer waits in the bead");
+        }
         return Ok(());
     };
     if pane == me && host == here {

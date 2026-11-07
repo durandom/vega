@@ -5653,7 +5653,7 @@ const PARK_BD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Parked children whose decision bead closed get `closed`: their attention
 /// turns `decided`, which wakes the parent once. One `bd show` per open
-/// park, on the metadata clock; nothing runs without parks. A bead bd cannot
+/// bead park, on the metadata clock; no polling for holds. A bead bd cannot
 /// show proves nothing: the park stays (logged once).
 fn check_parks(failing: &mut HashSet<String>) {
     for (m, pane, mut p) in st::parks()

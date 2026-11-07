@@ -49,7 +49,12 @@ esac"#,
             "hc",
             r#"
 case "$2" in
- get) if [ "$3" = t1 ]; then cat "$HOME/me.json"; else cat "$HOME/child.json"; fi ;;
+ get) case "$3" in
+   t1) cat "$HOME/me.json" ;;
+   t2) cat "$HOME/child.json" ;;
+   io/t9|io/remote-worker) cat "$HOME/remote.json" ;;
+   *) echo '{"error":{"kind":"not_found","message":"unexpected target"}}'; exit 3 ;;
+ esac ;;
  ls) cat "$HOME/hc.json" ;;
  *) echo '{}' ;;
 esac"#,
@@ -57,7 +62,8 @@ esac"#,
         script(
             &bin,
             "bd",
-            r#"case "$1" in
+            r#"printf '%s\n' "$*" >> "$HOME/bd-calls"
+case "$1" in
  show) echo '[{"id":"decision-1","title":"Decision","status":"open"}]' ;;
  create) echo '{"id":"tracker-1"}' ;;
  *) echo '[]' ;;
@@ -77,6 +83,10 @@ esac"#,
             ("agent", json!({"result":{"agent":tui("w1:p2")}})),
             ("me", terminal("t1")),
             ("child", terminal("t2")),
+            (
+                "remote",
+                json!({"address":"io/t9", "name":"remote-worker", "state":"live", "status":{"app":"codex", "state":"idle"}, "cwd":"/remote/path/never/local"}),
+            ),
             (
                 "hc",
                 json!({"terminals":[terminal("t1"),terminal("t2"), {"address":"remote/t9","state":"live","cwd":"/not/local"}]}),
@@ -137,6 +147,27 @@ esac"#,
         assert!(call(&[]).contains("on hold"));
         assert!(call(&["unpark", child]).contains("unparked:"));
         fs::rename(bin.join("bd-off"), bin.join("bd")).unwrap();
+        // All remote operations below go through the fake hc, never a real core.
+        assert!(call(&["adopt", "hc:io/t9", "--headless"]).contains("adopted: t9"));
+        assert!(call(&["park", "hc:io/t9", "--bead", "decision-1"]).contains("parked: t9"));
+        let remote_park = root.join("state/vega/parked/io_hc-7439");
+        let parked: serde_json::Value =
+            serde_json::from_slice(&fs::read(&remote_park).unwrap()).unwrap();
+        assert_eq!(parked["bead"], "decision-1");
+        assert_eq!(parked["held"], false);
+        assert!(!root.join("state/vega/parked/local_hc-7439").exists());
+        assert!(!root.join("state/vega/parked/io_hc-696f2f7439").exists());
+        assert!(call(&["hold", "hc:t9", "--machine", "io"]).contains("held: t9"));
+        let held: serde_json::Value =
+            serde_json::from_slice(&fs::read(&remote_park).unwrap()).unwrap();
+        assert_eq!(held["held"], true);
+        assert_eq!(held["bead"], "");
+        assert!(call(&["unpark", "hc:io/t9"]).contains("unparked: t9"));
+        assert!(!remote_park.exists());
+        assert!(call(&["hold", "hc:remote-worker", "--machine", "io"]).contains("held: t9"));
+        assert!(remote_park.exists());
+        call(&["unpark", "t9", "--machine", "io"]);
+        assert!(!remote_park.exists());
         call(&["ask", "status?"]);
         assert!(call(&["answer", "decision-1", "yes"]).contains("you (no mail)"));
         assert!(fs::read_to_string(root.join("mail"))
@@ -181,5 +212,13 @@ esac"#,
             !partial.contains(other_child),
             "failed inventory is not proof of exit: {partial}"
         );
+        script(&bin, if hc { "hc" } else { "herdr" }, "exit 1");
+        let saved_answer = call(&["answer", "decision-1", "still saved"]);
+        assert!(saved_answer.contains("answered: decision-1"));
+        assert!(saved_answer.contains("uac: unknown ("));
+        assert!(!saved_answer.contains("none alive"));
+        assert!(fs::read_to_string(root.join("bd-calls"))
+            .unwrap()
+            .contains("comments add decision-1 --author Slayer -- still saved"));
     }
 }

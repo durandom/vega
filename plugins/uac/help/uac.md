@@ -83,6 +83,7 @@ Commands:
                token-burn's health; see `vega capacity --help`
   answer <bead> "<a>"  the Slayer's answer to a decision: a bead comment (author
                Slayer) plus mail to the UAC, which acts and closes the bead
+               Inventory failure reports unknown; the answer stays in the bead.
   park <pane> --bead <id> [--machine <m>]
                a sentinel waits on an open decision bead: vegad stops waking
                you for it and wakes you once when the bead closes; new work
@@ -90,6 +91,7 @@ Commands:
   hold <pane> [--machine <m>]
                pause a supervised sentinel's attention without a decision bead;
                no bead polling; unpark or new parent work clears the hold
+               Replaces an existing decision park and stops watching its bead.
   unpark <pane> [--machine <m>]  ends a hold or park without waiting for a bead
   rules        the generic coordinator rules (briefing, branches, landing, cleanup)
 
