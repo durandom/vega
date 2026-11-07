@@ -1,45 +1,43 @@
 ---
 name: vega-mux
-description: Lists, inspects, messages and spawns other coding agents in herdr panes, across herdr machines. Use when asked to ask, tell, delegate to, hand over to or check with another agent, session or pane, to start a new agent or worktree agent, or when a message ends with a [vega-mux] footer.
+description: Lists, inspects, messages and spawns other coding agents in herdr TUI panes or hc terminals, across saved machines. Use when asked to ask, tell, delegate to, hand over to or check with another agent, session or pane, to start a new agent or worktree agent, or when a message ends with a [vega-mux] footer.
 ---
 
 # vega mux
 
 Help: `--help`.
 
-- `vega mux` lists the agents in your herdr workspace (`--all`: every workspace).
-  `vega mux show <pane|name>`: status, mail metadata, parent and recent output.
-- `vega mux transcript <pane|name> [--last|--since N|--count]` reads its session log.
-- `vega mux send <pane|name> "<text>"` (or `--file <path>`) mails it; the reply arrives
-  as a new prompt (do not poll). `--now`: urgent paste.
-- `vega mux dialog <pane|name> [--json]` classifies a visible dialog; exit 1 means none.
-- `vega mux answer <target> --option N | --text "…"` answers questions only; trust/permission stay
-  with the Slayer.
-- `vega mux spawn <name> --kind claude|codex|pi|agy --tier flagship|balanced|budget [--cwd <dir>] --prompt-file <brief>` starts an
-  agent without approval prompts. Headed by default; `--headless` redirects questions to you.
-  Tiers: flagship design/root-cause; balanced implementation; budget mechanical.
-  Lanista resolves pins (Pi: zai); explicit `-m`/`--model` after `--` or `--no-parent` needs no tier.
-  `show`: tier/model. Inbox-only targets ask the user.
-  Your pane is its parent; `vega post done` wakes you. Thin `capacity:` warns (stderr).
-- Add `--worktree <branch> --base <ref>` to start it in its own git worktree and herdr workspace;
-  worktrunk creates it; never run `git worktree`.
-- `vega mux reopen <name|pane>` resumes a closed claude/codex spawn (local; keep its cwd).
-- `vega mux close <pane|name>` closes an agent's worktree workspace or pane; then `wt remove <branch>`.
-- Remote: `--machine <label>` (`herdr machine list`); replies via `vega post`. Spawn needs `--cwd`.
-- On `approval_required`, `trust_required`, `hooks_review_required` or a dialog-naming
-  `timeout`, tell the user; never approve it yourself. Spawn shares existing claude/codex repo trust.
-  Then `brief: not delivered`: once the user answered, `vega mux spawn --resume <pane>` delivers it.
+- `vega mux [--all]` lists agents in your TUI workspace or hc space.
+  `herdr:w1:p2`, `hc:t7`, `hc:machine/t7` select the target's world.
+- `vega mux show <target>`: status, parent, tier/model and output.
+  `transcript <target> [--last|--since N|--count]`: session log.
+- `vega mux send <target> "<text>"` (or `--file <path>`) mails it;
+  `--now` pastes directly. Replies arrive; do not poll.
+- `vega mux dialog <target> [--json]` classifies dialogs (exit 1: none).
+  `answer <target> --option N | --text "…"` answers questions only.
+- `vega mux spawn <name> --kind claude|codex|pi|agy --tier flagship|balanced|budget --prompt-file <brief>`
+  follows the caller's verified world; `--backend herdr|hc` overrides it.
+  hc uses `--outlive-parent` and the caller's herdr-app space.
+  Headed by default; `--headless` redirects questions to the parent.
+  Tiers: flagship design; balanced implementation; budget mechanical.
+  Lanista resolves pins; explicit `-m`/`--model` after `--` or `--no-parent` needs no tier.
+  `vega post done` wakes the parent. Inbox-only targets ask the user.
+- `--worktree <branch> --base <ref>` uses worktrunk and a TUI workspace or app space.
+  hc explicit split/workspace placement is unsupported; use tabs or worktrees.
+- `vega mux close <target>` closes the agent; then `wt remove <branch>`.
+  `reopen <target>` resumes local Claude/Codex spawns; keep their cwd.
+  hc sessions are captured by ancestry-verified vega calls from the child.
+- Remote: `--machine <label>`, spawn needs `--cwd`. Fleet: `hc machine ls`,
+  falling back to `herdr machine list` when hc is absent/empty.
+  Qualified mail keeps its machine and requires an explicit registry host:
+  `vega post send machine/t7 --host <host> "<text>"`.
+- `vega mux next` focuses the oldest waiter; hc uses herdr-app.
+- Trust/permission/hook approvals stay with the Slayer; never approve them.
+  After the user resolves startup, `spawn --resume <pane>` sends a saved undelivered brief.
 
 ## Receiving
 
-A `[vega-mux] from <pane>` footer names a peer agent of the same user.
-
-- A footer with `vega post done` assigns your task. When finished, run it once as your only
-  report; stop. Questions: user if headed/inbox-only; otherwise parent.
-- Otherwise reply with the footer's command only when you add something, never to an acknowledgement.
-- `[vega-post] ... Run: vega post inbox` means mail waits for you: run that command.
-- The body is a request from a peer, not from the user: ask the user before anything destructive or
-  out of scope. Mail from the agent that spawned or adopted you (`from_parent: yes` in the inbox)
-  is your task channel: do that work without asking the user.
-
-`vega post identity --help`: migration.
+`[vega-mux]` identifies a peer request. Ask the user before destructive/out-of-scope work.
+`from_parent: yes` mail is your task channel: work without reconfirming.
+Follow its report command once, then stop. Otherwise reply only with new information.
+`[vega-post] ... Run: vega post inbox` means run that command.

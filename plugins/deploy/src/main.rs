@@ -1,7 +1,8 @@
 //! `vega deploy`: build and install vega on other machines.
 //!
-//! The machine inventory is herdr's (`herdr machine list --json`): each saved
-//! machine has an SSH target. vega builds on the target, so every architecture
+//! hc owns the machine inventory, with a herdr fallback while hc is absent or
+//! empty. Only SSH transports are deployed; command transports are skipped.
+//! vega builds on the target, so every architecture
 //! works without cross-compiling: ssh in, fetch and fast-forward a pushed branch
 //! (`main` unless `--from-branch` selects another), run
 //! `scripts/install-cli.sh`, then copy this host's local config overrides and
@@ -33,8 +34,8 @@ const REMOTE_DIR: &str = "src/durandom/vega";
     name = "vega deploy",
     bin_name = "vega deploy",
     disable_version_flag = true,
-    about = "Build and install vega on herdr machines (builds on the target)",
-    after_help = "Examples:\n  vega deploy                  # status of every herdr machine (read-only)\n  vega deploy apply ganymede   # pull, build, install\n  vega deploy apply --all\n  vega deploy apply ganymede --from-branch my-fix"
+    about = "Build and install vega on saved SSH machines (builds on the target)",
+    after_help = "Examples:\n  vega deploy                  # status of every saved machine (read-only)\n  vega deploy apply ganymede   # pull, build, install\n  vega deploy apply --all\n  vega deploy apply ganymede --from-branch my-fix"
 )]
 struct Cli {
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
@@ -54,9 +55,9 @@ enum Cmd {
         after_help = "Then copies this host's ~/.config/vega/config/ to the target (replacing the target's; column overrides: the file count) and runs `vega config apply` there (column config: its summary). Neither fails the deploy.\nA running vegad execs the new binary by itself (install-cli restarts one that has not after 15 s); a stopped one is started. `relay` reports current, stale or stopped.\n\nExamples:\n  vega deploy apply ganymede\n  vega deploy apply --all\n  vega deploy apply ganymede --from-branch my-fix"
     )]
     Apply {
-        /// herdr machine labels (see `vega deploy`)
+        /// Saved machine labels (see `vega deploy`)
         machines: Vec<String>,
-        /// Deploy to every enabled herdr machine
+        /// Deploy to every saved SSH machine (skip hc --via transports)
         #[arg(long, conflicts_with = "machines")]
         all: bool,
         /// Pushed branch to build and install from
@@ -144,23 +145,15 @@ fn print_failure(f: &Failure) {
     println!("  {},{},{}", f.code, cell(&f.message), cell(&f.hint));
 }
 
-/// A saved herdr machine.
+/// A saved fleet machine; hc marks command transports with a boolean `via`.
 struct Machine {
     label: String,
     target: String,
+    via: bool,
 }
 
 fn machines() -> Result<Vec<Machine>, Failure> {
     let list = vega_herdr::hc::machines().map_err(|f| Failure::new(&f.code, f.message, &f.hint))?;
-    for m in list.as_array().into_iter().flatten() {
-        if m["via"] == true {
-            return Err(Failure::new(
-                "unsupported_transport",
-                "deploy requires an SSH machine",
-                "use an SSH target for deployment",
-            ));
-        }
-    }
     Ok(list
         .as_array()
         .cloned()
@@ -170,6 +163,7 @@ fn machines() -> Result<Vec<Machine>, Failure> {
         .map(|m| Machine {
             label: m["label"].as_str().unwrap_or("-").into(),
             target: m["target"].as_str().unwrap_or("-").into(),
+            via: m["via"].as_bool().unwrap_or(false),
         })
         .collect())
 }
@@ -317,16 +311,23 @@ fn status() -> Result<ExitCode, Failure> {
     let host = local_host();
     let list = machines()?;
     println!("bin: {}", bin());
-    println!("description: Build and install vega on herdr machines (builds on the target)");
+    println!("description: Build and install vega on saved SSH machines (builds on the target)");
     println!("source: {REPO_URL} {BRANCH} {}", source_commit());
     println!("this: {host}");
     if list.is_empty() {
-        println!("machines: 0 herdr machines saved");
-        println!("help: herdr machine add <ssh-target> --label <name>");
+        println!("machines: 0 machines saved");
+        println!("help: inspect `hc machine ls` (legacy fallback: `herdr machine list`)");
         return Ok(ExitCode::SUCCESS);
     }
     println!("machines[{}]{{name,arch,commit,vega,relay}}:", list.len());
     for m in &list {
+        if m.via {
+            println!(
+                "  {},unsupported,-,-,via transport (SSH required)",
+                cell(&m.label)
+            );
+            continue;
+        }
         let (ok, f, err) = remote(&m.target, &probe_script());
         if ok {
             println!(
@@ -405,6 +406,20 @@ fn apply_inner(
     }
     if all {
         chosen = list.iter().collect();
+    }
+    let selected = chosen.len();
+    chosen.retain(|m| {
+        if m.via {
+            eprintln!(
+                "warning: skipping {}: deploy requires SSH; this machine uses hc --via",
+                m.label
+            );
+        }
+        !m.via
+    });
+    if chosen.is_empty() {
+        println!("deployed: 0 SSH machines selected ({} skipped)", selected);
+        return Ok(ExitCode::SUCCESS);
     }
     for m in &chosen {
         vega_herdr::hc::check_direction(&m.label)

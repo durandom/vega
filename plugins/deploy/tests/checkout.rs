@@ -28,10 +28,10 @@ fn fixture_bin() -> &'static Path {
         let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("deploy-checkout-bin");
         fs::create_dir_all(&bin).unwrap();
         for (name, text) in [
-            ("hc", "#!/bin/sh\necho '{\"machines\":[]}'\n"),
+            ("hc", "#!/bin/sh\nif [ -f \"$HOME/machines.json\" ]; then cat \"$HOME/machines.json\"; else echo '{\"machines\":[]}'; fi\n"),
             (
                 "ssh",
-                "#!/bin/sh\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/ssh-calls\"\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",
             ),
             ("hostname", "#!/bin/sh\necho deploying-host\n"),
             (
@@ -139,11 +139,17 @@ ln -sf "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
     }
 
     fn apply(&self, branch: Option<&str>, config_failure: bool) -> Output {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_vega-deploy"));
+        let mut cmd = self.command();
         cmd.args(["apply", "target"]);
         if let Some(branch) = branch {
             cmd.args(["--from-branch", branch]);
         }
+        cmd.env("CONFIG_EXIT", if config_failure { "1" } else { "0" });
+        cmd.output().unwrap()
+    }
+
+    fn command(&self) -> Command {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_vega-deploy"));
         // A cwd outside any Git repository keeps history enrichment from probing
         // the checkout the tests run in.
         cmd.current_dir(&self.home)
@@ -154,9 +160,9 @@ ln -sf "$FIXTURE_BIN/vega" "$HOME/.local/bin/vega"
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("FIXTURE_BIN", &self.bin)
-            .env("CONFIG_EXIT", if config_failure { "1" } else { "0" })
+            .env("CONFIG_EXIT", "0")
             .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()));
-        cmd.output().unwrap()
+        cmd
     }
 
     fn success(&self, branch: Option<&str>) -> String {
@@ -379,4 +385,79 @@ fn unavailable_outbox_does_not_change_deploy_success_or_failure() {
         assert_eq!(out.status.success(), branch == "main");
         assert!(String::from_utf8_lossy(&out.stderr).contains("history: event not queued:"));
     }
+}
+
+fn mixed_fleet(f: &Fixture) {
+    fs::write(
+        f.home.join("machines.json"),
+        r#"{"machines":[
+        {"name":"target","host":"target","target":"fixture","via":false},
+        {"name":"provider","host":"provider","target":"do-not-ssh","via":true}
+    ]}"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn via_machine_does_not_block_status_or_selected_ssh_deployment() {
+    let f = Fixture::new();
+    mixed_fleet(&f);
+    let out = f.command().output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("provider,unsupported,-,-,via transport (SSH required)"),
+        "{text}"
+    );
+    assert!(text.contains("target,"));
+    f.success(None);
+    assert_eq!(f.actions(), "install\nconfig\nstart\n");
+    let calls = fs::read_to_string(f.home.join("ssh-calls")).unwrap();
+    assert!(calls.contains("fixture"));
+    assert!(!calls.contains("do-not-ssh"));
+}
+
+#[test]
+fn apply_all_skips_via_and_only_via_is_an_explicit_noop() {
+    let f = Fixture::new();
+    mixed_fleet(&f);
+    let out = f.command().args(["apply", "--all"]).output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("deployed[1]"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("skipping provider"));
+    assert_eq!(f.actions(), "install\nconfig\nstart\n");
+    let calls = fs::read_to_string(f.home.join("ssh-calls")).unwrap();
+    assert!(!calls.contains("do-not-ssh"));
+    let out = f.command().args(["apply", "provider"]).output().unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout)
+        .contains("deployed: 0 SSH machines selected (1 skipped)"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("skipping provider"));
+    assert_eq!(fs::read_to_string(f.home.join("ssh-calls")).unwrap(), calls);
+}
+
+#[test]
+fn corp_deploy_refuses_private_ssh_target_before_remote_actions() {
+    let f = Fixture::new();
+    mixed_fleet(&f);
+    let out = f
+        .command()
+        .env("VEGA_POST_HOST", "deimos")
+        .env("VEGA_POST_INBOX_ONLY", "deimos")
+        .args(["apply", "target"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("machine_direction"));
+    assert!(f.actions().is_empty());
+    assert!(!f.home.join("ssh-calls").exists());
 }

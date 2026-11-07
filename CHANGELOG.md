@@ -5,6 +5,22 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 117 · 2026-11-07
+
+- migration: `vega mux spawn` follows the caller's terminal world; `--backend herdr|hc`
+  overrides it. hc children retain their parent link and outlive a parent restart.
+  Spawn uses the caller's herdr-app space; `--worktree` creates a space through
+  worktrunk and herdr-app. Explicit split/workspace placement remains TUI-only.
+  Show, direct send, close, dialog/answer, next, reopen and transcript support hc
+  targets. Spawn records retain their backend; hc harness session IDs are captured
+  by ancestry-verified vega calls from the child for reopen/transcript.
+- feature: `vega deploy` and mux machine lookup read `hc machine ls`, falling back to
+  `herdr machine list` when hc is absent or its fleet is empty. Deploy shows `--via`
+  machines as unsupported and skips them with a warning during apply; SSH targets
+  remain usable. hc remote spawn and deployment apply refuse corporate-to-private
+  control. Qualified hc mail addresses retain their machine; post requires the
+  receiver's registry host before enqueuing them. No machines migrate automatically.
+
 ## 116 · 2026-11-07
 
 - unit: `herdr-app.mods` and `herdr-app.layouts` add a maintained vega clone of Herdr's main layout

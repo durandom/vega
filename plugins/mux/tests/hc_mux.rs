@@ -288,3 +288,123 @@ fn explicitly_undelivered_brief_can_resume_without_spawning_twice() {
     assert!(sent[2].as_str().unwrap().contains("saved task"));
     assert!(f.run(&["mode", "t8"]).contains("headless"));
 }
+
+#[test]
+fn qualified_mail_keeps_its_machine_and_never_targets_a_local_collision() {
+    let f = Fixture::new();
+    f.spawn();
+    let path = f.root().join("terminals.json");
+    let mut terminals: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let mut remote = terminals["t8"].clone();
+    remote["address"] = "corp/t8".into();
+    remote["name"] = "remote".into();
+    terminals["corp/t8"] = remote;
+    fs::write(path, terminals.to_string()).unwrap();
+    let post = f.root().join("bin/vega");
+    fs::write(&post, include_str!("fixtures/post.py")).unwrap();
+    fs::set_permissions(&post, fs::Permissions::from_mode(0o755)).unwrap();
+    let state = f.root().join("state/vega");
+    fs::create_dir_all(&state).unwrap();
+    let relay = fs::File::create(state.join("post-relay-test.lock")).unwrap();
+    relay.lock().unwrap();
+    let out = f
+        .cmd()
+        .args(["send", "corp/t8", "remote mail"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(!f.root().join("mail-local-t8").exists());
+    let calls: Vec<Value> = fs::read_to_string(f.root().join("post-calls"))
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(
+        calls[0],
+        serde_json::json!(["post", "send", "corp/t8", "remote mail"])
+    );
+    f.run(&["--machine", "corp", "send", "t8", "explicit host"]);
+    assert_eq!(
+        fs::read_to_string(f.root().join("mail-corp-t8")).unwrap(),
+        "explicit host"
+    );
+    assert!(!f.root().join("mail-local-t8").exists());
+    f.run(&["send", "hc:corp/t8", "direct remote", "--now"]);
+    let calls = f.calls();
+    let direct = calls.iter().rev().find(|v| v[0] == "send").unwrap();
+    assert_eq!(direct[1], "corp/t8");
+    assert!(direct[2]
+        .as_str()
+        .unwrap()
+        .contains("vega post send --host test t7"));
+}
+
+#[test]
+fn hc_worktree_uses_wt_path_and_the_created_app_space() {
+    let f = Fixture::new();
+    let tree = f.root().join("worktree");
+    fs::create_dir(&tree).unwrap();
+    let wt = f.root().join("bin/wt");
+    fs::write(
+        &wt,
+        r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+root=Path(os.environ['HOME'])
+with open(root/'wt-calls','a') as f: f.write(json.dumps(sys.argv[1:])+'\n')
+if sys.argv[1:] == ['--version']: print('fixture wt')
+else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_branch':'main'}))
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&wt, fs::Permissions::from_mode(0o755)).unwrap();
+    f.run(&[
+        "spawn",
+        "worker",
+        "--kind",
+        "codex",
+        "--worktree",
+        "fix-branch",
+        "--base",
+        "main",
+        "--",
+        "-m",
+        "chosen",
+    ]);
+    let calls = f.calls();
+    let run = calls
+        .iter()
+        .find(|v| v[0] == "run")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert!(run
+        .windows(2)
+        .any(|w| w[0] == "--cwd" && w[1] == tree.to_str().unwrap()));
+    assert!(run
+        .windows(2)
+        .any(|w| w[0] == "--label" && w[1] == "herdr.space=s2"));
+    let app = fs::read_to_string(f.root().join("app-calls")).unwrap();
+    assert!(
+        app.contains(&format!(
+            "space.new --name fix-branch --folder {}",
+            tree.display()
+        )),
+        "{app}"
+    );
+    let wt_calls: Vec<Value> = fs::read_to_string(f.root().join("wt-calls"))
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(wt_calls.iter().any(|c| c
+        .as_array()
+        .unwrap()
+        .windows(2)
+        .any(|w| w[0] == "--base" && w[1] == "main")));
+}

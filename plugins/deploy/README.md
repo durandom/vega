@@ -1,7 +1,14 @@
 # vega deploy
 
-Rolls vega out to the other herdr machines. It shows which commit and vegad each machine runs, and builds and
+Rolls vega out to saved SSH machines. It shows which commit and vegad each machine runs, and builds and
 installs a pushed branch (`main` by default) on a target over SSH, then applies the vega config there.
+
+Fleet discovery uses `hc machine ls`, falling back to `herdr machine list` when hc
+is absent or has no saved machines. hc's boolean `via` field marks command transports:
+status shows those rows as unsupported without probing them; apply skips selected
+via machines with a warning and continues with SSH targets. If all selected targets
+use via, apply reports zero deployments. Corporate/inbox-only hosts cannot deploy to
+private hosts. This plugin never adds machines or changes their transport profiles.
 
 Commands: `vega deploy`, `vega deploy apply <machine>|--all [--from-branch <branch>]`.
 

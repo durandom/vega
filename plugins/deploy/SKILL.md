@@ -1,11 +1,16 @@
 ---
 name: vega-deploy
-description: Shows which vega commit each herdr machine runs and builds and installs a pushed branch (main by default) on them over SSH. Use when asked to deploy, update or roll out vega to other machines, or to check which version a machine runs.
+description: Shows which vega commit each saved SSH machine runs and builds and installs a pushed branch (main by default) on them over SSH. Use when asked to deploy, update or roll out vega to other machines, or to check which version a machine runs.
 ---
 
 # vega deploy: install vega on other machines
 
-`vega deploy` shows every herdr machine (`herdr machine list`) with its architecture, deployed commit, vega version and its vegad (`vega post relay`): `current`, `stale` (runs an older binary) or `stopped`. It changes nothing.
+`vega deploy` reads the fleet from `hc machine ls` (fallback: `herdr machine list` when hc is absent or empty) and shows SSH machines with their architecture, deployed commit, vega version and vegad (`vega post relay`): `current`, `stale` (runs an older binary) or `stopped`. It changes nothing.
+
+hc `--via` machines appear as unsupported without being contacted. Apply skips
+selected via machines with a stderr warning; an unrelated via machine never blocks
+an SSH target. A selection containing only via machines reports zero deployments.
+Corporate/inbox-only hosts cannot deploy to private hosts. No machines are added automatically.
 
 `vega deploy apply <machine>|--all` builds on the target over SSH: fetch and fast-forward of the pushed `main` from GitHub (or the branch selected with `--from-branch`), then `scripts/install-cli.sh`, then it replaces the target's `~/.config/vega/config/` (local config overrides) with this host's (column `overrides`: the file count; a file deleted here is deleted there), then `vega config apply` (column `config`: its summary, e.g. `written 2, unchanged 7, managed 2, skipped 0, rejected 0, failed 0`; units chezmoi still manages stay untouched; never fails the deploy). A running vegad execs the new binary by itself; install-cli restarts one that still runs the old binary after 15 s; a stopped vegad is started (`vega post relay start`). Push first; uncommitted or unpushed code is never deployed. It adds no herdr profile back to this machine: replies from other machines go through `vega post`. A new machine still needs `vega post keygen` and `vega post relay install` once (see `vega skills post`).
 

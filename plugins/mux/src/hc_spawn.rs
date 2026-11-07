@@ -158,7 +158,7 @@ pub fn spawn(
         args.push(if no_parent && own.is_none() {
             p.into()
         } else {
-            backend::body(p, handoff(no_parent, mode).0)?
+            backend::body(p, handoff(no_parent, mode).0, machine().is_some())?
         });
     }
     let v = hc_on(

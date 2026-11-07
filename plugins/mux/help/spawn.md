@@ -2,7 +2,8 @@ The backend follows the caller's verified terminal; --backend herdr|hc overrides
 In hc, spawn opens a tab in the caller's herdr-app space, keeps the native parent link,
 and uses --outlive-parent. --worktree uses wt and a new app space. Explicit --at split
 or --at workspace is currently TUI-only. hc receives env as argv and the task at launch;
-show reports startup output. Session IDs are captured when the child next calls vega.
+show reports startup output. Session IDs are captured by ancestry-verified vega calls
+from the child, for commands such as mux and post.
 
 Choose --tier flagship|balanced|budget (no default): flagship for design/root-cause,
 balanced for normal implementation, budget for mechanical work. Models resolve through
@@ -33,7 +34,7 @@ Examples:
   vega mux spawn fix --kind claude --tier balanced --worktree fix-login --base origin/main --prompt-file /tmp/task.md
   vega mux spawn gate-rev --kind codex --env VEGA_GATE_ROLE=reviewer -- -m gpt-6-luna
 
---env K=V (repeatable) sets env on the agent's pane through herdr. Tool shells also
+--env K=V (repeatable) sets env through herdr's env flags or hc's env argv. Tool shells also
 require the harness's environment policy to pass the variable through.
 An --env BEADS_ACTOR replaces the lane's. The `env:` line lists the keys, never the values.
 
@@ -53,10 +54,12 @@ preserving the rest of `shell_environment_policy`; an `include_only` allowlist m
 still retain `SSH_AUTH_SOCK`. No socket path is hardcoded. Manually started Codex
 panes are unchanged and need their own environment policy configuration.
 
-Codex spawns also set the herdr pane identity vega tools read (`vega ci watch`, the gate,
+TUI Codex spawns also set the herdr pane identity vega tools read (`vega ci watch`, the gate,
 `vega orchestration`): `-c shell_environment_policy.set.HERDR_PANE_ID="<new pane>"` and, on a
 local spawn with `HERDR_SOCKET_PATH` set, `...set.HERDR_SOCKET_PATH`. `--env HERDR_PANE_ID=...`
-and explicit Codex `-c` arguments win the same way.
+and explicit Codex `-c` arguments win the same way. hc Codex spawns inherit the child
+terminal environment so tool shells retain its new HC_* identity; explicit trailing
+config overrides still win.
 
 Codex spawns default to FORCE_COLOR=1 (basic ANSI colours), so the composer uses
 terminal defaults and stays readable after a live light/dark appearance switch. Codex caches

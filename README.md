@@ -14,7 +14,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 
 | Plugin | Purpose |
 | --- | --- |
-| [`mux`](plugins/mux/) | Agent-to-agent messaging over herdr; spawn and adopt agents |
+| [`mux`](plugins/mux/) | Agent messaging and lifecycle over herdr TUI and hc |
 | [`notify`](plugins/notify/) | Raise and settle blocking operator asks; probe desktop delivery |
 | [`post`](plugins/post/) | Agent mail over a NATS JetStream broker; `vegad`, the per-host daemon |
 | [`uac`](plugins/uac/) | Coordinator mode: the role guide and the home view of the agents a session runs |
@@ -25,7 +25,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | [`gate`](plugins/gate/) | LLM review before agent pushes; records a pass for each change |
 | [`ci`](plugins/ci/) | GitHub CI watch; the verdict arrives by mail |
 | [`bd`](plugins/bd/) | Beads sync: a project's bd database on a configured Dolt remote |
-| [`deploy`](plugins/deploy/) | Build and install vega on the herdr machines |
+| [`deploy`](plugins/deploy/) | Build and install vega on saved SSH machines |
 | [`theme`](plugins/theme/) | OS dark/light mode to every TUI; renders herdr's config |
 | [`secrets`](plugins/secrets/) | Secrets for tools and agents: inventory, env injection, rekey |
 | [`janitor`](plugins/janitor/) | Map of every git checkout on a machine (read-only) |

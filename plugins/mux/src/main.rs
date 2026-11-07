@@ -1,8 +1,6 @@
-//! `vega mux`: agent-to-agent messaging over herdr.
-//!
-//! MVP scope: list agents (home view) and `send`. A message is delivered as a
-//! new prompt via `herdr agent prompt`, with a footer that tells the receiver
-//! how to reply. No coordinator, no mailbox: the reply is just another `send`.
+//! `vega mux`: agent messaging and lifecycle over herdr TUI and hc backends.
+//! Vega retains model selection, lineage, mail and dialog policy; each backend
+//! owns terminal transport. Direct prompts carry the receiver's reply command.
 
 mod backend;
 mod dialog;
@@ -42,14 +40,14 @@ use vega_herdr::{
     name = "vega mux",
     bin_name = "vega mux",
     disable_version_flag = true,
-    about = "Agent-to-agent messaging over herdr",
+    about = "Agent messaging across herdr TUI and hc terminals",
     after_help = "Examples:\n  vega mux                         # agents in this workspace\n  vega mux --all                   # all workspaces, plus panes without an agent\n  vega mux show w3V:p2             # kind, name, status, title and recent output\n  vega mux transcript w3V:p2 --last # its last reply, from its session log\n  vega mux send w3V:p2 \"ping\"       # send a message; the reply arrives as a new prompt\n  vega mux send rev \"status?\"       # target an agent by its name instead of its pane\n  vega mux spawn rev --kind codex --tier balanced  # start a codex agent in a new tab\n  vega mux close fix-login         # close a worker (its worktree workspace)"
 )]
 struct Cli {
     /// List agents in all workspaces, plus workspace labels and panes without an agent
     #[arg(long)]
     all: bool,
-    /// Act on the agents of another herdr machine (label from `herdr machine list`)
+    /// Act on another saved machine (hc fleet, with empty-fleet herdr fallback)
     #[arg(long, global = true)]
     machine: Option<String>,
     /// Spawn backend (default: caller’s verified terminal world)
@@ -184,7 +182,7 @@ enum Cmd {
         /// Recorded pane id or unique agent name
         target: String,
     },
-    /// Start a new agent in a herdr tab, split or workspace, without approval prompts
+    /// Start an agent in the caller's terminal world, without approval prompts
     #[command(
         after_help = include_str!("../help/spawn.md")
     )]
@@ -1024,10 +1022,9 @@ fn send_post(target: &str, text: &str) -> Result<String, Failure> {
         args.push("--host".into());
         args.push(m.to_lowercase());
     }
-    let destination = vega_herdr::pane::parse(&pane)
-        .map(|p| p.pane)
-        .unwrap_or_else(|| pane.clone());
-    args.push(destination);
+    // Post owns the registry-host mapping. Keep a qualified address intact so
+    // its missing-host guard can fail closed instead of mailing a local inbox.
+    args.push(pane.clone());
     args.push(text.to_string());
     let out = Command::new("vega")
         .args(&args)

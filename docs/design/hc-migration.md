@@ -123,6 +123,12 @@ dirs for a real core (never the user's core).
    `herdr.space`/`herdr.tab` labels or `herdr-app do tab.new`; then `send --now`, `show`, `close`,
    `dialog`/`answer` (vega's classifier on `hc read`), `next` (`herdr-app do agent.focus`), `reopen` and
    `transcript` (session id from vega state). Machines are added to hc before `--machine` works for hc.
+   Slice 4 fleet behavior: hc inventory falls back to the TUI list only when hc is
+   absent or empty. Deploy displays via transports as unsupported and skips selected
+   via targets during apply; unrelated SSH machines remain usable. Mux preserves
+   qualified mail addresses so post's explicit registry-host requirement still applies.
+   hc explicit split/workspace placement is tracked in vega-0h4c.20; tab and wt-created
+   spaces are implemented. Guides and README descriptions change with this slice.
 5. **UAC and the UI.** UAC commands over both backends, the vega herdr-app mod, board and open, config
    doctor rows for `hc`/`herdr-app`, skills and help texts.
 6. **Retire the TUI** (vega-0h4c.4): once no TUI agent runs on any host, delete the herdr backend, the

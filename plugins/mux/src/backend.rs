@@ -109,9 +109,9 @@ pub fn read(target: &str, lines: u32) -> Result<String, Failure> {
         )
     })
 }
-pub fn body(text: &str, footer: Footer) -> Result<String, Failure> {
+pub fn body(text: &str, footer: Footer, remote: bool) -> Result<String, Failure> {
     let caller = own_terminal()?;
-    let (origin, reply, host) = reply_origin(caller.pane(), machine().is_some());
+    let (origin, reply, host) = reply_origin(caller.pane(), remote);
     let f = footer_text(
         footer,
         caller.pane(),
@@ -132,7 +132,8 @@ pub fn send(target: &str, text: &str, footer: Footer) -> Result<(), Failure> {
             "run `vega mux` to list other agents",
         ));
     }
-    hc_local(&["send", pane, &body(text, footer)?])?;
+    let remote = machine().is_some() || parse(pane).is_some_and(|p| p.machine.is_some());
+    hc_local(&["send", pane, &body(text, footer, remote)?])?;
     Ok(())
 }
 pub fn close(target: &str) -> Result<(), Failure> {
