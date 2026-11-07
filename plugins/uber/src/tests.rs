@@ -73,6 +73,26 @@ fn a_returning_older_claim_is_superseded_not_the_uber() {
 
 #[test]
 fn hc_and_herdr_on_one_host_share_the_claim_and_writer_lock() {
+    // As in land/prune/tests.rs: another parallel test may fork while this
+    // test holds the lock. Its child retains that open file description until
+    // exec, briefly delaying release after drop. Retry only after deliberate
+    // contention has ended; the held-lock assertion below must fail at once.
+    async fn after_unlock(
+        client: &async_nats::Client,
+        kv: &async_nats::jetstream::kv::Store,
+        here: &Here,
+        now: u64,
+    ) -> Result<Claimed, Failure> {
+        for _ in 0..100 {
+            match claim_on(client, kv, here, now).await {
+                Err(e) if e.code == "claim_busy" => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                result => return result,
+            }
+        }
+        claim_on(client, kv, here, now).await
+    }
     let dir = tempfile::tempdir().unwrap();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -95,16 +115,16 @@ fn hc_and_herdr_on_one_host_share_the_claim_and_writer_lock() {
                 "claim_busy"
             );
             drop(lock);
-            assert!(claim_on(&client, &kv, a, 100)
+            assert!(after_unlock(&client, &kv, a, 100)
                 .await
                 .unwrap()
                 .lost_to
                 .is_none());
             assert_eq!(
-                claim_on(&client, &kv, b, 200).await.unwrap_err().code,
+                after_unlock(&client, &kv, b, 200).await.unwrap_err().code,
                 "uber_exists"
             );
-            assert!(claim_on(&client, &kv, a, 200).await.unwrap().already);
+            assert!(after_unlock(&client, &kv, a, 200).await.unwrap().already);
             uber_state::remove(&hc.file).unwrap();
             uber_state::unpublish(&kv, &hc.host).await.unwrap();
         }
