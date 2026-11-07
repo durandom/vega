@@ -9,7 +9,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - migration: `vega mux spawn` follows the caller's terminal world; `--backend herdr|hc`
   overrides it. hc children retain their parent link and outlive a parent restart.
-  Spawn uses the caller's herdr-app space; `--worktree` creates a space through
+  Local spawn uses the caller's herdr-app space; remote children omit that local
+  space ID. `--worktree` creates a space through
   worktrunk and herdr-app. Explicit split/workspace placement remains TUI-only.
   Show, direct send, close, dialog/answer, next, reopen and transcript support hc
   targets. Spawn records retain their backend; hc harness session IDs are captured
@@ -22,6 +23,11 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   receiver's registry host before enqueuing them. No machines migrate automatically.
 
 ## 116 · 2026-11-07
+
+- feature: vegad subscribes to hc events, with `hc ls` polling as a fallback, and delivers mail
+  and supervises agents in hc terminals. Registry agent rows include their backend and address.
+  `vega post send t7` and `vega post send hc:t7` target hc terminals; machine-qualified hc
+  addresses require `--host <registry-host>`. See [hc migration](docs/design/hc-migration.md).
 
 - unit: `herdr-app.mods` and `herdr-app.layouts` add a maintained vega clone of Herdr's main layout
   with a small vegad status row. The row starts vegad when instantiated. With herdr-app running,

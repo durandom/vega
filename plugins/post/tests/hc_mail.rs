@@ -25,10 +25,16 @@ case "$1 $2" in
  'api schema') exit 1 ;;
  'agent list'|'pane list')
    key=agents; test "$1" = pane && key=panes
-   printf '{"result":{"%s":[{"pane_id":"w1:p1","agent":"codex","agent_status":"idle","cwd":"%s"},{"pane_id":"w1:p2","agent":"codex","agent_status":"idle","cwd":"%s"}]}}\n' "$key" "$HOME" "$HOME" ;;
+   printf '{"result":{"%s":[{"pane_id":"w1:p1","agent":"codex","agent_status":"idle","cwd":"%s"},{"pane_id":"w1:p2","name":"shared-worker","agent":"codex","agent_status":"idle","cwd":"%s"}]}}\n' "$key" "$HOME" "$HOME" ;;
  'workspace list') echo '{"result":{"workspaces":[]}}' ;;
  'pane process-info') printf '{"result":{"process_info":{"shell_pid":%s}}}\n' "$FAKE_PID" ;;
- 'agent get') printf '{"result":{"agent":{"pane_id":"%s","agent":"codex"}}}\n' "$3" ;;
+ 'agent get')
+   case "$3" in
+     shared-worker) set -- agent get w1:p2 ;;
+     w1:p1|w1:p2) ;;
+     *) echo '{"error":{"code":"not_found","message":"no such agent"}}'; exit 1 ;;
+   esac
+   printf '{"result":{"agent":{"pane_id":"%s","agent":"codex"}}}\n' "$3" ;;
  'agent prompt') printf '{"pane":"%s","text":"pointer"}\n' "$3" >> "$HOME/prompts"; echo '{"result":{}}' ;;
  'pane read') printf 'done\n────────\n❯ \n────────\n status\n' ;;
  *) echo '{"result":{}}' ;;
@@ -452,4 +458,107 @@ fn hc_status_race_keeps_pointer_pending_and_local_delivery_uses_hc() {
         .as_str()
         .unwrap()
         .contains("local-hc-body"));
+}
+
+#[test]
+fn inbox_only_ambiguous_backend_name_requires_an_explicit_terminal_id() {
+    let f = Fixture::new();
+    let file = f.home.path().join("hc.json");
+    let mut terminals: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    terminals["terminals"][1]["name"] = json!("shared-worker");
+    write(&file, &terminals);
+    let send = |target: &str, body: &str| {
+        f.command(&["send", target, body], Some("w1:p1"))
+            .env("VEGA_POST_INBOX_ONLY", "testhost")
+            .env("VEGA_NATS_URL", "nats://127.0.0.1:9")
+            .output()
+            .unwrap()
+    };
+    let out = send("shared-worker", "ambiguous-body");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("ambiguous_agent"), "{text}");
+    assert!(text.contains("use an explicit terminal ID"), "{text}");
+    assert!(!f.home.path().join("prompts").exists());
+
+    for target in ["t2", "hc:t2"] {
+        let body = format!("explicit-{target}");
+        let before = f.prompts("t2").len();
+        let out = send(target, &body);
+        assert!(out.status.success(), "{out:?}");
+        let prompts = f.prompts("t2");
+        assert_eq!(prompts.len(), before + 1);
+        assert!(prompts.last().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains(&body));
+    }
+    assert!(f.prompts("w1:p2").is_empty());
+}
+
+#[test]
+fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
+    let mut f = Fixture::new();
+    let home = f.home.path();
+    fs::create_dir_all(home.join("config/vega")).unwrap();
+    fs::write(
+        home.join("config/vega/theme.toml"),
+        "mode = \"light\"\nlive_claude = true\n",
+    )
+    .unwrap();
+    // A recorded different mode makes the watcher emit a real theme event.
+    write(
+        &home.join("state/vega/theme.json"),
+        &json!({"mode":"dark","source":"fixed","at":1}),
+    );
+    fs::write(
+        home.join("hc-screen"),
+        "answer\n────────\n❯ \n────────\n  status\n",
+    )
+    .unwrap();
+    f.start();
+    wait(f.home.path(), "hc theme command", || {
+        f.prompts("t2")
+            .iter()
+            .any(|p| p["text"] == "/config theme=light")
+    });
+    let prompts = f.prompts("t2");
+    let theme = prompts
+        .iter()
+        .find(|p| p["text"] == "/config theme=light")
+        .unwrap();
+    assert_eq!(
+        theme["args"],
+        json!(["send", "--if", "idle", "t2", "/config theme=light"])
+    );
+    assert!(f
+        .log()
+        .contains("claude pane(s) get /config theme=light when idle"));
+    assert!(f.prompts("w1:p2").is_empty());
+}
+
+#[test]
+fn inbox_only_hc_name_resolves_without_a_herdr_match() {
+    let f = Fixture::new();
+    let file = f.home.path().join("hc.json");
+    let mut terminals: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    terminals["terminals"][1]["name"] = json!("hc-worker");
+    write(&file, &terminals);
+    let out = f
+        .command(&["send", "hc-worker", "hc-name-body"], Some("w1:p1"))
+        .env("VEGA_POST_INBOX_ONLY", "testhost")
+        .env("VEGA_NATS_URL", "nats://127.0.0.1:9")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let prompts = f.prompts("t2");
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("hc-name-body"));
+    let args = prompts[0]["args"].as_array().unwrap();
+    assert_eq!(args[0], "send");
+    assert_eq!(args[args.len() - 2], "t2");
+    assert!(f.prompts("w1:p2").is_empty());
 }

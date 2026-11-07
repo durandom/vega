@@ -23,10 +23,7 @@ toml_edit = "0.25"
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-theme-sync = { path = "../../crates/vega-theme-sync" }
 vega-plugin = { path = "../../crates/vega-plugin" }
-
 tempfile = "3"
-
-[dev-dependencies]
 
 [build-dependencies]
 vega-build = { path = "../../crates/vega-build" }

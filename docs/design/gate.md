@@ -203,9 +203,9 @@ and `first_message.sent`. An idle reviewer at turn zero or with an unsent first 
 
 An hc verdict requires the saved review, a matching `vega.review` label and ancestry verified by
 `own_terminal()`; hc supplies no harness session ID. The generation lock below still applies.
-Until hc mail routing lands, hc verdicts use `hc send <author>` directly; TUI verdicts use `vega post`.
-A successful tool mail enqueue does not prove hc delivery, so exit-code fallback is insufficient. Reviewer
-questions likewise use `hc send`; the prompt names the gate executable to record the verdict.
+hc verdicts keep using `hc send <author>` directly until hc offers an atomic idle-or-done guard
+(vega-0h4c.17); TUI verdicts use `vega post`. Reviewer questions likewise use `hc send`; the prompt
+names the gate executable to record the verdict.
 See [hc migration, slice 1](hc-migration.md#slices).
 
 **Read-only, checked 2026-10-19:**

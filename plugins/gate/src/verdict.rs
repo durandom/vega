@@ -161,8 +161,9 @@ pub fn give(pass: bool, findings: &[Finding], r: &Review) -> Result<Vec<String>,
     // The review is over: `vega gate` must not list it while the pane closes.
     state::remove(&r.pane);
     let text = mail_text(pass, r, findings, start::is_sentinel(&r.author_pane));
-    // Until slice 3, post can acknowledge hc mail without delivering it:
-    // --from-tool skips reachability. Select transport by the saved backend.
+    // Keep direct hc delivery until hc offers an atomic idle-or-done guard
+    // (vega-0h4c.17); direct hc send proves synchronous delivery.
+    // Select transport by the saved backend.
     let mailed = !r.author_pane.is_empty()
         && match r.backend {
             Backend::Hc => vega_herdr::hc_on(

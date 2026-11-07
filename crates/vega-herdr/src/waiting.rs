@@ -244,6 +244,39 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_reconcile_only_their_own_backend() {
+        for hc in [true, false] {
+            let (kept, gone, other) = if hc {
+                ("t1", "t2", "w1:p1")
+            } else {
+                ("w1:p1", "w1:p2", "t1")
+            };
+            let belongs = |p: &str| crate::pane::is_hc_id(p) == hc;
+            let mut ledger = Ledger::default();
+            ledger.status(kept, "done", 10);
+            ledger.status(gone, "blocked", 20);
+            ledger.status(other, "blocked", 30);
+            let other_wait = ledger.panes[other].clone();
+            let live = BTreeMap::from([(kept.to_string(), "blocked".to_string())]);
+
+            assert!(ledger.snapshot_where(&live, 40, belongs));
+            assert_eq!(since(&ledger, kept), Some(("blocked".into(), 10)));
+            assert!(!ledger.panes.contains_key(gone));
+            assert_eq!(ledger.panes[other], other_wait);
+            assert_eq!(ledger.panes.len(), 2);
+            assert!(!ledger.snapshot_where(&live, 50, belongs));
+
+            // Even an empty source snapshot must preserve the other backend.
+            assert!(ledger.snapshot_where(&BTreeMap::new(), 60, belongs));
+            assert_eq!(
+                ledger.panes,
+                BTreeMap::from([(other.to_string(), other_wait)])
+            );
+            assert!(!ledger.snapshot_where(&BTreeMap::new(), 70, belongs));
+        }
+    }
+
+    #[test]
     fn pick_takes_the_oldest_of_the_wanted_statuses() {
         let c = |host: &str, pane: &str, status: &str, since: i64| Candidate {
             host: host.into(),
