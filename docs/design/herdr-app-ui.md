@@ -126,6 +126,6 @@ has not changed to another program; normal app reconciliation then removes the
 empty space. Old spaces without ownership labels stay untouched for user-led live
 cleanup. No worktrunk hooks or badge schema changes are involved.
 
-Items 6 (unclaimed project decisions) and 8 (git arrow tooltip) await the Slayer's
-decision in the worker pane. The toast-position upstream request is drafted only
-in the bead notes.
+The Slayer kept decisions limited to projects with a claimed UAC (item 6:
+decisions belong to the UAC) and kept the existing Git tooltip (item 8). The
+toast-position upstream request is drafted only in the bead notes.
