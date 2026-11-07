@@ -77,7 +77,7 @@ const kidStatus = (k, listed) => {
   return s === "error" ? "blocked" : s === "done" ? "idle" : s;
 };
 const SORTS = [
-  // The first is the default: the TUI machines tree.
+  // The first is the default: UAC projects across machines, then spaces (projectTree).
   { id: "project", label: "UAC / spaces", icon: "layers" },
   { id: "priority", label: "Priority", icon: "clock" },
   { id: "grouped", label: "Grouped by space", icon: "layers" },

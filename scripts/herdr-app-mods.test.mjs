@@ -350,3 +350,16 @@ test('worktree placeholder shells stay out of the list and the tree',()=>{
   assert(!nodes.some(n=>n.idValue==='ag-t3c'||n.idValue==='sub-t3c'),'placeholder has no row');
   assert(nodes.some(n=>n.idValue==='sub-t3d'),'its sentinel still shows');
 });
+
+test('vega mod draws the shipped status line without the palette hint',()=>{
+  const h=load('vega');
+  h.api.spaces=()=>[{id:'sp1',name:'vega',machine:'ganymede',branch:'main',active:true,tabs:[]}];
+  h.api.agents=()=>[{address:'t1',status:'blocked'},{address:'t2',status:'idle'}];
+  let text=texts(h.render());
+  assert(text.includes('ganymede')&&text.includes('main'),'machine and branch of the shown space');
+  assert(text.includes('2 agents')&&text.includes('· 1 needs you'));
+  assert(!text.some(s=>/commands|vegad/.test(s)),'no palette hint, no vegad line');
+  h.api.spaces=()=>[];h.api.agents=()=>[];
+  text=texts(h.render());
+  assert(text.includes('This computer')&&text.includes('0 agents'),'falls back to this computer');
+});

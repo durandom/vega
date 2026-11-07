@@ -8,8 +8,9 @@ keys change.
 `claude.hooks` installs the minimal `vega-hooks@vega-local` plugin through Claude Code's CLI in user
 scope. It removes legacy vega settings hooks after verifying the plugin; restart running Claude sessions.
 
-The `herdr-app` group installs checked Vega status, agents and inbox mods plus the
-maintained layout. The agents clone adds machine/project grouping and clickable badges.
+The `herdr-app` group installs checked Vega status, sidebar and inbox mods plus the
+maintained layout. `vega-sidebar` (a clone of the shipped agents mod) is the only sidebar list: UAC
+projects across machines in dragged order, then spaces without a UAC, with clickable badges.
 The non-modal inbox shows decisions and waiting panes; only new decisions auto-open it.
 Doctor includes local hc, herdr-app and Python 3 availability.
 The inbox also reads badges from connected hc machines and executes answers and

@@ -10,8 +10,8 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
 1. **`vega-sidebar` replaces the shipped `agents` mod** in the vega layout (`config/herdr-app/layouts/vega.json`).
    It starts as `herdr-app do mod.clone '{"name":"agents","as":"vega-sidebar"}'` and keeps what the original
    does: sub-agent tree from `terminals().parent`, priority sort, "Needs you", click to focus. vega adds:
-   grouping by machine and project (a sort option, replacing the TUI "machines" tree), the UAC badge, the
-   harness icon, mail count, hand (waiting), scale (decisions) and git state.
+   the UAC project tree across machines (the default view, replacing the TUI "machines" tree; decision 3),
+   the UAC badge, the harness glyph, mail count, hand (waiting), scale (decisions) and git state.
 2. **Every vega icon is clickable on its own** (`on_click` with `cx.stop_propagation()`): mail opens that
    agent's inbox, hand focuses the agent's tab, scale opens the decision in `vega-inbox`. In the TUI sidebar
    these icons were not clickable.
