@@ -635,3 +635,30 @@ fn remote_preparation_failure_never_launches() {
     assert!(!out.status.success());
     assert!(!f.calls().iter().any(|v| v[0] == "run"));
 }
+
+#[test]
+fn empty_tui_identity_still_binds_hc_session_before_dispatch() {
+    let f = Fixture::new();
+    f.spawn();
+    success(
+        f.cmd()
+            .env("HERDR_PANE_ID", "")
+            .env("HC_TERMINAL_ID", "t8")
+            .env("CODEX_THREAD_ID", "eager-session")
+            .args([
+                "prepare",
+                "--kind",
+                "pi",
+                "--cwd",
+                f.root().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap(),
+    );
+    let records: Vec<Value> = fs::read_dir(f.root().join("state/vega/spawns"))
+        .unwrap()
+        .map(|p| serde_json::from_slice(&fs::read(p.unwrap().path()).unwrap()).unwrap())
+        .collect();
+    let child = records.iter().find(|v| v["pane"] == "t8").unwrap();
+    assert_eq!(child["session"], "eager-session");
+}

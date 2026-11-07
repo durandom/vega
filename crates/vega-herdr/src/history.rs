@@ -38,7 +38,9 @@ pub fn event(host: &str, kind: &str, data: Value) -> Value {
         std::process::id(),
         SERIAL.fetch_add(1, Ordering::Relaxed)
     ));
-    let caller = std::env::var("HERDR_PANE_ID").ok();
+    let caller = std::env::var("HERDR_PANE_ID")
+        .ok()
+        .filter(|p| !p.is_empty());
     let pane = data
         .get("pane")
         .cloned()

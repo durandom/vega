@@ -233,7 +233,10 @@ fn run_herdr_on(
     if !out.status.success() {
         // An agent sandbox (e.g. Codex) denies connecting to the herdr socket.
         if stderr.contains("PermissionDenied") || stderr.contains("Operation not permitted") {
-            let socket = env::var("HERDR_SOCKET_PATH").unwrap_or_else(|_| "herdr socket".into());
+            let socket = env::var("HERDR_SOCKET_PATH")
+                .ok()
+                .filter(|p| !p.is_empty())
+                .unwrap_or_else(|| "herdr socket".into());
             return Err(Failure::new(
                 "socket_denied",
                 format!(

@@ -362,7 +362,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     backend::set_override(cli.backend);
-    if std::env::var_os("HERDR_PANE_ID").is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
+    if std::env::var_os("HERDR_PANE_ID").is_none_or(|p| p.is_empty())
+        && std::env::var_os("HC_TERMINAL_ID").is_some_and(|p| !p.is_empty())
+    {
         let _ = vega_herdr::hc::own_terminal();
     }
     let result = match cli.cmd {

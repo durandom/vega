@@ -252,3 +252,44 @@ esac
         assert_eq!(request["params"]["env"]["SPECIAL"], "a b");
     }
 }
+
+#[test]
+fn empty_tui_environment_is_absent_for_history_and_errors() {
+    if env::var_os("VEGA_HC_EMPTY_TEST").is_some() {
+        let event = vega_herdr::history::event("host", "test", serde_json::json!({}));
+        assert!(event["pane"].is_null(), "{event}");
+        assert!(event["session"].is_null(), "{event}");
+        let failure = vega_herdr::herdr_local(&["agent", "list"]).unwrap_err();
+        assert_eq!(failure.code, "socket_denied");
+        assert!(
+            failure.message.ends_with("herdr socket"),
+            "{}",
+            failure.message
+        );
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let herdr = dir.path().join("herdr");
+    fs::write(&herdr, "#!/bin/sh\necho PermissionDenied >&2\nexit 1\n").unwrap();
+    fs::set_permissions(&herdr, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = Command::new(env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "empty_tui_environment_is_absent_for_history_and_errors",
+            "--nocapture",
+        ])
+        .env_clear()
+        .env("VEGA_HC_EMPTY_TEST", "1")
+        .env("HERDR_PANE_ID", "")
+        .env("HERDR_SOCKET_PATH", "")
+        .env("CODEX_THREAD_ID", "must-not-bind")
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

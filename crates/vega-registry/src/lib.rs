@@ -437,7 +437,7 @@ impl View {
         {
             return Err(vega_herdr::Failure::new("machine_host_unknown",
                 format!("hc machine {machine} has no matching registry host"),
-                &format!("hc machine rename {machine} <host>; inspect vega post for registry hosts, or start vegad on the intended host")));
+                &format!("hc machine rename {machine} <host>; run vega config infra --fleet to check names, or start vegad on the intended host")));
         }
         Ok(())
     }
