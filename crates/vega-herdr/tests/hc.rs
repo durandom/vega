@@ -31,6 +31,15 @@ fn fake_hc_contract() {
                     "remote/t7"
                 );
             }
+            "usage" => {
+                for args in [
+                    &["ls", "--all"][..],
+                    &["exec", "word"][..],
+                    &["get", "t7", "--bg"][..],
+                ] {
+                    assert_eq!(hc_local(args).unwrap_err().code, "usage", "{args:?}");
+                }
+            }
             "bad" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_bad_output"),
             "exit" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_bad_output"),
             "timeout" => assert_eq!(
@@ -100,6 +109,7 @@ esac
         "neither",
         "stale_herdr",
         "on",
+        "usage",
         "bad",
         "exit",
         "timeout",
@@ -152,7 +162,7 @@ esac
         if case == "hc" {
             assert_eq!(fs::read_to_string(&args).unwrap(), "connect\n");
         }
-        if ["herdr", "stale_herdr", "neither"].contains(&case) {
+        if ["herdr", "stale_herdr", "neither", "usage"].contains(&case) {
             assert!(!args.exists(), "{case} must not call hc");
         }
     }

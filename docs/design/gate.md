@@ -188,14 +188,15 @@ The shim calls it (and an agent may, to review before handing work back). Steps:
 
 `own_terminal()` verifies the author's process ancestry and chooses herdr or hc; a TUI pane takes
 precedence over an enclosing hc terminal. TUI reviewers still use `vega mux spawn`. An hc author
-starts a reviewer with `hc run --bg --json --no-parent --outlive-parent --name gate-<review id>
---cwd <clone> --label vega.role=gate-reviewer --label vega.review=<review id>`, inheriting the author's
+starts a reviewer through a schema-validated `terminal.run` RPC over `hc connect`, with
+`wait: false`, `no_parent: true`, `outlive_parent: true`, name `gate-<review id>`, cwd `<clone>`,
+and labels `vega.role=gate-reviewer` / `vega.review=<review id>`, inheriting the author's
 `herdr.space` label. The program argv begins `env VEGA_GATE_ROLE=reviewer <kind>` and includes the shared
 harness defaults and model arguments. Both paths use `vega-herdr::launch` for defaults and existing
 repo trust propagation; no trust dialog is answered automatically.
 
 Review state stores `backend`; old files default to `herdr`. hc state filenames use the lossless
-`hc-<hex address>` token. Liveness and status come from `hc get`: `state=live`, `status.state`, `turn`
+`hc-<hex address>` token. Liveness and status come from `terminal.get` RPC: `state=live`, `status.state`, `turn`
 and `first_message.sent`. An idle reviewer at turn zero or with an unsent first message is shown as
 `stuck`; `blocked` and `stuck` guidance points to `hc read <terminal>`. Cleanup uses `hc kill` and
 `hc rm`, including detached cleanup after a verdict. For hc authors, a parent link or

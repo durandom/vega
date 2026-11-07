@@ -19,10 +19,10 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
    moved. Every slice is additive: the TUI path stays untouched until the last slice.
 3. **The backend follows the agent concerned.** For "who am I" the caller's world decides; for a target the
    world recorded with it decides.
-4. **Sentinels outlive their parent (Slayer, 2026-11-06).** `vega mux spawn` runs `hc run` inside the
+4. **Sentinels outlive their parent (Slayer, 2026-11-06).** `vega mux spawn` calls `terminal.run` from the
    spawning agent's terminal, so the UAC becomes the hc parent, and by default a child ends when its
    parent's program ends: a UAC handoff, `/exit`, crash or resume would end every sentinel (TUI panes
-   never did). vega spawns with `--outlive-parent`: hc keeps the parent link (`hc wait --children`, notes)
+   never did). vega spawns with `outlive_parent: true`: hc keeps the parent link (`hc wait --children`, notes)
    and vega keeps its own lineage ledger.
 5. **The vega herdr-app mod starts vegad (Slayer, 2026-11-06).** herdr-app has no startup hooks; a mod has
    `init()` and `exec()`, so the vega mod runs the idempotent `vega-post relay start` when it loads, as the
@@ -70,7 +70,7 @@ by a command inside a shell terminal survives that command (the shell is the roo
   hands `HC_*` to every TUI pane).
 - Else `HC_TERMINAL_ID` set (with `HC_TERMINAL_SOCKET`, `HC_SCOPE`): hc world.
 - Either is verified against the process ancestry (herdr: the existing `me()` check; hc: the pids of
-  `hc get $HC_TERMINAL_ID`), so a stale variable never claims a terminal.
+  `terminal.get {terminal: $HC_TERMINAL_ID}`), so a stale variable never claims a terminal.
 - Neither: no terminal. Gate's fail-open message becomes "no terminal" instead of "no herdr".
 - Long-lived daemons (vegad) strip `HC_*` as they strip `HERDR_*` today.
 
@@ -112,10 +112,13 @@ dirs for a real core (never the user's core).
    `pane.rs`/`vega_shim::is_pane`/post `valid_pane_id`, safe encoding, the `claude-code` alias, `HC_*`
    stripped from vegad.
 1. **Gate reviewer.** Identity from `own_terminal()`; `Review` stores the backend; an hc author's reviewer
-   starts with `hc run --bg --json --no-parent --outlive-parent --name gate-<id> --cwd <clone>
-   --label vega.role=gate-reviewer --label vega.review=<id> -- env VEGA_GATE_ROLE=reviewer <kind> ...`;
-   liveness, cleanup and reviewer state through `hc get/kill/rm`; verdict authorization by state file plus
-   the `vega.review` label plus ancestry. Verdict mail uses `hc send <author>` directly, selected by the
+   starts through `terminal.run` RPC with `wait: false`, `no_parent: true`,
+   `outlive_parent: true`, name `gate-<id>`, cwd `<clone>`, and labels
+   `vega.role=gate-reviewer` / `vega.review=<id>`. Its argv begins
+   `env VEGA_GATE_ROLE=reviewer <kind> ...`; liveness and reviewer state use
+   `terminal.get`, and synchronous cleanup uses `terminal.kill` / `terminal.rm`;
+   verdict authorization is by state file plus
+   the `vega.review` label plus ancestry. Verdict mail uses `terminal.send` RPC directly, selected by the
    saved backend, until hc offers an atomic idle-or-done guard (vega-0h4c.17). Ends
    the `VEGA_GATE=skip` pushes from herdr-app (vega-yixb).
 2. **Own identity everywhere.** `post inbox` parent lookup, `ci watch`, `notify`, `review`, orchestration
@@ -235,12 +238,12 @@ opening/focusing hc addresses remains a later slice and fails explicitly for now
 
 ### Slice 3 delivery contract (2026-11-07)
 
-vegad consumes `hc events --json` (the `events.subscribe` snapshot/stream),
+vegad consumes an `events.subscribe` RPC snapshot/stream over `hc connect`,
 resubscribes on `missed`, and polls `terminal.list` through `hc connect` while
 the stream is unavailable. All terminal inventories use the shared
-`vega_herdr::hc::terminal_list` helper: `hc --json ls` is a display summary with
-string status and no labels or foreground metadata. `terminal.list` and
-`hc --json get` return full Terminal objects, including foreground cwd.
+`vega_herdr::hc::terminal_list` helper. `terminal.list` and `terminal.get`
+return schema-validated full Terminal objects, including status, labels and
+foreground cwd, rather than the CLI's display summaries.
 Snapshots, CI liveness, and waiting/supervision state are scoped by backend.
 Only local hc terminals are published by this host; connected remote terminals'
 paths are never resolved as local checkouts. Registry agent rows retain bare
@@ -341,7 +344,9 @@ initial result against the same schema. Notifications (`event`, `heartbeat`,
 `missed`) are the exception to schema validation: OpenRPC describes method
 results, while their shapes and stream semantics live in upstream's
 `schema/README.md`. They remain handled by the stream parser and its tests.
-Gate detached cleanup still invokes `hc kill`/`hc rm` with output discarded;
-these are lifecycle commands without JSON reads. There are no remaining hc CLI
-JSON exceptions. The independent herdr TUI
-transport and its output shapes remain unchanged.
+Gate's synchronous cleanup uses `hc_on`: its `terminal.kill` / `terminal.rm`
+results are parsed and schema-validated, then discarded. Separately,
+`cleanup_detached` in `plugins/gate/src/start.rs` launches a shell that invokes
+`hc kill` / `hc rm` directly with stdout/stderr redirected to `/dev/null`;
+it consumes only exit codes. There are no remaining hc CLI JSON reads.
+The independent herdr TUI transport and its output shapes remain unchanged.
