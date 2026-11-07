@@ -34,6 +34,7 @@ run = [
   "node --test scripts/herdr-app-mods.test.mjs",
   "sh scripts/install-vscode-ext.test.sh",
   "sh scripts/check-stamp.test.sh",
+  "sh scripts/install-cli.test.sh",
   # Last: `mise run install` skips the check for this clean tree.
   "sh scripts/check-stamp.sh write",
 ]

@@ -5,6 +5,8 @@
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# cargo build finds the workspace from the cwd; vega deploy runs this from ~.
+cd "$root"
 
 # Build in this checkout's own target dir. With a CARGO_TARGET_DIR shared by
 # several worktrees, `cargo install` can find its build "fresh" and copy the
