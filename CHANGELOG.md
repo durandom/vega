@@ -18,7 +18,6 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   Closing the worker also removes its owned placeholder when no other terminal
   uses the space. Existing unmarked spaces need manual cleanup with the user.
 
-
 ## 121 · 2026-11-07
 
 - optional: `vegad-start` starts vegad at login without herdr-app or herdr TUI;

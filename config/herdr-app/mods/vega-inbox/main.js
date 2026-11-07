@@ -34,12 +34,12 @@ export default class VegaInbox extends View {
   rows() {
     const project = shared("vega.inbox-project");
     return (shared("vega.badges") ?? []).filter(r => Date.now()/1000-r.at <= 60 && (!project || r.project === project))
-      .map(r => ({...r, decision_texts: (r.decision_texts ?? []).filter(d => !this.completed.has(`${r.project}/${d.id}`))}));
+      .map(r => ({...r, decision_texts: (r.decision_texts ?? []).filter(d => !this.completed.has(decisionKey(r, d.id)))}));
   }
 
   waiting(rows) {
     const live = new Set(terminals().filter(t => t.state === "live").map(t => t.address));
-    return rows.flatMap(row => (row.waiting_panes ?? []).map(w => ({...w, project: row.project})))
+    return rows.flatMap(row => (row.waiting_panes ?? []).map(w => ({...w, project: row.project, machine: row.machine ?? null})))
       .filter(w => live.has(w.pane.replace(/^hc:/,"")));
   }
 

@@ -190,12 +190,16 @@ test('machine/project tree has one child row, short names and positive totals on
     {address:'ganymede/t3',state:'live',parent:'ganymede/t2',labels:{'vega.project':'file:host:/tmp/gate'}},
     {address:'ganymede/t4',state:'live',labels:{}},
   ];
-  h.state.set('vega-agents.sort','project');h.state.set('vega.badges',[{...row(),project:'github.com/team/vega',notes:2,decisions:0,waiting:0}]);
+  h.state.set('vega-agents.sort','project');h.state.set('vega.badges',[
+    {...row(),project:'github.com/team/vega',notes:9,decisions:0,waiting:0},
+    {...row(),machine:'ganymede',project:'github.com/team/vega',notes:2,decisions:0,waiting:0},
+  ]);
   h.mod.init({},h.cx);const tree=h.render(), nodes=elements(tree), text=texts(tree);
   assert.equal(nodes.filter(n=>n.idValue==='sub-ganymede/t3').length,1);
   assert.equal(nodes.filter(n=>typeof n.idValue==='string'&&n.idValue.startsWith('project-')).length,1);
   assert(text.includes('ganymede · vega'));
   assert(text.includes('✉ 2'));assert(!text.includes('⚖ 0'));assert(!text.includes('✋ 0'));
+  assert(!text.includes('✉ 9'),'another machine cannot supply this group total');
   const order=h.calls.find(c=>c[0]==='order')[1];assert.equal(order.length,3);
   assert.equal(new Set(order).size,3,'navigation includes the child once in tree order');
 });
@@ -264,4 +268,50 @@ test('successful Answer and Dismiss close the last card immediately; errors keep
 test('empty initial mod check has null props and no overlay to close',()=>{
   const h=load('vega-inbox');h.setProps(null);h.mod.init({},h.cx);h.render();
   assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+});
+
+test('pinned listed child stays once under its live parent and once in navigation',()=>{
+  const h=load('vega-agents');
+  const agent=(address,pinned)=>({address,pinned,space:'s',space_name:'vega',tab:'tb',pane:address,status:'idle',program:{},seq:1});
+  h.api.agents=()=>[agent('t1',false),agent('t2',true)];
+  h.api.terminals=()=>[{address:'t1',state:'live',parent:null,labels:{}},{address:'t2',state:'live',parent:'t1',labels:{'herdr.pinned':'true'}}];
+  h.mod.init({},h.cx);const nodes=elements(h.render());
+  assert.equal(nodes.filter(n=>n.idValue==='sub-t2').length,1);
+  assert.equal(nodes.filter(n=>n.idValue==='ag-t2').length,0);
+  assert.equal(nodes.filter(n=>n.idValue==='pinned').length,0);
+  assert.equal(JSON.stringify(h.calls.find(c=>c[0]==='order')[1]),JSON.stringify(['t1','t2']));
+});
+
+test('remote completion and failures stay machine-scoped and close only the last remaining card',async()=>{
+  for(const dismiss of [false,true]) {
+    const h=load('vega-inbox'),local=row(),remote={...row(),machine:'ganymede'};
+    h.setProps({overlay:'remote-window'});h.state.set('vega.badges',[local,remote]);h.mod.init({},h.cx);
+    h.mod.inputs.get('ganymede/project-a/b-1').set_value('Remote answer');
+    for(const result of [{code:3,stderr:'Transport failed'},{code:0,stdout:JSON.stringify({code:9,stdout:'Inner failed',stderr:''})}]) {
+      h.api.exec=async(...a)=>{h.calls.push(['exec',...a]);return result;};
+      h.mod.act(remote,remote.decision_texts[0],dismiss,h.cx);await new Promise(r=>setImmediate(r));
+      assert.equal(h.mod.completed.size,0);assert.equal(h.mod.rows()[1].decision_texts.length,1);
+      assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+    }
+    h.api.exec=async(...a)=>{h.calls.push(['exec',...a]);return {code:0,stdout:JSON.stringify({code:0,stdout:'Sent',stderr:''})};};
+    h.mod.act(remote,remote.decision_texts[0],dismiss,h.cx);await new Promise(r=>setImmediate(r));
+    assert(h.calls.filter(c=>c[0]==='exec').every(c=>c[1]==='python3'),'remote actions never run bd/vega locally');
+    assert(h.mod.completed.has('ganymede/project-a/b-1'));
+    assert.equal(h.mod.rows()[1].decision_texts.length,0);
+    assert.equal(h.mod.rows()[0].decision_texts.length,1,'local card with the same ID remains');
+    assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+    h.mod.inputs.get('project-a/b-1').set_value('Local answer');h.api.exec=async()=>({code:0,stdout:'Sent'});
+    h.mod.act(local,local.decision_texts[0],dismiss,h.cx);await new Promise(r=>setImmediate(r));
+    assert.equal(h.calls.filter(c=>c[0]==='close'&&c[1]==='remote-window').length,1);
+  }
+});
+
+test('only the qualified remote waiting terminal keeps an otherwise empty inbox open',()=>{
+  const h=load('vega-inbox');const remote={...row(),machine:'ganymede',decision_texts:[],waiting_panes:[{pane:'hc:ganymede/t7',name:'Remote'}]};
+  h.setProps({overlay:'waiting-window'});h.state.set('vega.badges',[remote]);
+  h.api.terminals=()=>[{address:'ganymede/t7',state:'live'}];h.mod.init({},h.cx);
+  assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+  assert.equal(h.mod.waiting(h.mod.rows())[0].machine,'ganymede');
+  h.api.terminals=()=>[{address:'t7',state:'live'}];h.mod.prepare(h.cx);
+  assert(h.calls.some(c=>c[0]==='close'&&c[1]==='waiting-window'),'same bare ID on this machine is unrelated');
 });

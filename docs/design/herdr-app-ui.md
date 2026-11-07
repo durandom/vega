@@ -126,6 +126,11 @@ cards and no live waiting panes. Unrelated projects do not keep a filtered windo
 open; an in-flight action prevents closing. Successful Answer/Dismiss removes its
 card immediately and closes the last one without waiting for vegad. This is local
 to the window; reopening can still show an answered bead until its UAC closes it.
+Completed cards use the same machine/project/id keys as inputs and results, so
+answering on one machine leaves another machine's identical bead ID visible.
+Remote transport or inner-command failures keep the card open. Waiting panes
+retain their qualified machine address, and positive group totals still match
+both source machine and project.
 
 `space.new` creates a shell before mux starts a worktree agent. New launches link
 that exact placeholder and worker with ownership labels. `mux close` removes the
