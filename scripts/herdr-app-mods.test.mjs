@@ -45,12 +45,16 @@ test('new decisions open once, timestamps and waiters do not reopen; stale decis
   assert.equal(h.calls.filter(c=>c[0]==='toast').length,1);
   r.at++;r.waiting_panes=[{pane:'t7'}];await h.mod.badges(h.cx);
   assert.equal(h.calls.filter(c=>c[0]==='open').length,1);
+  const refreshes=()=>h.calls.filter(c=>c[0]==='run'&&c[1]==='vega-inbox.refresh').length;
+  assert.equal(refreshes(),0,'a closed inbox has no refresh command');
   h.state.set('vega.inbox-open',true);r.decision_texts.push({...r.decision_texts[0],id:'b-2'});
   await h.mod.badges(h.cx);
   assert.equal(h.calls.filter(c=>c[0]==='open').length,1,'existing input is preserved');
   assert.equal(h.calls.filter(c=>c[0]==='toast').length,2);
+  assert.equal(refreshes(),1);
   rows=[{...row(),at:1}];await h.mod.badges(h.cx);
   assert.equal(h.state.get('vega.badges').length,0);
+  assert.equal(refreshes(),2);
 });
 
 test('answer and dismiss use argv and the recorded project cwd; inputs never autofocus',async()=>{
