@@ -14,7 +14,9 @@ def get(p):
     sys.exit(3)
 if args[0] == 'ls': emit(load())
 elif args[0] == 'get': emit(get(args[1]))
-elif args[0] == 'read': emit({'text':'completed work', 'complete':True, 'how':'screen'})
+elif args[0] == 'read':
+    screen = home/'hc-screen'
+    emit({'text':screen.read_text() if screen.exists() else 'completed work', 'complete':True, 'how':'screen'})
 elif args[0] == 'send':
     assert '--force' not in args
     p, text = args[-2:]

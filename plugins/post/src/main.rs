@@ -3310,12 +3310,17 @@ async fn serve(
                 let typed = match notify_queued(&pane, &line, d.may_queue(&pane)) {
                     Ok(()) => {
                         log(&format!(
-                            "pointer: {pane} ({count} pending{}{}, agent {}), herdr {} ms",
+                            "pointer: {pane} ({count} pending{}{}, agent {}), {} {} ms",
                             wake.as_ref()
                                 .map(|(s, _)| format!("; wake: {s}"))
                                 .unwrap_or_default(),
                             if again { ", again" } else { "" },
                             d.status_of(&pane),
+                            if terminals::is_hc(&pane) {
+                                "hc"
+                            } else {
+                                "herdr"
+                            },
                             started.elapsed().as_millis()
                         ));
                         if let Some((_, current)) = &wake {
@@ -3494,10 +3499,10 @@ async fn serve(
 }
 
 /// How often vegad looks at the Claude panes still waiting for a theme
-/// switch (one `herdr agent list` per look, only while some wait).
+/// switch (a fresh inventory of both terminal backends, only while some wait).
 const LIVE_THEME_EVERY: Duration = Duration::from_secs(2);
 
-/// This host's agents (`herdr agent list`); empty when herdr is away.
+/// This host's agents from both terminal backends; unavailable sources are omitted.
 fn local_agents() -> Vec<serde_json::Value> {
     terminals::Inventory::read().agents()
 }

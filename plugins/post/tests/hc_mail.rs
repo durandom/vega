@@ -489,3 +489,44 @@ fn inbox_only_ambiguous_backend_name_requires_an_explicit_terminal_id() {
     }
     assert!(f.prompts("w1:p2").is_empty());
 }
+
+#[test]
+fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
+    let mut f = Fixture::new();
+    let home = f.home.path();
+    fs::create_dir_all(home.join("config/vega")).unwrap();
+    fs::write(
+        home.join("config/vega/theme.toml"),
+        "mode = \"light\"\nlive_claude = true\n",
+    )
+    .unwrap();
+    // A recorded different mode makes the watcher emit a real theme event.
+    write(
+        &home.join("state/vega/theme.json"),
+        &json!({"mode":"dark","source":"fixed","at":1}),
+    );
+    fs::write(
+        home.join("hc-screen"),
+        "answer\n────────\n❯ \n────────\n  status\n",
+    )
+    .unwrap();
+    f.start();
+    wait(f.home.path(), "hc theme command", || {
+        f.prompts("t2")
+            .iter()
+            .any(|p| p["text"] == "/config theme=light")
+    });
+    let prompts = f.prompts("t2");
+    let theme = prompts
+        .iter()
+        .find(|p| p["text"] == "/config theme=light")
+        .unwrap();
+    assert_eq!(
+        theme["args"],
+        json!(["send", "--if", "idle", "t2", "/config theme=light"])
+    );
+    assert!(f
+        .log()
+        .contains("claude pane(s) get /config theme=light when idle"));
+    assert!(f.prompts("w1:p2").is_empty());
+}
