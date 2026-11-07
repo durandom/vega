@@ -42,6 +42,9 @@ by about a second, not 15.
 
 **`vega mux next [--status done,blocked]`** (default `done`):
 
+The hc path also merges `hc ls` candidates and focuses local or remote hc agents through
+`herdr-app do agent.focus`; see [hc migration, slice 4](hc-migration.md) for the backend routing.
+
 1. This host: its ledger file, panes herdr still lists. Other hosts: the registry (fresh hosts only);
    without it, this host only, said on stderr.
 2. Pick the waiting agent with the oldest `since` whose status is in `--status`.

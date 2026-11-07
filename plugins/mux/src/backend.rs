@@ -163,6 +163,13 @@ pub fn close(target: &str) -> Result<(), Failure> {
     Ok(())
 }
 pub fn home(all: bool) -> Result<(), Failure> {
+    if machine().is_some() {
+        return Err(Failure::new(
+            "unsupported_scope",
+            "hc home has no machine scope",
+            "run `vega mux` on that machine",
+        ));
+    }
     let list = hc_local(&["ls"])?;
     let own = own_terminal().ok();
     let caller = own.as_ref().and_then(|o| info(o.pane()).ok());

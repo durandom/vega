@@ -489,3 +489,42 @@ fn hc_home_filters_space_and_finished_rows_and_reports_empty_state() {
     );
     assert!(empty_all.contains("agents: 0 live agents"), "{empty_all}");
 }
+
+#[test]
+fn hc_home_rejects_machine_scope_for_hc_and_overridden_tui_callers() {
+    for tui in [false, true] {
+        for all in [false, true] {
+            let f = Fixture::new();
+            let mut cmd = f.cmd();
+            cmd.args(["--machine", "corp"]);
+            if tui {
+                cmd.env_remove("HC_TERMINAL_ID")
+                    .env("HERDR_PANE_ID", "w1:p1")
+                    .args(["--backend", "hc"]);
+            }
+            if all {
+                cmd.arg("--all");
+            }
+            let out = cmd.output().unwrap();
+            let stdout = String::from_utf8(out.stdout).unwrap();
+            assert_eq!(out.status.code(), Some(1), "{stdout}");
+            assert!(stdout.contains("error{code,message,hint}:"), "{stdout}");
+            assert!(stdout.contains("unsupported_scope"), "{stdout}");
+            assert!(
+                stdout.contains("run `vega mux` on that machine"),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("agents["), "{stdout}");
+            assert!(!stdout.contains("agents: 0"), "{stdout}");
+            let calls = fs::read_to_string(f.root().join("calls")).unwrap_or_default();
+            assert!(
+                !calls.lines().any(|line| {
+                    let call: Value = serde_json::from_str(line).unwrap();
+                    call[0] == "ls"
+                }),
+                "{calls}"
+            );
+            assert!(!f.root().join("herdr-calls").exists());
+        }
+    }
+}
