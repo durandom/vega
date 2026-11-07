@@ -330,6 +330,7 @@ pub fn summary(
             format!("{n} decisions closed; resume your parked sentinels")
         };
     }
+    // Historical summary inputs: live wakes filter reported children through actionable().
     let all_done = n == children && current.iter().all(|(_, a)| *a == Attention::Completed);
     let s = if n == 1 { "" } else { "s" };
     if all_done {

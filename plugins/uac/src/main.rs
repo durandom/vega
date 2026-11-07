@@ -2321,6 +2321,16 @@ mod tests {
     }
 
     #[test]
+    fn waiting_on_gate_shows_the_verdict_and_next_command() {
+        let w = row("t7", "proteus", Some(Attention::Waiting));
+        assert!(w.ci.is_empty());
+        assert_eq!(
+            attention_table(&[w], "proteus")[1],
+            "  proteus,t7,waiting,gate review: awaiting verdict,wait: the verdict mail wakes t7"
+        );
+    }
+
+    #[test]
     fn quota_shows_the_abort_and_when_to_retry() {
         std::env::set_var("XDG_STATE_HOME", "/nonexistent/vega-test");
         let abort = |transient, resets: Option<&str>| {
