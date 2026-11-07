@@ -40,6 +40,9 @@ pub fn git_env() {
 pub fn git(dir: &Path, args: &[&str]) -> String {
     git_env();
     let o = Command::new("git")
+        .env_remove("VEGA_GATE_ROLE")
+        .env_remove("VEGA_GATE")
+        .env_remove("HC_TERMINAL_ID")
         .args(args)
         .current_dir(dir)
         .output()

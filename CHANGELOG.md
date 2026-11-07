@@ -7,6 +7,11 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 ## 116 · 2026-11-07
 
+- feature: vegad subscribes to hc events, with `hc ls` polling as a fallback, and delivers mail
+  and supervises agents in hc terminals. Registry agent rows include their backend and address.
+  `vega post send t7` and `vega post send hc:t7` target hc terminals; machine-qualified hc
+  addresses require `--host <registry-host>`. See [hc migration](docs/design/hc-migration.md).
+
 - unit: `herdr-app.mods` and `herdr-app.layouts` add a maintained vega clone of Herdr's main layout
   with a small vegad status row. The row starts vegad when instantiated. With herdr-app running,
   `vega config apply herdr-app` validates the mod and selects the vega layout on first apply;
