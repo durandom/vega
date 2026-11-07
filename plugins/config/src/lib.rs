@@ -89,11 +89,13 @@ pub enum Unit {
     HerdrAppSettings,
     HerdrAppThemes,
     HerdrAppMods,
+    HerdrAppAgents,
+    HerdrAppInbox,
     HerdrAppLayouts,
 }
 
 impl Unit {
-    pub const ALL: [Unit; 18] = [
+    pub const ALL: [Unit; 20] = [
         Unit::Herdr,
         Unit::DcgConfig,
         Unit::DcgPacks,
@@ -111,6 +113,9 @@ impl Unit {
         // Themes before the settings that name them: the app rejects a theme
         // it has no file for.
         Unit::HerdrAppThemes,
+        // Install overlay and sidebar before the status mod can open them.
+        Unit::HerdrAppInbox,
+        Unit::HerdrAppAgents,
         Unit::HerdrAppMods,
         Unit::HerdrAppLayouts,
         Unit::HerdrAppSettings,
@@ -135,6 +140,8 @@ impl Unit {
             Unit::HerdrAppSettings => "herdr-app.settings",
             Unit::HerdrAppThemes => "herdr-app.themes",
             Unit::HerdrAppMods => "herdr-app.mods",
+            Unit::HerdrAppAgents => "herdr-app.vega-agents",
+            Unit::HerdrAppInbox => "herdr-app.vega-inbox",
             Unit::HerdrAppLayouts => "herdr-app.layouts",
         }
     }
@@ -159,6 +166,8 @@ impl Unit {
             Unit::HerdrAppSettings => "~/.config/herdr-app/settings.json",
             Unit::HerdrAppThemes => "~/.config/herdr-app/themes/",
             Unit::HerdrAppMods => "~/.config/herdr-app/mods/vega/",
+            Unit::HerdrAppAgents => "~/.config/herdr-app/mods/vega-agents/",
+            Unit::HerdrAppInbox => "~/.config/herdr-app/mods/vega-inbox/",
             Unit::HerdrAppLayouts => "~/.config/herdr-app/layouts/vega.json",
         }
     }
@@ -168,7 +177,7 @@ impl Unit {
             Unit::Herdr => "whole file, herdr keys kept",
             Unit::ClaudeMd | Unit::CodexMd | Unit::PiMd | Unit::Agentsview => "whole file",
             Unit::DcgConfig | Unit::HerdrAppKeys | Unit::HerdrAppLayouts => "whole file",
-            Unit::HerdrAppMods => "whole folder",
+            Unit::HerdrAppMods | Unit::HerdrAppAgents | Unit::HerdrAppInbox => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
             Unit::ClaudeHooks => "plugin + legacy hook migration",
@@ -193,6 +202,8 @@ impl Unit {
                 | Unit::HerdrAppSettings
                 | Unit::HerdrAppThemes
                 | Unit::HerdrAppMods
+                | Unit::HerdrAppAgents
+                | Unit::HerdrAppInbox
                 | Unit::HerdrAppLayouts
         )
     }
@@ -212,6 +223,8 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
             Unit::HerdrAppSettings,
             Unit::HerdrAppThemes,
             Unit::HerdrAppMods,
+            Unit::HerdrAppAgents,
+            Unit::HerdrAppInbox,
             Unit::HerdrAppLayouts,
         ],
     ),
@@ -570,7 +583,9 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             plan.sources.push(src);
             Ok(plan)
         }
-        Unit::HerdrAppMods | Unit::HerdrAppLayouts => herdr_app::plan(ctx, unit),
+        Unit::HerdrAppMods | Unit::HerdrAppAgents | Unit::HerdrAppInbox | Unit::HerdrAppLayouts => {
+            herdr_app::plan(ctx, unit)
+        }
         Unit::HerdrAppKeys => {
             if let Some(p) = need_herdr_app(env) {
                 return Ok(p);
@@ -871,7 +886,10 @@ fn apply_inner(
     if !m.is_empty() {
         return Outcome::Managed(m);
     }
-    if matches!(unit, Unit::HerdrAppMods | Unit::HerdrAppLayouts) {
+    if matches!(
+        unit,
+        Unit::HerdrAppMods | Unit::HerdrAppAgents | Unit::HerdrAppInbox | Unit::HerdrAppLayouts
+    ) {
         return herdr_app::apply(ctx, unit, &plan, evidence);
     }
     if unit == Unit::ClaudeHooks {

@@ -5,8 +5,8 @@ description: Shows, diffs and applies the coding agents', herdr's and dcg's conf
 
 # vega config: agent, herdr and dcg config from one source
 
-With herdr-app running, `vega config apply herdr-app` checks the vega mod and selects its layout
-on first apply. Later layout choices stay yours. Status reports clone/app version drift.
+With herdr-app running, `vega config apply herdr-app` checks all Vega mods and selects its layout
+on first apply. Later choices stay yours; status reports clone drift.
 
 ```
 vega config                  # per unit: target, ownership, state; local sources
@@ -30,11 +30,13 @@ vega config infra            # the infra vega needs: required/optional, state, n
   Verified installation precedes legacy hook removal. Restart running Claude sessions.
 - `managed (chezmoi)`: the dotfiles still own the target; apply leaves it until they drop it.
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
-- Apply prints a redacted `evidence` table and retains the last 256 unit results in
-  `$XDG_STATE_HOME/vega/config-evidence.json`: timestamp, phase, unit, target, key operations,
-  and presence states, never values. Deploy reports both install and final apply phases.
-- `infra` checks locally (no network): mise, cargo, git, vega, herdr and an agent are required;
-  NATS, tailnet, Dolt, bd, gh and the rest are optional. `vega onboard` walks through it.
+- Apply retains 256 redacted results in `$XDG_STATE_HOME/vega/config-evidence.json`:
+  phases, targets, operations and presence, never values.
+- `infra` checks locally (no network): mise, cargo, git, vega and an agent are required;
+  hc, herdr-app, legacy herdr, Python 3, NATS, tailnet, Dolt, bd and gh are optional.
+  `vega onboard` walks through it.
+- Apply the `herdr-app` group together: checked status, agents and inbox mods precede
+  its layout. New decisions open a non-modal inbox; the status row or scale reopens it.
 
 Service endpoints are explicit local config, outside the rendered config units.
 NATS needs `VEGA_NATS_URL` or `vega/nats.url`; Dolt needs `VEGA_BD_REMOTE` or

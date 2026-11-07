@@ -72,10 +72,11 @@ reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units
 
 ### Vega layout and startup mod (vega-0h4c.13)
 
-`herdr-app.mods` replaces the whole `mods/vega/` folder from the two source files; local overrides
+`herdr-app.mods`, `herdr-app.vega-agents` and `herdr-app.vega-inbox` each replace their
+whole mod folder from two source files; local overrides
 resolve per file. It stages both files together and requires the installed `herdr-app check` to pass
 before touching the target. A missing checker or a failed check reports `rejected`. Replacement moves
-the old folder, including stale files, to `~/.config/herdr-app/.vega-mod.vega-bak`; other mods stay
+the old folder, including stale files, to `~/.config/herdr-app/.vega-mod.<name>-bak`; other mods stay
 untouched. Any chezmoi-managed descendant prevents replacement.
 
 `herdr-app.layouts` owns `layouts/vega.json`: a clone of the installed 0.1.13 `main`, with its
@@ -83,19 +84,20 @@ untouched. Any chezmoi-managed descendant prevents replacement.
 Shipped layouts are replaced on every app start and reject structural changes, so this clone is
 maintained by vega. `vega config` compares its `cloned_from.version` with `herdr-app --version` and
 its `vega_source.installed_hash` with `installed.json["layout:main"]["json"]`. A changed or
-missing fingerprint reports drift, even within the same app version. Shipped mod references remain
-upstream-owned.
+missing fingerprint reports drift, even within the same app version. The agents block uses
+the vega-owned clone; other shipped mod references remain upstream-owned.
 
 For explicit maintenance, run `python3 scripts/herdr-app-layout.py --write`, review the generated
 diff and commit `config/herdr-app/layouts/vega.json`. Without `--write`, the script previews provenance.
 It reads the installed `layouts/main.json`, inserts the vega block after the unique `status` block
-in its column, and records app version, the installed fingerprint and a SHA-256 of the source bytes.
+in its column, replaces the unique agents reference with vega-agents, and records app version,
+the installed fingerprint and a SHA-256 of the source bytes.
 A missing, duplicated or changed anchor refuses without touching the old output. `--app-home`,
 `--app-version` and `--output` support isolated maintenance/tests. Config apply only writes the
 reviewed source; it never runs the generator. There is no automatic rebase.
 
 Layout selection is **not a settings key** in 0.1.13: `layout.switch` persists `shared("layout")` in
-app-owned `shared.json`. First apply requires a running app and the installed vega mod, writes the
+app-owned `shared.json`. First apply requires a running app and all three vega mods, writes the
 layout, calls `layout.switch --name vega`, then verifies the selected name and empty error list. A
 failed activation restores the old file and reports `rejected`; a missing app rejects before writing.
 Successful selection is recorded in `$XDG_STATE_HOME/vega/herdr-app-layout-selected`; later applies
@@ -108,7 +110,10 @@ and prior layout selection. An inactive layout update is checked when next selec
 The mod's `init()` invokes `~/.local/bin/vega-post relay start` once per instantiated copy. That
 idempotent command detaches vegad; a startup failure cannot break the element. The row polls
 `relay status --json` every 15 seconds and shows running, stopped or unavailable. It redraws only
-when that state changes. Labels, toasts and focus integration follow in migration slice 5.
+when that state changes. It reads badge snapshots with Python 3 and watches their XDG state folder
+with a timer fallback. Only new decisions auto-open the inbox and post an actionable toast.
+Decision identities are remembered across restarts. The inbox never automatically focuses an input.
+The agents clone reads hc labels on render, without terminal polling. See [herdr-app UI](herdr-app-ui.md).
 
 ### Destructive Command Guard
 

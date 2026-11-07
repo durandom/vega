@@ -20,12 +20,16 @@ class GeneratorTest(unittest.TestCase):
             home = Path(directory)
             (home / "layouts").mkdir()
             main = {"type": "column", "custom": {"keep": True}, "children": [
-                {"id": "status", "type": "block", "content": {"mod": "workspace-status"}}]}
+                {"id": "status", "type": "block", "content": {"mod": "workspace-status"}},
+                {"id": "agents", "type": "block", "content": {"mod": "agents"}},
+                {"id": "spaces", "type": "block", "content": {"mod": "spaces"}}]}
             (home / "layouts/main.json").write_text(json.dumps(main))
             (home / "installed.json").write_text('{"layout:main":{"json":"recorded-hash"}}')
             result = json.loads(generator.generate(home, "0.1.13"))
             self.assertEqual(result["children"][0], main["children"][0])
             self.assertEqual(result["children"][1]["content"], {"mod": "vega"})
+            self.assertEqual(result["children"][2]["content"]["mod"], "vega-agents")
+            self.assertEqual(result["children"][3], main["children"][2])
             self.assertEqual(result["custom"], main["custom"])
             self.assertEqual(result["vega_source"]["installed_hash"], "recorded-hash")
             # A changed upstream anchor refuses and keeps the previously reviewed output.

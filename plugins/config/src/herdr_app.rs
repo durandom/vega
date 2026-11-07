@@ -170,20 +170,29 @@ pub fn app_error(file: &Path, since: SystemTime, wait: Duration) -> Option<Strin
 /// The vega mod owns its entire folder; local overrides resolve per shipped file.
 const MOD_FILES: [&str; 2] = ["main.js", "mod.json"];
 
+fn mod_name(unit: crate::Unit) -> Option<&'static str> {
+    match unit {
+        crate::Unit::HerdrAppMods => Some("vega"),
+        crate::Unit::HerdrAppAgents => Some("vega-agents"),
+        crate::Unit::HerdrAppInbox => Some("vega-inbox"),
+        _ => None,
+    }
+}
+
 fn selection_marker(env: &Env) -> PathBuf {
     env.state.join("vega/herdr-app-layout-selected")
 }
 
 pub fn plan(ctx: &crate::Ctx, unit: crate::Unit) -> Result<crate::Plan, String> {
-    use crate::{sources, whole, Plan, Unit};
+    use crate::{sources, whole, Plan};
     if let Some(p) = crate::need_herdr_app(&ctx.env) {
         return Ok(p);
     }
     let mut p = Plan::default();
-    if unit == Unit::HerdrAppMods {
-        let dir = home(&ctx.env).join("mods/vega");
+    if let Some(mod_name) = mod_name(unit) {
+        let dir = home(&ctx.env).join("mods").join(mod_name);
         for name in MOD_FILES {
-            let src = sources::get(&ctx.env, &format!("herdr-app/mods/vega/{name}"))?;
+            let src = sources::get(&ctx.env, &format!("herdr-app/mods/{mod_name}/{name}"))?;
             p.files.push(whole(dir.join(name), src.text.clone())?);
             p.sources.push(src);
         }
@@ -195,8 +204,7 @@ pub fn plan(ctx: &crate::Ctx, unit: crate::Unit) -> Result<crate::Plan, String> 
             });
         if p.herdr_app_pending {
             p.notes.push(
-                "replace the whole mods/vega folder; retain the old folder in .vega-mod.vega-bak"
-                    .into(),
+                format!("replace the whole mods/{mod_name} folder; retain the old folder in .vega-mod.{mod_name}-bak"),
             );
         }
         p.whole_dir = Some(dir);
@@ -280,12 +288,12 @@ pub fn apply(
     plan: &crate::Plan,
     evidence: &mut Vec<Value>,
 ) -> crate::Outcome {
-    use crate::{Outcome, Unit};
+    use crate::Outcome;
     if !plan.herdr_app_pending && plan.files.iter().all(|f| !f.changed()) {
         return Outcome::Unchanged;
     }
-    if unit == Unit::HerdrAppMods {
-        return apply_mod(ctx, plan, evidence);
+    if let Some(name) = mod_name(unit) {
+        return apply_mod(ctx, plan, name, evidence);
     }
     let file = &plan.files[0];
     let v: Value = match serde_json::from_str(&file.text) {
@@ -302,8 +310,17 @@ pub fn apply(
     // switch command validates activation, and owns persistence in shared.json.
     let mut previous_layout = None;
     if plan.herdr_app_pending {
-        if !home(&ctx.env).join("mods/vega/main.js").is_file() {
-            return Outcome::Rejected(vec!["apply herdr-app.mods before herdr-app.layouts".into()]);
+        for name in ["vega", "vega-agents", "vega-inbox"] {
+            if !home(&ctx.env)
+                .join("mods")
+                .join(name)
+                .join("main.js")
+                .is_file()
+            {
+                return Outcome::Rejected(vec![format!(
+                    "apply herdr-app mod units before herdr-app.layouts (missing {name})"
+                )]);
+            }
         }
         match app_command(ctx, &["status"]) {
             Ok(v) => previous_layout = v["layout"].as_str().map(str::to_string),
@@ -360,7 +377,12 @@ pub fn apply(
     Outcome::Written(vec![file.path.display().to_string()])
 }
 
-fn apply_mod(ctx: &crate::Ctx, plan: &crate::Plan, evidence: &mut Vec<Value>) -> crate::Outcome {
+fn apply_mod(
+    ctx: &crate::Ctx,
+    plan: &crate::Plan,
+    name: &str,
+    evidence: &mut Vec<Value>,
+) -> crate::Outcome {
     use crate::Outcome;
     let manifest = plan
         .files
@@ -378,7 +400,7 @@ fn apply_mod(ctx: &crate::Ctx, plan: &crate::Plan, evidence: &mut Vec<Value>) ->
         Ok(d) => d,
         Err(e) => return Outcome::Failed(format!("stage vega mod: {e}")),
     };
-    let folder = staged.path().join("vega");
+    let folder = staged.path().join(name);
     let prepare = || -> std::io::Result<()> {
         fs::create_dir(&folder)?;
         for f in &plan.files {
@@ -410,8 +432,8 @@ fn apply_mod(ctx: &crate::Ctx, plan: &crate::Plan, evidence: &mut Vec<Value>) ->
             )])
         }
     }
-    let target = app_home.join("mods/vega");
-    let backup = app_home.join(".vega-mod.vega-bak");
+    let target = app_home.join("mods").join(name);
+    let backup = app_home.join(format!(".vega-mod.{name}-bak"));
     let result = || -> std::io::Result<()> {
         // The checker generates editor helpers alongside main.js. They are not
         // source files and would otherwise make every following apply drift.

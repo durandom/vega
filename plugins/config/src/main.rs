@@ -53,12 +53,12 @@ enum Cmd {
     Print { unit: String },
     /// Copy a repo default to ~/.config/vega/config/ for local editing
     #[command(
-        after_help = "Sources: herdr/config.toml, instructions/<part>.md, claude/output-styles/<name>.md,\nclaude/settings.json, agentsview/LOCAL-SETUP.md, dcg/config.toml, dcg/packs/oc.yaml, herdr-app/keys.json, herdr-app/settings.json, herdr-app/themes/<name>.json, herdr-app/mods/vega/{main.js,mod.json}, herdr-app/layouts/vega.json. A local file that exists is never overwritten. With nonstandard XDG_CONFIG_HOME, edit dcg/config.toml packs.custom_paths to point at that dcg/packs directory after init (init copies literal defaults).\n\nExamples:\n  vega config init instructions/vega.md\n  vega config init claude/settings.json"
+        after_help = "Sources: herdr/config.toml, instructions/<part>.md, claude/output-styles/<name>.md,\nclaude/settings.json, agentsview/LOCAL-SETUP.md, dcg/config.toml, dcg/packs/oc.yaml, herdr-app/keys.json, herdr-app/settings.json, herdr-app/themes/<name>.json, herdr-app/mods/{vega,vega-agents,vega-inbox}/{main.js,mod.json}, herdr-app/layouts/vega.json. A local file that exists is never overwritten. With nonstandard XDG_CONFIG_HOME, edit dcg/config.toml packs.custom_paths to point at that dcg/packs directory after init (init copies literal defaults).\n\nExamples:\n  vega config init instructions/vega.md\n  vega config init claude/settings.json"
     )]
     Init { source: String },
     /// The infra vega needs on this host: level, state, what it enables, next step
     #[command(
-        after_help = "Local checks only (PATH without the shims, env vars, config files); nothing touches the network.\nRequired: the core (agents in herdr panes, guides, config). Optional: one feature set each.\n\nExamples:\n  vega config infra"
+        after_help = "Local checks only (PATH without the shims, env vars, config files); nothing touches the network.\nRequired: build tools, vega and an agent. Optional: hc, herdr-app, legacy herdr and feature tools.\n\nExamples:\n  vega config infra"
     )]
     Infra,
 }

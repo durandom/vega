@@ -49,13 +49,16 @@ const fn c(
 use Level::{Optional, Required};
 
 /// Required first; the order of the views.
-pub const COMPONENTS: [Component; 21] = [
+pub const COMPONENTS: [Component; 24] = [
     c("mise", Required, "mise run install-cli, mise run check", "install mise: https://mise.jdx.dev/installing-mise.html"),
     c("cargo", Required, "building vega (toolchain pinned in rust-toolchain.toml)", "install rustup: https://rustup.rs"),
     c("git", Required, "clone, upgrade, worktrees (>= 2.54: the wt-guard hook)", "install git with the OS package manager"),
     c("vega", Required, "every vega <plugin> call", "mise run install-cli in the vega checkout; put ~/.local/bin on PATH"),
-    c("herdr", Required, "vega mux, uac, board, open: agents in panes", "install herdr: https://github.com/herdrdev/herdr"),
     c("agent", Required, "the coding agents vega runs and configures", "install Claude Code, Codex or pi and start it once"),
+    c("hc", Optional, "hc terminals, agent labels and the herdr-app backend", "install herdr-core (hc): https://github.com/herdrdev/herdr-core"),
+    c("herdr-app", Optional, "vega-agents sidebar and vega-inbox decisions; apply the herdr-app config group", "install herdr-app, then vega config apply herdr-app"),
+    c("python3", Optional, "herdr-app vega badge file reader and layout maintenance", "install Python 3 with the OS package manager"),
+    c("herdr", Optional, "legacy TUI backend: board and agents in panes", "install herdr: https://github.com/herdrdev/herdr"),
     c("chezmoi", Optional, "vega config apply writes every unit", "drop vega's targets from the dotfiles; vega config lists them"),
     c("wt", Optional, "vega mux spawn --worktree with worktrunk (else herdr worktrees)", "install worktrunk (wt)"),
     c("dcg", Optional, "recommended: destructive command protection before shell execution", "install dcg: https://github.com/Dicklesworthstone/destructive_command_guard#installation; register hooks with its installer, then dcg doctor (Claude: dcg install; Codex: ~/.codex/hooks.json)"),
@@ -546,7 +549,7 @@ mod tests {
     fn bare_home_misses_everything_with_a_next_step() {
         let (_d, p, ctx) = setup(&[]);
         let rows = check(&p, &ctx);
-        assert_eq!(summary(&rows), "required 0/6, optional 1/15");
+        assert_eq!(summary(&rows), "required 0/5, optional 1/19");
         // chezmoi absent is fine: nothing manages vega's targets.
         assert!(row(&rows, "chezmoi").ok);
         for r in rows.iter().filter(|r| !r.ok) {

@@ -4833,7 +4833,7 @@ fn save_project_badges(
         decisions: decisions.map_or_else(|| previous.map_or(0, |b| b.decisions), <[_]>::len),
     };
     if decisions.is_some() || previous.is_some() {
-        vega_herdr::badges::save(key, &b, waiting, now);
+        vega_herdr::badges::save_decisions(key, &b, waiting, decisions, now);
     }
     b
 }
@@ -4863,8 +4863,12 @@ struct Layout {
 }
 
 impl Layout {
-    fn read() -> Layout {
-        Layout::read_herdr().resolve_projects()
+    fn read() -> (Layout, bool) {
+        let mut layout = Layout::read_herdr();
+        let hc = terminals::hc_list();
+        let hc_available = hc.is_ok();
+        layout.panes.extend(hc.unwrap_or_default());
+        (layout.resolve_projects(), hc_available)
     }
 
     /// herdr's lists alone, without project resolution (identity quiesce).
@@ -5054,8 +5058,11 @@ impl Layout {
     /// the workspace of its local `parent` pane (a sentinel in a worktree
     /// workspace shows its project), else its own workspace.
     fn project_token(&self, id: &str, parent: Option<&str>) -> [String; 2] {
-        match parent
-            .and_then(|p| self.workspace_label(p))
+        match self
+            .pane(id)
+            .filter(|_| terminals::is_hc(id))
+            .and_then(|p| p["project"].as_str())
+            .or_else(|| parent.and_then(|p| self.workspace_label(p)))
             .or_else(|| self.workspace_label(id))
         {
             Some(l) => ["--token".into(), format!("project={l}")],
@@ -5169,7 +5176,7 @@ fn report_quiesced() {
         cmd.extend(args);
         cmds.push(cmd);
     }
-    sidebar::submit(cmds);
+    sidebar::submit(cmds, false);
 }
 
 /// `herdr workspace report-metadata` for workspace `ws`'s count tokens
@@ -5369,6 +5376,12 @@ fn report_metadata(
                 attention: a.as_str().to_string(),
                 title: title.chars().take(80).collect(),
             });
+            if terminals::is_hc(&c.pane) {
+                args.extend([
+                    "--token".into(),
+                    format!("waiting={}", sym.icon(&vega_herdr::theme::WAITING)),
+                ]);
+            }
         }
         match attention {
             Some(a) => args.extend(["--token".into(), format!("attention={}", a.as_str())]),
@@ -5389,7 +5402,7 @@ fn report_metadata(
     };
     let live: Vec<String> = d.panes();
     phases.mark("notes");
-    let layout = Layout::read();
+    let (layout, hc_available) = Layout::read();
     phases.mark("layout");
     log_theme_errors(&sym.errors);
     let projects = vega_bd_sync::store::projects();
@@ -5549,8 +5562,7 @@ fn report_metadata(
         }
     }
     for (pane, mut args) in panes {
-        // hc labels are a separate backend API (migration slice 5).
-        if terminals::is_hc(&pane) || !valid_pane_id(&pane) || !live.contains(&pane) {
+        if !valid_pane_id(&pane) || !live.contains(&pane) {
             continue;
         }
         if !d.has_mail(&pane) {
@@ -5558,6 +5570,30 @@ fn report_metadata(
         }
         if d.unread_since(&pane).is_none() {
             args.extend(["--clear-token".into(), "mail_since".into()]);
+        }
+        if terminals::is_hc(&pane) {
+            // A failed hc snapshot is not evidence for clearing metadata.
+            let Some(metadata) = layout.pane(&pane) else {
+                continue;
+            };
+            // Gate and mux also own role labels. Only an old uac role is ours
+            // to clear; a current UAC claim wins over another role.
+            if !uacs.iter().any(|(_, p, _)| p == &pane) {
+                if let Some(role) = metadata["labels"]["vega.role"]
+                    .as_str()
+                    .filter(|r| *r != "uac")
+                {
+                    args.extend(["--token".into(), format!("role={role}")]);
+                }
+            }
+            if let Some(project) = metadata["project"].as_str() {
+                args.extend(["--token".into(), format!("project-id={project}")]);
+            }
+            if d.has_mail(&pane) {
+                args.extend(["--token".into(), format!("mail=✉ {}", d.mail_count(&pane))]);
+            }
+            cmds.push(sidebar::hc_labels(&pane, &args));
+            continue;
         }
         let mut cmd: Vec<String> = vec![
             "pane".into(),
@@ -5572,7 +5608,7 @@ fn report_metadata(
         cmds.push(cmd);
     }
     // Sent off the loop, only what changed (sidebar.rs).
-    sidebar::submit(cmds);
+    sidebar::submit(cmds, hc_available);
     phases.mark("panes");
     let due = hygiene
         .run(now, &tidy)

@@ -31,6 +31,7 @@ run = [
   "sh scripts/readmes.test.sh",
   "sh scripts/inline-md.test.sh",
   "python3 scripts/herdr-app-layout.test.py",
+  "node --test scripts/herdr-app-mods.test.mjs",
   "sh scripts/install-vscode-ext.test.sh",
   "sh scripts/check-stamp.test.sh",
   # Last: `mise run install` skips the check for this clean tree.

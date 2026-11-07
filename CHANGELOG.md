@@ -5,6 +5,21 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 118 · 2026-11-07
+
+- optional: `hc` and `herdr-app` enable the new terminal UI; `python3` reads its badge snapshots.
+  Legacy `herdr` is now optional for hosts using hc. Doctor checks these tools locally.
+- feature: vegad publishes changed per-terminal `vega.*` labels to hc. The Vega layout's
+  agents clone keeps the tree and priority view, adds machine/project grouping,
+  and makes mail, waiting, decisions, UAC, harness and git indicators clickable.
+- unit: `herdr-app.vega-agents` and `herdr-app.vega-inbox` join `herdr-app.mods` and
+  `herdr-app.layouts`. Apply the `herdr-app` group together; every mod is checked before writing.
+  Shipped agents and spaces are unchanged. Doctor lists hc, herdr-app and Python 3 locally.
+- feature: Vega inbox shows decision questions, Answer/Dismiss actions and waiting panes.
+  New decisions open a kept non-modal window and an actionable toast, preserving keyboard
+  focus. Waiting panes and unread notes never auto-open it. Mail stays in the sidebar.
+  Answers and dismissal reasons run in the decision project's recorded checkout.
+
 ## 117 · 2026-11-07
 
 - migration: `vega mux spawn` follows the caller's terminal world; `--backend herdr|hc`

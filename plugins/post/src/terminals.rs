@@ -43,7 +43,7 @@ pub fn hc_agents(v: &Value) -> Result<Vec<Value>, Failure> {
             json!({
                 "pane_id": t["address"], "backend": "hc",
                 "address": format!("hc:{}", t["address"].as_str().unwrap()),
-                "name": t["name"], "agent": kind,
+                "name": t["name"], "agent": kind, "labels": t["labels"],
                 "agent_status": t["status"]["state"].as_str().unwrap_or("unknown"),
                 "completion_seq": t["turn"], "parent": t["parent"],
                 "cwd": t["foreground"]["cwd"].as_str().or(t["cwd"].as_str()).unwrap_or("")

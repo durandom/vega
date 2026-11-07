@@ -3,9 +3,9 @@ name: vega-post
 description: Sends and reads agent mail through a NATS broker, also across machines, and shows the mail archive. Use when a [vega-post] pointer says to run vega post inbox, when a vega mux footer says to reply with vega post send, or to message an agent on another machine.
 ---
 
-# vega post: agent mail over a broker (spike)
+# vega post: mail
 
-Recipients pull queued mail.
+vegad labels hc terminals for the Vega UI.
 
 1. `vega post`: broker, pane, unread count. `vega post log`: archive, without marking read.
 2. `vega post send <pane> "<text>"` stores the message; `--host <machine>` for another machine. The target gets its pointer when idle or done; mail from its parent also while it works; `--now` only for urgent mail ("stop"). Do not poll: the reply arrives as a pointer.

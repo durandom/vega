@@ -22,12 +22,15 @@ def generate(app_home, version):
     if not isinstance(fingerprint, str) or not fingerprint:
         raise ValueError("installed.json has no layout:main fingerprint")
     anchors = []
+    agent_anchors = []
 
     def walk(node):
         if not isinstance(node, dict):
             raise ValueError("main contains a non-object node")
         if node.get("id") == "vega-status":
             raise ValueError("main already contains vega-status")
+        if node.get("content", {}).get("mod") == "agents":
+            agent_anchors.append(node)
         children = node.get("children", [])
         if not isinstance(children, list):
             raise ValueError("main contains invalid children")
@@ -44,6 +47,9 @@ def generate(app_home, version):
     walk(tree)
     if len(anchors) != 1:
         raise ValueError("expected exactly one status anchor; old output kept")
+    if len(agent_anchors) != 1:
+        raise ValueError("expected exactly one agents block; review the upstream layout")
+    agent_anchors[0]["content"]["mod"] = "vega-agents"
     children, index = anchors[0]
     children.insert(index + 1, {
         "id": "vega-status", "type": "block", "size": {"px": 24},

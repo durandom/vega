@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 23] = [
+pub const DEFAULTS: [(&str, &str); 27] = [
     default!("herdr/config.toml"),
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
@@ -34,6 +34,10 @@ pub const DEFAULTS: [(&str, &str); 23] = [
     default!("dcg/packs/oc.yaml"),
     default!("herdr-app/mods/vega/main.js"),
     default!("herdr-app/mods/vega/mod.json"),
+    default!("herdr-app/mods/vega-agents/main.js"),
+    default!("herdr-app/mods/vega-agents/mod.json"),
+    default!("herdr-app/mods/vega-inbox/main.js"),
+    default!("herdr-app/mods/vega-inbox/mod.json"),
     default!("herdr-app/layouts/vega.json"),
     default!("herdr-app/keys.json"),
     default!("herdr-app/settings.json"),
@@ -217,6 +221,8 @@ mod tests {
             "dcg/packs",
             "herdr-app/themes",
             "herdr-app/mods/vega",
+            "herdr-app/mods/vega-agents",
+            "herdr-app/mods/vega-inbox",
             "herdr-app/layouts",
         ] {
             for f in repo_files(dir) {

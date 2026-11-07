@@ -115,6 +115,8 @@ impl Badges {
 pub struct Decision {
     pub id: String,
     pub title: String,
+    /// Full decision description, shown as the question in vega-inbox.
+    pub question: String,
     /// `created_at` as Unix seconds; 0 when bd gave none.
     pub created: i64,
 }
@@ -155,6 +157,7 @@ pub fn decisions(json: &str) -> Option<Vec<Decision>> {
             .map(|b| Decision {
                 id: s(b, "id"),
                 title: s(b, "title"),
+                question: s(b, "description"),
                 created: b["created_at"]
                     .as_str()
                     .and_then(crate::capacity::parse_rfc3339)
@@ -172,6 +175,17 @@ fn file(key: &str) -> Option<PathBuf> {
 /// vegad: the counts of project ID `key` at
 /// `now`, plus the waiting panes behind the `waiting` count.
 pub fn save(key: &str, b: &Badges, waiting: &[Waiting], now: i64) {
+    save_decisions(key, b, waiting, None, now);
+}
+
+/// None retains decision texts through transient bd failures; Some([]) clears.
+pub fn save_decisions(
+    key: &str,
+    b: &Badges,
+    waiting: &[Waiting],
+    decisions: Option<&[Decision]>,
+    now: i64,
+) {
     let Some(f) = file(key) else {
         return;
     };
@@ -181,9 +195,29 @@ pub fn save(key: &str, b: &Badges, waiting: &[Waiting], now: i64) {
             |w| json!({"pane": w.pane, "name": w.name, "attention": w.attention, "title": w.title}),
         )
         .collect();
+    let cards = decisions
+        .map(|ds| {
+            ds.iter()
+                .map(|d| {
+                    json!({
+                        "id": d.id, "title": d.title, "question": d.question, "project": key,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            std::fs::read_to_string(&f)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .filter(|v| v["schema"] == 2 && v["project"] == key)
+                .and_then(|v| v["decision_texts"].as_array().cloned())
+                .unwrap_or_default()
+        });
+    let checkout = crate::state::project_uac_location(key).map(|l| l.checkout);
     let body = json!({
         "schema": 2, "project": key, "notes": b.notes, "decisions": b.decisions,
         "waiting": b.waiting, "waiting_panes": panes, "at": now,
+        "decision_texts": cards, "checkout": checkout,
     });
     let tmp = f.with_extension(format!("tmp{}", std::process::id()));
     let _ = f
@@ -349,6 +383,7 @@ mod tests {
             vec![Decision {
                 id: "v-1.1".into(),
                 title: "tabs?".into(),
+                question: String::new(),
                 created: 1_791_495_802,
             }]
         );
@@ -361,6 +396,48 @@ mod tests {
         assert_eq!(decision_count(two), None);
         assert_eq!(decision_count("[]"), None);
         assert_eq!(decision_count("oops"), None);
+    }
+
+    #[test]
+    fn decision_texts_survive_failure_and_clear_on_empty_success() {
+        if std::env::var_os("VEGA_BADGE_TEST_CHILD").is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "badges::tests::decision_texts_survive_failure_and_clear_on_empty_success",
+                ])
+                .env("VEGA_BADGE_TEST_CHILD", "1")
+                .env("XDG_STATE_HOME", dir.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let key = "test-project";
+        let d = Decision {
+            id: "v-1".into(),
+            title: "Choice".into(),
+            question: "Full question\nwith another line".into(),
+            ..Default::default()
+        };
+        let b = Badges {
+            decisions: 1,
+            ..Default::default()
+        };
+        save_decisions(key, &b, &[], Some(std::slice::from_ref(&d)), 10);
+        let read = || {
+            serde_json::from_str::<Value>(&std::fs::read_to_string(file(key).unwrap()).unwrap())
+                .unwrap()
+        };
+        let saved = read();
+        assert_eq!(saved["decision_texts"][0]["question"], d.question);
+        assert_eq!(saved["decision_texts"][0]["project"], key);
+        assert_eq!(load(key, 10).unwrap().0, b);
+        save_decisions(key, &b, &[], None, 11);
+        assert_eq!(read()["decision_texts"], saved["decision_texts"]);
+        save_decisions(key, &Badges::default(), &[], Some(&[]), 12);
+        assert_eq!(read()["decision_texts"], json!([]));
     }
 
     #[test]

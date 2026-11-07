@@ -45,6 +45,17 @@ fn key(cmd: &Cmd) -> Key {
 /// the display agent, title and state labels. herdr has no clear-all.
 fn withdraw(cmds: &[Cmd]) -> Option<Cmd> {
     let first = cmds.first()?;
+    if first.first().is_some_and(|s| s == "hc") {
+        let mut out = first[..3].to_vec();
+        out.extend(
+            first[3..]
+                .iter()
+                .filter_map(|s| s.split_once('='))
+                .filter(|(k, v)| *k != "vega.role" || *v == "uac" || v.is_empty())
+                .map(|(k, _)| format!("{k}=")),
+        );
+        return Some(out);
+    }
     let source = first
         .iter()
         .position(|a| a == "--source")
@@ -102,6 +113,20 @@ impl State {
         self.wanted = wanted;
     }
 
+    /// A backend failure must not be mistaken for an empty snapshot.
+    fn set_snapshot(&mut self, mut cmds: Vec<Cmd>, hc_available: bool) {
+        if !hc_available {
+            cmds.retain(|c| c.first().is_none_or(|k| k != "hc"));
+            cmds.extend(
+                self.wanted
+                    .iter()
+                    .filter(|(k, _)| k.0 == "hc")
+                    .flat_map(|(_, cs)| cs.clone()),
+            );
+        }
+        self.set(cmds);
+    }
+
     pub fn take_withdrawn(&mut self) -> Vec<(Key, Cmd)> {
         std::mem::take(&mut self.withdrawn)
     }
@@ -128,7 +153,8 @@ impl State {
             .iter()
             .filter(|(k, cmds)| match self.sent.get(k) {
                 Some((last, at)) => {
-                    last != cmds || now.duration_since(*at) >= crate::pace::of(RENEW_AFTER)
+                    last != cmds
+                        || (k.0 != "hc" && now.duration_since(*at) >= crate::pace::of(RENEW_AFTER))
                 }
                 None => true,
             })
@@ -148,34 +174,97 @@ impl State {
 }
 
 /// Hands one refresh's commands to the sidebar thread (started on first use).
-pub fn submit(cmds: Vec<Cmd>) {
-    static TX: OnceLock<mpsc::Sender<Vec<Cmd>>> = OnceLock::new();
+pub fn submit(cmds: Vec<Cmd>, hc_available: bool) {
+    static TX: OnceLock<mpsc::Sender<(Vec<Cmd>, bool)>> = OnceLock::new();
     let tx = TX.get_or_init(|| {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || run(rx));
         tx
     });
-    let _ = tx.send(cmds);
+    let _ = tx.send((cmds, hc_available));
 }
 
-fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
+// hc commands carry a backend prefix; herdr commands keep their old spelling.
+fn send(cmd: &Cmd) -> Result<(), vega_herdr::Failure> {
+    let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
+    if refs.first() == Some(&"hc") {
+        vega_herdr::hc::hc_local(&refs[1..]).map(|_| ())
+    } else {
+        vega_herdr::herdr_text(&refs).map(|_| ())
+    }
+}
+
+/// Translate only vegad-owned metadata. Emit the entire known key set so a
+/// lost role/attention is removed even after a daemon restart. Never touch
+/// hc's parent, herdr.* or gate-owned vega.review labels.
+pub fn hc_labels(pane: &str, args: &[String]) -> Cmd {
+    let mut values = std::collections::BTreeMap::new();
+    for key in [
+        "display-agent",
+        "title",
+        "parent",
+        "attention",
+        "role",
+        "uac",
+        "notes",
+        "decisions",
+        "waiting",
+        "host",
+        "kind",
+        "project",
+        "project-id",
+        "label",
+        "git",
+        "mail",
+        "mail_since",
+    ] {
+        values.insert(key.to_string(), String::new());
+    }
+    for pair in args.windows(2) {
+        match pair[0].as_str() {
+            "--token" => {
+                if let Some((k, v)) = pair[1].split_once('=') {
+                    values.insert(k.into(), v.into());
+                }
+            }
+            "--clear-token" => {
+                values.insert(pair[1].clone(), String::new());
+            }
+            "--display-agent" => {
+                values.insert("display-agent".into(), pair[1].clone());
+            }
+            "--title" => {
+                values.insert("title".into(), pair[1].clone());
+            }
+            _ => {}
+        }
+    }
+    let mut cmd = vec![
+        "hc".into(),
+        "label".into(),
+        crate::terminals::bare(pane).into(),
+    ];
+    cmd.extend(values.into_iter().map(|(k, v)| format!("vega.{k}={v}")));
+    cmd
+}
+
+fn run(rx: mpsc::Receiver<(Vec<Cmd>, bool)>) {
     let mut state = State::default();
     loop {
         match rx.recv_timeout(crate::pace::of(TICK)) {
-            Ok(mut cmds) => {
+            Ok(mut snapshot) => {
                 // Only the newest refresh counts.
                 while let Ok(newer) = rx.try_recv() {
-                    cmds = newer;
+                    snapshot = newer;
                 }
-                state.set(cmds);
+                state.set_snapshot(snapshot.0, snapshot.1);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         let started = Instant::now();
         for (k, cmd) in state.take_withdrawn() {
-            let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-            match vega_herdr::herdr_text(&refs) {
+            match send(&cmd) {
                 Ok(_) => state.withdrawn_ok(&k),
                 Err(f) => {
                     // A target that is gone needs no clearing.
@@ -193,10 +282,10 @@ fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
         let n = due.len();
         for (k, cmds) in due {
             let mut gone = false;
+            let mut failed = false;
             for cmd in &cmds {
-                let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
-                // report-metadata prints nothing on success, not JSON.
-                if let Err(f) = vega_herdr::herdr_text(&refs) {
+                if let Err(f) = send(cmd) {
+                    failed = true;
                     let what = if k.0 == "workspace" {
                         "inbox"
                     } else {
@@ -211,7 +300,7 @@ fn run(rx: mpsc::Receiver<Vec<Cmd>>) {
             }
             if gone {
                 state.forget(&k);
-            } else {
+            } else if !failed {
                 state.mark_sent(k, cmds, Instant::now());
             }
         }
@@ -242,6 +331,54 @@ mod tests {
             s.mark_sent(k, c, now);
         }
         n
+    }
+
+    #[test]
+    fn hc_labels_change_clear_and_withdraw_without_ttl_renewal() {
+        let args = [
+            "--token",
+            "role=uac",
+            "--token",
+            "notes=N 2",
+            "--title",
+            "asks: tabs?",
+        ]
+        .map(String::from);
+        let cmd = hc_labels("hc:t7", &args);
+        assert_eq!(&cmd[..3], &["hc", "label", "t7"]);
+        assert!(cmd.contains(&"vega.role=uac".into()));
+        assert!(cmd.contains(&"vega.notes=N 2".into()));
+        assert!(cmd.contains(&"vega.title=asks: tabs?".into()));
+        assert!(cmd.contains(&"vega.git=".into()));
+        assert!(!cmd.iter().any(|a| a.starts_with("vega.review=")));
+        let mut state = State::default();
+        let now = Instant::now();
+        state.set(vec![cmd.clone()]);
+        assert_eq!(send_all(&mut state, now), 1);
+        assert!(state.due(now + Duration::from_secs(3600)).is_empty());
+        let cleared = hc_labels("t7", &[]);
+        state.set(vec![cleared.clone()]);
+        assert_eq!(state.due(now)[0].1, vec![cleared]);
+        state.set(vec![]);
+        let withdrawn = state.take_withdrawn();
+        assert_eq!(&withdrawn[0].1[..3], &["hc", "label", "t7"]);
+        assert!(withdrawn[0].1[3..].iter().all(|s| s.ends_with('=')));
+    }
+
+    #[test]
+    fn unavailable_hc_retains_labels_and_withdrawal_preserves_other_roles() {
+        let mut state = State::default();
+        let now = Instant::now();
+        let cmd = hc_labels("t7", &["--token".into(), "role=gate-reviewer".into()]);
+        state.set(vec![cmd]);
+        send_all(&mut state, now);
+        state.set_snapshot(vec![], false);
+        assert!(state.take_withdrawn().is_empty());
+        assert!(state.due(now + Duration::from_secs(3600)).is_empty());
+        state.set_snapshot(vec![], true);
+        let cleared = state.take_withdrawn();
+        assert_eq!(cleared.len(), 1);
+        assert!(!cleared[0].1.iter().any(|a| a.starts_with("vega.role=")));
     }
 
     #[test]

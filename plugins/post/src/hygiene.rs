@@ -388,6 +388,7 @@ mod tests {
             id: id.into(),
             title: format!("{id}?"),
             created: now - age,
+            ..Default::default()
         };
         let mut p = project(vec![]);
         p.decisions = vec![

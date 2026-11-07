@@ -971,7 +971,13 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
         apply(&ctx, Unit::HerdrAppLayouts, &managed),
         Outcome::Rejected(_)
     ));
-    assert_eq!(apply(&ctx, Unit::HerdrAppMods, &managed).kind(), "written");
+    for unit in [
+        Unit::HerdrAppMods,
+        Unit::HerdrAppAgents,
+        Unit::HerdrAppInbox,
+    ] {
+        assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
+    }
     fs::write(home.join("offline"), "").unwrap();
     assert!(matches!(
         apply(&ctx, Unit::HerdrAppLayouts, &managed),
@@ -1015,7 +1021,13 @@ fn app_selected_layout_update_reverifies_and_restores_on_false_success() {
     let home = herdr_app::home(&ctx.env);
     fs::create_dir_all(&home).unwrap();
     let managed = BTreeSet::new();
-    assert_eq!(apply(&ctx, Unit::HerdrAppMods, &managed).kind(), "written");
+    for unit in [
+        Unit::HerdrAppMods,
+        Unit::HerdrAppAgents,
+        Unit::HerdrAppInbox,
+    ] {
+        assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
+    }
     assert_eq!(
         apply(&ctx, Unit::HerdrAppLayouts, &managed).kind(),
         "written"

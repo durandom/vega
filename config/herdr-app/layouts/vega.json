@@ -61,7 +61,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "agents"
+                "mod": "vega-agents"
               }
             }
           ]

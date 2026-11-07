@@ -49,3 +49,20 @@ bead tabs (List, Table, Kanban) stay a TUI that runs as an hc tab when needed. `
 - Toasts take one click action and no buttons, hence the window.
 - No tree component: tree lines are drawn as the shipped `agents` mod does.
 - A mod cannot stream `hc events`; `terminals()` and `watchFolder()` cover what vega needs.
+
+## Slice 5b verification (2026-11-07)
+
+A scratch hc core (`HC_SESSION=vega5b`, `XDG_RUNTIME_DIR=/tmp/hc-5b`, PID 64837,
+versus user core PID 92972) and a separate `HERDR_APP_HOME` tested a focused mod
+opening a kept window overlay. Its focus handle stayed focused before and after
+opening (`{"before":true,"after":true}`). The implementation therefore auto-opens
+windows and never focuses answer inputs automatically. The agents clone was made
+with `mod.clone` in that scratch app; no user app config was changed.
+
+Badge schema 2 retains its counts and adds `decision_texts` (id, title, question,
+project) and `checkout`. An unavailable bd retains the last decision texts; an
+empty successful list clears them. The UI ignores snapshots over 60 seconds old.
+Answers use the recorded checkout, independent of the app's current tab. Dismiss
+uses the entered text as the mandatory close reason. Agent mail opens a separate
+read-only archive (`vega post log --pane`); notification counts open `vega post notes`.
+Neither acknowledges an agent's mail.

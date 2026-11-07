@@ -450,6 +450,14 @@ impl Delivery {
         self.pending.contains(pane) || self.pointed.contains_key(pane)
     }
 
+    pub fn mail_count(&self, pane: &str) -> usize {
+        if self.has_mail(pane) {
+            self.arrivals.get(pane).map_or(1, |a| a.len().max(1))
+        } else {
+            0
+        }
+    }
+
     /// When the oldest unread mail for this pane arrived (Unix ms).
     pub fn unread_since(&self, pane: &str) -> Option<u64> {
         self.has_mail(pane)
