@@ -121,6 +121,7 @@ pub fn spawn(
             format!("cannot prepare {target}: {}", f.message),
             "deploy matching vega binaries to the target and check its cwd and hc connection")
             })?;
+        let prepared = exec_output(target, &prepared)?;
         if prepared["schema"] != 1
             || !prepared
                 .get("trust")
@@ -289,6 +290,36 @@ pub fn spawn(
     }
     Ok(pane)
 }
+
+/// `hc exec --json` wraps the program's output: base64 `stdout`, its exit `code`.
+fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
+    use base64::Engine;
+    let fail = |m: String| {
+        Failure::new(
+            "remote_prepare_failed",
+            m,
+            "deploy the matching vega version to the target before spawning",
+        )
+    };
+    let stdout = wrapped["stdout"]
+        .as_str()
+        .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+        .ok_or_else(|| fail(format!("{target}: hc exec returned no stdout")))?;
+    if wrapped["code"] != 0 {
+        let stderr = wrapped["stderr"]
+            .as_str()
+            .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+            .unwrap_or_default();
+        return Err(fail(format!(
+            "{target}: vega-mux prepare exited {}: {}",
+            wrapped["code"],
+            String::from_utf8_lossy(&stderr).trim()
+        )));
+    }
+    serde_json::from_slice(&stdout)
+        .map_err(|e| fail(format!("{target}: prepare output is not JSON: {e}")))
+}
+
 pub fn app(args: &[&str]) -> Result<Value, Failure> {
     let out = Command::new("herdr-app")
         .args(args)

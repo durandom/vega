@@ -3332,6 +3332,7 @@ dependencies = [
 name = "vega-mux"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clap",
  "serde_json",
  "tempfile",

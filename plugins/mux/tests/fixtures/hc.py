@@ -39,8 +39,11 @@ elif cmd=='exec':
   e=dict(os.environ, HOME=str(root/'remote-home'))
   for k in ['HC_TERMINAL_ID','HERDR_PANE_ID','XDG_CONFIG_HOME','XDG_STATE_HOME']: e.pop(k,None)
   r=subprocess.run([os.environ['TEST_MUX_EXE']]+a[a.index('--')+2:],env=e,capture_output=True)
-  sys.stdout.buffer.write(r.stdout);sys.stderr.buffer.write(r.stderr);sys.exit(r.returncode)
- print(json.dumps({'schema':1,'trust':None}))
+  out,errb,rc=r.stdout,r.stderr,r.returncode
+ else: out,errb,rc=(json.dumps({'schema':1,'trust':None})+'\n').encode(),b'',0
+ # Real `hc exec --json` wraps the program's output: base64 stdout/stderr plus its exit code.
+ import base64
+ print(json.dumps({'code':rc,'ms':1,'signal':None,'stderr':base64.b64encode(errb).decode(),'stdout':base64.b64encode(out).decode(),'timed_out':False,'truncated':False}))
 elif cmd=='get': print(json.dumps(get(a[1])))
 elif cmd=='ls': print(json.dumps({'terminals':([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())}))
 elif cmd=='machine': print(os.environ.get('TEST_MACHINES','{"machines":[]}'))
