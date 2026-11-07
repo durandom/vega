@@ -125,6 +125,9 @@ esac"#,
         assert!(!listing.contains("remote/t9"));
         assert!(call(&["status"]).contains("project:"));
         assert!(call(&["adopt", child, "--headless"]).contains("told: yes"));
+        let other_child = if hc { "w1:p2" } else { "t2" };
+        let other_target = if hc { "herdr:w1:p2" } else { "hc:t2" };
+        assert!(call(&["adopt", other_target, "--headless"]).contains("told: yes"));
         assert!(call(&["park", child, "--bead", "decision-1"]).contains("parked:"));
         assert!(call(&["unpark", child]).contains("unparked:"));
         fs::rename(bin.join("bd"), bin.join("bd-off")).unwrap();
@@ -171,9 +174,12 @@ esac"#,
             "refusal must preserve the owner"
         );
         call(&["release"]);
-        if hc {
-            script(&bin, "herdr", "exit 1");
-            assert!(call(&["status"]).contains("t2"));
-        }
+        script(&bin, if hc { "herdr" } else { "hc" }, "exit 1");
+        let partial = call(&["status"]);
+        assert!(partial.contains(child));
+        assert!(
+            !partial.contains(other_child),
+            "failed inventory is not proof of exit: {partial}"
+        );
     }
 }
