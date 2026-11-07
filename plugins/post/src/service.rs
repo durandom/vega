@@ -1201,7 +1201,7 @@ mod tests {
             "relay".into(),
             "start".into(),
         ];
-        let vars = vec![("PATH".into(), "/home/A & B/bin:/usr/bin".into())];
+        let vars = vec![("PATH".into(), "/home/A & B/$tools/%bin:/usr/bin".into())];
         let mac = login_body(Manager::Launchd, &args, &vars);
         assert!(mac.contains("<string>/home/A &amp; B/vega-post</string>"));
         assert!(mac.contains("<key>AbandonProcessGroup</key><true/>"));
@@ -1212,6 +1212,7 @@ mod tests {
         assert!(linux.contains("ExecStart=\"/home/A & B/vega-post\" \"relay\" \"start\""));
         assert_eq!(systemd_quote("a%$\"\\b"), "\"a%%$$\\\"\\\\b\"");
         assert!(!linux.contains("Restart="));
+        assert!(linux.contains("Environment=\"PATH=/home/A & B/$tools/%%bin:/usr/bin\""));
     }
 
     #[test]
@@ -1242,12 +1243,14 @@ test -z "$FAIL_SYSTEMCTL""#,
                 fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
                 fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
             }
+            std::os::unix::fs::symlink(env::current_exe().unwrap(), bin.join("vega-post")).unwrap();
             let status = Command::new(env::current_exe().unwrap())
                 .args([
                     "--exact",
                     "service::tests::login_install_repair_and_remove_with_fake_managers",
                 ])
                 .env("VEGA_LOGIN_TEST", "1")
+                .env("XDG_DATA_HOME", d.path().join("data"))
                 .env("HOME", d.path())
                 .env("XDG_CONFIG_HOME", d.path().join("config"))
                 .env("XDG_STATE_HOME", d.path().join("state"))
@@ -1258,6 +1261,14 @@ test -z "$FAIL_SYSTEMCTL""#,
             assert!(status.success());
             return;
         }
+        // Real planning and hook selection must work on a herdr-less host.
+        assert!(dir_of("herdr").is_none());
+        let planned = plan().expect("planning must not require herdr");
+        assert_eq!(
+            link_herdr_plugin(&planned.exe.display().to_string(), None),
+            "skipped (herdr not installed)"
+        );
+        assert!(!plugin_dir().unwrap().exists());
         let mut plan = Plan {
             exe: home().unwrap().join("bin/vega-post"),
             container: None,

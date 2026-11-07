@@ -238,6 +238,12 @@ export default class Agents extends View {
     return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? color : t.dim + "00");
   }
 
+  vegaTotals(address, project) {
+    const machine = address?.includes("/") ? address.split("/")[0] : "";
+    return (shared("vega.badges") ?? []).find(r => r.project === project &&
+      (r.machine || "") === machine && Date.now()/1000-r.at <= 60);
+  }
+
   vegaIcons(address, t) {
     const labels = this.vegaTerminals?.get(address)?.labels ?? {};
     const focus = () => run("agent.focus", {terminal: address});
@@ -428,7 +434,7 @@ export default class Agents extends View {
     const header = (g) => {
       const open = !this.folded.has(g.id);
       const project = this.vegaTerminals.get(g.members[0]?.address)?.labels?.["vega.project-id"];
-      const totals = (shared("vega.badges") ?? []).find(r => r.project === project && (r.machine || "") === (g.members[0]?.address.includes("/") ? g.members[0].address.split("/")[0] : "") && Date.now()/1000-r.at <= 60);
+      const totals = this.vegaTotals(g.members[0]?.address, project);
       const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       return h_flex()
         .id(g.id)

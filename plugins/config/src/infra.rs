@@ -396,6 +396,15 @@ fn moshi_row(p: &Probe) -> (bool, String) {
     }
 }
 
+/// Login starter installed by `vega post relay install`; shared with onboarding.
+pub fn vegad_login_path(env: &Env) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        env.home.join("Library/LaunchAgents/vega.vegad-start.plist")
+    } else {
+        env.config.join("systemd/user/vega-vegad-start.service")
+    }
+}
+
 /// Every component's state, in [`COMPONENTS`] order.
 pub fn check(p: &Probe, ctx: &Ctx) -> Vec<Row> {
     COMPONENTS
@@ -403,13 +412,7 @@ pub fn check(p: &Probe, ctx: &Ctx) -> Vec<Row> {
         .map(|comp| {
             let (ok, state) = match comp.name {
                 "vegad-start" => {
-                    let path = if cfg!(target_os = "macos") {
-                        p.env
-                            .home
-                            .join("Library/LaunchAgents/vega.vegad-start.plist")
-                    } else {
-                        p.env.config.join("systemd/user/vega-vegad-start.service")
-                    };
+                    let path = vegad_login_path(&p.env);
                     if path.is_file() {
                         (
                             true,

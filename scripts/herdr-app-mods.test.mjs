@@ -157,3 +157,16 @@ test('same decision on two machines has separate inputs and notifications; remot
   assert.deepEqual(Array.from(call[2].slice(2)),['ganymede','/repo with spaces','vega','uac','answer','b-1','remote answer']);
   assert.equal(h.mod.results.get('ganymede/project-a/b-1'),'remote failure');
 });
+
+test('project group totals match source machine as well as project and expire',()=>{
+  const h=load('vega-agents');
+  const local={...row(),decisions:2},remote={...row(),machine:'ganymede',decisions:5};
+  // Remote first catches a regression to project-only matching for the local group.
+  h.state.set('vega.badges',[remote,local]);
+  assert.equal(h.mod.vegaTotals('t7','project-a').decisions,2);
+  assert.equal(h.mod.vegaTotals('ganymede/t7','project-a').decisions,5);
+  assert.equal(h.mod.vegaTotals('other/t7','project-a'),undefined);
+  assert.equal(h.mod.vegaTotals('ganymede/t7','another-project'),undefined);
+  remote.at=1;
+  assert.equal(h.mod.vegaTotals('ganymede/t7','project-a'),undefined);
+});

@@ -151,10 +151,11 @@ pub fn mode(seen: Option<u32>, newest: u32) -> Mode {
     }
 }
 
-/// Whether `vega post relay install` ran here: it writes herdr plugin
-/// vega.vegad under `$XDG_DATA_HOME/vega/herdr-plugin` (default
-/// `~/.local/share`).
+/// Whether the login starter or the legacy herdr startup hook is installed.
 pub fn vegad_installed(env: &Env) -> bool {
+    if vega_config::infra::vegad_login_path(env).is_file() {
+        return true;
+    }
     std::env::var_os("XDG_DATA_HOME")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
@@ -171,9 +172,9 @@ pub fn vegad_line(installed: bool, broker: bool) -> String {
                  relay, registry, beads sync and ci verdict mail stay off";
     match (installed, broker) {
         (false, false) => format!(
-            "vegad: not installed; run vega post relay install (once per host, herdr starts it; {local})"
+            "vegad: not installed; run vega post relay install (once per host, login starts it; {local})"
         ),
-        (false, true) => "vegad: not installed; run vega post relay install (once per host, herdr starts it)".into(),
+        (false, true) => "vegad: not installed; run vega post relay install (once per host, login starts it)".into(),
         (true, false) => format!("vegad: installed; {local}"),
         (true, true) => "vegad: installed".into(),
     }
