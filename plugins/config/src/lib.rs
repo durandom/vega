@@ -9,6 +9,7 @@
 
 mod claude_plugin;
 pub mod evidence;
+pub mod fleet;
 pub mod herdr;
 pub mod herdr_app;
 pub mod infra;

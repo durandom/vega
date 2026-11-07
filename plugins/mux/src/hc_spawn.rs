@@ -156,6 +156,7 @@ pub fn spawn(
             launch_env.insert(k.into(), v.into());
         }
     }
+    // hc can set but not unset: mask inherited TUI identity; consumers must ignore empty values.
     launch_env.insert("HERDR_PANE_ID".into(), "".into());
     launch_env.insert("HERDR_SOCKET_PATH".into(), "".into());
     for var in vars {

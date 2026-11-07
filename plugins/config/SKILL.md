@@ -32,9 +32,9 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
 - Apply retains 256 redacted results in `$XDG_STATE_HOME/vega/config-evidence.json`:
   phases, targets, operations and presence, never values.
-- `infra` checks locally (no network): mise, cargo, git, vega and an agent are required;
-  hc, herdr-app, legacy herdr, Python 3, NATS, tailnet, Dolt, bd and gh are optional.
-  `vega onboard` walks through it.
+- `infra` checks required/optional components locally; `vega onboard` guides setup.
+  `infra --fleet` additionally checks hc names against registry hosts (network);
+  mismatches exit 1 with `hc machine rename <old> <host>`. It never renames machines.
 - Apply the `herdr-app` group together: checked status, agents and inbox mods precede
   its layout. New decisions open a non-modal inbox; the status row or scale reopens it.
 

@@ -115,7 +115,7 @@ enum Cmd {
     /// Send a message to an agent's inbox; its relay types a pointer into the pane
     #[command(
         override_usage = "vega post send [OPTIONS] <TARGET> <TEXT>\n       vega post send [OPTIONS] --uac <PROJECT> <TEXT>\n       vega post send [OPTIONS] --uber <TEXT>",
-        after_help = "The relay types the pointer when the target agent is idle or done, one line for all its pending mail. Mail from the target's parent is typed while it works too (queued input), never into a dialog.\nsend checks the target in the registry first: a pane its host no longer lists fails with pane_gone and a hint naming the project's UAC; a host without a fresh registry entry gets the mail with a warning. A pane that closes with mail unread: its vegad bounces it once to each sender.\nWho is reachable: vega post and the registry (`vega uac`), not `herdr machine list` (only the machines this one saved).\n\nExamples:\n  vega post send w3V:p2 \"ping\"\n  vega post send --uac vega \"<text>\"                # the project's UAC, on whichever host\n  vega post send --uac . \"<text>\"                   # the UAC of this checkout's project\n  vega post send --uber --kind uber.withdraw '{\"id\":\"<id>\",\"reason\":\"obsolete\"}'   # the live Uber-UAC\n  vega post send --now w3V:p2 \"stop: wrong branch\"   # urgent: pointer at once\n  vega post send --host ganymede w3V:p2 \"ping\"\n  vega post send w3V:p1 --re <thread>/<hop>@<published-ms> \"pong\"   # reply command from `vega post inbox`"
+        after_help = include_str!("../help/send.md")
     )]
     Send {
         /// Target pane id (e.g. w3V:p2), then the message text; with --uac only the text
@@ -1387,6 +1387,10 @@ async fn resolve_target(
     check: bool,
 ) -> Result<(String, String, Option<String>), Failure> {
     let my_host = host();
+    let machine = match to {
+        To::Pane(pane, _) => terminals::machine_host(pane),
+        _ => None,
+    };
     let (target, to_host) = match to {
         To::Uac(query) => {
             let view = tokio::time::timeout(reach::WAIT, reach::read(client))
@@ -1429,7 +1433,7 @@ async fn resolve_target(
         }
         To::Pane(target, host) => terminals::mail_target(target, host, &my_host)?,
     };
-    if !check {
+    if !check && machine.is_none() {
         return Ok((target, to_host, None));
     }
     let fetched =
@@ -1438,6 +1442,19 @@ async fn resolve_target(
             Ok(Err(e)) => Err(format!("registry: {e}")),
             Err(_) => Err("the registry did not answer within 2 s".to_string()),
         };
+    if let Some(machine) = machine {
+        let view = fetched.as_ref().map_err(|why| {
+            Failure::new(
+                "registry_unavailable",
+                format!("cannot verify hc machine {machine}: {why}"),
+                "restore registry access and retry; no mail was enqueued",
+            )
+        })?;
+        view.check_hc_machine(&machine)?;
+    }
+    if !check {
+        return Ok((target, to_host, None));
+    }
     let reached = match &fetched {
         Ok(v) => reach::reach(v, &to_host, &target),
         Err(e) => reach::Reach::Unknown(e.clone()),

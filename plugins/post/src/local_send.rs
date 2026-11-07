@@ -8,7 +8,17 @@ const LOCAL_HINT: &str = "run `vega mux` to list local agents; send locally with
 
 pub fn resolve(to: To<'_>, host: &str) -> Result<(String, String), Failure> {
     match to {
-        To::Pane(pane, target_host) => terminals::mail_target(pane, target_host, host),
+        To::Pane(pane, target_host) => {
+            let target = terminals::mail_target(pane, target_host, host)?;
+            if terminals::machine_host(pane).is_some() && target.1 != host {
+                return Err(Failure::new(
+                    "registry_unavailable",
+                    "this inbox-only host cannot verify a remote hc machine in the registry",
+                    "use the unqualified terminal and explicit --host from its reply command",
+                ));
+            }
+            Ok(target)
+        }
         To::Uac(query) => {
             let here = if query == "." {
                 crate::my_project()?

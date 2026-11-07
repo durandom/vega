@@ -13,9 +13,11 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 - feature: hc spawns pass environment settings separately from the direct harness
   argv. Status still requires a harness that reports OSC 7501; unknown status waits
   for delivery rather than being treated as idle.
-- migration: hc `mux --machine <alias> send` preserves the qualified address instead
-  of assuming the alias is a registry host. Until alias resolution is available,
-  use `post send alias/t7 --host <registry-host>`; mux mail fails closed.
+- migration: An hc machine name must equal its vega registry host. `mux send
+  ganymede/t7` and `post send hc:ganymede/t7` route without `--host`, after verifying
+  the host exists in the registry. Unknown hosts and conflicting `--host` values
+  fail without sending. `vega config infra --fleet` checks every configured hc
+  machine and reports `hc machine rename <old> <host>` for mismatches.
 
 ## 119 · 2026-11-07
 

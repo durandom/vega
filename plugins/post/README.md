@@ -9,6 +9,16 @@ Agent mail through a NATS broker, also across machines. A message is stored in t
 target pane; vegad, the relay on each host, types a one-line pointer into the pane and the target pulls its mail.
 This keeps long messages out of busy panes and lets agents on different machines talk.
 
+hc machine names must equal vega registry hosts. `vega post send ganymede/t7 "ping"`
+(also `hc:ganymede/t7`) routes to host `ganymede` and terminal `t7` without `--host`.
+The registry must contain that host; unknown hosts or unavailable checks fail before
+enqueueing. A stale host remains known and follows the existing reachability warning
+policy. A conflicting `--host` cannot remap a qualified address. Unqualified `t7
+--host <host>` keeps its existing explicit-host behavior. Inbox-only hosts cannot
+verify remote names and must use that explicit form from a reply command.
+`vega config infra --fleet` checks names and reports `hc machine rename <old> <host>`
+for mismatches. No SSH alias or remote identity query participates in routing.
+
 Daemon herdr subprocesses and socket requests have deadlines; timeouts are logged
 and pointer mail remains pending for retry. Event-stream silence triggers a fresh
 snapshot after 30 seconds. See [herdr integration](../../docs/design/vegad.md#herdr-integration).

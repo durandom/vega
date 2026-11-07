@@ -428,6 +428,20 @@ impl View {
         })
     }
 
+    /// hc names are registry hosts, never aliases. A stale beat still proves
+    /// the host exists; freshness remains the delivery/liveness check's job.
+    pub fn check_hc_machine(&self, machine: &str) -> Result<(), vega_herdr::Failure> {
+        if machine != token(machine)
+            || machine != vega_herdr::state::host_token(machine)
+            || self.beat_at(machine).is_none()
+        {
+            return Err(vega_herdr::Failure::new("machine_host_unknown",
+                format!("hc machine {machine} has no matching registry host"),
+                &format!("hc machine rename {machine} <host>; inspect vega post for registry hosts, or start vegad on the intended host")));
+        }
+        Ok(())
+    }
+
     /// When the host's vegad last reconciled (Unix seconds).
     pub fn beat_at(&self, host: &str) -> Option<i64> {
         self.entries

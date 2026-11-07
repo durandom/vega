@@ -25,9 +25,13 @@ No bundled skill: `vega skills onboard` serves the plugin's guide (P5).
 
 Each component has a name, a level, a check, what it enables and how to get it. Checks are local and cheap:
 a binary on `PATH`, a directory, a config file or env var, one `git --version` and the `chezmoi managed`
-call `vega config` already makes. No check touches the network: `vega post` and `vega bd` report
+call `vega config` already makes. No default check touches the network: `vega post` and `vega bd` report
 reachability themselves, and a probe that waits on an unreachable tailnet host would make the home view slow
 exactly for the outside user.
+
+The explicit `vega config infra --fleet` diagnostic additionally checks hc machine
+names against registry hosts over the network. Names must match; it reports
+`hc machine rename <old> <host>` for mismatches without changing any machine.
 
 Required means the build tools, vega CLI and an agent. Optional means a backend or feature set;
 hc/herdr-app and the legacy herdr TUI are alternative terminal interfaces.

@@ -5,15 +5,15 @@ description: Sends and reads agent mail through a NATS broker, also across machi
 
 # vega post: mail
 
-vegad labels hc terminals for the Vega UI.
-
 1. `vega post`: broker, pane, unread count. `vega post log`: archive, without marking read.
 2. `vega post send <pane> "<text>"` stores the message; `--host <machine>` for another machine. The target gets its pointer when idle or done; mail from its parent also while it works; `--now` only for urgent mail ("stop"). Do not poll: the reply arrives as a pointer.
    - Targets: hc `t7`/`hc:t7`, TUI `w1:p2`/`herdr:w1:p2`. hc blocked terminals wait.
+   - `machine/t7` or `hc:machine/t7` uses registry host `machine`, without --host.
+     hc names must equal registry hosts; unknown/unverifiable hosts fail before send.
+     Diagnose with `vega config infra --fleet`; fix with `hc machine rename <old> <host>`.
    - `--uac <project>`: UAC by full project ID, published folder/origin/merged alias, repository name, or `.` (this checkout).
    - `pane_gone`: closed pane, nothing sent; the hint names the UAC. `warning:`: unchecked, sent anyway. A `bounce:` mail: a pane closed before reading yours.
-   - Reachable is what `vega post` and `vega uac` say, not `herdr machine list`.
-3. A `[vega-post]` pointer says `vega post inbox`: run it to print and ack messages with reply commands. `vega post inbox --show <id>` prints one again. A `stale:` line marks a done report sent before your newer brief to that agent.
+3. On a `[vega-post]` pointer, run `vega post inbox` to read/ack mail and get reply commands; `--show <id>` rereads one. `stale:` marks done before your newer brief.
 4. A task from `vega mux spawn` ends with `vega post done --to <pane> --outcome succeeded|failed "<result>"`: run it once when finished, then stop.
 5. `vega post cmd <kind> --to <host>` (JSON stdin): remote vegad command.
 6. `vega post notes`: human notifications; no agent action needed.

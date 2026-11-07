@@ -15,6 +15,11 @@ Doctor includes local hc, herdr-app and Python 3 availability.
 
 Commands: `vega config`, `diff`, `apply`, `print`, `init`, `infra`.
 
+`vega config infra --fleet` adds an explicit network check: every hc machine name
+must exist as a vega registry host. Mismatches exit 1 and suggest
+`hc machine rename <old> <host>`; no machine is changed. Empty fleets are reported
+without contacting the registry. Plain `infra` and onboarding remain local-only.
+
 `dcg.config` and `dcg.packs` also manage Destructive Command Guard's config.toml and
 custom YAML packs, with per-file local overrides. `allowlist.toml` remains user-owned.
 Preview with `vega config diff dcg.config dcg.packs`; the default blocks direct branch deletion

@@ -29,8 +29,8 @@ Help: `--help`.
   hc sessions are captured by ancestry-verified vega calls from the child.
 - Remote: `--machine <label>`, spawn needs `--cwd`. Fleet: `hc machine ls`,
   falling back to `herdr machine list` when hc is absent/empty.
-  Qualified mail keeps its machine and requires an explicit registry host:
-  `vega post send machine/t7 --host <host> "<text>"`.
+  The hc machine name must equal its registry host: `send machine/t7 "<text>"`
+  needs no --host. Unknown hosts fail; `vega config infra --fleet` diagnoses names.
 - `vega mux next` focuses the oldest waiter; hc uses herdr-app.
 - Trust/permission/hook approvals stay with the Slayer; never approve them.
   Remote hc spawn inherits existing trust on the target via its vega helper;

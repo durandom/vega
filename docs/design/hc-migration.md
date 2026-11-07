@@ -126,7 +126,7 @@ dirs for a real core (never the user's core).
    Slice 4 fleet behavior: hc inventory falls back to the TUI list only when hc is
    absent or empty. Deploy displays via transports as unsupported and skips selected
    via targets during apply; unrelated SSH machines remain usable. Mux preserves
-   qualified mail addresses so post's explicit registry-host requirement still applies.
+   qualified mail addresses; the machine-name/registry-host convention below now resolves them.
    hc explicit split/workspace placement is tracked in vega-0h4c.20; tab and wt-created
    spaces are implemented. Guides and README descriptions change with this slice.
 5. **UAC and the UI.** UAC commands over both backends, the vega herdr-app mod, board and open, config
@@ -250,15 +250,35 @@ existing done/silent ledger. Native local hc parent links seed missing vega
 parent records; an existing adoption wins, and discovery creates no new brief.
 hc receives no draft-clear/restore keystrokes.
 
-Cross-host post mail uses `t7 --host <registry-host>`. A machine-qualified hc
-address also needs `--host`: without a registry-host mapping, enqueueing it on
-this host would produce an inbox no local watcher could deliver.
+Cross-host post mail accepts `t7 --host <registry-host>` or a qualified hc address
+under the convention below. Remote terminals never enter the local inbox.
+
+### Machine names are registry hosts (Slayer, 2026-11-07, vega-0h4c.19)
+
+An hc machine name must equal its vega registry host. `machine/t7` and
+`hc:machine/t7` resolve directly to host `machine`, pane `t7`; no remote identity
+query, alias mapping, SSH target matching, or hostname guessing is used. Post
+checks that the host has a registry beat before enqueueing, including tool sends.
+Unknown hosts fail with `machine_host_unknown`; unavailable registry checks fail
+with `registry_unavailable`. A stale beat still identifies an existing host and
+retains the normal reachability warning policy. A conflicting explicit `--host`
+fails rather than remapping the machine-qualified address. Inbox-only senders
+cannot verify remote registry names; they use an unqualified ID and explicit host
+from a reply command. Local inbox-only delivery remains available.
+
+`vega config infra --fleet` checks every configured hc machine name against the
+registry and reports mismatches with `hc machine rename <old> <host>`. This is an
+explicit network diagnostic; ordinary infra/onboarding checks stay local. The
+diagnostic never renames machines or changes fleet membership. Missing hc or
+registry access is an explicit failure, not a successful empty inventory.
 
 ### Remote spawn corrections (vega-0h4c.27)
 
 Mux launches use JSON-lines `terminal.run` through `hc connect`, with direct harness
 argv and a separate environment map. `env` and `nice` argv wrappers obscure the
-program identity. Local hc spawns renice the returned PID after launch; TUI still
+program identity. hc overlays that map on the target core's base environment, so
+PATH and HOME belong to the target; vega forwards terminal identity and explicit
+spawn variables. Local hc spawns renice the returned PID after launch; TUI still
 renices its shell before launch. The native parent and outlive-parent contract is
 unchanged. A bounded RPC timeout reports uncertain completion and asks callers to
 inspect terminals before retrying.

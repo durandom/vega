@@ -3234,6 +3234,7 @@ dependencies = [
  "vega-build",
  "vega-herdr",
  "vega-plugin",
+ "vega-registry",
  "vega-theme-sync",
 ]
 

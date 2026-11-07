@@ -199,28 +199,31 @@ pub fn prompt(pane: &str, text: &str) -> Result<(), Failure> {
     }
 }
 
-/// Mail uses the receiver's registry host, not this core's SSH machine alias.
-/// A qualified hc address must supply that host explicitly until the fleet
-/// alias mapping is migrated. Never enqueue an unreachable local `io/t7` inbox.
+/// The qualified hc machine name is the registry host by convention.
+/// No SSH target, hostname heuristic, or persistent alias mapping participates.
+pub fn machine_host(pane: &str) -> Option<String> {
+    let p = vega_herdr::pane::parse(pane)?;
+    (p.backend == vega_herdr::pane::Backend::Hc)
+        .then_some(p.machine)
+        .flatten()
+}
+
 pub fn mail_target(
     pane: &str,
     host: Option<&str>,
     local: &str,
 ) -> Result<(String, String), Failure> {
-    if let Some(p) = vega_herdr::pane::parse(pane) {
-        if p.backend == vega_herdr::pane::Backend::Hc && p.machine.is_some() {
-            let host = host.ok_or_else(|| {
-                Failure::new(
-                    "usage",
-                    "an hc machine address needs its registry host for mail",
-                    &format!(
-                        "use vega post send {} --host <registry-host> \"<text>\"",
-                        p.pane
-                    ),
-                )
-            })?;
-            return Ok((p.pane, crate::subject_token(host)));
+    if let Some(machine) = machine_host(pane) {
+        if machine != vega_herdr::state::host_token(&machine)
+            || machine != vega_registry::token(&machine)
+            || host.is_some_and(|h| h != machine)
+        {
+            return Err(Failure::new("machine_host_mismatch",
+                "an hc machine name must equal its registry host; --host cannot remap it",
+                &format!("hc machine rename {machine} <host>; or address an unqualified terminal with --host <host>")));
         }
+        let p = vega_herdr::pane::parse(pane).unwrap();
+        return Ok((p.pane, machine));
     }
     Ok((
         bare(pane).into(),
@@ -233,11 +236,15 @@ pub fn mail_target(
 mod tests {
     use super::*;
     #[test]
-    fn qualified_targets_require_the_receiver_host() {
-        assert!(mail_target("hc:io/t7", None, "here").is_err());
+    fn qualified_targets_use_the_machine_host_convention() {
         assert_eq!(
-            mail_target("hc:io/t7", Some("receiver"), "here").unwrap(),
-            ("t7".into(), "receiver".into())
+            mail_target("hc:io/t7", None, "here").unwrap(),
+            ("t7".into(), "io".into())
+        );
+        assert!(mail_target("hc:io/t7", Some("receiver"), "here").is_err());
+        assert_eq!(
+            mail_target("hc:io/t7", Some("io"), "here").unwrap(),
+            ("t7".into(), "io".into())
         );
         assert_eq!(
             mail_target("hc:t7", None, "here").unwrap(),

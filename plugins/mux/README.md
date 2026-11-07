@@ -14,9 +14,11 @@ Target commands accept `hc:t7` or `hc:machine/t7` independently of the caller's 
 `--machine` lookup uses `hc machine ls`, falling back to `herdr machine list` when hc
 is absent or its fleet is empty. hc remote spawn refuses corporate-to-private control.
 
-Mail keeps machine-qualified addresses intact. Without an explicit registry host,
-post refuses qualified remote mail instead of treating its bare terminal ID as local;
-use `vega post send machine/t7 --host <registry-host> "<text>"`. `send --now` reaches
+Mail keeps machine-qualified addresses intact. The hc machine name must equal its
+vega registry host: `vega mux send machine/t7 "<text>"` needs no `--host`.
+Post verifies that host exists; unknown hosts or unavailable registry checks fail
+without enqueueing. `vega config infra --fleet` diagnoses mismatched names.
+`send --now` reaches
 that hc address directly and its reply footer names the sender's registry host.
 
 `spawn` and `send` record events through the bounded central

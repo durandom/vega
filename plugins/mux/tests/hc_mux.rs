@@ -295,7 +295,7 @@ fn explicitly_undelivered_brief_can_resume_without_spawning_twice() {
 }
 
 #[test]
-fn qualified_mail_fails_closed_without_a_registry_mapping() {
+fn qualified_mail_preserves_the_machine_host_convention() {
     let f = Fixture::new();
     f.spawn();
     let path = f.root().join("terminals.json");
@@ -317,8 +317,11 @@ fn qualified_mail_fails_closed_without_a_registry_mapping() {
         .args(["send", "corp/t8", "remote mail"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("registry host"));
+    success(out);
+    assert_eq!(
+        fs::read_to_string(f.root().join("mail-corp-t8")).unwrap(),
+        "remote mail"
+    );
     assert!(!f.root().join("mail-local-t8").exists());
     let calls: Vec<Value> = fs::read_to_string(f.root().join("post-calls"))
         .unwrap()
@@ -334,9 +337,18 @@ fn qualified_mail_fails_closed_without_a_registry_mapping() {
         .args(["--machine", "corp", "send", "t8", "scoped mail"])
         .output()
         .unwrap();
-    assert_eq!(scoped.status.code(), Some(2));
-    assert!(!f.root().join("mail-corp-t8").exists());
+    success(scoped);
+    assert_eq!(
+        fs::read_to_string(f.root().join("mail-corp-t8")).unwrap(),
+        "scoped mail"
+    );
     assert!(!f.root().join("mail-local-t8").exists());
+    drop(relay);
+    f.run(&["send", "corp/t8", "remote without local relay"]);
+    assert_eq!(
+        fs::read_to_string(f.root().join("mail-corp-t8")).unwrap(),
+        "remote without local relay"
+    );
     f.run(&["send", "hc:corp/t8", "direct remote", "--now"]);
     let calls = f.calls();
     let direct = calls.iter().rev().find(|v| v[0] == "send").unwrap();

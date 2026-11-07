@@ -58,9 +58,13 @@ enum Cmd {
     Init { source: String },
     /// The infra vega needs on this host: level, state, what it enables, next step
     #[command(
-        after_help = "Local checks only (PATH without the shims, env vars, config files); nothing touches the network.\nRequired: build tools, vega and an agent. Optional: hc, herdr-app, legacy herdr and feature tools.\n\nExamples:\n  vega config infra"
+        after_help = "Default: local checks only (PATH without the shims, env vars, config files). --fleet also checks hc machine names against registry hosts over the network; mismatches exit 1.\nRequired: build tools, vega and an agent. Optional: hc, herdr-app, legacy herdr and feature tools.\n\nExamples:\n  vega config infra\n  vega config infra --fleet"
     )]
-    Infra,
+    Infra {
+        /// Also verify that every hc machine name exists as a registry host (network)
+        #[arg(long)]
+        fleet: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -101,7 +105,7 @@ fn main() -> ExitCode {
         Some(Cmd::Apply { units }) => apply(&ctx, &units),
         Some(Cmd::Print { unit }) => print(&ctx, &unit),
         Some(Cmd::Init { source }) => init(&ctx, &source),
-        Some(Cmd::Infra) => infra(&ctx),
+        Some(Cmd::Infra { fleet }) => infra(&ctx, fleet),
     });
     match result {
         Ok(code) => code,
@@ -224,7 +228,7 @@ fn status(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn infra(ctx: &Ctx) -> Result<ExitCode, Failure> {
+fn infra(ctx: &Ctx, fleet: bool) -> Result<ExitCode, Failure> {
     let rows = infra::check(&infra::Probe::from_env(ctx.env.clone()), ctx);
     println!("infra: {}", infra::summary(&rows));
     println!(
@@ -248,6 +252,9 @@ fn infra(ctx: &Ctx) -> Result<ExitCode, Failure> {
         for r in gaps {
             println!("  {},{}", r.name(), cell(r.next()));
         }
+    }
+    if fleet && !vega_config::fleet::check()? {
+        return Ok(ExitCode::from(1));
     }
     Ok(ExitCode::SUCCESS)
 }

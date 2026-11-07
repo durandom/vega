@@ -109,7 +109,7 @@ enum Cmd {
     },
     /// Send a message to another agent; it arrives as a new prompt with a reply footer
     #[command(
-        after_help = "Examples:\n  vega mux send w3V:p2 \"ping\"\n  vega mux send reviewer \"Review done? Reply with a 1-line status.\"\n  vega mux send rev --file /tmp/review-notes.md\n  printf '%s' \"$msg\" | vega mux send rev -"
+        after_help = "hc machine names must equal registry hosts. Qualified mail (machine/t7) is checked in the registry before sending; unknown hosts fail. Diagnose with vega config infra --fleet.\n\nExamples:\n  vega mux send w3V:p2 \"ping\"\n  vega mux send reviewer \"Review done? Reply with a 1-line status.\"\n  vega mux send rev --file /tmp/review-notes.md\n  printf '%s' \"$msg\" | vega mux send rev -"
     )]
     Send {
         /// Target agent: pane id (e.g. w3V:p2) or unique herdr agent name
@@ -1011,7 +1011,9 @@ fn shorten(s: &str, max: usize) -> String {
 /// local mode (no broker): a direct paste with a one-line footer.
 fn send(target: &str, text: &str, now: bool) -> Result<(), Failure> {
     let relay = relay_running() && !vega_herdr::state::relay_local();
-    if !now && (machine().is_some() || relay) {
+    let remote =
+        machine().is_some() || vega_herdr::pane::parse(target).is_some_and(|p| p.machine.is_some());
+    if !now && (remote || relay) {
         match send_post(target, text) {
             Ok(pane) => {
                 vega_herdr::history::emit(
@@ -1023,7 +1025,7 @@ fn send(target: &str, text: &str, now: bool) -> Result<(), Failure> {
                 return Ok(());
             }
             // The broker is away: the paste still works on this machine.
-            Err(f) if f.code == "broker_unreachable" && machine().is_none() => {
+            Err(f) if f.code == "broker_unreachable" && !remote => {
                 println!("note: broker unreachable, pasting directly");
             }
             Err(f) => return Err(f),
@@ -1048,8 +1050,8 @@ fn send_post(target: &str, text: &str) -> Result<String, Failure> {
         args.push("--host".into());
         args.push(m.to_lowercase());
     }
-    // Preserve the qualified address for post's fail-closed host requirement;
-    // an hc machine alias is never assumed to be a registry host.
+    // Post validates the hc machine-name/registry-host convention before enqueueing.
+    // Preserve the qualified address so that check cannot be bypassed.
     args.push(pane.clone());
     args.push(text.to_string());
     let out = Command::new("vega")

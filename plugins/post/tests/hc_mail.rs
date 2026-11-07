@@ -61,12 +61,16 @@ fn wait(home: &Path, what: &str, mut ready: impl FnMut() -> bool) {
 struct Fixture {
     home: tempfile::TempDir,
     url: String,
+    host: String,
     exe: PathBuf,
     _nats: Proc,
     relay: Option<Proc>,
 }
 impl Fixture {
     fn new() -> Self {
+        Self::new_host("testhost")
+    }
+    fn new_host(host: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let h = home.path();
         let bin = h.join("bin");
@@ -91,7 +95,7 @@ impl Fixture {
         write(&h.join("hc.json"), &json!({"terminals":terminals}));
         let cutover = h.join("state/vega/identity-cutover");
         fs::create_dir_all(&cutover).unwrap();
-        let plan = json!({"schema":2,"host":"testhost","inbox_only":false,"mappings":[],"original":{},"writes":{},"remove":[],"registry":{"host":"testhost","backup":{},"projection":{}},"registry_reads":[],"owned":{}});
+        let plan = json!({"schema":2,"host":host,"inbox_only":false,"mappings":[],"original":{},"writes":{},"remove":[],"registry":{"host":host,"backup":{},"projection":{}},"registry_reads":[],"owned":{}});
         write(&cutover.join("journal.json"), &plan);
         write(
             &cutover.join("approved.json"),
@@ -99,7 +103,7 @@ impl Fixture {
         );
         write(
             &cutover.join("complete.json"),
-            &json!({"schema":2,"host":"testhost"}),
+            &json!({"schema":2,"host":host}),
         );
         let port = TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -145,6 +149,7 @@ impl Fixture {
         Self {
             home,
             url,
+            host: host.into(),
             exe,
             _nats: nats,
             relay: None,
@@ -160,7 +165,7 @@ impl Fixture {
             .env("XDG_CONFIG_HOME", h.join("config"))
             .env("PATH", format!("{}:/usr/bin:/bin", h.join("bin").display()))
             .env("FAKE_PID", std::process::id().to_string())
-            .env("VEGA_POST_HOST", "testhost")
+            .env("VEGA_POST_HOST", &self.host)
             .env("VEGA_NATS_URL", &self.url)
             .env("VEGA_POST_TEST_SPEEDUP", "20")
             .current_dir(h);
@@ -193,7 +198,9 @@ impl Fixture {
         self.relay = Some(Proc(c.spawn().unwrap()));
         wait(self.home.path(), "watchers", || {
             self.log().contains("stream (hc events.subscribe)")
-                && self.log().contains("relay: testhost watching")
+                && self
+                    .log()
+                    .contains(&format!("relay: {} watching", self.host))
         });
     }
     fn log(&self) -> String {
@@ -630,4 +637,80 @@ fn inbox_only_hc_name_resolves_without_a_herdr_match() {
     assert_eq!(args[0], "send");
     assert_eq!(args[args.len() - 2], "t2");
     assert!(f.prompts("w1:p2").is_empty());
+}
+
+#[test]
+fn machine_qualified_mail_crosses_hosts_and_reads_the_remote_inbox() {
+    let mut sender = Fixture::new();
+    let mut receiver = Fixture::new_host("remote");
+    receiver.url = sender.url.clone();
+    let plans: Vec<Value> = [&sender, &receiver]
+        .iter()
+        .map(|f| {
+            serde_json::from_slice(
+                &fs::read(
+                    f.home
+                        .path()
+                        .join("state/vega/identity-cutover/journal.json"),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        })
+        .collect();
+    for f in [&sender, &receiver] {
+        write(
+            &f.home
+                .path()
+                .join("state/vega/identity-cutover/approved.json"),
+            &json!({"schema":2,"hosts":plans,"grants":{}}),
+        );
+    }
+    sender.start();
+    receiver.start();
+    let before = sender.prompts("t2").len();
+    sender.post(&["send", "hc:remote/t2", "cross-host convention"], "t1");
+    wait(receiver.home.path(), "remote idle pointer", || {
+        !receiver.prompts("t2").is_empty()
+    });
+    assert_eq!(sender.prompts("t2").len(), before);
+    assert!(receiver
+        .post(&["inbox"], "t2")
+        .contains("cross-host convention"));
+    for args in [
+        vec!["send", "unknown/t2", "must not send"],
+        vec![
+            "send",
+            "unknown/t2",
+            "--from-tool",
+            "vega-test",
+            "must not send",
+        ],
+        vec!["send", "remote/t2", "--host", "testhost", "must not send"],
+    ] {
+        let out = sender.command(&args, Some("t1")).output().unwrap();
+        assert!(!out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("machine_host"), "{text}");
+    }
+    assert!(!receiver.post(&["inbox"], "t2").contains("must not send"));
+    assert!(!sender.post(&["inbox"], "t2").contains("must not send"));
+    sender.relay.take();
+    receiver.relay.take();
+    runtime().block_on(async {
+        let c = async_nats::connect(&sender.url).await.unwrap();
+        async_nats::jetstream::new(c)
+            .delete_key_value(vega_registry::BUCKET)
+            .await
+            .unwrap();
+    });
+    let out = sender
+        .command(&["send", "remote/t2", "unavailable registry"], Some("t1"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("registry_unavailable"));
+    assert!(!receiver
+        .post(&["inbox"], "t2")
+        .contains("unavailable registry"));
 }
