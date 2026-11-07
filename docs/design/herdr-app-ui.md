@@ -100,6 +100,8 @@ Machine/project groups use short repository names; routing still uses
 `vega.project-id`. A listed child appears only in its visible ancestor's tree,
 including children with panes in another space. A child whose ancestor is absent
 remains a top-level row. Project totals omit zero values.
+This tree rule also applies to pinned children: they stay under their visible
+parent rather than receiving a second top-level pinned row.
 
 vegad first resolves the foreground cwd. If no project resolves, it uses that
 terminal's space folder from the local core's `herdr-app` document (`doc.get`),
@@ -107,6 +109,8 @@ without asking the desktop app or inspecting remote paths. Local-only project
 names come from the identity's source/common-directory path, treating `.git` as
 its parent repository, so gate clones and linked worktrees share a name.
 New launches also retain their harness kind independently of the displayed glyph.
+`vega.harness` keeps the raw launch kind; vegad replaces `vega.kind` with the
+theme's display glyph, so the two labels can differ after metadata refresh.
 
 Mail windows render read-only message cards from `vega post log --json` (an object
 with `total` and newest-first `messages`, full text and a boolean `read`).

@@ -215,6 +215,25 @@ test('mail archive and notification JSON render readable cards and empty/error s
   }
 });
 
+test('a finished intermediate parent cannot hide a live child below a listed grandparent',()=>{
+  const h=load('vega-agents');
+  const agent=address=>({address,space_name:'vega',space:'s',tab:'tb',pane:address,status:'idle',program:{},seq:1,pinned:false});
+  h.api.agents=()=>[agent('t1'),agent('t3')];
+  h.api.terminals=()=>[
+    {address:'t1',state:'live',parent:null,labels:{}},
+    {address:'t2',state:'finished',parent:'t1',labels:{}},
+    {address:'t3',state:'live',parent:'t2',labels:{}},
+  ];
+  h.mod.init({},h.cx);const tree=h.render();
+  const order=h.calls.find(c=>c[0]==='order')[1];
+  assert.equal(JSON.stringify(order),JSON.stringify(['t1','t3']));
+  assert(elements(tree).some(n=>n.idValue==='ag-t3'), 'live child has a visible row');
+  assert.equal(elements(tree).filter(n=>n.idValue==='sub-t3').length,0,'child has its own top-level row');
+  h.api.terminals=()=>[{address:'t3',state:'live',parent:'missing',labels:{}}];
+  h.api.agents=()=>[agent('t3')];h.render();
+  assert.equal(h.calls.filter(c=>c[0]==='order').at(-1)[1][0],'t3','missing parents also keep a live root visible');
+});
+
 test('inbox closes after the last card disappears, respecting project scope and live waiting panes',()=>{
   const h=load('vega-inbox');h.setProps({overlay:'inbox-window',project:'project-a'});
   const r=row();h.state.set('vega.badges',[r]);h.mod.init({},h.cx);

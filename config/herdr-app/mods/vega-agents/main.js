@@ -299,7 +299,7 @@ export default class Agents extends View {
     list = list.filter(a => {
       const seen = new Set([a.address]);
       let parent = this.vegaTerminals.get(a.address)?.parent;
-      while (parent && !seen.has(parent)) {
+      while (parent && !seen.has(parent) && this.vegaTerminals.get(parent)?.state === "live") {
         if (listed.has(parent)) return false;
         seen.add(parent); parent = this.vegaTerminals.get(parent)?.parent;
       }
