@@ -37,11 +37,15 @@ elif args[0] == 'events':
     cursor = home/'cursor'
     offset = int(cursor.read_text()) if cursor.exists() else 0
     while os.getppid() == parent:
-        lines = (home/'events').read_text().splitlines() if (home/'events').exists() else []
+        lines = (home/'events').read_text().splitlines(keepends=True) if (home/'events').exists() else []
         for line in lines[offset:]:
+            # Rust's Value formatter may append a JSON line in several writes.
+            # Only a newline commits the event; do not parse/consume a partial one.
+            if not line.endswith('\n'): break
+            event = json.loads(line)
             offset += 1
             cursor.write_text(str(offset))
-            emit(json.loads(line))
+            emit(event)
         time.sleep(.05)
 else:
     sys.exit(1)
