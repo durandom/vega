@@ -81,11 +81,13 @@ pub fn spawn(
     } else {
         None
     };
+    let mut placeholder = None;
     if let Place::Worktree { branch, base } = place {
         let (path, how) = worktree::hc_worktree(&cwd, &branch, base.as_deref())?;
         cwd = path;
         println!("worktree: {} ({how})", cell(&branch));
         let v = app(&["do", "space.new", "--name", &branch, "--folder", &cwd])?;
+        placeholder = v["terminal"].as_str().map(String::from);
         space = v["space"].as_str().or(v["id"].as_str()).map(String::from);
         if space.is_none() {
             return Err(Failure::new(
@@ -146,8 +148,11 @@ pub fn spawn(
         .filter(|_| machine().is_none());
     let vars = spawn_env(kind, actor.as_deref(), socket.as_deref(), user);
     let mut labels = serde_json::json!({
-        "vega.kind":kind, "vega.mode":mode.as_str(), "vega.role":"sentinel"
+        "vega.kind":kind, "vega.harness":kind, "vega.mode":mode.as_str(), "vega.role":"sentinel"
     });
+    if let Some(p) = &placeholder {
+        labels["vega.worktree-placeholder"] = p.clone().into();
+    }
     if let Some(s) = space {
         labels["herdr.space"] = s.into();
     }
@@ -213,6 +218,9 @@ pub fn spawn(
             )
         })?
         .to_string();
+    if let Some(p) = &placeholder {
+        hc_local(&["label", p, &format!("vega.worktree-owner={pane}")])?;
+    }
     let mut record = old.cloned().unwrap_or_else(|| SpawnRecord {
         backend: "hc".into(),
         pane: pane.clone(),

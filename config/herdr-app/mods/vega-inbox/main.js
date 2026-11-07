@@ -19,9 +19,10 @@ export default class VegaInbox extends View {
     this.inputs = new Map();
     this.busy = new Set();
     this.results = new Map();
+    this.completed = new Set();
     setShared("vega.inbox-project", props()?.project ?? null);
-    this.prepare(cx);
     setShared("vega.inbox-open", true);
+    this.prepare(cx);
     cx.timer.every(15000, cx => { this.prepare(cx); cx.notify(); });
     cx.spawn(async cx => {
       for (;;) { await nextCommand(); this.prepare(cx); cx.notify(); }
@@ -30,8 +31,26 @@ export default class VegaInbox extends View {
 
   close() { setShared("vega.inbox-open", false); }
 
+  rows() {
+    const project = shared("vega.inbox-project");
+    return (shared("vega.badges") ?? []).filter(r => Date.now()/1000-r.at <= 60 && (!project || r.project === project))
+      .map(r => ({...r, decision_texts: (r.decision_texts ?? []).filter(d => !this.completed.has(`${r.project}/${d.id}`))}));
+  }
+
+  waiting(rows) {
+    const live = new Set(terminals().filter(t => t.state === "live").map(t => t.address));
+    return rows.flatMap(row => (row.waiting_panes ?? []).map(w => ({...w, project: row.project})))
+      .filter(w => live.has(w.pane.replace(/^hc:/,"")));
+  }
+
   prepare(cx) {
-    for (const row of shared("vega.badges") ?? []) {
+    const rows = this.rows();
+    if (!rows.some(r => r.decision_texts?.length) && !this.waiting(rows).length && !this.busy.size) {
+      setShared("vega.inbox-open", false);
+      if (props()?.overlay) closeOverlay(props().overlay);
+      return;
+    }
+    for (const row of rows) {
       for (const d of row.decision_texts ?? []) this.input(decisionKey(row, d.id), cx);
     }
   }
@@ -65,9 +84,10 @@ export default class VegaInbox extends View {
         } else {
           r = await exec(dismiss ? "bd" : "vega", args, {cwd: row.checkout});
         }
+        if (r.code === 0) this.completed.add(key);
         this.results.set(key, r.code === 0 ? (dismiss ? "Dismissed. Waiting for refresh." : "Answer sent to the UAC.") : r.stdout || r.stderr || `Command failed (${r.code})`);
       } catch (e) { this.results.set(key, String(e)); }
-      finally { this.busy.delete(key); cx.notify(); }
+      finally { this.busy.delete(key); this.prepare(cx); cx.notify(); }
     });
   }
 
@@ -79,9 +99,7 @@ export default class VegaInbox extends View {
 
   render(cx) {
     const t = theme();
-    const project = shared("vega.inbox-project");
-    const rows = (shared("vega.badges") ?? []).filter(r => Date.now()/1000-r.at <= 60 && (!project || r.project === project));
-    const live = new Set(terminals().filter(t => t.state === "live").map(t => t.address));
+    const rows = this.rows();
     const cards = rows.flatMap(row => (row.decision_texts ?? []).map(d => {
       const key = decisionKey(row, d.id);
       const input = this.inputs.get(key);
@@ -96,8 +114,7 @@ export default class VegaInbox extends View {
           .child(this.button(`dismiss-${key}`, "Dismiss", cx => this.act(row,d,true,cx),t)))
         .when(this.results.has(key), el => el.child(div().text_size(12).text_color(t.muted).child(this.results.get(key))));
     }));
-    const waiting = rows.flatMap(row => (row.waiting_panes ?? []).map(w => ({...w, project: row.project})))
-      .filter(w => live.has(w.pane.replace(/^hc:/,"")));
+    const waiting = this.waiting(rows);
     return v_flex().size_full().gap(12).p(16).bg(t.chrome).text_size(13).text_color(t.foreground)
       .child(h_flex().flex_none().justify_between().items_center().child(div().font_semibold().child("Vega inbox"))
         .child(this.button("close-inbox","Close",() => closeOverlay(props().overlay),t)))

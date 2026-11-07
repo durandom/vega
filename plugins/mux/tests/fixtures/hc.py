@@ -45,6 +45,13 @@ elif cmd=='exec':
  import base64
  print(json.dumps({'code':rc,'ms':1,'signal':None,'stderr':base64.b64encode(errb).decode(),'stdout':base64.b64encode(out).decode(),'timed_out':False,'truncated':False}))
 elif cmd=='get': print(json.dumps(get(a[1])))
+elif cmd=='label':
+ t=get(a[1])
+ for pair in a[2:]:
+  k,v=pair.split('=',1)
+  if v: t['labels'][k]=v
+  else: t['labels'].pop(k,None)
+ save();print('{}')
 elif cmd=='ls': print(json.dumps({'terminals':([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())}))
 elif cmd=='machine': print(os.environ.get('TEST_MACHINES','{"machines":[]}'))
 elif cmd=='read':

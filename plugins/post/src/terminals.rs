@@ -36,7 +36,12 @@ pub fn hc_agents(v: &Value) -> Result<Vec<Value>, Failure> {
         .iter()
         .filter(|t| local_terminal(t) && t["state"] == "live")
         .map(|t| {
-            let kind = match t["status"]["app"].as_str().unwrap_or("") {
+            let kind = match t["status"]["app"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .or(t["labels"]["vega.harness"].as_str())
+                .unwrap_or("")
+            {
                 "claude-code" => "claude",
                 k => k,
             };
@@ -53,7 +58,32 @@ pub fn hc_agents(v: &Value) -> Result<Vec<Value>, Failure> {
 }
 
 pub fn hc_list() -> Result<Vec<Value>, Failure> {
-    hc_agents(&hc_local(&["ls"])?)
+    let mut agents = hc_agents(&hc_local(&["ls"])?)?;
+    // This machine's shared layout supplies a project folder when the launch
+    // shell and foreground leader both remain at home. Never inspect remote paths.
+    if let Ok(doc) = vega_herdr::hc::rpc(
+        "doc.get",
+        json!({"name":"herdr-app"}),
+        std::time::Duration::from_secs(2),
+    ) {
+        apply_spaces(&mut agents, &doc);
+    }
+    Ok(agents)
+}
+
+fn apply_spaces(agents: &mut [Value], doc: &Value) {
+    for agent in agents {
+        let space = agent["labels"]["herdr.space"].as_str();
+        if let Some(s) = doc["value"]["spaces"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|s| space.is_some() && s["id"].as_str() == space)
+        {
+            agent["space_folder"] = s["folder"].clone();
+            agent["space_name"] = s["name"].clone();
+        }
+    }
 }
 
 /// Keep source failures separate: a failed backend is not an empty backend.
@@ -235,6 +265,24 @@ pub fn mail_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_hc_snapshot_uses_foreground_cwd_and_layout_doc_shape() {
+        let snapshot = json!({"terminals":[
+            {"address":"t2","state":"live","cwd":"/home/user","foreground":{"cwd":"/repo"},"status":{"app":"claude-code","state":"idle"},"labels":{"herdr.space":"sp1"}},
+            {"address":"t3","state":"live","cwd":"/home/user","status":null,"labels":{"herdr.space":"sp1","vega.harness":"codex"}},
+            {"address":"remote/t1","state":"live","cwd":"/remote"}
+        ]});
+        let mut agents = hc_agents(&snapshot).unwrap();
+        apply_spaces(
+            &mut agents,
+            &json!({"version":1,"value":{"spaces":[{"id":"sp1","name":"vega","folder":"/repo","tabs":[]}]}}),
+        );
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0]["cwd"], "/repo");
+        assert_eq!(agents[0]["agent"], "claude");
+        assert_eq!(agents[1]["agent"], "codex");
+        assert_eq!(agents[1]["space_folder"], "/repo");
+    }
     #[test]
     fn qualified_targets_use_the_machine_host_convention() {
         assert_eq!(

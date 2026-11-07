@@ -13,6 +13,7 @@ function load(name) {
       if(k==='child')return c=>{o.items.push(c);return proxy;};
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
+      if(k==='id'||k==='tooltip')return v=>{o[k+'Value']=v;return proxy;};
       if(k==='on_click'||k==='on_mouse_down')return (...a)=>{o.handlers[k]=a.at(-1);return proxy;};
       return ()=>proxy;
     }});return proxy;
@@ -22,6 +23,8 @@ function load(name) {
     InputState:{new(){assert.equal(rendering,false,'input state created in render');let value='';return {on(){},value:()=>value,set_value:v=>{value=v;},focus(){throw Error('focus stolen');}};}},
     Input:{new:el},theme:()=>({}),shared:k=>state.get(k),setShared:(k,v)=>state.set(k,v),
     props:()=>props,home:()=>'/scratch',terminals:()=>[{address:'t7',state:'live'}],
+    agents:()=>[],panes:()=>[],spaces:()=>[],focused:()=>null,layout:()=>null,window:()=>null,
+    setAgentOrder:a=>calls.push(['order',a]),
     run:(...a)=>calls.push(['run',...a]),openOverlay:s=>{calls.push(['open',s]);return 'window';},
     closeOverlay:s=>calls.push(['close',s]),notify:s=>calls.push(['toast',s]),
     nextCommand:()=>new Promise(r=>commands.push(r)),watchFolder:()=>new Promise(()=>{}),
@@ -169,4 +172,77 @@ test('project group totals match source machine as well as project and expire',(
   assert.equal(h.mod.vegaTotals('ganymede/t7','another-project'),undefined);
   remote.at=1;
   assert.equal(h.mod.vegaTotals('ganymede/t7','project-a'),undefined);
+});
+
+
+function elements(node) {
+  if (!node || typeof node !== 'object') return [];
+  return [node,...node.items.flatMap(elements)];
+}
+function texts(node) { return elements(node).flatMap(n=>n.items.filter(i=>typeof i==='string')); }
+
+test('machine/project tree has one child row, short names and positive totals only',()=>{
+  const h=load('vega-agents');
+  const agent=(address,space_name)=>({address,space_name,space:'s',tab:'tb',pane:address,status:'idle',program:{},seq:1});
+  h.api.agents=()=>[agent('ganymede/t2','vega'),agent('ganymede/t3','worker'),agent('ganymede/t4','vega')];
+  h.api.terminals=()=>[
+    {address:'ganymede/t2',state:'live',labels:{'vega.project-id':'github.com/team/vega','vega.project':'github.com/team/vega'}},
+    {address:'ganymede/t3',state:'live',parent:'ganymede/t2',labels:{'vega.project':'file:host:/tmp/gate'}},
+    {address:'ganymede/t4',state:'live',labels:{}},
+  ];
+  h.state.set('vega-agents.sort','project');h.state.set('vega.badges',[{...row(),project:'github.com/team/vega',notes:2,decisions:0,waiting:0}]);
+  h.mod.init({},h.cx);const tree=h.render(), nodes=elements(tree), text=texts(tree);
+  assert.equal(nodes.filter(n=>n.idValue==='sub-ganymede/t3').length,1);
+  assert.equal(nodes.filter(n=>typeof n.idValue==='string'&&n.idValue.startsWith('project-')).length,1);
+  assert(text.includes('ganymede · vega'));
+  assert(text.includes('✉ 2'));assert(!text.includes('⚖ 0'));assert(!text.includes('✋ 0'));
+  const order=h.calls.find(c=>c[0]==='order')[1];assert.equal(order.length,3);
+  assert.equal(new Set(order).size,3,'navigation includes the child once in tree order');
+});
+
+test('mail archive and notification JSON render readable cards and empty/error states',async()=>{
+  for(const notes of [false,true]) {
+    const h=load('vega-agents');h.setProps({mail:'ganymede/t7',notes,overlay:'mail-window'});
+    const message={from:'t2@io',host:'io',time:'2026-11-07T10:00:00Z',read:false,unread:true,title:'Notice',body:'Line one\nLine two',text:'Line one\nLine two'};
+    h.api.exec=async(...a)=>{h.calls.push(['exec',...a]);return {code:0,stdout:notes?JSON.stringify(message)+'\n':JSON.stringify({total:1,messages:[message]})};};
+    h.mod.init({},h.cx);await h.flush();
+    const content=texts(h.render());assert(content.includes(message.text));assert(content.some(s=>s.includes('Unread')));
+    const call=h.calls.find(c=>c[0]==='exec');assert(call[2].includes('--json'));assert.equal(call[3].on,'ganymede');
+    assert(!content.some(s=>s.startsWith('{')));
+    h.mod.mail=[];assert(texts(h.render()).includes('No mail.'));
+    h.api.exec=async()=>({code:1,stderr:'Broker unavailable'});h.mod.init({},h.cx);await h.flush();
+    assert(texts(h.render()).some(s=>s.includes('Broker unavailable')));
+  }
+});
+
+test('inbox closes after the last card disappears, respecting project scope and live waiting panes',()=>{
+  const h=load('vega-inbox');h.setProps({overlay:'inbox-window',project:'project-a'});
+  const r=row();h.state.set('vega.badges',[r]);h.mod.init({},h.cx);
+  assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+  r.decision_texts=[];r.waiting_panes=[{pane:'hc:t7',name:'Worker'}];h.mod.prepare(h.cx);
+  assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+  h.api.terminals=()=>[];h.mod.prepare(h.cx);
+  assert(h.calls.some(c=>c[0]==='close'&&c[1]==='inbox-window'));assert.equal(h.state.get('vega.inbox-open'),false);
+  h.calls.length=0;h.state.set('vega.badges',[{...row(),project:'other'}]);h.mod.prepare(h.cx);
+  assert.equal(h.calls.filter(c=>c[0]==='close').length,1,'another project cannot keep a filtered inbox open');
+});
+
+test('successful Answer and Dismiss close the last card immediately; errors keep it open',async()=>{
+  for(const dismiss of [false,true]) {
+    const h=load('vega-inbox');const r=row();h.setProps({overlay:'answer-window'});
+    h.state.set('vega.badges',[r]);h.mod.init({},h.cx);
+    h.mod.inputs.get('project-a/b-1').set_value('Proceed');
+    h.api.exec=async()=>({code:1,stderr:'Failed'});
+    h.mod.act(r,r.decision_texts[0],dismiss,h.cx);await new Promise(r=>setImmediate(r));
+    assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
+    h.api.exec=async()=>({code:0,stdout:'Done'});
+    h.mod.act(r,r.decision_texts[0],dismiss,h.cx);await new Promise(r=>setImmediate(r));
+    assert(h.calls.some(c=>c[0]==='close'&&c[1]==='answer-window'));
+    assert.equal(h.mod.rows()[0].decision_texts.length,0,'stale badge cannot keep an answered card visible');
+  }
+});
+
+test('empty initial mod check has null props and no overlay to close',()=>{
+  const h=load('vega-inbox');h.setProps(null);h.mod.init({},h.cx);h.render();
+  assert.equal(h.calls.filter(c=>c[0]==='close').length,0);
 });

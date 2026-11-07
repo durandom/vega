@@ -232,6 +232,9 @@ enum Cmd {
         /// Do not truncate message text
         #[arg(long)]
         full: bool,
+        /// Emit a JSON archive with full message text for UI clients
+        #[arg(long)]
+        json: bool,
     },
     /// List the notifications vega showed the human (all hosts), newest first
     #[command(
@@ -452,12 +455,14 @@ fn main() -> ExitCode {
             since,
             limit,
             full,
+            json,
         }) => log_view(
             pane.as_deref(),
             from.as_deref(),
             since.as_deref(),
             limit,
             full,
+            json,
         ),
         Some(Cmd::Notes {
             action,
@@ -3775,6 +3780,7 @@ fn log_view(
     since: Option<&str>,
     limit: usize,
     full: bool,
+    json: bool,
 ) -> Result<(), Failure> {
     let since = since.map(parse_duration).transpose()?;
     let host = host();
@@ -3809,7 +3815,8 @@ fn log_view(
         // Only server metadata establishes an empty filtered archive.
         let scope = describe_scope(&host, pane, from, since.is_some());
         if consumer.cached_info().num_pending == 0 {
-            println!("log: 0 messages {scope}");
+            if json { println!("{}", log_json(&[], 0)); }
+            else { println!("log: 0 messages {scope}"); }
             return Ok(());
         }
         let mut msgs = consumer.messages().await.map_err(broker_err)?;
@@ -3857,7 +3864,8 @@ fn log_view(
         }
 
         if rows.is_empty() {
-            println!("log: 0 messages {scope}");
+            if json { println!("{}", log_json(&[], total)); }
+            else { println!("log: 0 messages {scope}"); }
             return Ok(());
         }
         // Read state per pane: acked up to the consumer's ack floor.
@@ -3873,6 +3881,14 @@ fn log_view(
             }
         }
 
+        if json {
+            let messages: Vec<_> = rows.iter().rev().map(|r| {
+                let read = floors.get(&r.to).copied().flatten().is_some_and(|floor| r.id <= floor);
+                (r, read)
+            }).collect();
+            println!("{}", log_json(&messages, total));
+            return Ok(());
+        }
         println!("log: {} of {total} messages {scope}, newest first", rows.len());
         println!("messages[{}]{{id,time,to,from,hop,read,text}}:", rows.len());
         let mut truncated = false;
@@ -3921,6 +3937,12 @@ struct LogRow {
     from: String,
     hop: String,
     text: String,
+}
+
+fn log_json(rows: &[(&LogRow, bool)], total: usize) -> serde_json::Value {
+    serde_json::json!({"total":total, "messages":rows.iter().map(|(r, read)|
+        serde_json::json!({"id":r.id,"time":r.time,"to":r.to,"from":r.from,
+            "hop":r.hop,"read":read,"text":r.text})).collect::<Vec<_>>()})
 }
 
 fn describe_scope(host: &str, pane: Option<&str>, from: Option<&str>, since: bool) -> String {
@@ -4957,7 +4979,49 @@ impl Layout {
                 .workspaces
                 .iter()
                 .find(|w| w["workspace_id"] == p["workspace_id"]);
-            let id = resolve(ws, p["cwd"].as_str().unwrap_or_default());
+            let cwd = p["cwd"].as_str().unwrap_or_default();
+            let mut id = resolve(ws, cwd);
+            if id.is_none() && terminals::is_hc(p["pane_id"].as_str().unwrap_or_default()) {
+                if let Some(folder) = p["space_folder"].as_str().filter(|s| !s.is_empty()) {
+                    id = resolve(None, folder);
+                    if id.is_some() {
+                        p["cwd"] = folder.to_string().into();
+                    }
+                }
+            }
+            if let Some(key) = &id {
+                // Git IDs have a repository name; local-only IDs need the common
+                // directory to avoid showing a gate/worktree's temporary path.
+                let name = if !key.starts_with("file:") {
+                    key.rsplit('/')
+                        .next()
+                        .unwrap_or(key)
+                        .trim_end_matches(".git")
+                        .to_string()
+                } else {
+                    probes::resolve(
+                        std::path::Path::new(p["cwd"].as_str().unwrap_or_default()),
+                        &host,
+                    )
+                    .ok()
+                    .and_then(|project| {
+                        let common = project.location.common_dir;
+                        let repo = if common.file_name().is_some_and(|n| n == ".git") {
+                            common.parent()?
+                        } else {
+                            &common
+                        };
+                        Some(
+                            repo.file_name()?
+                                .to_string_lossy()
+                                .trim_end_matches(".git")
+                                .to_string(),
+                        )
+                    })
+                    .unwrap_or_else(|| key.rsplit('/').next().unwrap_or(key).to_string())
+                };
+                p["project_name"] = name.into();
+            }
             p["schema"] = 2.into();
             p["project"] = id.into();
         }
@@ -5090,7 +5154,7 @@ impl Layout {
         match self
             .pane(id)
             .filter(|_| terminals::is_hc(id))
-            .and_then(|p| p["project"].as_str())
+            .and_then(|p| p["project_name"].as_str().or(p["project"].as_str()))
             .or_else(|| parent.and_then(|p| self.workspace_label(p)))
             .or_else(|| self.workspace_label(id))
         {
@@ -6983,10 +7047,66 @@ mod tests {
     }
 
     #[test]
+    fn hc_home_cwd_falls_back_to_space_and_keeps_project_id_separate_from_name() {
+        use std::process::Command;
+        let repo = tempfile::tempdir().unwrap();
+        assert!(Command::new("git")
+            .args(["init", "-q"])
+            .arg(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/team/vega.git"
+            ])
+            .status()
+            .unwrap()
+            .success());
+        let layout = Layout {
+            panes: vec![serde_json::json!({"pane_id":"t2", "cwd":"/", "space_folder":repo.path(), "agent":"codex"})],
+            workspaces: vec![], tabs: vec![],
+        }.resolve_projects();
+        assert_eq!(layout.panes[0]["project"], "github.com/team/vega");
+        assert_eq!(layout.panes[0]["cwd"], repo.path().to_str().unwrap());
+        assert_eq!(
+            layout.project_token("t2", None),
+            ["--token", "project=vega"]
+        );
+        assert_eq!(layout.agent_kind("t2"), Some("codex"));
+    }
+
+    #[test]
+    fn archive_json_preserves_multiline_text_read_state_and_empty_shape() {
+        let row = LogRow {
+            id: 7,
+            time: "now".into(),
+            to: "t2".into(),
+            from: "t1@host".into(),
+            hop: "0".into(),
+            text: "first, \"quoted\"\nsecond".into(),
+        };
+        let value = log_json(&[(&row, false)], 3);
+        assert_eq!(value["total"], 3);
+        assert_eq!(value["messages"][0]["text"], row.text);
+        assert_eq!(value["messages"][0]["read"], false);
+        assert_eq!(
+            log_json(&[], 0),
+            serde_json::json!({"total":0,"messages":[]})
+        );
+        assert!(Cli::try_parse_from(["vega-post", "log", "--json"]).is_ok());
+    }
+
+    #[test]
     fn hc_metadata_keeps_claims_and_foreign_roles_and_reports_own_project_and_mail() {
         let mut layout = Layout {
             panes: vec![
-                serde_json::json!({"pane_id":"t7", "project":"git:own-project",
+                serde_json::json!({"pane_id":"t7", "project":"git:own-project", "project_name":"own-project",
                     "labels":{"vega.role":"gate-reviewer"}}),
                 serde_json::json!({"pane_id":"w1:p1", "workspace_id":"w1"}),
             ],
@@ -6994,7 +7114,7 @@ mod tests {
             tabs: vec![],
         };
         let project = layout.project_token("t7", Some("w1:p1"));
-        assert_eq!(project, ["--token", "project=git:own-project"]);
+        assert_eq!(project, ["--token", "project=own-project"]);
         let mut delivery = Delivery::default();
         delivery.mail("t7", delivery::Sender::Other);
         delivery.mail("t7", delivery::Sender::Other);
@@ -7004,7 +7124,7 @@ mod tests {
         let foreign = report(&layout, false);
         assert!(foreign.contains(&"vega.role=gate-reviewer".into()));
         assert!(foreign.contains(&"vega.project-id=git:own-project".into()));
-        assert!(foreign.contains(&"vega.project=git:own-project".into()));
+        assert!(foreign.contains(&"vega.project=own-project".into()));
         assert!(foreign.contains(&"vega.mail=✉ 2".into()));
         let current = report(&layout, true);
         assert!(current.contains(&"vega.role=uac".into()));

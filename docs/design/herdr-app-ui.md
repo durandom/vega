@@ -92,3 +92,39 @@ mean the decision command succeeded. Local answers retain their existing executi
 path. No remote checkout is opened locally. After merge/apply, verify that a new
 remote decision opens the inbox without stealing focus, its answer reaches the
 remote UAC, and a remote waiting card focuses its terminal.
+
+
+## Live-tour polish (vega-0h4c.24)
+
+Machine/project groups use short repository names; routing still uses
+`vega.project-id`. A listed child appears only in its visible ancestor's tree,
+including children with panes in another space. A child whose ancestor is absent
+remains a top-level row. Project totals omit zero values.
+
+vegad first resolves the foreground cwd. If no project resolves, it uses that
+terminal's space folder from the local core's `herdr-app` document (`doc.get`),
+without asking the desktop app or inspecting remote paths. Local-only project
+names come from Git's common directory so gate and linked worktrees share a name.
+New launches also retain their harness kind independently of the displayed glyph.
+
+Mail windows render read-only message cards from `vega post log --json` (an object
+with `total` and newest-first `messages`, full text and a boolean `read`).
+Notification windows consume the existing newline-delimited `post notes --json`.
+Neither changes acknowledgements. Empty archives and errors remain explicit.
+
+The inbox closes itself on refresh when its selected project has no decision
+cards and no live waiting panes. Unrelated projects do not keep a filtered window
+open; an in-flight action prevents closing. Successful Answer/Dismiss removes its
+card immediately and closes the last one without waiting for vegad. This is local
+to the window; reopening can still show an answered bead until its UAC closes it.
+
+`space.new` creates a shell before mux starts a worktree agent. New launches link
+that exact placeholder and worker with ownership labels. `mux close` removes the
+placeholder only when the space has no other live terminal and its foreground
+has not changed to another program; normal app reconciliation then removes the
+empty space. Old spaces without ownership labels stay untouched for user-led live
+cleanup. No worktrunk hooks or badge schema changes are involved.
+
+Items 6 (unclaimed project decisions) and 8 (git arrow tooltip) await the Slayer's
+decision in the worker pane. The toast-position upstream request is drafted only
+in the bead notes.

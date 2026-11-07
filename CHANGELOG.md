@@ -5,6 +5,20 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 122 · 2026-11-07
+
+- unit: Reapply the herdr-app mods for short machine/project group labels, a single
+  tree row per child, and project totals only when positive. Mail opens readable
+  archive cards; the decision inbox closes when its last decision or live waiter
+  disappears, including a project-filtered inbox.
+- feature: vegad uses the local herdr-app space folder when an hc agent's cwd
+  cannot identify a project. Full project IDs remain available for routing.
+  `vega post log --json` supplies full archive messages without acknowledging mail.
+- feature: New hc worktree launches record the shell created by `space.new`.
+  Closing the worker also removes its owned placeholder when no other terminal
+  uses the space. Existing unmarked spaces need manual cleanup with the user.
+
+
 ## 121 · 2026-11-07
 
 - optional: `vegad-start` starts vegad at login without herdr-app or herdr TUI;

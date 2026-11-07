@@ -154,6 +154,18 @@ pub fn close(target: &str) -> Result<(), Failure> {
         ));
     }
     reopen::snapshot(&normalize(&t));
+    let placeholder = t["labels"]["vega.worktree-placeholder"]
+        .as_str()
+        .filter(|p| vega_herdr::pane::is_hc_id(p));
+    if let Some(p) = placeholder {
+        let all = hc_local(&["ls"])?;
+        if let Some(shell) = worktree_placeholder(&t, &all) {
+            if shell["state"] == "live" {
+                hc_local(&["kill", p])?;
+            }
+            hc_local(&["rm", p])?;
+        }
+    }
     if t["state"] == "live" {
         hc_local(&["kill", pane])?;
     }
@@ -162,6 +174,46 @@ pub fn close(target: &str) -> Result<(), Failure> {
     println!("closed: {pane}");
     Ok(())
 }
+
+// A worktree space starts with a shell created by space.new. Only remove that
+// explicitly owned placeholder, and only when nobody else uses its space.
+fn worktree_placeholder<'a>(worker: &Value, all: &'a Value) -> Option<&'a Value> {
+    let rows = all["terminals"].as_array()?;
+    let pane = worker["address"].as_str()?;
+    let space = worker["labels"]["herdr.space"].as_str()?;
+    let id = worker["labels"]["vega.worktree-placeholder"].as_str()?;
+    let shell = rows.iter().find(|t| {
+        t["address"] == id
+            && t["labels"]["vega.worktree-owner"] == pane
+            && t["labels"]["herdr.space"] == space
+    })?;
+    if rows.iter().any(|t| {
+        t["state"] == "live"
+            && t["labels"]["herdr.space"] == space
+            && t["address"] != pane
+            && t["address"] != id
+    }) {
+        return None;
+    }
+    // A shell now running another program belongs to its user.
+    let basename = |s: &str| {
+        s.rsplit('/')
+            .next()
+            .unwrap_or(s)
+            .trim_start_matches('-')
+            .to_string()
+    };
+    let launch = shell["argv"][0].as_str().map(basename);
+    let foreground = shell["foreground"]["name"]
+        .as_str()
+        .or(shell["foreground"]["argv"][0].as_str())
+        .map(basename);
+    if foreground.is_some() && foreground != launch {
+        return None;
+    }
+    Some(shell)
+}
+
 pub fn home(all: bool) -> Result<(), Failure> {
     if machine().is_some() {
         return Err(Failure::new(
@@ -194,4 +246,28 @@ pub fn home(all: bool) -> Result<(), Failure> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn worktree_cleanup_only_takes_owned_unshared_placeholder() {
+        let worker =
+            json!({"address":"t8","labels":{"herdr.space":"sp2","vega.worktree-placeholder":"t9"}});
+        let shell = json!({"address":"t9","state":"live","argv":["/bin/zsh","-l"],"foreground":{"name":"zsh","argv":["-zsh"],"cwd":"/repo"},"labels":{"herdr.space":"sp2","vega.worktree-owner":"t8"}});
+        let mut all = json!({"terminals":[worker,shell]});
+        assert!(worktree_placeholder(&worker, &all).is_some());
+        all["terminals"][1]["labels"]["vega.worktree-owner"] = "other".into();
+        assert!(worktree_placeholder(&worker, &all).is_none());
+        all["terminals"][1] = shell.clone();
+        all["terminals"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"address":"t10","state":"live","labels":{"herdr.space":"sp2"}}));
+        assert!(worktree_placeholder(&worker, &all).is_none());
+        all["terminals"].as_array_mut().unwrap().pop();
+        all["terminals"][1]["foreground"] = json!({"argv":["vim"]});
+        assert!(worktree_placeholder(&worker, &all).is_none());
+    }
 }

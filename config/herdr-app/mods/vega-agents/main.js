@@ -85,9 +85,12 @@ export default class Agents extends View {
           const slash = target.indexOf("/");
           const on = slash < 0 ? undefined : target.slice(0, slash);
           const pane = slash < 0 ? target : target.slice(slash + 1);
-          const args = props().notes ? ["post", "notes"] : ["post", "log", "--pane", pane, "--full"];
+          const args = props().notes ? ["post", "notes", "--json"] : ["post", "log", "--pane", pane, "--full", "--json"];
           const r = await exec("vega", args, {on});
-          this.mail = r.stdout || r.stderr || (r.code ? "Mail unavailable" : "No mail");
+          if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Mail unavailable");
+          this.mail = props().notes
+            ? r.stdout.split("\n").filter(s => s.trim()).map(s => JSON.parse(s))
+            : JSON.parse(r.stdout).messages;
         } catch (e) { this.mail = String(e); }
         cx.notify();
       });
@@ -270,7 +273,11 @@ export default class Agents extends View {
     if (props()?.mail) return v_flex().size_full().p(16).gap(12).bg(t.chrome).text_color(t.foreground)
       .child(h_flex().justify_between().child(`Mail · ${props().mail}`)
         .child(div().id("close-mail").cursor_pointer().child("Close").on_click(() => closeOverlay(props().overlay))))
-      .child(div().id("mail-body").flex_1().overflow_y_scrollbar().child(this.mail));
+      .child(v_flex().id("mail-body").flex_1().overflow_y_scrollbar().gap(12)
+        .children(Array.isArray(this.mail) ? (this.mail.length ? this.mail.map((m,i) => v_flex().id(`mail-${i}`).gap(5).p(10).bg(t.surface)
+          .child(div().text_size(11).text_color(t.muted).child(`${m.from || m.host || ""} · ${m.time || ""} · ${m.read === false || m.unread ? "Unread" : "Read"}`))
+          .when(Boolean(m.title), el => el.child(div().font_semibold().child(m.title)))
+          .child(div().child(m.text ?? m.body ?? ""))) : [div().child("No mail.")]) : [div().child(this.mail)]));
     if (props()?.sortMenu) return this.sortMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
@@ -287,14 +294,26 @@ export default class Agents extends View {
     const urgency = new Map(list.map((a) => [a.address, Math.max(this.rank(a), ...this.tree(all, a.address).map((s) => RANK[kidStatus(s.t, this.listed)] ?? 0))]));
     const rankOf = (a) => urgency.get(a.address);
     if (byPriority) list = [...list].sort((x, y) => rankOf(y) - rankOf(x) || this.since(y) - this.since(x) || y.seq - x.seq);
-    const projectOf = a => this.vegaTerminals.get(a.address)?.labels?.["vega.project"] || a.space_name || "Unassigned";
+    // A listed child belongs to its visible ancestor's tree, even in another space.
+    const listed = new Set(list.map(a => a.address));
+    list = list.filter(a => {
+      const seen = new Set([a.address]);
+      let parent = this.vegaTerminals.get(a.address)?.parent;
+      while (parent && !seen.has(parent)) {
+        if (listed.has(parent)) return false;
+        seen.add(parent); parent = this.vegaTerminals.get(parent)?.parent;
+      }
+      return true;
+    });
+    const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
+    const projectOf = a => short(this.vegaTerminals.get(a.address)?.labels?.["vega.project"]) || a.space_name || "Unassigned";
     const machineOf = a => a.address.includes("/") ? a.address.split("/")[0] : "This machine";
     const groupOf = a => `${machineOf(a)} · ${projectOf(a)}`;
     if (sort.id === "project") list = [...list].sort((a,b) => groupOf(a).localeCompare(groupOf(b)) || rankOf(b)-rankOf(a));
     const pinned = list.filter((a) => a.pinned);
     const rest = list.filter((a) => !a.pinned);
     list = [...pinned, ...rest];
-    setAgentOrder(list.map((a) => a.address));
+    setAgentOrder(list.flatMap(a => [a.address, ...this.tree(all, a.address).filter(s => listed.has(s.t.address)).map(s => s.t.address)]));
 
     const withKids = (a, i) => {
       const subs = collapsed ? [] : this.tree(all, a.address);
@@ -458,7 +477,7 @@ export default class Agents extends View {
           ["notes", "✉", () => openOverlay({mod:"vega-agents",kind:"window",key:`vega-notes-${project}`,width:700,height:500,props:{mail:g.members[0].address,notes:true}})],
           ["decisions", "⚖", () => openOverlay({mod:"vega-inbox",kind:"window",key:"vega-inbox",keep:true,width:620,height:520,props:{project}})],
           ["waiting", "✋", () => run("agent.focus",{terminal:totals?.waiting_panes?.[0]?.pane?.replace(/^hc:/,"") || g.members[0].address})],
-        ].map(([key,icon,action]) => div().id(`total-${g.id}-${key}`).text_size(10).text_color(t.muted)
+        ].filter(([key]) => totals[key] >= 1).map(([key,icon,action]) => div().id(`total-${g.id}-${key}`).text_size(10).text_color(t.muted)
           .tooltip(`Project ${key}`).child(`${icon} ${totals?.[key] ?? 0}`)
           .on_mouse_down("left",(_e,cx) => cx.stop_propagation())
           .on_click((_e,cx) => {cx.stop_propagation();action();})))))

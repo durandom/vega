@@ -11,7 +11,7 @@ impl Fixture {
         let d = tempfile::tempdir().unwrap();
         let bin = d.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for (name, text) in [("renice","#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/renice-calls\"\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app","#!/bin/sh\necho \"$*\" >> \"$HOME/app-calls\"\necho '{\"space\":\"s2\"}'\n"),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
+        for (name, text) in [("renice","#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/renice-calls\"\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app",include_str!("fixtures/app.py")),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
             fs::write(bin.join(name),text).unwrap();fs::set_permissions(bin.join(name),fs::Permissions::from_mode(0o755)).unwrap();
         }
         Self(d)
@@ -395,6 +395,17 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
     let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
     assert_eq!(run["cwd"], tree.to_str().unwrap());
     assert_eq!(run["labels"]["herdr.space"], "s2");
+    assert_eq!(run["labels"]["vega.worktree-placeholder"], "t0");
+    assert_eq!(run["labels"]["vega.harness"], "codex");
+    let worker = run["name"].as_str().unwrap();
+    f.run(&["close", worker]);
+    let terminals: Value =
+        serde_json::from_str(&fs::read_to_string(f.root().join("terminals.json")).unwrap())
+            .unwrap();
+    assert!(
+        terminals.as_object().unwrap().is_empty(),
+        "owned space shell must close with its worker: {terminals}"
+    );
     let app = fs::read_to_string(f.root().join("app-calls")).unwrap();
     assert!(
         app.contains(&format!(
