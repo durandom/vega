@@ -816,7 +816,7 @@ impl Attention {
             Attention::Failure => {
                 format!("vega mux{mflag} show {pane}, then send a fix or close it")
             }
-            Attention::Waiting => format!("wait: the ci verdict mail wakes {pane}"),
+            Attention::Waiting => format!("wait: the verdict mail wakes {pane}"),
             Attention::Completed => {
                 format!("vega mux{mflag} show {pane}, then land or close it")
             }

@@ -49,6 +49,8 @@ mod probes;
 #[cfg(test)]
 mod project_location_test;
 mod quarantine;
+#[cfg(test)]
+mod quiet_attention_test;
 mod quota;
 mod reach;
 #[cfg(test)]
@@ -4244,7 +4246,7 @@ fn notify_queued(pane: &str, line: &str, queued: bool) -> Result<(), Failure> {
 /// The line that wakes a parent; `mail`: its unread count, said in the same
 /// line so the parent gets one prompt, not two.
 fn wake_line(summary: &str, mail: u64) -> String {
-    match mail {
+    let line = match mail {
         // A question already ends the sentence.
         0 if summary.ends_with(['?', '…']) => format!("[vega] {summary} Run: vega uac"),
         0 => format!("[vega] {summary}. Run: vega uac"),
@@ -4256,7 +4258,8 @@ fn wake_line(summary: &str, mail: u64) -> String {
             "[vega] {summary}; {n} new messages. Run: {} inbox, then vega uac",
             cmd()
         ),
-    }
+    };
+    format!("{line}. Act, record, reply in ≤10 words; longer only for urgent blockers.")
 }
 
 /// Each local parent's children with attention, and how many children it
@@ -4269,6 +4272,7 @@ fn attentions(
 ) -> HashMap<String, (Attentions, usize, HashMap<String, String>)> {
     let mut out: HashMap<String, (Attentions, usize, HashMap<String, String>)> = HashMap::new();
     let watching = vega_ci_watch::store::waiting(vega_ci_watch::unix_now());
+    let gates = vega_gate::state::waiting_authors(vega_ci_watch::unix_now());
     let here = vega_herdr::hosts::key(&host());
     let mut open_asks: Vec<_> = gather::open()
         .unwrap_or_default()
@@ -4346,6 +4350,11 @@ fn attentions(
             st::known_mode_of(m, &c.pane, &c.name),
         );
         let attention = supervise::unanswered(attention, status, owes);
+        let attention = supervise::actionable(
+            attention,
+            done.is_some(),
+            m.is_none() && (watching.contains_key(&c.pane) || gates.contains(&c.pane)),
+        );
         let mode = st::mode_of(m, &c.pane, &c.name);
         if let Some(a) = attention.filter(|a| supervise::wakes(*a, mode)) {
             let key = m.map_or(c.pane.clone(), |m| format!("{m}/{}", c.pane));

@@ -166,6 +166,16 @@ pub fn all() -> Vec<Review> {
     out
 }
 
+/// Authors awaiting a verdict on this host. Verdict delivery removes the
+/// review record; expired records must not hide a stalled author forever.
+pub fn waiting_authors(now: i64) -> std::collections::HashSet<String> {
+    all()
+        .into_iter()
+        .filter(|r| !r.author_pane.is_empty() && now < r.started_at.saturating_add(r.timeout_secs))
+        .map(|r| r.author_pane)
+        .collect()
+}
+
 pub fn remove(pane: &str) {
     let _ = fs::remove_file(file(pane));
 }

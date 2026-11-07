@@ -1,7 +1,7 @@
 # vega uac
 
 Coordinator mode: one session (VEGA, the UAC) runs the user's other agent sessions (sentinels) on a project across
-their herdr machines, so the user talks to one agent only. The plugin carries the role guide and the home view of
+hc terminals and herdr TUI panes, so the user talks to one agent only. The plugin carries the role guide and the home view of
 the agents this session runs, with what needs its attention.
 
 `unread_mail` shows the relay's oldest mail age, `pending` when mail has no valid
@@ -9,7 +9,11 @@ age, or `unknown` without mail metadata. Unknown does not prove an empty inbox;
 inspect `vega post log --pane <pane>` on the owning host for broker read status.
 
 Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`,
-`grant`, `revoke`, `grants`, `group`.
+`grant`, `revoke`, `grants`, `group`, `park`, `unpark`.
+
+Done reports arrive by mail without a duplicate attention wake. Silent gate/CI
+waits, parked children and closed hc terminals remain quiet. Spawn briefs request
+only done, blocked, or requested CI verdict mail, without acknowledgement or progress.
 
 On the receiving vegad host, `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`
 allows exactly one inbox-only peer pair until expiry. `revoke` takes the same pair; `grants`

@@ -7,6 +7,11 @@ status, unread_mail, parent, mode, claimed bead, tier and model. Agents whose pa
 is your pane are your sentinels. Registry-off mode omits remote membership;
 remote paths are metadata and never opened locally.
 
+Runs from hc terminals and herdr TUI panes. Local inventory includes both worlds.
+Targets `hc:t7` and `herdr:w1:p2` select the backend; names follow a saved spawn
+record or the caller's world. Claim refuses takeover if the old UAC's backend
+cannot be checked. Remote targets accept --machine; their paths stay remote.
+
 unread_mail: relay age, pending without a valid age, unknown without metadata.
 Unknown does not prove an empty inbox. Inspect `vega post log --pane <pane>`
 on the owning host for broker read status without acknowledging mail.
@@ -25,6 +30,11 @@ decided (its decision bead closed: vegad woke you to resume it). A headed
 pane's asking, silent and input are for the user working in it: listed with
 next `for the user (headed pane; no wake)`, but vegad does not wake you for them. The
 attention table adds the done report (parked: the bead) and the next command. Local input shows the dialog kind and title; all_done when every sentinel is completed.
+
+Done reports stay visible here but arrive by mail, with no duplicate attention
+wake. Silent gate/CI waits, parks and closed hc terminals add no wake. A new
+actionable item wakes once even if the item count is unchanged. Wakes remind
+the UAC to act, record and reply in at most ten words.
 
 Commands:
   group [add <path|project-id> | discover <dir>]  manage .vega/group.toml;

@@ -14,6 +14,7 @@ mod beads;
 mod grants;
 mod group;
 mod land;
+mod terminal;
 
 use std::env;
 use std::path::Path;
@@ -25,7 +26,7 @@ use serde_json::Value;
 use vega_herdr::lanes;
 use vega_herdr::state::{self as st, parent_of_on, Attention};
 use vega_herdr::{
-    agent_name, cell, collapse_home, herdr, herdr_on, me, me_line, print_failure, status_counts,
+    agent_name, cell, collapse_home, herdr, herdr_on, me_line, print_failure, status_counts,
     status_rank, str_of, Failure, Me,
 };
 
@@ -178,6 +179,7 @@ struct Snapshot {
     agents: Vec<Value>,
     workspaces: Vec<Value>,
     tabs: Vec<Value>,
+    backends: Vec<&'static str>,
 }
 
 fn snapshot(machine: Option<&str>) -> Result<Snapshot, Failure> {
@@ -194,6 +196,7 @@ fn snapshot(machine: Option<&str>) -> Result<Snapshot, Failure> {
         agents: list("agent", "agents")?,
         workspaces: list("workspace", "workspaces")?,
         tabs: list("tab", "tabs")?,
+        backends: vec!["herdr"],
     })
 }
 
@@ -229,7 +232,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
         program,
         cwd: my_cwd,
         ..
-    } = me()?;
+    } = terminal::identity()?;
     // Remote machines answer over ssh: ask them in parallel with the local one.
     let remote: Vec<_> = machines()
         .into_iter()
@@ -243,13 +246,13 @@ fn home(mode: Mode) -> Result<(), Failure> {
         .collect();
     // The registry (other hosts' lineage, UACs, statuses), in parallel.
     let reg = thread::spawn(|| vega_registry::read_blocking(Duration::from_secs(4)));
-    let local = snapshot(None)?;
+    let local = terminal::local()?;
 
     let bin = env::current_exe()
         .map(|p| collapse_home(&p.display().to_string()))
         .unwrap_or_else(|_| "unknown".into());
     println!("bin: {bin}");
-    println!("description: UAC facility console: every agent on this project across your herdr machines, with parent and bead");
+    println!("description: UAC facility console: every agent on this project across terminal backends and hosts, with parent and bead");
     print!("{}", vega_herdr::daemon_health::status());
     let my_name = local
         .agents
@@ -271,13 +274,28 @@ fn home(mode: Mode) -> Result<(), Failure> {
     if let Some(p) = &project {
         match &mode {
             Mode::Claim => {
+                let mut members =
+                    group::members(&project_path(&local.workspaces, &my_ws, &my_cwd))?;
+                members.insert(p.clone());
+                for key in &members {
+                    if uac_record(key).is_some_and(|(pane, host)| {
+                        host == st::post_host()
+                            && !local.backends.contains(&terminal::backend(&pane))
+                    }) {
+                        return Err(Failure::new(
+                            "inventory_unavailable",
+                            "cannot verify the existing UAC's terminal backend",
+                            "restore that backend before claiming the project",
+                        ));
+                    }
+                }
                 return group::claim_all(
                     p,
                     &my_pane,
                     &local.agents,
                     view,
                     &project_path(&local.workspaces, &my_ws, &my_cwd),
-                )
+                );
             }
             Mode::Release => return group::release_all(p, &my_pane),
             Mode::Adopt(target, machine, headless) => {
@@ -329,6 +347,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
     let host = st::post_host();
     let mut lookup = beads::Lookup::default();
     let watching = vega_ci_watch::store::waiting(vega_ci_watch::unix_now());
+    let gates = vega_gate::state::waiting_authors(unix_now());
     let mut rows = Vec::new();
     for s in &snapshots {
         let m = s.machine.as_deref();
@@ -380,7 +399,13 @@ fn home(mode: Mode) -> Result<(), Failure> {
                     silence.as_ref(),
                     st::park_of(m, pane).as_ref(),
                 );
-                (st::waiting(attention, ci.is_some()), silence)
+                (
+                    st::waiting(
+                        attention,
+                        ci.is_some() || (m.is_none() && gates.contains(pane)),
+                    ),
+                    silence,
+                )
             };
             rows.push(Row {
                 project: agent_project.unwrap_or_default(),
@@ -399,15 +424,13 @@ fn home(mode: Mode) -> Result<(), Failure> {
                 status: str_of(a, "agent_status").to_string(),
                 dialog: if m.is_none() && matches!(str_of(a, "agent_status"), "blocked" | "unknown")
                 {
-                    vega_herdr::herdr_text(&["pane", "read", pane, "--source", "visible"])
-                        .ok()
-                        .and_then(|raw| {
-                            vega_herdr::dialog::classify(
-                                &raw,
-                                str_of(a, "agent"),
-                                str_of(a, "agent_status"),
-                            )
-                        })
+                    terminal::screen(pane).and_then(|raw| {
+                        vega_herdr::dialog::classify(
+                            &raw,
+                            str_of(a, "agent"),
+                            str_of(a, "agent_status"),
+                        )
+                    })
                 } else {
                     None
                 },
@@ -450,6 +473,9 @@ fn home(mode: Mode) -> Result<(), Failure> {
         let Some(s) = snapshots.iter().find(|s| s.machine == c.machine) else {
             continue;
         };
+        if !s.backends.contains(&terminal::backend(&c.pane)) {
+            continue; // A failed backend is not proof of an exit.
+        }
         let here = s.agents.iter().any(|a| a["pane_id"] == c.pane.as_str());
         // One UAC oversees the project: gone children of any local project
         // agent count, not only mine.
@@ -820,7 +846,7 @@ fn claim(
     };
     let record = claim_record(
         prior,
-        serde_json::json!({"schema": 2, "pane": me, "host": here, "at": unix_now(), "project": key,
+        serde_json::json!({"schema": 2, "pane": me, "backend": terminal::backend(me), "host": here, "at": unix_now(), "project": key,
         "common_dir": common, "checkout": project.location.checkout, "folder_name": vega_registry::project_folder(&common), "origin_name": origin}),
         tracker.as_deref(),
     );
@@ -978,8 +1004,9 @@ fn release(key: &str, me: &str) -> Result<(), Failure> {
 /// `headless`: an adopted session is mostly one the user works in, so its
 /// in-pane questions stay (`vega mux mode`).
 fn adopt(target: &str, machine: Option<&str>, me: &str, headless: bool) -> Result<(), Failure> {
-    let a =
-        herdr_on(machine, &["agent", "get", target], MACHINE_TIMEOUT)?["result"]["agent"].clone();
+    let (target, machine) = terminal::scope(target, machine)?;
+    let (target, machine) = (target.as_str(), machine.as_deref());
+    let a = terminal::agent(target, machine)?;
     let pane = str_of(&a, "pane_id").to_string();
     if machine.is_none() && pane == me {
         return Err(Failure::new(
@@ -1053,8 +1080,9 @@ fn adopt(target: &str, machine: Option<&str>, me: &str, headless: bool) -> Resul
 /// vegad leaves it out of the wakes until the bead closes (it checks with
 /// `bd show` in this checkout), then wakes the parent once with `decided`.
 fn park(target: &str, bead: &str, machine: Option<&str>) -> Result<(), Failure> {
-    let a =
-        herdr_on(machine, &["agent", "get", target], MACHINE_TIMEOUT)?["result"]["agent"].clone();
+    let (target, machine) = terminal::scope(target, machine)?;
+    let (target, machine) = (target.as_str(), machine.as_deref());
+    let a = terminal::agent(target, machine)?;
     let pane = str_of(&a, "pane_id").to_string();
     if parent_of_on(machine, &pane, agent_name(&a)).is_none() {
         return Err(Failure::new(
@@ -1095,8 +1123,9 @@ fn park(target: &str, bead: &str, machine: Option<&str>) -> Result<(), Failure> 
 
 /// `vega uac unpark <pane>`: vegad supervises the sentinel as before.
 fn unpark(target: &str, machine: Option<&str>) -> Result<(), Failure> {
-    let a =
-        herdr_on(machine, &["agent", "get", target], MACHINE_TIMEOUT)?["result"]["agent"].clone();
+    let (target, machine) = terminal::scope(target, machine)?;
+    let (target, machine) = (target.as_str(), machine.as_deref());
+    let a = terminal::agent(target, machine)?;
     let pane = str_of(&a, "pane_id").to_string();
     if st::unpark(machine, &pane) {
         println!("unparked: {pane}");
@@ -1113,16 +1142,11 @@ fn answer_here(id: &str, text: &str) -> Result<(), Failure> {
     let key = vega_herdr::project::resolve(&cwd, &st::post_host())?
         .id
         .to_string();
-    let me = env::var("HERDR_PANE_ID").unwrap_or_default();
-    let reg = thread::spawn(|| vega_registry::read_blocking(Duration::from_secs(4)));
-    let agents = herdr_on(None, &["agent", "list"], MACHINE_TIMEOUT)
-        .map(|v| {
-            v["result"]["agents"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-        })
+    let me = vega_herdr::hc::own_terminal()
+        .map(|t| t.pane().to_string())
         .unwrap_or_default();
+    let reg = thread::spawn(|| vega_registry::read_blocking(Duration::from_secs(4)));
+    let agents = terminal::local().map(|s| s.agents).unwrap_or_default();
     let registry = reg
         .join()
         .unwrap_or_else(|_| Err("registry read crashed".into()));
@@ -1720,7 +1744,11 @@ fn attention_table(rows: &[Row], host: &str) -> Vec<String> {
         let report = if let Some(d) = &r.dialog {
             format!("{}: {}", d.kind.as_str(), d.title)
         } else if a == Attention::Waiting {
-            format!("ci watch: {}", r.ci.join(" "))
+            if r.ci.is_empty() {
+                "gate review: awaiting verdict".into()
+            } else {
+                format!("ci watch: {}", r.ci.join(" "))
+            }
         } else if let Some(p) = park {
             let closed = if p.closed { " (closed)" } else { "" };
             shorten(&format!("{}{closed}: {}", p.bead, p.title), 200)
@@ -2248,7 +2276,7 @@ mod tests {
         w.ci = vec!["o/r#42".into()];
         assert_eq!(
             attention_table(&[w], "proteus")[1],
-            "  proteus,w1:p1,waiting,ci watch: o/r#42,wait: the ci verdict mail wakes w1:p1"
+            "  proteus,w1:p1,waiting,ci watch: o/r#42,wait: the verdict mail wakes w1:p1"
         );
     }
 
