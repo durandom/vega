@@ -6,7 +6,8 @@ use std::sync::OnceLock;
 fn document() -> &'static Value {
     static DOC: OnceLock<Value> = OnceLock::new();
     DOC.get_or_init(|| {
-        serde_json::from_str(include_str!("../schema/hc-0.1.18.openrpc.json")).unwrap()
+        serde_json::from_str(include_str!("../schema/hc-0.1.18.openrpc.json"))
+            .expect("vendored hc schema is valid JSON")
     })
 }
 

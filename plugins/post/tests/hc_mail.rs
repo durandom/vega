@@ -192,12 +192,15 @@ impl Fixture {
         text
     }
     fn start(&mut self) {
+        self.start_with_mode("stream (hc events.subscribe)");
+    }
+    fn start_with_mode(&mut self, mode: &str) {
         let mut c = self.command(&["relay"], None);
         c.stdout(fs::File::create(self.home.path().join("relay.log")).unwrap())
             .stderr(Stdio::null());
         self.relay = Some(Proc(c.spawn().unwrap()));
         wait(self.home.path(), "watchers", || {
-            self.log().contains("stream (hc events.subscribe)")
+            self.log().contains(mode)
                 && self
                     .log()
                     .contains(&format!("relay: {} watching", self.host))
@@ -346,6 +349,31 @@ fn polling_fallback_delivers_without_an_event_stream() {
         saved, adopted,
         "native parent must not overwrite vega adoption"
     );
+}
+
+#[test]
+fn invalid_subscription_replies_fall_back_to_polling_and_deliver_mail() {
+    for (broken, reason) in [
+        ("wrong-id", "invalid events.subscribe reply"),
+        (
+            "missing-seq",
+            "events.subscribe: result.seq: required field missing",
+        ),
+    ] {
+        let mut f = Fixture::new();
+        fs::write(f.home.path().join("broken-subscription"), broken).unwrap();
+        f.start_with_mode(&format!("hc mode: poll (terminal.list; {reason})"));
+        assert!(!f.log().contains("stream (hc events.subscribe)"));
+        f.post(&["send", "hc:t2", "invalid-subscription-mail"], "w1:p1");
+        wait(
+            f.home.path(),
+            "poll delivery after rejected subscription",
+            || !f.prompts("t2").is_empty(),
+        );
+        assert!(f
+            .post(&["inbox"], "t2")
+            .contains("invalid-subscription-mail"));
+    }
 }
 
 #[test]

@@ -233,8 +233,8 @@ pub fn hc_on(
     )
 }
 
-/// Full Terminal inventory (including remote machine addresses). The CLI `ls`
-/// emits summaries without labels/foreground and with a string status instead.
+/// Full Terminal inventory (including remote machine addresses). hc's CLI `ls`
+/// display summaries are never parsed: they omit labels and foreground metadata.
 /// Consumers must scope local-only operations by address themselves.
 pub fn terminal_list() -> Result<Value, Failure> {
     let result = rpc("terminal.list", serde_json::json!({}), DAEMON_CALL_TIMEOUT)?;

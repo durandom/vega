@@ -48,11 +48,18 @@ elif args[0] == 'events':
     if (home/'poll-mode').exists(): sys.exit(1)
     # Parent-death check ensures test cleanup cannot leave a fake watcher.
     parent = os.getppid()
-    emit(dict(load(), seq=0))
+    broken=home/'broken-subscription'
+    snapshot=dict(load(), seq=0)
+    if broken.exists():
+        if broken.read_text()=='wrong-id': request['id']+=1
+        else: del snapshot['seq']
+    emit(snapshot)
     request=None
     cursor = home/'cursor'
     offset = int(cursor.read_text()) if cursor.exists() else 0
     while os.getppid() == parent:
+        # Keep a broken subscription alive so silence/EOF cannot mask a missing guard.
+        if broken.exists(): emit({'jsonrpc':'2.0','method':'heartbeat','params':{'seq':0}})
         lines = (home/'events').read_text().splitlines(keepends=True) if (home/'events').exists() else []
         for line in lines[offset:]:
             # Rust's Value formatter may append a JSON line in several writes.

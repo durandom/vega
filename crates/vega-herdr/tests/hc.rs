@@ -31,6 +31,10 @@ fn fake_hc_contract() {
                     "remote/t7"
                 );
             }
+            "send" => assert_eq!(
+                hc_local(&["send", "t8", "literal --text"]).unwrap()["turn"],
+                1
+            ),
             "usage" => {
                 for args in [
                     &["ls", "--all"][..],
@@ -72,6 +76,7 @@ fn fake_hc_contract() {
 import json,os,sys,time
 open(os.environ['VEGA_HC_ARGS'],'w').write('\n'.join(sys.argv[1:])+'\n')
 r=json.loads(sys.stdin.readline())
+open(os.environ['VEGA_HC_REQUEST'],'w').write(json.dumps(r))
 c=os.environ['VEGA_HC_TEST']
 t={{"address":"t7","state":"live","pid":{pid},"labels":{{}},"argv":[],"cwd":"/shell/vega","created_ms":0,"screen":"exact","cols":80,"rows":24}}
 if c=='hc_foreground': t.update(pid=0,foreground={{"pid":{pid},"name":"codex","argv":["codex"],"cwd":"/project"}})
@@ -84,6 +89,7 @@ elif c=='bad': print('nope');sys.exit()
 elif c=='exit': sys.exit(4)
 elif c=='timeout': time.sleep(5)
 elif c=='on': t['address']='remote/t7'
+elif c=='send': t={{'turn':1}}
 elif c not in ['hc']:
  print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"error":{{"code":-32000,"message":"probe","data":{{"kind":c,"hint":"try again"}}}}}}));sys.exit(3)
 print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"result":t}}))
@@ -109,6 +115,7 @@ esac
         "neither",
         "stale_herdr",
         "on",
+        "send",
         "usage",
         "bad",
         "exit",
@@ -124,11 +131,13 @@ esac
         "missing",
     ] {
         let args = dir.path().join("args");
+        let request = dir.path().join("request");
         let _ = fs::remove_file(&args);
         let mut cmd = Command::new(env::current_exe().unwrap());
         cmd.args(["--exact", "fake_hc_contract", "--nocapture"])
             .env("VEGA_HC_TEST", case)
             .env("VEGA_HC_ARGS", &args)
+            .env("VEGA_HC_REQUEST", &request)
             .env_remove("HERDR_PANE_ID")
             .env_remove("HC_TERMINAL_ID")
             .env(
@@ -161,6 +170,20 @@ esac
         }
         if case == "hc" {
             assert_eq!(fs::read_to_string(&args).unwrap(), "connect\n");
+        }
+        if let Some(method) = match case {
+            "hc" => Some("terminal.get"),
+            "on" => Some("terminal.run"),
+            "send" => Some("terminal.send"),
+            _ => None,
+        } {
+            let request: serde_json::Value =
+                serde_json::from_slice(&fs::read(&request).unwrap()).unwrap();
+            assert_eq!(request["method"], method);
+            assert_eq!(
+                request["params"]["caller"], "t7",
+                "{method} must preserve caller identity"
+            );
         }
         if ["herdr", "stale_herdr", "neither", "usage"].contains(&case) {
             assert!(!args.exists(), "{case} must not call hc");
