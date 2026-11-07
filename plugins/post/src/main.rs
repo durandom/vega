@@ -2583,6 +2583,14 @@ impl Jobs {
             l.snapshot(panes.keys().cloned(), hc);
         }
         if hc {
+            // A successful hc snapshot proves closure, including children that
+            // disappeared while vegad was down. A source error never gets here.
+            for c in st::children().into_iter().filter(|c| {
+                c.machine.is_none() && terminals::is_hc(&c.pane) && !panes.contains_key(&c.pane)
+            }) {
+                sup.gone(&c.pane);
+                st::forget(&c.pane);
+            }
             sup.snapshot_backend(panes.keys(), true);
         } else {
             sup.snapshot(panes.keys());
@@ -2656,6 +2664,9 @@ impl Jobs {
                     l.panes.remove(&p);
                 }
                 sup.gone(&p);
+                if terminals::is_hc(&p) {
+                    st::forget(&p);
+                }
                 if d.gone(&p) {
                     log(&format!("pane gone: {p}, pending pointer dropped"));
                 }
@@ -4301,9 +4312,14 @@ fn attentions(
             },
         };
         let status = status.as_deref();
-        let done = st::done_of(m, &c.pane).map(|x| x.outcome);
         let entry = out.entry(c.parent.pane.clone()).or_default();
         entry.1 += 1;
+        // hc owns exit notes; working children need no parent attention.
+        // Keep reports durable until the parent settles them.
+        if terminals::is_hc(&c.pane) && (alive == Some(false) || status == Some("working")) {
+            continue;
+        }
+        let done = st::done_of(m, &c.pane).map(|x| x.outcome);
         let dialog = (m.is_none() && alive == Some(true))
             .then(|| local_dialog(&c.pane, d.status_of(&c.pane)))
             .flatten();
@@ -5299,6 +5315,11 @@ fn report_metadata(
         if subject_token(&c.parent.host.to_lowercase()) == here {
             parents.insert(c.pane.clone(), c.parent.pane.clone());
         }
+        if terminals::is_hc(&c.pane)
+            && (sup.alive(&c.pane) == Some(false) || d.status_of(&c.pane) == "working")
+        {
+            continue;
+        }
         let done = st::done_of(None, &c.pane);
         let status = Some(d.status_of(&c.pane)).filter(|s| *s != "unknown");
         let dialog = (sup.alive(&c.pane) == Some(true))
@@ -5528,7 +5549,8 @@ fn report_metadata(
         }
     }
     for (pane, mut args) in panes {
-        if !valid_pane_id(&pane) || !live.contains(&pane) {
+        // hc labels are a separate backend API (migration slice 5).
+        if terminals::is_hc(&pane) || !valid_pane_id(&pane) || !live.contains(&pane) {
             continue;
         }
         if !d.has_mail(&pane) {
