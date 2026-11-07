@@ -26,6 +26,7 @@ case "$1 $2" in
  'agent list'|'pane list')
    key=agents; test "$1" = pane && key=panes
    printf '{"result":{"%s":[{"pane_id":"w1:p1","agent":"codex","agent_status":"idle","cwd":"%s"},{"pane_id":"w1:p2","name":"shared-worker","agent":"codex","agent_status":"idle","cwd":"%s"}]}}\n' "$key" "$HOME" "$HOME" ;;
+ 'pane report-metadata') printf '%s\n' "$3" >> "$HOME/metadata" ;;
  'workspace list') echo '{"result":{"workspaces":[]}}' ;;
  'pane process-info') printf '{"result":{"process_info":{"shell_pid":%s}}}\n' "$FAKE_PID" ;;
  'agent get')
@@ -427,6 +428,74 @@ fn hc_parent_queue_done_silence_and_closure_use_the_existing_ledger() {
     assert!(f
         .post(&["inbox"], "w1:p1")
         .contains("t2 on testhost closed before it read your mail"));
+    assert!(!state.join("silent/local_hc-7432").exists());
+    assert!(!state.join("parents/local_hc-7432").exists());
+}
+
+#[test]
+fn hc_snapshot_cleans_closed_children_and_working_children_do_not_need_parent() {
+    let mut f = Fixture::new();
+    let state = f.home.path().join("state/vega");
+    // Durable leftovers from before a relay restart: working, finished, absent.
+    for (pane, encoded) in [("t2", "7432"), ("t3", "7433"), ("t4", "7434")] {
+        for kind in ["parents", "silent", "done"] {
+            fs::create_dir_all(state.join(kind)).unwrap();
+            let value = match kind {
+                "parents" => json!({"name":pane,"parent":"t1","host":"testhost"}),
+                "done" => json!({"outcome":"succeeded","summary":"durable report"}),
+                _ => json!({}),
+            };
+            write(
+                &state.join(kind).join(format!("local_hc-{encoded}")),
+                &value,
+            );
+        }
+    }
+    let file = f.home.path().join("hc.json");
+    let mut v: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    v["terminals"][1]["status"]["state"] = json!("working");
+    v["terminals"].as_array_mut().unwrap().push(json!({
+        "address":"t3", "state":"finished", "parent":"t1"
+    }));
+    write(&file, &v);
+    f.start();
+    wait(f.home.path(), "snapshot cleanup and metadata", || {
+        !state.join("parents/local_hc-7433").exists()
+            && !state.join("parents/local_hc-7434").exists()
+            && f.home.path().join("metadata").exists()
+    });
+    // Allow several attention/metadata ticks with the parent idle.
+    std::thread::sleep(Duration::from_secs(2));
+    for kind in ["parents", "silent", "done"] {
+        assert!(state.join(kind).join("local_hc-7432").exists());
+        for encoded in ["7433", "7434"] {
+            assert!(!state
+                .join(kind)
+                .join(format!("local_hc-{encoded}"))
+                .exists());
+        }
+    }
+    assert!(
+        f.prompts("t1").is_empty(),
+        "working child woke parent: {:?}",
+        f.prompts("t1")
+    );
+    let metadata = fs::read_to_string(f.home.path().join("metadata")).unwrap();
+    assert!(metadata.lines().any(|p| p == "w1:p1"));
+    assert!(
+        metadata.lines().all(|p| p.starts_with('w')),
+        "hc sent to herdr: {metadata}"
+    );
+
+    // A removed event clears durable state too, even without unread mail.
+    f.event(
+        json!({"method":"event","params":{"seq":1,"terminal":"t2","type":"removed","data":{}}}),
+    );
+    wait(f.home.path(), "removed ledger", || {
+        !state.join("parents/local_hc-7432").exists()
+    });
+    assert!(!state.join("silent/local_hc-7432").exists());
+    assert!(!state.join("done/local_hc-7432").exists());
 }
 
 #[test]
