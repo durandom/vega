@@ -8,6 +8,18 @@ fn fake_hc_contract() {
             "hc" | "hc_foreground" => {
                 assert_eq!(own_terminal().unwrap(), Terminal::Hc("t7".into()))
             }
+            "hc_agent_cwd" | "hc_agent_launch_cwd" => {
+                let terminal = own_terminal().unwrap();
+                let metadata = terminal.agent().unwrap();
+                assert_eq!(
+                    metadata["cwd"],
+                    if case == "hc_agent_cwd" {
+                        "/agent/rally-coach"
+                    } else {
+                        "/shell/vega"
+                    }
+                );
+            }
             "herdr" => assert_eq!(own_terminal().unwrap(), Terminal::Herdr("w1:p2".into())),
             "stale" | "finished" | "wrong_address" | "neither" | "stale_herdr" => {
                 assert!(own_terminal().is_err())
@@ -52,6 +64,8 @@ printf '%s\n' "$@" > "$VEGA_HC_ARGS"
 case "$VEGA_HC_TEST" in
 hc) printf '%s' '{{"state":"live","address":"t7","pid":{pid}}}' ;;
 hc_foreground) printf '%s' '{{"state":"live","address":"t7","pid":0,"foreground":{{"pid":{pid}}}}}' ;;
+hc_agent_cwd) printf '%s' '{{"state":"live","address":"t7","pid":{pid},"cwd":"/shell/vega","foreground":{{"pid":{pid},"cwd":"/agent/rally-coach"}},"status":{{"app":"claude-code","state":"idle"}}}}' ;;
+hc_agent_launch_cwd) printf '%s' '{{"state":"live","address":"t7","pid":{pid},"cwd":"/shell/vega","foreground":null,"status":{{"app":"claude-code","state":"idle"}}}}' ;;
 stale) printf '%s' '{{"state":"live","address":"t7","pid":4294967295}}' ;;
 finished) printf '%s' '{{"state":"finished","address":"t7","pid":{pid}}}' ;;
 wrong_address) printf '%s' '{{"state":"live","address":"t8","pid":{pid}}}' ;;
@@ -74,6 +88,8 @@ esac
     for case in [
         "hc",
         "hc_foreground",
+        "hc_agent_cwd",
+        "hc_agent_launch_cwd",
         "herdr",
         "stale",
         "finished",

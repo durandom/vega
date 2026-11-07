@@ -105,7 +105,11 @@ parent rather than receiving a second top-level pinned row.
 
 vegad first resolves the foreground cwd. If no project resolves, it uses that
 terminal's space folder from the local core's `herdr-app` document (`doc.get`),
-without asking the desktop app or inspecting remote paths. Local-only project
+without asking the desktop app or inspecting remote paths. Project
+attribution never replaces a resolved foreground project with the launch or space
+folder: an agent in rally-coach launched from a vega shell stays in rally-coach.
+Own-terminal metadata likewise prefers `foreground.cwd`, falling back to `cwd`.
+Local-only project
 names come from the identity's source/common-directory path, treating `.git` as
 its parent repository, so gate clones and linked worktrees share a name.
 New launches also retain their harness kind independently of the displayed glyph.

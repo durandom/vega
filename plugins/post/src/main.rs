@@ -7071,6 +7071,52 @@ mod tests {
     }
 
     #[test]
+    fn hc_project_labels_follow_foreground_checkout_instead_of_launch_or_space() {
+        let launch = tempfile::tempdir().unwrap();
+        let active = tempfile::tempdir().unwrap();
+        for (repo, name) in [(&launch, "vega"), (&active, "rally-coach")] {
+            assert!(std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(repo.path())
+                .status()
+                .unwrap()
+                .success());
+            assert!(std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args([
+                    "remote",
+                    "add",
+                    "origin",
+                    &format!("https://github.com/team/{name}.git")
+                ])
+                .status()
+                .unwrap()
+                .success());
+        }
+        let mut panes = terminals::hc_agents(&serde_json::json!({"terminals":[{
+            "address":"t34","state":"live","cwd":launch.path(),
+            "foreground":{"cwd":active.path(),"argv":["claude","--resume","session"]},
+            "status":{"app":"claude-code","state":"idle"},"labels":{"herdr.space":"sp1"}
+        }]}))
+        .unwrap();
+        panes[0]["space_folder"] = serde_json::json!(launch.path());
+        let layout = Layout {
+            panes,
+            workspaces: vec![],
+            tabs: vec![],
+        }
+        .resolve_projects();
+        assert_eq!(layout.panes[0]["cwd"], active.path().to_str().unwrap());
+        assert_eq!(layout.panes[0]["project"], "github.com/team/rally-coach");
+        let args = layout.project_token("t34", None).to_vec();
+        let cmd = hc_metadata_cmd(&layout, &Delivery::default(), "t34", false, args).unwrap();
+        assert!(cmd.contains(&"vega.project=rally-coach".into()));
+        assert!(cmd.contains(&"vega.project-id=github.com/team/rally-coach".into()));
+        assert!(!cmd.iter().any(|s| s.contains("team/vega")));
+    }
+
+    #[test]
     fn hc_local_only_project_displays_repository_name_instead_of_file_id() {
         let repo = tempfile::tempdir().unwrap();
         assert!(std::process::Command::new("git")
