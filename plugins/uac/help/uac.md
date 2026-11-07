@@ -10,7 +10,8 @@ remote paths are metadata and never opened locally.
 Runs from hc terminals and herdr TUI panes. Local inventory includes both worlds.
 Targets `hc:t7` and `herdr:w1:p2` select the backend; names follow a saved spawn
 record or the caller's world. Claim refuses takeover if the old UAC's backend
-cannot be checked. Remote targets accept --machine; their paths stay remote.
+cannot be checked. Remote names require --machine; qualified hc targets use a
+terminal ID (`hc:<machine>/t7`). Their paths stay remote.
 
 unread_mail: relay age, pending without a valid age, unknown without metadata.
 Unknown does not prove an empty inbox. Inspect `vega post log --pane <pane>`

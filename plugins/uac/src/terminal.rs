@@ -140,6 +140,13 @@ pub fn scope(target: &str, machine: Option<&str>) -> Result<(String, Option<Stri
             p.machine.or_else(|| machine.map(String::from)),
         ));
     }
+    if target.contains('/') {
+        return Err(Failure::new(
+            "usage",
+            "a qualified target must contain a terminal ID, not a name",
+            "use hc:<machine>/t7 or <name> --machine <machine>",
+        ));
+    }
     Ok((target.into(), machine.map(String::from)))
 }
 

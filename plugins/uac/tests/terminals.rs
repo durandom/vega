@@ -146,6 +146,12 @@ esac"#,
             error.contains("usage") && error.contains("different machines"),
             "{error}"
         );
+        for target in ["hc:io/worker", "io/worker"] {
+            let rejected = invoke(&["hold", target], hc);
+            assert!(!rejected.status.success());
+            let error = String::from_utf8_lossy(&rejected.stdout);
+            assert!(error.contains("terminal ID, not a name"), "{error}");
+        }
 
         // A healthy caller in the other world cannot take over an unverifiable UAC.
         let unavailable = if hc { "hc" } else { "herdr" };
