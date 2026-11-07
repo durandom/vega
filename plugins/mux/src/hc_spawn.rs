@@ -1,6 +1,6 @@
 //! hc owns terminal creation and input; vega retains launch policy and lineage.
 use super::*;
-use vega_herdr::hc::{hc_local, hc_on, own_terminal, Terminal};
+use vega_herdr::hc::{hc_local, own_terminal, Terminal};
 use vega_herdr::state::SpawnRecord;
 
 #[allow(clippy::too_many_arguments)]
@@ -98,53 +98,72 @@ pub fn spawn(
     if machine().is_none() && !no_parent {
         vega_herdr::project::resolve_optional(Path::new(&cwd), &vega_herdr::state::post_host())?;
     }
-    if machine().is_none() {
-        if let Some(line) = trust::apply(kind, &cwd) {
-            println!("{line}");
+    let trust_line = if let Some(target) = machine() {
+        let prepared =
+            vega_herdr::hc::hc_on(
+                Some(target),
+                &[
+                    "exec",
+                    "--timeout",
+                    "15",
+                    "--",
+                    "vega-mux",
+                    "prepare",
+                    "--kind",
+                    kind,
+                    "--cwd",
+                    &cwd,
+                ],
+                Some(std::time::Duration::from_secs(20)),
+            )
+            .map_err(|f| {
+                Failure::new("remote_prepare_failed",
+            format!("cannot prepare {target}: {}", f.message),
+            "deploy matching vega binaries to the target and check its cwd and hc connection")
+            })?;
+        if prepared["schema"] != 1
+            || !prepared
+                .get("trust")
+                .is_some_and(|v| v.is_null() || v.is_string())
+        {
+            return Err(Failure::new(
+                "remote_prepare_failed",
+                "target returned an incompatible preparation result",
+                "deploy the matching vega version to the target before spawning",
+            ));
         }
+        prepared["trust"].as_str().map(String::from)
+    } else {
+        trust::apply(kind, &cwd)
+    };
+    if let Some(line) = trust_line {
+        println!("{line}");
     }
     let actor = beads_actor(&cwd);
     let socket = env::var("SSH_AUTH_SOCK")
         .ok()
         .filter(|_| machine().is_none());
     let vars = spawn_env(kind, actor.as_deref(), socket.as_deref(), user);
-    let mut args: Vec<String> = [
-        "run",
-        "--bg",
-        "--outlive-parent",
-        "--name",
-        name,
-        "--cwd",
-        &cwd,
-        "--label",
-        &format!("vega.kind={kind}"),
-        "--label",
-        &format!("vega.mode={}", mode.as_str()),
-        "--label",
-        "vega.role=sentinel",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    if no_parent || !matches!(own, Some(Terminal::Hc(_))) {
-        args.push("--no-parent".into());
-    }
+    let mut labels = serde_json::json!({
+        "vega.kind":kind, "vega.mode":mode.as_str(), "vega.role":"sentinel"
+    });
     if let Some(s) = space {
-        args.extend(["--label".into(), format!("herdr.space={s}")]);
+        labels["herdr.space"] = s.into();
     }
-    args.extend([
-        "--".into(),
-        "env".into(),
-        "-u".into(),
-        "HERDR_PANE_ID".into(),
-        "-u".into(),
-        "HERDR_SOCKET_PATH".into(),
-    ]);
-    args.extend(vars);
-    if machine().is_none() {
-        args.extend(["nice".into(), "-n".into(), AGENT_NICE.to_string()]);
+    let mut launch_env = serde_json::Map::new();
+    for k in ["TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "COLORTERM"] {
+        if let Ok(v) = env::var(k) {
+            launch_env.insert(k.into(), v.into());
+        }
     }
-    args.push(kind.into());
+    launch_env.insert("HERDR_PANE_ID".into(), "".into());
+    launch_env.insert("HERDR_SOCKET_PATH".into(), "".into());
+    for var in vars {
+        if let Some((k, v)) = var.split_once('=') {
+            launch_env.insert(k.into(), v.into());
+        }
+    }
+    let mut args = vec![kind.to_string()];
     let mut agent_args = spawn_args(kind, &[("SSH_AUTH_SOCK", socket.as_deref())], user, &[]);
     if kind == "codex" {
         // The child ID/socket are created by hc, not the parent's environment.
@@ -162,11 +181,25 @@ pub fn spawn(
             backend::body(p, handoff(no_parent, mode).0, machine().is_some())?
         });
     }
-    let v = hc_on(
-        machine(),
-        &args.iter().map(String::as_str).collect::<Vec<_>>(),
-        None,
+    let v = vega_herdr::hc::rpc(
+        "terminal.run",
+        serde_json::json!({
+            "argv":args, "env":launch_env, "labels":labels, "cwd":cwd,
+            "name":name, "on":machine(), "outlive_parent":true, "die_with_parent":false,
+            "no_parent":no_parent || !matches!(own, Some(Terminal::Hc(_))),
+            "caller":own.as_ref().and_then(|t| match t { Terminal::Hc(p) => Some(p), _ => None }),
+            "wait":false,
+        }),
+        std::time::Duration::from_secs(30),
     )?;
+    // Keep the harness as argv[0]. A nice/env wrapper hides its identity.
+    if machine().is_none() {
+        if let Some(pid) = v["pid"].as_u64().filter(|p| *p > 1) {
+            let _ = Command::new("renice")
+                .args([AGENT_NICE, "-p", &pid.to_string()])
+                .output();
+        }
+    }
     let pane = v["address"]
         .as_str()
         .filter(|p| vega_herdr::pane::parse(p).is_some())

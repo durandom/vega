@@ -91,7 +91,7 @@ fills the registry from `herdr agent list` only, so an hc agent can neither be f
 | Gap in hc / herdr-app | vega's answer |
 |---|---|
 | No harness session id (gate verdict, reopen, transcript) | The agent's own env (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), recorded in vega state at first contact |
-| No env flag on `hc run` (API has `env`) | `env K=V <cmd>` in argv |
+| No env flag on `hc run` (API has `env`) | mux uses `terminal.run` over `hc connect`, with separate env and direct harness argv |
 | No sidebar tokens, toasts, focus events | A vega herdr-app mod: renders `vega.*` labels, shows toasts and `$upgrade` from an hc doc, writes focus into an hc doc for `human.rs`/`waiting.rs` |
 | No startup hook for vegad | The vega mod runs `vega-post relay start` in `init()` (decision 5); the TUI plugin stays a no-op-if-running starter until the TUI goes |
 | No plugin panes or actions (board, open) | board as a terminal via `herdr-app do pane.split --argv`, open as a mod |
@@ -253,3 +253,24 @@ hc receives no draft-clear/restore keystrokes.
 Cross-host post mail uses `t7 --host <registry-host>`. A machine-qualified hc
 address also needs `--host`: without a registry-host mapping, enqueueing it on
 this host would produce an inbox no local watcher could deliver.
+
+### Remote spawn corrections (vega-0h4c.27)
+
+Mux launches use JSON-lines `terminal.run` through `hc connect`, with direct harness
+argv and a separate environment map. `env` and `nice` argv wrappers obscure the
+program identity. Local hc spawns renice the returned PID after launch; TUI still
+renices its shell before launch. The native parent and outlive-parent contract is
+unchanged. A bounded RPC timeout reports uncertain completion and asks callers to
+inspect terminals before retrying.
+
+Before a remote launch, `hc exec --on <machine>` invokes the target's `vega-mux
+prepare` helper. Existing trust and hook approval inheritance runs on that machine;
+local paths/configs are not consulted for remote trust. Matching vega binaries must
+be deployed to both ends. Unknown repositories and changed hooks still ask the user.
+
+The live ganymede probe found Codex 0.160.0 reported no OSC 7501 status even with a
+direct argv and a Ready screen. This is a harness deployment prerequisite, not a
+reason to infer idle from screen text or bypass the slice 3 delivery contract. The
+main session owns the harness upgrade and post-deploy idle-pointer verification.
+Core startup/launchd remains vega-0h4c.25; macOS privacy prompts are documented in
+[onboarding](onboarding.md#first-herdr-core-use-on-macos).

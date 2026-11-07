@@ -189,3 +189,66 @@ esac
         assert_eq!(d.path().join("fallback").exists(), case == "empty");
     }
 }
+
+#[test]
+fn rpc_contract() {
+    if let Ok(case) = env::var("VEGA_HC_RPC_TEST") {
+        let result = vega_herdr::hc::rpc(
+            "terminal.run",
+            serde_json::json!({
+                "argv":["codex","literal $text; no shell"], "env":{"SPECIAL":"a b"},
+                "on":"remote", "outlive_parent":true,
+            }),
+            Duration::from_millis(200),
+        );
+        match case.as_str() {
+            "ok" => assert_eq!(result.unwrap()["address"], "remote/t7"),
+            "error" => assert_eq!(result.unwrap_err().code, "hc_spawn_failed"),
+            "timeout" => assert_eq!(result.unwrap_err().code, "hc_timeout"),
+            _ => assert_eq!(result.unwrap_err().code, "hc_bad_output"),
+        }
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("hc");
+    fs::write(&fake, r#"#!/bin/sh
+[ "$1" = connect ] || exit 1
+cat > "$VEGA_HC_ARGS"
+case "$VEGA_HC_RPC_TEST" in
+ok) echo '{"jsonrpc":"2.0","id":1,"result":{"address":"remote/t7"}}' ;;
+error) echo '{"jsonrpc":"2.0","id":1,"error":{"message":"failed","data":{"kind":"spawn_failed","hint":"check cwd"}}}' ;;
+timeout) sleep 5 ;;
+wrong_id) echo '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+missing_result) echo '{"jsonrpc":"2.0","id":1}' ;;
+*) echo not-json ;;
+esac
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    for case in [
+        "ok",
+        "error",
+        "timeout",
+        "wrong_id",
+        "missing_result",
+        "malformed",
+    ] {
+        let args = dir.path().join("args");
+        let out = Command::new(env::current_exe().unwrap())
+            .args(["--exact", "rpc_contract", "--nocapture"])
+            .env("VEGA_HC_RPC_TEST", case)
+            .env("VEGA_HC_ARGS", &args)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{case}: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let request: serde_json::Value = serde_json::from_slice(&fs::read(args).unwrap()).unwrap();
+        assert_eq!(request["method"], "terminal.run");
+        assert_eq!(request["params"]["argv"][1], "literal $text; no shell");
+        assert_eq!(request["params"]["env"]["SPECIAL"], "a b");
+    }
+}

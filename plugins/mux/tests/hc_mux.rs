@@ -11,7 +11,7 @@ impl Fixture {
         let d = tempfile::tempdir().unwrap();
         let bin = d.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for (name, text) in [("hc",include_str!("fixtures/hc.py")),("herdr-app","#!/bin/sh\necho \"$*\" >> \"$HOME/app-calls\"\necho '{\"space\":\"s2\"}'\n"),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
+        for (name, text) in [("renice","#!/bin/sh\nexit 0\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app","#!/bin/sh\necho \"$*\" >> \"$HOME/app-calls\"\necho '{\"space\":\"s2\"}'\n"),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
             fs::write(bin.join(name),text).unwrap();fs::set_permissions(bin.join(name),fs::Permissions::from_mode(0o755)).unwrap();
         }
         Self(d)
@@ -79,18 +79,19 @@ fn hc_spawn_show_send_capture_close_reopen_and_transcript() {
     f.spawn();
     let calls = f.calls();
     let run = calls.iter().find(|v| v[0] == "run").unwrap();
-    let a = run.as_array().unwrap();
-    for item in [
-        "--bg",
-        "--outlive-parent",
-        "herdr.space=s1",
-        "vega.mode=headed",
-        "--no-daemon",
-        "SPECIAL=a b $literal",
-    ] {
-        assert!(a.iter().any(|v| v == item), "{run}");
-    }
-    assert!(!a.iter().any(|v| v == "--no-notify"));
+    let p = &run[1];
+    assert_eq!(p["argv"][0], "codex");
+    assert_eq!(p["outlive_parent"], true);
+    assert_eq!(p["wait"], false);
+    assert_eq!(p["caller"], "t7");
+    assert_eq!(p["labels"]["herdr.space"], "s1");
+    assert_eq!(p["labels"]["vega.mode"], "headed");
+    assert_eq!(p["env"]["SPECIAL"], "a b $literal");
+    assert_eq!(p["env"]["HERDR_PANE_ID"], "");
+    assert_eq!(p["env"]["HERDR_SOCKET_PATH"], "");
+    let a = p["argv"].as_array().unwrap();
+    assert!(a.iter().any(|v| v == "--no-daemon"));
+    assert!(!a.iter().any(|v| v == "env" || v == "nice"));
     assert!(a
         .last()
         .unwrap()
@@ -123,7 +124,7 @@ fn hc_spawn_show_send_capture_close_reopen_and_transcript() {
     f.run(&["reopen", "worker"]);
     let calls = f.calls();
     let run = calls.iter().rev().find(|v| v[0] == "run").unwrap();
-    assert!(run
+    assert!(run[1]["argv"]
         .as_array()
         .unwrap()
         .windows(2)
@@ -290,7 +291,7 @@ fn explicitly_undelivered_brief_can_resume_without_spawning_twice() {
 }
 
 #[test]
-fn qualified_mail_keeps_its_machine_and_never_targets_a_local_collision() {
+fn qualified_mail_keeps_its_alias_and_never_guesses_a_registry_host() {
     let f = Fixture::new();
     f.spawn();
     let path = f.root().join("terminals.json");
@@ -312,11 +313,10 @@ fn qualified_mail_keeps_its_machine_and_never_targets_a_local_collision() {
         .args(["send", "corp/t8", "remote mail"])
         .output()
         .unwrap();
+    success(out);
     assert_eq!(
-        out.status.code(),
-        Some(2),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
+        fs::read_to_string(f.root().join("mail-registry-corp-t8")).unwrap(),
+        "remote mail"
     );
     assert!(!f.root().join("mail-local-t8").exists());
     let calls: Vec<Value> = fs::read_to_string(f.root().join("post-calls"))
@@ -330,7 +330,7 @@ fn qualified_mail_keeps_its_machine_and_never_targets_a_local_collision() {
     );
     f.run(&["--machine", "corp", "send", "t8", "explicit host"]);
     assert_eq!(
-        fs::read_to_string(f.root().join("mail-corp-t8")).unwrap(),
+        fs::read_to_string(f.root().join("mail-registry-corp-t8")).unwrap(),
         "explicit host"
     );
     assert!(!f.root().join("mail-local-t8").exists());
@@ -377,18 +377,9 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
         "chosen",
     ]);
     let calls = f.calls();
-    let run = calls
-        .iter()
-        .find(|v| v[0] == "run")
-        .unwrap()
-        .as_array()
-        .unwrap();
-    assert!(run
-        .windows(2)
-        .any(|w| w[0] == "--cwd" && w[1] == tree.to_str().unwrap()));
-    assert!(run
-        .windows(2)
-        .any(|w| w[0] == "--label" && w[1] == "herdr.space=s2"));
+    let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+    assert_eq!(run["cwd"], tree.to_str().unwrap());
+    assert_eq!(run["labels"]["herdr.space"], "s2");
     let app = fs::read_to_string(f.root().join("app-calls")).unwrap();
     assert!(
         app.contains(&format!(
@@ -420,25 +411,14 @@ fn remote_hc_spawn_routes_to_machine_without_local_space_label() {
     );
     assert!(out.contains("remote/t8"), "{out}");
     let calls = f.calls();
-    let run = calls
-        .iter()
-        .find(|v| v[0] == "run")
-        .unwrap()
-        .as_array()
-        .unwrap();
-    let separator = run.iter().position(|v| v == "--").unwrap();
-    assert!(run[..separator]
-        .windows(2)
-        .any(|w| w[0] == "--on" && w[1] == "remote"));
-    assert!(run
-        .windows(2)
-        .any(|w| w[0] == "--cwd" && w[1] == "/remote/repo"));
-    assert!(!run
-        .iter()
-        .any(|v| v.as_str().is_some_and(|s| s.starts_with("herdr.space="))));
-    for label in ["vega.kind=codex", "vega.mode=headed", "vega.role=sentinel"] {
-        assert!(run.windows(2).any(|w| w[0] == "--label" && w[1] == label));
-    }
+    let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+    assert_eq!(run["on"], "remote");
+    assert_eq!(run["cwd"], "/remote/repo");
+    assert_eq!(run["argv"][0], "codex");
+    assert!(run["labels"].get("herdr.space").is_none());
+    assert_eq!(run["labels"]["vega.kind"], "codex");
+    assert_eq!(run["labels"]["vega.mode"], "headed");
+    assert_eq!(run["labels"]["vega.role"], "sentinel");
     assert!(!f.root().join("app-calls").exists());
 }
 
@@ -527,4 +507,115 @@ fn hc_home_rejects_machine_scope_for_hc_and_overridden_tui_callers() {
             assert!(!f.root().join("herdr-calls").exists());
         }
     }
+}
+
+#[test]
+fn remote_prepare_uses_target_trust_and_copies_hook_approvals() {
+    let f = Fixture::new();
+    let remote = f.root().join("remote-home");
+    let main = remote.join("repo/main");
+    let tree = remote.join("repo/worker");
+    fs::create_dir_all(&main).unwrap();
+    let git = |cwd: &Path, args: &[&str]| {
+        success(
+            Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .output()
+                .unwrap(),
+        );
+    };
+    git(&main, &["init", "-b", "main"]);
+    git(
+        &main,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ],
+    );
+    git(
+        &remote,
+        &[
+            "clone",
+            "--shared",
+            main.to_str().unwrap(),
+            tree.to_str().unwrap(),
+        ],
+    );
+    git(&tree, &["checkout", "--detach"]);
+    let main = main.canonicalize().unwrap();
+    let tree = tree.canonicalize().unwrap();
+    fs::create_dir_all(remote.join(".codex")).unwrap();
+    let config = format!("[projects.\"{}\"]\ntrust_level = \"trusted\"\n\n[hooks.state.\"{}/.codex/hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:approved\"\n", main.display(), main.display());
+    fs::write(remote.join(".codex/config.toml"), &config).unwrap();
+    let out = success(
+        f.cmd()
+            .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
+            .env(
+                "TEST_MACHINES",
+                r#"{"machines":[{"name":"remote","host":"remote"}]}"#,
+            )
+            .args([
+                "spawn",
+                "worker",
+                "--kind",
+                "codex",
+                "--machine",
+                "remote",
+                "--cwd",
+                tree.to_str().unwrap(),
+                "--",
+                "-m",
+                "chosen",
+            ])
+            .output()
+            .unwrap(),
+    );
+    assert!(out.contains("hook approvals copied"), "{out}");
+    let written = fs::read_to_string(remote.join(".codex/config.toml")).unwrap();
+    assert!(
+        written.contains(&format!("[projects.\"{}\"]", tree.display())),
+        "{written}"
+    );
+    assert!(written.contains(&format!("{}/.codex/hooks.json:stop:0:0", tree.display())));
+    assert!(!f.root().join(".codex/config.toml").exists());
+    let calls = f.calls();
+    let prepare = calls.iter().position(|v| v[0] == "exec").unwrap();
+    let launch = calls.iter().position(|v| v[0] == "run").unwrap();
+    assert!(prepare < launch);
+}
+
+#[test]
+fn remote_preparation_failure_never_launches() {
+    let f = Fixture::new();
+    let out = f
+        .cmd()
+        .env("TEST_PREPARE_FAIL", "1")
+        .env(
+            "TEST_MACHINES",
+            r#"{"machines":[{"name":"remote","host":"remote"}]}"#,
+        )
+        .args([
+            "spawn",
+            "worker",
+            "--kind",
+            "codex",
+            "--machine",
+            "remote",
+            "--cwd",
+            "/remote/repo",
+            "--",
+            "-m",
+            "chosen",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(!f.calls().iter().any(|v| v[0] == "run"));
 }

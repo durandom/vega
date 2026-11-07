@@ -257,11 +257,20 @@ fn run_herdr_on(
 /// (then it is killed). Pipes are drained on threads so a full pipe cannot
 /// block the child.
 pub fn output_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<Option<Output>> {
+    output_with_stdin_within(cmd, timeout, Stdio::null())
+}
+
+/// The bounded runner with an explicit input source (for one-shot RPC calls).
+pub(crate) fn output_with_stdin_within(
+    cmd: &mut Command,
+    timeout: Duration,
+    stdin: Stdio,
+) -> std::io::Result<Option<Output>> {
     use std::os::unix::process::CommandExt;
     let start = Instant::now();
     let mut child = cmd
         .process_group(0)
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;

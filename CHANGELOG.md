@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 120 · 2026-11-07
+
+- migration: Remote hc spawns prepare repository trust and inherited hook approvals
+  on the target machine. Deploy matching vega binaries on both ends. Resolve macOS
+  Herdr Core privacy prompts on the target's screen before unattended spawning.
+- feature: hc spawns pass environment settings separately from the direct harness
+  argv. Status still requires a harness that reports OSC 7501; unknown status waits
+  for delivery rather than being treated as idle.
+
 ## 119 · 2026-11-07
 
 - migration: `vega uac` status, claim/release, adopt, park/unpark and ask/answer

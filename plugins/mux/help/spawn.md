@@ -1,7 +1,7 @@
 The backend follows the caller's verified terminal; --backend herdr|hc overrides it.
 In hc, spawn opens a tab in the caller's herdr-app space, keeps the native parent link,
 and uses --outlive-parent. --worktree uses wt and a new app space. Explicit --at split
-or --at workspace is currently TUI-only. hc receives env as argv and the task at launch;
+or --at workspace is currently TUI-only. hc receives env separately through terminal.run and the task at launch;
 show reports startup output. Session IDs are captured by ancestry-verified vega calls
 from the child, for commands such as mux and post.
 
@@ -34,12 +34,13 @@ Examples:
   vega mux spawn fix --kind claude --tier balanced --worktree fix-login --base origin/main --prompt-file /tmp/task.md
   vega mux spawn gate-rev --kind codex --env VEGA_GATE_ROLE=reviewer -- -m gpt-6-luna
 
---env K=V (repeatable) sets env through herdr's env flags or hc's env argv. Tool shells also
+--env K=V (repeatable) sets env through herdr's env flags or hc's API environment. Tool shells also
 require the harness's environment policy to pass the variable through.
 An --env BEADS_ACTOR replaces the lane's. The `env:` line lists the keys, never the values.
 
-A local spawn runs at nice 10 (the pane shell is reniced before the agent starts), so vegad
-keeps its pace on a loaded host; the agent's tools inherit it.
+A local spawn runs at nice 10 so vegad keeps its pace on a loaded host. TUI renices
+the pane shell before launch; hc renices the returned process immediately after launch.
+The agent's later tools inherit it.
 
 Spawns forward the caller's SSH_AUTH_SOCK when set to the agent process. An explicit
 --env SSH_AUTH_SOCK=... wins, including an empty value. This covers every agent kind and placement, including worktrees. For
@@ -77,7 +78,12 @@ Folder trust is per agent kind. When claude or codex would ask to trust a repo t
 either kind already trusts (its checkout, repo root or main checkout), vega writes that
 trust first (~/.claude.json, ~/.codex/config.toml; for a codex worktree of a bare repo also
 the main checkout's hook approvals) and says so in a `claude trust:` or `codex trust:` line.
-Repos no kind trusts still ask.
+For remote hc spawns, `vega-mux prepare` runs through hc exec on the target before launch,
+using only that machine's repository and trust files. Deploy matching vega binaries on
+both machines; an unavailable or incompatible helper fails before creating a terminal.
+Repos no kind trusts still ask. Hook hashes are copied from existing approvals, never
+newly approved; changed hooks still need the user. macOS Core file-access dialogs must
+be resolved on the target's screen first (docs/design/onboarding.md).
 
 Capacity: `capacity:` is the binding window of the kind's provider from token-burn's
 stored sample, its account window with the least left (claude, codex, agy: antigravity, pi: its

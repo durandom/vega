@@ -16,17 +16,31 @@ def get(t):
   if v['address']==t or (v['name']==t and v['state']=='live'): return v
  err('not_found')
 cmd=a[0]
-if cmd=='run':
- n=a[a.index('--name')+1]
+if cmd=='connect':
+ request=json.loads(sys.stdin.readline());assert request['method']=='terminal.run'
+ p=request['params']
+ with open(root/'calls','a') as f: f.write(json.dumps(['run',p])+'\n')
+ n=p['name']
  if any(t['name']==n and t['state']=='live' for t in ts.values()): err('name_taken')
  i='t'+str(int((root/'counter').read_text())+1 if (root/'counter').exists() else 8)
  (root/'counter').write_text(i[1:])
- if '--on' in a: i=a[a.index('--on')+1]+'/'+i
- labels=dict(a[j+1].split('=',1) for j,x in enumerate(a) if x=='--label')
- t={'address':i,'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':labels['vega.kind'],'state':'idle'},'cwd':a[a.index('--cwd')+1],'labels':labels,'turn':0}
+ if p.get('on'): i=p['on']+'/'+i
+ labels=p['labels']
+ assert p['argv'][0]==labels['vega.kind']
+ t={'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':p['argv'][0],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0}
  ts[i]=t;save()
  if os.environ.get('TEST_UNDELIVERED'): t['first_message']={'sent':False,'reason':'blocked'}
- print(json.dumps(t))
+ print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':t}))
+elif cmd=='exec':
+ if os.environ.get('TEST_PREPARE_FAIL'): err('unavailable')
+ assert a[a.index('--')+1:a.index('--')+3]==['vega-mux','prepare']
+ if (root/'remote-home').exists():
+  import subprocess
+  e=dict(os.environ, HOME=str(root/'remote-home'))
+  for k in ['HC_TERMINAL_ID','HERDR_PANE_ID','XDG_CONFIG_HOME','XDG_STATE_HOME']: e.pop(k,None)
+  r=subprocess.run([os.environ['TEST_MUX_EXE']]+a[a.index('--')+2:],env=e,capture_output=True)
+  sys.stdout.buffer.write(r.stdout);sys.stderr.buffer.write(r.stderr);sys.exit(r.returncode)
+ print(json.dumps({'schema':1,'trust':None}))
 elif cmd=='get': print(json.dumps(get(a[1])))
 elif cmd=='ls': print(json.dumps({'terminals':([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())}))
 elif cmd=='machine': print(os.environ.get('TEST_MACHINES','{"machines":[]}'))

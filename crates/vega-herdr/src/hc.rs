@@ -239,3 +239,62 @@ pub fn check_direction(target: &str) -> Result<(), Failure> {
     }
     Ok(())
 }
+
+/// One JSON-lines RPC over hc's supported stdio transport. Unlike `hc run`,
+/// terminal.run accepts an environment separately from argv. EOF closes the
+/// one-shot connection after its reply; no core lifecycle command is issued.
+pub fn rpc(method: &str, params: Value, timeout: Duration) -> Result<Value, Failure> {
+    use std::io::{Seek, Write};
+    let io = |e: std::io::Error| {
+        Failure::new(
+            "hc_unavailable",
+            e.to_string(),
+            "check hc and the target machine connection",
+        )
+    };
+    let mut input = tempfile::tempfile().map_err(io)?;
+    writeln!(
+        input,
+        "{}",
+        serde_json::json!({
+            "jsonrpc":"2.0", "id":1, "method":method, "params":params
+        })
+    )
+    .map_err(io)?;
+    input.rewind().map_err(io)?;
+    let out =
+        crate::output_with_stdin_within(Command::new("hc").arg("connect"), timeout, input.into())
+            .map_err(io)?
+            .ok_or_else(|| {
+                Failure::new(
+                    "hc_timeout",
+                    "hc did not answer before the deadline",
+                    "inspect vega mux --all before retrying; a launch may have completed",
+                )
+            })?;
+    let bad = || {
+        Failure::new(
+            "hc_bad_output",
+            "hc returned no valid RPC reply",
+            "check hc --version and inspect vega mux --all before retrying",
+        )
+    };
+    let reply: Value = serde_json::from_slice(&out.stdout).map_err(|_| bad())?;
+    if reply["jsonrpc"] != "2.0" || reply["id"] != 1 {
+        return Err(bad());
+    }
+    if let Some(e) = reply.get("error") {
+        let kind = e["data"]["kind"].as_str().unwrap_or("error");
+        return Err(Failure::new(
+            &format!("hc_{kind}"),
+            e["message"].as_str().unwrap_or("hc RPC failed"),
+            e["data"]["hint"]
+                .as_str()
+                .unwrap_or("inspect vega mux --all before retrying"),
+        ));
+    }
+    if !out.status.success() {
+        return Err(bad());
+    }
+    reply.get("result").cloned().ok_or_else(bad)
+}

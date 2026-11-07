@@ -68,6 +68,19 @@ hook entries produce a recommendation to use dcg's installer/doctor (Codex confi
 `~/.codex/hooks.json`). Vega's own hooks do not register dcg. Its managed config units are
 whole files, so onboard keeps the user's existing differing config and packs.
 
+### First Herdr Core use on macOS
+
+On each Mac, approve the first **Herdr Core** file-access privacy dialog on that
+Mac’s screen before starting unattended agents. Existing Herdr.app permissions
+do not transfer to Herdr Core. A remote spawn can appear hung in `getcwd` or file
+access (including a checkout under `~/src`) while that dialog waits on the remote
+screen; approving it on the initiating machine does not resolve it.
+
+If terminals were created before the signed Core bundle upgrade, recreate those
+terminals after the user has resolved access; restarting only the core does not
+repair their old holders. Do not restart other users’ terminals to diagnose this.
+Core startup and launchd ownership are tracked separately in vega-0h4c.25.
+
 ### Degrading cleanly
 
 What the survey of every plugin found (bead notes, 2026-10-15), and what this change adds:

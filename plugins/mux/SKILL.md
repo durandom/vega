@@ -33,6 +33,8 @@ Help: `--help`.
   `vega post send machine/t7 --host <host> "<text>"`.
 - `vega mux next` focuses the oldest waiter; hc uses herdr-app.
 - Trust/permission/hook approvals stay with the Slayer; never approve them.
+  Remote hc spawn inherits existing trust on the target via its vega helper;
+  deploy matching vega versions on both ends. Unknown/changed trust still asks.
   After the user resolves startup, `spawn --resume <pane>` sends a saved undelivered brief.
 
 ## Receiving

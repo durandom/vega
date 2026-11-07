@@ -67,6 +67,17 @@ const SKILL: &str = include_str!("../SKILL.md");
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Apply this machine's existing repository trust before a remote hc launch (JSON)
+    #[command(
+        hide = true,
+        after_help = "Used by remote spawn; never creates trust for an untrusted repository.\nExample: vega mux prepare --kind codex --cwd /src/repo"
+    )]
+    Prepare {
+        #[arg(long, value_parser = ["claude", "codex", "pi", "agy"])]
+        kind: String,
+        #[arg(long)]
+        cwd: String,
+    },
     /// Agent hooks: `ask-parent` (PreToolUse) and `install`; run by vega's install
     #[command(hide = true)]
     Hook {
@@ -356,6 +367,21 @@ fn main() -> ExitCode {
     }
     let result = match cli.cmd {
         None => home(cli.all),
+        Some(Cmd::Prepare { kind, cwd }) => {
+            if machine().is_some() || !Path::new(&cwd).is_absolute() {
+                Err(Failure::new(
+                    "usage",
+                    "prepare requires a local absolute cwd",
+                    "run prepare on the target machine with --cwd /absolute/path",
+                ))
+            } else {
+                println!(
+                    "{}",
+                    serde_json::json!({"schema":1,"trust":trust::apply(&kind, &cwd)})
+                );
+                Ok(())
+            }
+        }
         Some(Cmd::Hook {
             action: HookCmd::AskParent,
         }) => {
@@ -1018,12 +1044,12 @@ fn send_post(target: &str, text: &str) -> Result<String, Failure> {
     let a = backend::agent(target)?["result"]["agent"].clone();
     let pane = str_of(&a, "pane_id").to_string();
     let mut args = vec!["post".to_string(), "send".into()];
-    if let Some(m) = machine() {
+    if let Some(m) = machine().filter(|_| a["backend"] != "hc") {
         args.push("--host".into());
         args.push(m.to_lowercase());
     }
     // Post owns the registry-host mapping. Keep a qualified address intact so
-    // its missing-host guard can fail closed instead of mailing a local inbox.
+    // an hc machine alias is never assumed to be a registry host.
     args.push(pane.clone());
     args.push(text.to_string());
     let out = Command::new("vega")
