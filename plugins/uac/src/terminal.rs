@@ -31,7 +31,7 @@ fn normalize(t: &Value) -> Value {
 
 pub fn local() -> Result<Snapshot, Failure> {
     let tui = snapshot(None);
-    let hc = hc_local(&["ls"]).and_then(|v| {
+    let hc = vega_herdr::hc::terminal_list().and_then(|v| {
         v["terminals"]
             .as_array()
             .map(|rows| {
@@ -48,7 +48,7 @@ pub fn local() -> Result<Snapshot, Failure> {
             .ok_or_else(|| {
                 Failure::new(
                     "hc_bad_output",
-                    "hc ls has no terminals list",
+                    "terminal.list has no terminals list",
                     "check hc --version",
                 )
             })

@@ -20,7 +20,7 @@ pub fn spawn(tx: UnboundedSender<Event>) {
             match stream(&tx) {
                 Ok(()) => thread::sleep(Duration::from_millis(100)),
                 Err(why) => {
-                    let _ = tx.send(Event::HcMode(format!("poll (hc ls; {why})")));
+                    let _ = tx.send(Event::HcMode(format!("poll (terminal.list; {why})")));
                     let until = Instant::now() + STREAM_RETRY;
                     while !tx.is_closed() && Instant::now() < until {
                         if let Ok(agents) = terminals::hc_list() {

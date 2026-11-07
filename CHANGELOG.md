@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 123 · 2026-11-07
+
+- feature: hc terminal discovery uses the full RPC inventory, restoring harness
+  status, space labels, parent links and project attribution from foreground cwd.
+  The herdr TUI backend continues to work alongside hc.
+
 ## 122 · 2026-11-07
 
 - unit: Reapply the herdr-app mods for short machine/project group labels, a single

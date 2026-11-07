@@ -714,3 +714,47 @@ fn machine_qualified_mail_crosses_hosts_and_reads_the_remote_inbox() {
         .post(&["inbox"], "t2")
         .contains("unavailable registry"));
 }
+
+#[test]
+fn rpc_inventory_attributes_project_from_foreground_cwd() {
+    let mut f = Fixture::new();
+    let repo = f.home.path().join("rally-coach");
+    fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/team/rally-coach.git",
+        ],
+    ] {
+        assert!(Command::new("git")
+            .current_dir(&repo)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let file = f.home.path().join("hc.json");
+    let mut terminals: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    terminals["terminals"][1]["foreground"] =
+        json!({"argv":["claude"],"cwd":repo,"name":"claude","pid":std::process::id()});
+    terminals["terminals"][1]["labels"] = json!({"vega.project":"vega"});
+    write(&file, &terminals);
+    // CLI ls deliberately drops foreground/labels and flattens status; only
+    // RPC discovery can publish this agent in its active project.
+    f.start();
+    wait(f.home.path(), "foreground project in registry", || {
+        runtime().block_on(async {
+            let c = async_nats::connect(&f.url).await.unwrap();
+            let kv = vega_registry::bucket(&c).await.unwrap();
+            let view = vega_registry::read(&c, &kv).await.unwrap();
+            view.entries
+                .get(&vega_registry::agent_key("testhost", "hc:t2"))
+                .is_some_and(|a| {
+                    a["project"] == "github.com/team/rally-coach" && a["kind"] == "claude"
+                })
+        })
+    });
+}

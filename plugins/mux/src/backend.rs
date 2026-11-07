@@ -158,7 +158,7 @@ pub fn close(target: &str) -> Result<(), Failure> {
         .as_str()
         .filter(|p| vega_herdr::pane::is_hc_id(p));
     if let Some(p) = placeholder {
-        let all = hc_local(&["ls"])?;
+        let all = vega_herdr::hc::terminal_list()?;
         if let Some(shell) = worktree_placeholder(&t, &all) {
             if shell["state"] == "live" {
                 hc_local(&["kill", p])?;
@@ -222,7 +222,7 @@ pub fn home(all: bool) -> Result<(), Failure> {
             "run `vega mux` on that machine",
         ));
     }
-    let list = hc_local(&["ls"])?;
+    let list = vega_herdr::hc::terminal_list()?;
     let own = own_terminal().ok();
     let caller = own.as_ref().and_then(|o| info(o.pane()).ok());
     let space = caller

@@ -204,6 +204,21 @@ pub fn hc_on(
     })
 }
 
+/// Full Terminal inventory (including remote machine addresses). The CLI `ls`
+/// emits summaries without labels/foreground and with a string status instead.
+/// Consumers must scope local-only operations by address themselves.
+pub fn terminal_list() -> Result<Value, Failure> {
+    let result = rpc("terminal.list", serde_json::json!({}), DAEMON_CALL_TIMEOUT)?;
+    if !result["terminals"].is_array() {
+        return Err(Failure::new(
+            "hc_bad_output",
+            "terminal.list has no terminals array",
+            "check hc --version",
+        ));
+    }
+    Ok(result)
+}
+
 /// hc owns the fleet. Before migration starts, retain the TUI inventory.
 /// Errors are not an empty fleet: never deploy against a stale fallback.
 pub fn machines() -> Result<Value, Failure> {

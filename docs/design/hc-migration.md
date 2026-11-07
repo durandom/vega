@@ -236,7 +236,11 @@ opening/focusing hc addresses remains a later slice and fails explicitly for now
 ### Slice 3 delivery contract (2026-11-07)
 
 vegad consumes `hc events --json` (the `events.subscribe` snapshot/stream),
-resubscribes on `missed`, and polls `hc ls` while the stream is unavailable.
+resubscribes on `missed`, and polls `terminal.list` through `hc connect` while
+the stream is unavailable. All terminal inventories use the shared
+`vega_herdr::hc::terminal_list` helper: `hc --json ls` is a display summary with
+string status and no labels or foreground metadata. `terminal.list` and
+`hc --json get` return full Terminal objects, including foreground cwd.
 Snapshots, CI liveness, and waiting/supervision state are scoped by backend.
 Only local hc terminals are published by this host; connected remote terminals'
 paths are never resolved as local checkouts. Registry agent rows retain bare

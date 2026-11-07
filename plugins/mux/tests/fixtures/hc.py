@@ -17,7 +17,12 @@ def get(t):
  err('not_found')
 cmd=a[0]
 if cmd=='connect':
- request=json.loads(sys.stdin.readline());assert request['method']=='terminal.run'
+ request=json.loads(sys.stdin.readline())
+ if request['method']=='terminal.list':
+  assert request['params']=={}
+  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{'hidden_finished':0,'machines':[],'terminals':([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())}}))
+  sys.exit(0)
+ assert request['method']=='terminal.run'
  p=request['params']
  with open(root/'calls','a') as f: f.write(json.dumps(['run',p])+'\n')
  n=p['name']
@@ -52,7 +57,9 @@ elif cmd=='label':
   if v: t['labels'][k]=v
   else: t['labels'].pop(k,None)
  save();print('{}')
-elif cmd=='ls': print(json.dumps({'terminals':([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())}))
+elif cmd=='ls':
+ rows=([] if os.environ.get('TEST_HIDE_PARENT') else [parent])+list(ts.values())
+ print(json.dumps({'hidden_finished':0,'machines':[],'terminals':[{'address':t['address'],'agent':t.get('status',{}).get('app'),'cwd':t.get('cwd'),'state':t['state'],'status':t.get('status',{}).get('state'),'turn':t.get('turn',0),'where':'local'} for t in rows]}))
 elif cmd=='machine': print(os.environ.get('TEST_MACHINES','{"machines":[]}'))
 elif cmd=='read':
  t=get(a[1]);q=os.environ.get('TEST_DIALOG','')

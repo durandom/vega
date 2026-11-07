@@ -28,7 +28,7 @@ pub fn hc_agents(v: &Value) -> Result<Vec<Value>, Failure> {
     let terminals = v["terminals"].as_array().ok_or_else(|| {
         Failure::new(
             "hc_bad_output",
-            "hc ls has no terminals list",
+            "terminal.list has no terminals list",
             "check hc --version",
         )
     })?;
@@ -58,7 +58,7 @@ pub fn hc_agents(v: &Value) -> Result<Vec<Value>, Failure> {
 }
 
 pub fn hc_list() -> Result<Vec<Value>, Failure> {
-    let mut agents = hc_agents(&hc_local(&["ls"])?)?;
+    let mut agents = hc_agents(&vega_herdr::hc::terminal_list()?)?;
     // This machine's shared layout supplies a project folder when the launch
     // shell and foreground leader both remain at home. Never inspect remote paths.
     if let Ok(doc) = vega_herdr::hc::rpc(

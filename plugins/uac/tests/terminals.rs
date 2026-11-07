@@ -48,6 +48,14 @@ esac"#,
             &bin,
             "hc",
             r#"
+if [ "$1" = connect ]; then
+ read -r request
+ case "$request" in *'"method":"terminal.list"'*) ;; *) exit 1 ;; esac
+ printf '{"jsonrpc":"2.0","id":1,"result":'
+ cat "$HOME/hc.json"
+ printf '}'
+ exit 0
+fi
 case "$2" in
  get) case "$3" in
    t1) cat "$HOME/me.json" ;;
@@ -55,7 +63,7 @@ case "$2" in
    io/t9|io/remote-worker) cat "$HOME/remote.json" ;;
    *) echo '{"error":{"kind":"not_found","message":"unexpected target"}}'; exit 3 ;;
  esac ;;
- ls) cat "$HOME/hc.json" ;;
+ ls) echo '{"terminals":[{"address":"t1","agent":"codex","cwd":"/shell","state":"live","status":"idle","turn":0,"where":"local"}]}' ;;
  *) echo '{}' ;;
 esac"#,
         );
@@ -89,7 +97,7 @@ esac"#,
             ),
             (
                 "hc",
-                json!({"terminals":[terminal("t1"),terminal("t2"), {"address":"remote/t9","state":"live","cwd":"/not/local"}]}),
+                json!({"hidden_finished":0,"machines":[],"terminals":[terminal("t1"),terminal("t2"), {"address":"remote/t9","state":"live","cwd":"/not/local"}]}),
             ),
         ] {
             fs::write(root.join(format!("{name}.json")), value.to_string()).unwrap();

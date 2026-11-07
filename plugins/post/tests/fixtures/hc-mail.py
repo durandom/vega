@@ -12,7 +12,15 @@ def get(p):
             return t
     emit({'error': {'kind':'not_found', 'message':'closed', 'hint':'list'}})
     sys.exit(3)
-if args[0] == 'ls': emit(load())
+if args[0] == 'connect':
+    request = json.loads(sys.stdin.readline())
+    if request['method'] == 'terminal.list':
+        assert request['params'] == {}
+        emit({'jsonrpc':'2.0','id':request['id'],'result':dict(load(), hidden_finished=0, machines=[])})
+    else:
+        emit({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32601,'message':'unknown method'}})
+elif args[0] == 'ls':
+    emit({'hidden_finished':0,'machines':[],'terminals':[{'address':t['address'],'agent':t.get('status',{}).get('app'),'cwd':t.get('cwd'),'state':t['state'],'status':t.get('status',{}).get('state'),'turn':t.get('turn',0),'where':'local'} for t in load()['terminals']]})
 elif args[0] == 'get': emit(get(args[1]))
 elif args[0] == 'read':
     screen = home/'hc-screen'

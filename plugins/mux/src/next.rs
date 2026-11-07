@@ -21,7 +21,7 @@ pub fn run(statuses: &[String]) -> Result<(), Failure> {
         .ok()
         .and_then(|v| v["result"]["agents"].as_array().cloned())
         .unwrap_or_default();
-    if let Ok(list) = vega_herdr::hc::hc_local(&["ls"]) {
+    if let Ok(list) = vega_herdr::hc::terminal_list() {
         agents.extend(
             list["terminals"]
                 .as_array()

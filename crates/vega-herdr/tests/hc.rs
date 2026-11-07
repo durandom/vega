@@ -309,3 +309,91 @@ fn empty_tui_environment_is_absent_for_history_and_errors() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+// Keep the two hc wire contracts distinct: `ls` is a display summary, while
+// terminal.list and CLI get expose full Terminal metadata used by discovery.
+#[test]
+fn terminal_list_contract_preserves_full_metadata() {
+    use serde_json::{json, Value};
+    if env::var_os("VEGA_HC_LIST_TEST").is_some() {
+        let summary = hc_local(&["ls"]).unwrap();
+        assert_eq!(summary["terminals"][0]["status"], "working");
+        assert!(summary["terminals"][0].get("labels").is_none());
+        assert!(summary["terminals"][0].get("foreground").is_none());
+        let list = vega_herdr::hc::terminal_list().unwrap();
+        let terminal = &list["terminals"][0];
+        assert_eq!(terminal["status"]["app"], "claude-code");
+        assert_eq!(terminal["status"]["state"], "working");
+        assert_eq!(terminal["foreground"]["cwd"], "/projects/rally-coach");
+        assert_eq!(terminal["labels"]["herdr.space"], "sp1");
+        assert_eq!(terminal["parent"], "t2");
+        assert_eq!(list["terminals"][1]["address"], "ganymede/t1g");
+        assert_eq!(&hc_local(&["get", "t34"]).unwrap(), terminal);
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let terminal = json!({"address":"t34", "name":"coach", "parent":"t2",
+        "state":"live", "cwd":"/home/user", "argv":["/bin/zsh","-l"],
+        "pid":123, "turn":4, "foreground":{"argv":["claude"],
+            "cwd":"/projects/rally-coach", "name":"claude", "pid":456},
+        "status":{"app":"claude-code","state":"working"},
+        "labels":{"herdr.space":"sp1","vega.project":"vega"}});
+    let mut remote = terminal.clone();
+    remote["address"] = json!("ganymede/t1g");
+    for (name, value) in [
+        ("terminal", terminal.clone()),
+        (
+            "list",
+            json!({"jsonrpc":"2.0","id":1,"result":{
+            "hidden_finished":0,"machines":[],"terminals":[
+                terminal,remote]}}),
+        ),
+        (
+            "summary",
+            json!({"hidden_finished":0,"machines":[],"terminals":[{
+            "address":"t34","agent":"claude-code","cwd":"/home/user",
+            "state":"live","status":"working","turn":4,"where":"coach / 1"}]}),
+        ),
+    ] {
+        fs::write(dir.path().join(name), value.to_string()).unwrap();
+    }
+    let fake = dir.path().join("hc");
+    fs::write(
+        &fake,
+        r#"#!/bin/sh
+case "$1 $2" in
+ 'connect ')
+   cat > "$VEGA_HC_ARGS"
+   cat "$VEGA_HC_LIST_TEST/list" ;;
+ '--json ls') cat "$VEGA_HC_LIST_TEST/summary" ;;
+ '--json get') cat "$VEGA_HC_LIST_TEST/terminal" ;;
+ *) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    let request = dir.path().join("request");
+    let out = Command::new(env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "terminal_list_contract_preserves_full_metadata",
+            "--nocapture",
+        ])
+        .env("VEGA_HC_LIST_TEST", dir.path())
+        .env("VEGA_HC_ARGS", &request)
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let request: Value = serde_json::from_slice(&fs::read(request).unwrap()).unwrap();
+    assert_eq!(
+        request,
+        json!({"jsonrpc":"2.0","id":1,"method":"terminal.list","params":{}})
+    );
+}
