@@ -390,7 +390,7 @@ fn quote(s: &str) -> String {
 }
 
 fn park_row(machine: Option<&str>, pane: &str, host: &str, park: &state::Park) -> Row {
-    let next = if park.closed {
+    let next = if park.closed || park.held {
         format!(
             "vega uac unpark {}{}",
             quote(pane),
@@ -405,19 +405,30 @@ fn park_row(machine: Option<&str>, pane: &str, host: &str, park: &state::Park) -
         id: format!("park:{pane}@{host}"),
         bead: park.bead.clone(),
         waiter: format!("{pane}@{host}"),
-        owner: if park.closed {
+        owner: if park.held {
+            "UAC".into()
+        } else if park.closed {
             "unknown (inspect the closed decision)".into()
         } else {
             "Slayer".into()
         },
-        reason: format!(
-            "decision {}: {}",
-            if park.closed { "closed" } else { "open" },
-            park.title
-        ),
+        reason: if park.held {
+            "on hold".into()
+        } else {
+            format!(
+                "decision {}: {}",
+                if park.closed { "closed" } else { "open" },
+                park.title
+            )
+        },
         age: "unknown".into(),
         source: "uac-park (local)".into(),
-        freshness: "local decision snapshot".into(),
+        freshness: if park.held {
+            "local hold"
+        } else {
+            "local decision snapshot"
+        }
+        .into(),
         next,
     }
 }
@@ -610,6 +621,7 @@ mod tests {
     #[test]
     fn park_rows_preserve_decision_state_and_quote_saved_machine_labels() {
         let mut p = state::Park {
+            held: false,
             bead: "b-1".into(),
             title: "choose owner".into(),
             dir: "/project".into(),
@@ -625,6 +637,13 @@ mod tests {
         assert!(closed.reason.contains("closed"));
         assert_eq!(closed.next, "vega uac unpark 'w1:p1' --machine 'Build box'");
         assert_eq!(closed.source, "uac-park (local)");
+        p.held = true;
+        p.closed = false;
+        p.bead.clear();
+        let held = park_row(None, "t7", "here", &p);
+        assert_eq!(held.owner, "UAC");
+        assert_eq!(held.reason, "on hold");
+        assert_eq!(held.next, "vega uac unpark 't7'");
     }
 
     #[test]

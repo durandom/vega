@@ -181,6 +181,17 @@ pub fn wakes(a: Attention, mode: Mode) -> bool {
     !matches!(a, Attention::Parked | Attention::Waiting) && !for_user(a, mode)
 }
 
+/// Reports already deliver durable mail. Gate/CI waits are quiet unless there
+/// is concrete input, decision or unanswered-ask evidence to act on.
+pub fn actionable(a: Option<Attention>, reported: bool, waiting: bool) -> Option<Attention> {
+    match a {
+        Some(Attention::Input | Attention::Decided | Attention::Unanswered) => a,
+        _ if reported => None,
+        Some(Attention::Silent) if waiting => None,
+        _ => a,
+    }
+}
+
 /// Join an unanswered target only with resolved host and current mode evidence.
 pub fn owes_reply(
     asks: &[vega_herdr::gather::Ask],
@@ -319,6 +330,7 @@ pub fn summary(
             format!("{n} decisions closed; resume your parked sentinels")
         };
     }
+    // No live path feeds Completed here; only direct tests cover these historical strings.
     let all_done = n == children && current.iter().all(|(_, a)| *a == Attention::Completed);
     let s = if n == 1 { "" } else { "s" };
     if all_done {

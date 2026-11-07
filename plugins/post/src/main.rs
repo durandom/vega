@@ -49,6 +49,8 @@ mod probes;
 #[cfg(test)]
 mod project_location_test;
 mod quarantine;
+#[cfg(test)]
+mod quiet_attention_test;
 mod quota;
 mod reach;
 #[cfg(test)]
@@ -4244,7 +4246,7 @@ fn notify_queued(pane: &str, line: &str, queued: bool) -> Result<(), Failure> {
 /// The line that wakes a parent; `mail`: its unread count, said in the same
 /// line so the parent gets one prompt, not two.
 fn wake_line(summary: &str, mail: u64) -> String {
-    match mail {
+    let line = match mail {
         // A question already ends the sentence.
         0 if summary.ends_with(['?', '…']) => format!("[vega] {summary} Run: vega uac"),
         0 => format!("[vega] {summary}. Run: vega uac"),
@@ -4256,7 +4258,8 @@ fn wake_line(summary: &str, mail: u64) -> String {
             "[vega] {summary}; {n} new messages. Run: {} inbox, then vega uac",
             cmd()
         ),
-    }
+    };
+    format!("{line}. Act, record, reply in ≤10 words; longer only for urgent blockers.")
 }
 
 /// Each local parent's children with attention, and how many children it
@@ -4269,6 +4272,7 @@ fn attentions(
 ) -> HashMap<String, (Attentions, usize, HashMap<String, String>)> {
     let mut out: HashMap<String, (Attentions, usize, HashMap<String, String>)> = HashMap::new();
     let watching = vega_ci_watch::store::waiting(vega_ci_watch::unix_now());
+    let gates = vega_gate::state::waiting_authors(vega_ci_watch::unix_now());
     let here = vega_herdr::hosts::key(&host());
     let mut open_asks: Vec<_> = gather::open()
         .unwrap_or_default()
@@ -4320,11 +4324,14 @@ fn attentions(
             continue;
         }
         let done = st::done_of(m, &c.pane).map(|x| x.outcome);
+        let park = st::park_of(m, &c.pane);
+        if park.as_ref().is_some_and(|p| p.held) {
+            continue; // An explicit hold suppresses wakes until the parent resumes it.
+        }
         let dialog = (m.is_none() && alive == Some(true))
             .then(|| local_dialog(&c.pane, d.status_of(&c.pane)))
             .flatten();
         let silence = st::silence_of(m, &c.pane);
-        let park = st::park_of(m, &c.pane);
         let (attention, question) = match dialog {
             Some(x) => asking_dialog(&x),
             None => (
@@ -4346,6 +4353,11 @@ fn attentions(
             st::known_mode_of(m, &c.pane, &c.name),
         );
         let attention = supervise::unanswered(attention, status, owes);
+        let attention = supervise::actionable(
+            attention,
+            done.is_some(),
+            m.is_none() && (watching.contains_key(&c.pane) || gates.contains(&c.pane)),
+        );
         let mode = st::mode_of(m, &c.pane, &c.name);
         if let Some(a) = attention.filter(|a| supervise::wakes(*a, mode)) {
             let key = m.map_or(c.pane.clone(), |m| format!("{m}/{}", c.pane));
@@ -5696,10 +5708,13 @@ const PARK_BD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Parked children whose decision bead closed get `closed`: their attention
 /// turns `decided`, which wakes the parent once. One `bd show` per open
-/// park, on the metadata clock; nothing runs without parks. A bead bd cannot
+/// bead park, on the metadata clock; no polling for holds. A bead bd cannot
 /// show proves nothing: the park stays (logged once).
 fn check_parks(failing: &mut HashSet<String>) {
-    for (m, pane, mut p) in st::parks().into_iter().filter(|(_, _, p)| !p.closed) {
+    for (m, pane, mut p) in st::parks()
+        .into_iter()
+        .filter(|(_, _, p)| !p.closed && !p.held)
+    {
         let key = m.as_ref().map_or(pane.clone(), |m| format!("{m}/{pane}"));
         let out = vega_herdr::output_within(
             std::process::Command::new(&p.bd)

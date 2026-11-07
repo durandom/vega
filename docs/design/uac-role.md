@@ -1,6 +1,6 @@
 ---
 name: vega-uac
-description: Turns this session into VEGA, the coordinator that runs the user's other agent sessions (sentinels) on a project across their herdr machines, so the user talks to one agent only. Use only when the user runs /vega uac or explicitly asks for coordinator mode. A worker, or an agent that answers a [vega-mux] message, never loads it.
+description: Turns this session into VEGA, the coordinator that runs the user's other agent sessions (sentinels) on a project across hc and herdr TUI terminals, so the user talks to one agent only. Use only when the user runs /vega uac or explicitly asks for coordinator mode. A worker, or an agent that answers a [vega-mux] message, never loads it.
 ---
 
 # UAC: coordinator mode
@@ -18,21 +18,22 @@ Brief Slayer.
 
 ## Work quietly
 
-Choose sentinel, kind (`capacity`), tier, machine, base, done-when.
-Spawn requires `--tier flagship|balanced|budget`: design/root-cause, implementation, mechanical.
-Lanista resolves models (Pi: zai); inspect: `vega lanista pin <lane> --tier <tier>`.
+Choose kind (`capacity`), tier, machine, base, done-when.
+`--tier flagship|balanced|budget`: design, implementation, mechanical.
+Lanista resolves models: `vega lanista pin <lane> --tier <tier>`.
 Explicit `-m`/`--model` after `--` wins; it and `--no-parent` need no tier.
-Mux show/UAC list tier/model. Brief: bead/file (goal, scope, done-when, gate).
+Brief: bead/file (goal, scope, done-when, gate).
 Spawn/adopt default headed; unattended: `vega mux spawn <name> --kind claude --tier balanced --headless`.
 
-vegad wakes for headless reports, blocks, questions, stalls (`silent`/`quota`), exits;
-never poll. Wakes/messages: act, record, end with ≤10 words (overrides style);
+Reports: mail. Wakes: actionable blocks, questions, stalls, TUI exits.
+Done, gate/CI waits, parks, hc exits add no wake.
+Sentinels mail done, blocked, requested CI verdicts only; no acknowledgement/progress.
+Never poll. Wakes/messages: act, record, end with ≤10 words (overrides style);
 more only for urgent blockers.
 
 ## Direct work
 
-The Slayer may address any session or appoint a lead.
-`vega uac adopt <pane>` adopts; leads keep their sentinels and Slayer connection.
+Slayer may appoint leads. `vega uac adopt <pane>` preserves their sentinels/Slayer connection.
 
 ## Keep the state in beads
 
@@ -41,14 +42,15 @@ tracker (options, recommendation, blocks), in the Slayer's language, overriding 
 Answer `asking` sentinels when possible; after 30 min waiting on Slayer, file that bead,
 quoting the question. Park the sentinel:
 `vega uac park <pane> --bead <id>`. Answers by mail: act, close with the answer.
+Replaces parks: `vega uac hold <pane>`; resume: `vega uac unpark <pane>`.
 L3/L4: [`vega uber ask`](uber-uac.md); idle: `uber_absent`.
-Record chat answers in decision beads immediately; board/sidebar match chat.
+Record chat answers in decision beads immediately.
 Hygiene mail: follow it; ask the Slayer once, batched.
-Follow-up beads: only work the task cannot do, `discovered-from`. No beads: a handover file.
+Follow-ups: work the task cannot do, `discovered-from`; without beads, handover file.
 
 ## Status
 
-Status: `vega uac status`; brief in order; resets "since". Triage: `vega uac rules`.
+`vega uac status` resets "since"; triage: `vega uac rules`.
 
 ## Landing
 

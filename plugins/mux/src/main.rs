@@ -2122,7 +2122,7 @@ fn footer_text(
             // A receiver pair grant permits peer mail only; questions still go to the human.
             let questions = task_questions(Mode::Headed, me, &host);
             format!(
-                "\nYour host is inbox-only: your mail is a quarantine note unless the receiver has a live operator pair grant for peer inbox mail.\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\" (peer mail with a live pair grant; otherwise the human reads it).\n{questions}\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report."
+                "\nYour host is inbox-only: your mail is a quarantine note unless the receiver has a live operator pair grant for peer inbox mail.\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\" (peer mail with a live pair grant; otherwise the human reads it).\n{questions}\nQuiet reporting: mail the parent only for done, blocked, or a CI verdict the parent asked for. No acknowledgement or progress mail.\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report."
             )
         }
         // The parent's relay records the outcome and wakes the parent.
@@ -2130,7 +2130,7 @@ fn footer_text(
             let host = host.map(|h| format!(" --host {h}")).unwrap_or_default();
             let questions = task_questions(mode, me, &host);
             format!(
-                "\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\"\nThat is your final report; do not also reply. {questions}\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report.\nCI: never poll gh in a loop; vega ci watch <pr|branch> mails you the verdict."
+                "\nWhen done, run once: vega post done --to {me}{host} --outcome succeeded|failed \"<one-line result>\"\nThat is your final report; do not also reply. {questions}\nQuiet reporting: mail the parent only for done, blocked, or a CI verdict the parent asked for. No acknowledgement or progress mail.\nFollow-ups: a bead only for work this task cannot do, always --deps discovered-from:<your bead>; without beads, name it in your report.\nCI: never poll gh in a loop; vega ci watch <pr|branch> mails you the verdict."
             )
         }
     }
@@ -2616,6 +2616,7 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
         let (footer, parent) = handoff(false, Mode::Headless);
         assert!(parent);
         let task = footer_text(footer, "w1:p1", "vega mux send w1:p1", None, false);
+        assert!(task.contains("No acknowledgement or progress mail"));
         assert!(
             task.contains("vega post done --to w1:p1 --outcome"),
             "{task}"

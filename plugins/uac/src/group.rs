@@ -181,7 +181,7 @@ pub(super) fn claim_all(
     claim(key, me, agents, view, path)?;
     for member in members.iter().filter(|m| m.as_str() != key) {
         let prior = record(member)?;
-        let next = serde_json::json!({"schema":2,"project":member,"pane":me,"host":here,"at":unix_now(),"group":key});
+        let next = serde_json::json!({"schema":2,"project":member,"pane":me,"backend":terminal::backend(me),"host":here,"at":unix_now(),"group":key});
         let mut next = claim_record(prior.clone(), next, None);
         if prior["pane"] == me && prior["host"] == here {
             next = prior;

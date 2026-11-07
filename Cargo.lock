@@ -3431,6 +3431,7 @@ dependencies = [
  "vega-bd-sync",
  "vega-build",
  "vega-ci-watch",
+ "vega-gate",
  "vega-herdr",
  "vega-history",
  "vega-notify",
