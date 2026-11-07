@@ -50,6 +50,13 @@ broker (local mode) there is no Uber (§2).
 
 ## 2. Singleton: one estate-wide claim
 
+The claim holder may run in an ancestry-verified hc terminal or a herdr TUI pane. Both worlds share
+the host's claim file and registry key, identified by host plus terminal address (`t7` or `w1:p1`).
+`here()` merges both local inventories; hc fleet addresses and finished terminals never count as
+local live terminals. The caller's backend and any backend holding the local claim must answer:
+an unavailable incumbent backend fails closed rather than permitting takeover. Claim and release
+serialize on `$XDG_STATE_HOME/vega/uber/claim.lock`; contention returns retryable `claim_busy`.
+
 - `vega uber claim`: the session becomes the Uber-UAC. Registry key `<host>.uber.v1` = `{schema: 1, pane,
   host, at, epoch, engaged_at?}`. This mirrors `<host>.uac.v2.<id>`, with one key for the whole estate, not one per project.
   `epoch` = claim time in ms, raised above every epoch already in the registry; it changes on every claim

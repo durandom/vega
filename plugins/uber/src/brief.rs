@@ -245,6 +245,7 @@ mod tests {
             host: "ganymede".into(),
             pane: "w1:p1".into(),
             panes: vec![],
+            unavailable: [None, None],
             file: PathBuf::from("/x/claim.json"),
         };
         let t = targets(&view, &me);

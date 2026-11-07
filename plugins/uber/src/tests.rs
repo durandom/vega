@@ -14,6 +14,7 @@ fn here(dir: &Path, host: &str, pane: &str) -> Here {
         host: host.into(),
         pane: pane.into(),
         panes: vec![pane.into()],
+        unavailable: [None, None],
         file: dir.join(host).join("claim.json"),
     }
 }
@@ -71,7 +72,95 @@ fn a_returning_older_claim_is_superseded_not_the_uber() {
     assert_eq!(conflict(&superseded[0], &winner).code, "uber_conflict");
 }
 
+#[test]
+fn hc_and_herdr_on_one_host_share_the_claim_and_writer_lock() {
+    // As in land/prune/tests.rs: another parallel test may fork while this
+    // test holds the lock. Its child retains that open file description until
+    // exec, briefly delaying release after drop. Retry only after deliberate
+    // contention has ended; the held-lock assertion below must fail at once.
+    async fn after_unlock(
+        client: &async_nats::Client,
+        kv: &async_nats::jetstream::kv::Store,
+        here: &Here,
+        now: u64,
+    ) -> Result<Claimed, Failure> {
+        for _ in 0..100 {
+            match claim_on(client, kv, here, now).await {
+                Err(e) if e.code == "claim_busy" => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                result => return result,
+            }
+        }
+        claim_on(client, kv, here, now).await
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let (_server, client, kv) = broker(dir.path()).await;
+        let mut hc = here(dir.path(), "worker", "t7");
+        hc.panes = vec!["t7".into(), "w1:p1".into()];
+        let tui = Here {
+            host: hc.host.clone(),
+            pane: "w1:p1".into(),
+            panes: hc.panes.clone(),
+            unavailable: [None, None],
+            file: hc.file.clone(),
+        };
+        for (a, b) in [(&hc, &tui), (&tui, &hc)] {
+            let lock = claim_lock(a).unwrap();
+            assert_eq!(
+                claim_on(&client, &kv, b, 100).await.unwrap_err().code,
+                "claim_busy"
+            );
+            drop(lock);
+            assert!(after_unlock(&client, &kv, a, 100)
+                .await
+                .unwrap()
+                .lost_to
+                .is_none());
+            assert_eq!(
+                after_unlock(&client, &kv, b, 200).await.unwrap_err().code,
+                "uber_exists"
+            );
+            assert!(after_unlock(&client, &kv, a, 200).await.unwrap().already);
+            uber_state::remove(&hc.file).unwrap();
+            uber_state::unpublish(&kv, &hc.host).await.unwrap();
+        }
+    });
+}
+
 struct Server(Child);
+
+#[test]
+fn a_claim_appearing_after_sampling_in_an_unavailable_world_is_not_taken_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let (_server, client, kv) = broker(dir.path()).await;
+        for (index, caller, incumbent, code) in [
+            (0, "t7", "w1:p1", "herdr_not_found"),
+            (1, "w1:p1", "t7", "hc_not_found"),
+        ] {
+            // Identity and inventory were sampled with no claim present.
+            let mut sampled = here(&dir.path().join(index.to_string()), "worker", caller);
+            sampled.unavailable[index] = Some(Failure::new(code, "inventory unavailable", "retry"));
+            assert!(sampled.check_incumbent().is_ok());
+            // The other world claims before this caller acquires the writer lock.
+            let record = uber_state::value(incumbent, "worker", 0, 50);
+            uber_state::save(&sampled.file, &record).unwrap();
+            let e = claim_on(&client, &kv, &sampled, 100).await.unwrap_err();
+            assert_eq!(e.code, code);
+            assert_eq!(uber_state::local(&sampled.file, "worker"), Some(record));
+        }
+    });
+}
 
 impl Drop for Server {
     fn drop(&mut self) {

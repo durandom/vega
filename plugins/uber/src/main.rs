@@ -11,8 +11,8 @@
 //!
 //! The claim file on its host is the truth; the registry key
 //! `<host>.uber.v1` is its copy (`vega_registry::uber_state`), and
-//! `View::live_uber` decides which claim is the Uber. This host's herdr
-//! panes and claim file replace what the registry holds for it.
+//! `View::live_uber` decides which claim is the Uber. This host's terminal
+//! inventories and claim file replace what the registry holds for it.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -52,7 +52,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// This session becomes the Uber-UAC; a live claim elsewhere refuses
+    /// This hc or herdr session becomes the Uber-UAC; a live claim elsewhere refuses
     Claim,
     /// The Uber hands back its claim
     Release,
@@ -134,8 +134,10 @@ fn main() -> ExitCode {
 struct Here {
     host: String,
     pane: String,
-    /// The panes herdr lists on this host now.
+    /// Live local terminals across hc and herdr.
     panes: Vec<String>,
+    /// Sampled inventory errors: herdr, hc. Retained for claims appearing later.
+    unavailable: [Option<Failure>; 2],
     /// This host's claim file.
     file: PathBuf,
 }
@@ -144,24 +146,96 @@ impl Here {
     fn mine(&self, c: &UberClaim) -> bool {
         c.pane == self.pane && vega_registry::token(&c.host) == vega_registry::token(&self.host)
     }
+
+    fn check_incumbent(&self) -> Result<(), Failure> {
+        if let Some(claim) = uber_state::local(&self.file, &self.host) {
+            let hc = claim["pane"]
+                .as_str()
+                .is_some_and(vega_herdr::pane::is_hc_id);
+            if let Some(e) = &self.unavailable[usize::from(hc)] {
+                return Err(Failure::new(&e.code, &e.message, &e.hint));
+            }
+        }
+        Ok(())
+    }
 }
 
 fn here() -> Result<Here, Failure> {
-    let me = vega_herdr::me()?;
-    let panes = herdr_local(&["pane", "list"])?["result"]["panes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| p["pane_id"].as_str().map(String::from))
-        .collect();
+    use vega_herdr::hc::{own_terminal, terminal_list, Terminal};
+    let me = own_terminal()?;
     let file = uber_state::file()
         .ok_or_else(|| Failure::new("no_home", "no state dir", "set HOME or XDG_STATE_HOME"))?;
-    Ok(Here {
-        host: st::post_host(),
-        pane: me.pane,
+    let host = st::post_host();
+    let tui = herdr_local(&["pane", "list"]).and_then(|v| {
+        v["result"]["panes"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|p| p["pane_id"].as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .ok_or_else(|| {
+                Failure::new(
+                    "herdr_bad_output",
+                    "pane list has no panes array",
+                    "check herdr --version",
+                )
+            })
+    });
+    let hc = terminal_list();
+    let mut panes = Vec::new();
+    let mut unavailable = [None, None];
+    match tui {
+        Ok(rows) => panes.extend(rows),
+        Err(e) if matches!(me, Terminal::Herdr(_)) => return Err(e),
+        Err(e) => unavailable[0] = Some(e),
+    }
+    match hc {
+        Ok(v) => panes.extend(
+            v["terminals"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|t| t["state"] == "live")
+                .filter_map(|t| t["address"].as_str())
+                // Fleet addresses must never make a local claim look live.
+                .filter(|p| vega_herdr::pane::is_hc_id(p))
+                .map(String::from),
+        ),
+        Err(e) if matches!(me, Terminal::Hc(_)) => return Err(e),
+        Err(e) => unavailable[1] = Some(e),
+    }
+    let here = Here {
+        host,
+        pane: me.pane().into(),
         panes,
+        unavailable,
         file,
-    })
+    };
+    here.check_incumbent()?;
+    Ok(here)
+}
+
+/// Serialize this host's claim/release across both terminal worlds.
+fn claim_lock(here: &Here) -> Result<std::fs::File, Failure> {
+    let io = |e: std::io::Error| Failure::new("state_io", e.to_string(), "check the state dir");
+    if let Some(dir) = here.file.parent() {
+        std::fs::create_dir_all(dir).map_err(io)?;
+    }
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(here.file.with_extension("lock"))
+        .map_err(io)?;
+    lock.try_lock().map_err(|e| {
+        Failure::new(
+            "claim_busy",
+            e.to_string(),
+            "retry vega uber status, then claim or release",
+        )
+    })?;
+    Ok(lock)
 }
 
 fn now_ms() -> u64 {
@@ -247,6 +321,9 @@ async fn claim_on(
     here: &Here,
     now: u64,
 ) -> Result<Claimed, Failure> {
+    let _lock = claim_lock(here)?;
+    // The incumbent may have appeared or changed worlds since inventory sampling.
+    here.check_incumbent()?;
     let view = read_view(client, kv, here).await.map_err(no_broker)?;
     if let Some(w) = view.live_uber() {
         if here.mine(&w) {
@@ -352,6 +429,7 @@ fn claim() -> Result<(), Failure> {
 
 fn release() -> Result<(), Failure> {
     let here = here()?;
+    let _lock = claim_lock(&here)?;
     let Some(record) = uber_state::local(&here.file, &here.host) else {
         println!("released: no Uber claim on {} (no-op)", here.host);
         return Ok(());

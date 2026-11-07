@@ -5,7 +5,7 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
-## 125 · 2026-11-07
+## 126 · 2026-11-08
 
 - unit: The herdr-app sidebar mod is renamed `vega-agents` -> `vega-sidebar` (unit
   `herdr-app.vega-sidebar`) and is now the only sidebar list, titled VEGA: UAC
@@ -15,6 +15,12 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   palette hint. Run `vega config apply herdr-app`.
 - migration: Delete the old mod folder `~/.config/herdr-app/mods/vega-agents`
   (and its `.vega-mod.vega-agents-bak`) after the apply.
+
+## 125 · 2026-11-07
+
+- feature: `vega uber` claim, status, ask and brief work from hc terminals.
+  hc and herdr sessions share one host claim and check both local inventories;
+  concurrent claim/release operations refuse with `claim_busy` and can be retried.
 
 ## 124 · 2026-11-07
 

@@ -372,6 +372,33 @@ mod tests {
     }
 
     #[test]
+    fn hc_uac_routes_to_the_exact_hc_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let r = ask_to(
+            d,
+            body(),
+            Uac {
+                pane: "t8".into(),
+                ..uac(d)
+            },
+            Ok(live("ganymede", "t7", 77)),
+            5,
+            |to, body| {
+                assert_eq!(
+                    (to.host.as_str(), to.pane.as_str(), to.epoch),
+                    ("ganymede", "t7", 77)
+                );
+                assert!(vega_uber_msg::validate(Kind::Ask, body.as_bytes()).is_ok());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(r.uac_pane, "t8");
+        assert_eq!(uber_asks::load(d, &r.ask.id), Some(r));
+    }
+
+    #[test]
     fn options_split_at_the_first_colon() {
         let o = parse_option("yes: push: now ");
         assert_eq!((o.label.as_str(), o.detail.as_str()), ("yes", "push: now"));
