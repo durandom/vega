@@ -91,7 +91,7 @@ impl Fixture {
         }
         let exe = bin.join("vega-post");
         fs::copy(env!("CARGO_BIN_EXE_vega-post"), &exe).unwrap();
-        let terminals:Vec<_>=["t1","t2","io/t9"].iter().map(|p| json!({"address":p,"state":"live","name":p,"cwd":h,"turn":0,"status":{"app":"claude-code","state":"idle"}})).collect();
+        let terminals:Vec<_>=["t1","t2","io/t9"].iter().map(|p| json!({"argv":[],"labels":{},"created_ms":0,"screen":"exact","cols":80,"rows":24,"address":p,"state":"live","name":p,"cwd":h,"turn":0,"status":{"app":"claude-code","state":"idle"}})).collect();
         write(&h.join("hc.json"), &json!({"terminals":terminals}));
         let cutover = h.join("state/vega/identity-cutover");
         fs::create_dir_all(&cutover).unwrap();
@@ -462,7 +462,7 @@ fn hc_snapshot_cleans_closed_children_and_working_children_do_not_need_parent() 
     let mut v: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
     v["terminals"][1]["status"]["state"] = json!("working");
     v["terminals"].as_array_mut().unwrap().push(json!({
-        "address":"t3", "state":"finished", "parent":"t1"
+        "argv":[],"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"labels":{},"address":"t3", "state":"finished", "parent":"t1"
     }));
     write(&file, &v);
     f.start();

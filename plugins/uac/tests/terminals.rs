@@ -48,24 +48,20 @@ esac"#,
             &bin,
             "hc",
             r#"
-if [ "$1" = connect ]; then
- read -r request
- case "$request" in *'"method":"terminal.list"'*) ;; *) exit 1 ;; esac
- printf '{"jsonrpc":"2.0","id":1,"result":'
- cat "$HOME/hc.json"
- printf '}'
- exit 0
-fi
-case "$2" in
- get) case "$3" in
-   t1) cat "$HOME/me.json" ;;
-   t2) cat "$HOME/child.json" ;;
-   io/t9|io/remote-worker) cat "$HOME/remote.json" ;;
-   *) echo '{"error":{"kind":"not_found","message":"unexpected target"}}'; exit 3 ;;
- esac ;;
- ls) echo '{"terminals":[{"address":"t1","agent":"codex","cwd":"/shell","state":"live","status":"idle","turn":0,"where":"local"}]}' ;;
- *) echo '{}' ;;
-esac"#,
+exec /usr/bin/python3 -c '
+import json,os,sys
+from pathlib import Path
+r=json.loads(sys.stdin.readline()); p=r["params"]; root=Path(os.environ["HOME"])
+if r["method"]=="terminal.list": v=json.loads((root/"hc.json").read_text())
+else:
+ assert r["method"]=="terminal.get"
+ name={"t1":"me","t2":"child","io/t9":"remote","io/remote-worker":"remote"}.get(p["terminal"])
+ if name is None:
+  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32000,"message":"unexpected target","data":{"kind":"not_found"}}})); sys.exit(3)
+ v=json.loads((root/(name+".json")).read_text())
+print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":v}))
+'
+"#,
         );
         script(
             &bin,
@@ -81,7 +77,7 @@ esac"#,
         script(&bin, "gh", "echo '{}'");
         let child = if hc { "t2" } else { "w1:p2" };
         let tui = |p: &str| json!({"pane_id":p,"name":p,"agent":"codex","agent_status":"idle","cwd":root});
-        let terminal = |p: &str| json!({"address":p,"name":p,"state":"live","pid":std::process::id(),"status":{"app":"codex","state":"idle"},"cwd":root});
+        let terminal = |p: &str| json!({"argv":[],"labels":{},"created_ms":0,"screen":"exact","cols":80,"rows":24,"address":p,"name":p,"state":"live","pid":std::process::id(),"status":{"app":"codex","state":"idle"},"cwd":root});
         for (name, value) in [
             ("panes", json!({"result":{"panes":[tui("w1:p1")]}})),
             (
@@ -93,11 +89,11 @@ esac"#,
             ("child", terminal("t2")),
             (
                 "remote",
-                json!({"address":"io/t9", "name":"remote-worker", "state":"live", "status":{"app":"codex", "state":"idle"}, "cwd":"/remote/path/never/local"}),
+                json!({"argv":[],"labels":{},"created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"io/t9", "name":"remote-worker", "state":"live", "status":{"app":"codex", "state":"idle"}, "cwd":"/remote/path/never/local"}),
             ),
             (
                 "hc",
-                json!({"hidden_finished":0,"machines":[],"terminals":[terminal("t1"),terminal("t2"), {"address":"remote/t9","state":"live","cwd":"/not/local"}]}),
+                json!({"hidden_finished":0,"machines":[],"terminals":[terminal("t1"),terminal("t2"), {"argv":[],"labels":{},"created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"remote/t9","state":"live","cwd":"/not/local"}]}),
             ),
         ] {
             fs::write(root.join(format!("{name}.json")), value.to_string()).unwrap();

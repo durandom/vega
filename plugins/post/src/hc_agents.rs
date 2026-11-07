@@ -1,7 +1,7 @@
-//! hc events.subscribe through its JSON-lines CLI, with bounded silence and
+//! hc events.subscribe through its JSON-lines RPC transport, with bounded silence and
 //! polling fallback. Only local terminals enter this host's relay/registry.
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -96,12 +96,23 @@ fn parse(v: &Value, seq: u64) -> Result<Parsed, String> {
 
 fn stream(tx: &UnboundedSender<Event>) -> Result<(), String> {
     let mut child = Command::new("hc")
-        .args(["--json", "events"])
-        .stdin(Stdio::null())
+        .arg("connect")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
+    // Keep stdin open for this subscription; closing it ends `hc connect`.
+    let mut stdin = child.stdin.take().expect("piped");
+    if let Err(e) = writeln!(
+        stdin,
+        "{}",
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"events.subscribe","params":{}})
+    ) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e.to_string());
+    }
     let stdout = child.stdout.take().expect("piped");
     let (lines_tx, lines) = mpsc::channel();
     let reader = thread::spawn(move || {
@@ -123,7 +134,16 @@ fn stream(tx: &UnboundedSender<Event>) -> Result<(), String> {
                 .recv_timeout(STREAM_RETRY)
                 .map_err(|e| e.to_string())?
                 .map_err(|e| e.to_string())?;
-            let v: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+            let mut v: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+            if !synced {
+                if v["jsonrpc"] != "2.0" || v["id"] != 1 {
+                    return Err("invalid events.subscribe reply".into());
+                }
+                let result = v.get("result").ok_or("events.subscribe failed")?;
+                vega_herdr::hc::validate_result("events.subscribe", result)
+                    .map_err(|e| e.message)?;
+                v = result.clone();
+            }
             match parse(&v, seq)? {
                 Parsed::Snapshot(panes, at) => {
                     if let Ok(agents) = terminals::hc_agents(&v) {

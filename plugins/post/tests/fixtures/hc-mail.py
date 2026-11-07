@@ -2,26 +2,34 @@
 import json, os, pathlib, sys, time
 home = pathlib.Path(os.environ['HOME'])
 args = sys.argv[1:]
-if args[0] == '--json': args.pop(0)
-def emit(v): print(json.dumps(v), flush=True)
+assert args == ['connect']
+request=None
+def emit(v): print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':v} if request else v), flush=True)
+def error(kind):
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':kind,'data':{'kind':kind,'hint':'wait'}}}),flush=True)
+    sys.exit(9)
 def load(): return json.loads((home/'hc.json').read_text())
 def get(p):
     for t in load()['terminals']:
         if t['address'] == p:
             t['pid'] = int(os.environ['FAKE_PID'])
             return t
-    emit({'error': {'kind':'not_found', 'message':'closed', 'hint':'list'}})
-    sys.exit(3)
+    error('not_found')
 if args[0] == 'connect':
     request = json.loads(sys.stdin.readline())
-    if request['method'] == 'terminal.list':
-        assert request['params'] == {}
-        emit({'jsonrpc':'2.0','id':request['id'],'result':dict(load(), hidden_finished=0, machines=[])})
-    else:
-        emit({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32601,'message':'unknown method'}})
-elif args[0] == 'ls':
-    emit({'hidden_finished':0,'machines':[],'terminals':[{'address':t['address'],'agent':t.get('status',{}).get('app'),'cwd':t.get('cwd'),'state':t['state'],'status':t.get('status',{}).get('state'),'turn':t.get('turn',0),'where':'local'} for t in load()['terminals']]})
-elif args[0] == 'get': emit(get(args[1]))
+    p=request['params']
+    method=request['method']
+    if method == 'events.subscribe': args=['events']
+    elif method == 'terminal.list':
+        emit(dict(load(), hidden_finished=0, machines=[]))
+        sys.exit(0)
+    elif method == 'terminal.get': args=['get',p['terminal']]
+    elif method == 'terminal.read': args=['read',p['terminal']]
+    elif method == 'terminal.send': args=['send']+(['--if',p['if']] if 'if' in p else [])+[p['terminal'],p['text']]
+    elif method == 'terminal.label': args=['label',p['terminal']]
+    else: raise AssertionError(method)
+if args[0] == 'get': emit(get(args[1]))
+elif args[0] == 'label': emit(get(args[1]))
 elif args[0] == 'read':
     screen = home/'hc-screen'
     emit({'text':screen.read_text() if screen.exists() else 'completed work', 'complete':True, 'how':'screen'})
@@ -33,8 +41,7 @@ elif args[0] == 'send':
     # Simulate a status change between get and send.
     if (home/'race').exists(): state = (home/'race').read_text()
     if state == 'blocked' or ('--if' in args and state != args[args.index('--if')+1]):
-        emit({'error':{'kind':'blocked' if state == 'blocked' else 'status_mismatch','message':'changed','hint':'wait'}})
-        sys.exit(9)
+        error('blocked' if state == 'blocked' else 'status_mismatch')
     with (home/'prompts').open('a') as f: f.write(json.dumps({'pane':p,'args':args,'text':text})+'\n')
     emit({'started':True,'status':state,'turn':1})
 elif args[0] == 'events':
@@ -42,6 +49,7 @@ elif args[0] == 'events':
     # Parent-death check ensures test cleanup cannot leave a fake watcher.
     parent = os.getppid()
     emit(dict(load(), seq=0))
+    request=None
     cursor = home/'cursor'
     offset = int(cursor.read_text()) if cursor.exists() else 0
     while os.getppid() == parent:

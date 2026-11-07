@@ -10,7 +10,8 @@ if sys.argv[1:3] != ['do', 'space.new']:
 path = root/'terminals.json'
 terminals = json.loads(path.read_text()) if path.exists() else {}
 terminals['t0'] = {'address':'t0','name':None,'state':'live','argv':['/bin/zsh','-l'],
-    'foreground':{'name':'zsh','argv':['-zsh'],'cwd':str(root/'worktree')},
+    'created_ms':0,'screen':'exact','cols':80,'rows':24,'cwd':str(root/'worktree'),
+    'foreground':{'pid':1,'name':'zsh','argv':['-zsh'],'cwd':str(root/'worktree')},
     'labels':{'herdr.space':'s2','herdr.tab':'tb2'},'status':None}
 path.write_text(json.dumps(terminals))
 # Real space.new returns its initial shell as well as the new space and tab.

@@ -685,7 +685,7 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
         ("working", 0, true, "working"),
         ("idle", 1, true, "idle"),
     ] {
-        let info = serde_json::json!({"address": "t11", "state": "live", "status": {"state": status}, "turn": turn, "first_message": {"sent": sent}});
+        let info = serde_json::json!({"argv":[],"labels":{},"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address": "t11", "state": "live", "status": {"state": status}, "turn": turn, "first_message": {"sent": sent}});
         fs::write(tmp.path().join("hc-t11.json"), info.to_string()).unwrap();
         let home = run(&work, tmp.path(), &env, &[]);
         assert!(home.status.success(), "{}", out(&home));
@@ -699,7 +699,7 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
         (None, "sentinel", "name the verdict in your done report"),
         (None, "", "push again"),
     ] {
-        let author = serde_json::json!({"address": "t1", "state": "live", "pid": std::process::id(), "parent": parent, "labels": {"vega.role": role}, "status": {"app": "claude-code"}});
+        let author = serde_json::json!({"argv":[],"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address": "t1", "state": "live", "pid": std::process::id(), "parent": parent, "labels": {"vega.role": role}, "status": {"app": "claude-code", "state":"working"}});
         fs::write(tmp.path().join("hc-t1.json"), author.to_string()).unwrap();
         let running = run(&work, tmp.path(), &env, &["start"]);
         assert!(running.status.success(), "{}", out(&running));
@@ -707,7 +707,7 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
     }
     fs::write(
         tmp.path().join("hc-t11.json"),
-        r#"{"address":"t11","state":"finished"}"#,
+        r#"{"argv":[],"labels":{},"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"t11","state":"finished"}"#,
     )
     .unwrap();
     let home = run(&work, tmp.path(), &env, &[]);

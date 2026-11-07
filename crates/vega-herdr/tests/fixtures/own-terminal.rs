@@ -5,8 +5,9 @@ pub fn fixture(binary: &str) -> (tempfile::TempDir, Command) {
     let bin = dir.path().join("bin");
     fs::create_dir_all(&bin).unwrap();
     fs::write(bin.join("hc"), r#"#!/bin/sh
-[ "$1 $2 $3" = '--json get t7' ] || exit 1
-printf '{"state":"live","address":"t7","pid":%s,"name":"child","parent":"t2","status":{"app":"claude-code"},"foreground":{"cwd":"/project"}}\n' "$TEST_PARENT_PID"
+[ "$1" = connect ] || exit 1
+read -r request
+printf '{"jsonrpc":"2.0","id":1,"result":{"argv":[],"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"labels":{},"state":"live","address":"t7","pid":%s,"name":"child","parent":"t2","status":{"app":"claude-code","state":"idle"},"foreground":{"pid":1,"name":"claude","argv":["claude"],"cwd":"/project"}}}\n' "$TEST_PARENT_PID"
 "#).unwrap();
     fs::set_permissions(bin.join("hc"), fs::Permissions::from_mode(0o755)).unwrap();
     let mut c = Command::new(binary);

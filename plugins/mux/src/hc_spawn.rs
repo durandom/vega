@@ -299,7 +299,7 @@ pub fn spawn(
     Ok(pane)
 }
 
-/// `hc exec --json` wraps the program's output: base64 `stdout`, its exit `code`.
+/// `machine.exec` wraps the program's output: base64 `stdout`, its exit `code`.
 fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
     use base64::Engine;
     let fail = |m: String| {
@@ -312,7 +312,7 @@ fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
     let stdout = wrapped["stdout"]
         .as_str()
         .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
-        .ok_or_else(|| fail(format!("{target}: hc exec returned no stdout")))?;
+        .ok_or_else(|| fail(format!("{target}: machine.exec returned no stdout")))?;
     if wrapped["code"] != 0 {
         let stderr = wrapped["stderr"]
             .as_str()

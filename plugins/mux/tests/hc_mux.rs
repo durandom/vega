@@ -74,6 +74,25 @@ fn success(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 #[test]
+fn broken_python_fake_results_fail_the_wire_contract() {
+    for case in ["missing", "wrapped"] {
+        let f = Fixture::new();
+        let out = f
+            .cmd()
+            .env_remove("HC_TERMINAL_ID")
+            .env("TEST_BROKEN", case)
+            .args(["show", "hc:t7"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "broken {case} fake was accepted");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains("hc_bad_output") && text.contains("required field missing"),
+            "{text}"
+        );
+    }
+}
+#[test]
 fn hc_spawn_show_send_capture_close_reopen_and_transcript() {
     let f = Fixture::new();
     f.spawn();
@@ -431,7 +450,7 @@ fn remote_hc_spawn_routes_to_machine_without_local_space_label() {
     let f = Fixture::new();
     let out = success(
         f.cmd()
-            .env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","target":"user@remote","via":false}]}"#)
+            .env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.18","state":"connected","target":"user@remote","via":false}]}"#)
             .args(["spawn", "worker", "--kind", "codex", "--machine", "remote", "--cwd", "/remote/repo", "--", "-m", "chosen"])
             .output().unwrap(),
     );
@@ -586,7 +605,7 @@ fn remote_prepare_uses_target_trust_and_copies_hook_approvals() {
             .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
             .env(
                 "TEST_MACHINES",
-                r#"{"machines":[{"name":"remote","host":"remote"}]}"#,
+                r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.18","state":"connected","target":"user@remote"}]}"#,
             )
             .args([
                 "spawn",
@@ -626,7 +645,7 @@ fn remote_preparation_failure_never_launches() {
         .env("TEST_PREPARE_FAIL", "1")
         .env(
             "TEST_MACHINES",
-            r#"{"machines":[{"name":"remote","host":"remote"}]}"#,
+            r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.18","state":"connected","target":"user@remote"}]}"#,
         )
         .args([
             "spawn",

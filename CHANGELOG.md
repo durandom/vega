@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 124 · 2026-11-07
+
+- feature: hc calls use the versioned RPC API, including remote preparation and
+  vegad's event stream. Results are checked against the vendored hc 0.1.18 schema
+  so incompatible responses fail explicitly; subprocess test fakes use the same
+  check. The herdr TUI backend is unchanged.
+
 ## 123 · 2026-11-07
 
 - feature: hc terminal discovery uses the full RPC inventory, restoring harness

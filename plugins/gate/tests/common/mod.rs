@@ -236,34 +236,7 @@ case "$1 $2" in
 esac
 "#,
     );
-    let hc = shared_script(
-        "gate-fakes",
-        "hc",
-        r#"L=${FAKE_LOG:?}
-printf '%s\n' "$*" >> "$L/hc.log"
-[ "$1" = --json ] && shift
-case "$1" in
-  get)
-    if [ -f "$L/hc-$2.json" ]; then cat "$L/hc-$2.json"; exit; fi
-    pid=$PPID
-    review=$(cat "$L/hc-review" 2>/dev/null || echo none)
-    [ -f "$L/hc-stale" ] && pid=2
-    printf '{"address":"%s","state":"live","pid":%s,"status":{"app":"claude-code","state":"working"},"foreground":{"cwd":"/nonexistent"},"labels":{"herdr.space":"space-1","vega.review":"%s"}}\n' "$2" "$pid" "$review" ;;
-  run)
-    n=$(( $(cat "$L/hc-n" 2>/dev/null || echo 10) + 1 )); echo "$n" > "$L/hc-n"
-    printf '{"address":"t%s"}\n' "$n" ;;
-  rm)
-    n=$(cat "$L/hc-rm-busy" 2>/dev/null || echo 0)
-    if [ "$n" -gt 0 ]; then
-      echo $((n - 1)) > "$L/hc-rm-busy"
-      echo '{"error":{"kind":"live","message":"still running"}}' >&2
-      exit 6
-    fi
-    echo '{}' ;;
-  send|kill) echo '{}' ;;
-esac
-"#,
-    );
+    let hc = shared_script("gate-fakes", "hc", include_str!("../fixtures/hc.sh"));
     let mut harness = PathBuf::new();
     for kind in ["codex", "claude", "pi", "agy"] {
         harness = shared_script("gate-harness", kind, "exit 0\n");

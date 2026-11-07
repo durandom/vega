@@ -27,12 +27,12 @@ fn fake_hc_contract() {
             "on" => {
                 assert_eq!(
                     hc_on(Some("remote"), &["run", "--bg", "--", "echo", "hi"], None).unwrap()
-                        ["ok"],
-                    true
+                        ["address"],
+                    "remote/t7"
                 );
             }
             "bad" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_bad_output"),
-            "exit" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_error"),
+            "exit" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_bad_output"),
             "timeout" => assert_eq!(
                 hc_on(None, &["ls"], Some(Duration::from_millis(50)))
                     .unwrap_err()
@@ -59,22 +59,25 @@ fn fake_hc_contract() {
     let dir = tempfile::tempdir().unwrap();
     let pid = std::process::id();
     let fake = dir.path().join("hc");
-    fs::write(&fake, format!(r#"#!/bin/sh
-printf '%s\n' "$@" > "$VEGA_HC_ARGS"
-case "$VEGA_HC_TEST" in
-hc) printf '%s' '{{"state":"live","address":"t7","pid":{pid}}}' ;;
-hc_foreground) printf '%s' '{{"state":"live","address":"t7","pid":0,"foreground":{{"pid":{pid}}}}}' ;;
-hc_agent_cwd) printf '%s' '{{"state":"live","address":"t7","pid":{pid},"cwd":"/shell/vega","foreground":{{"pid":{pid},"cwd":"/agent/rally-coach"}},"status":{{"app":"claude-code","state":"idle"}}}}' ;;
-hc_agent_launch_cwd) printf '%s' '{{"state":"live","address":"t7","pid":{pid},"cwd":"/shell/vega","foreground":null,"status":{{"app":"claude-code","state":"idle"}}}}' ;;
-stale) printf '%s' '{{"state":"live","address":"t7","pid":4294967295}}' ;;
-finished) printf '%s' '{{"state":"finished","address":"t7","pid":{pid}}}' ;;
-wrong_address) printf '%s' '{{"state":"live","address":"t8","pid":{pid}}}' ;;
-on) printf '%s' '{{"ok":true}}' ;;
-bad) printf nope ;;
-exit) exit 4 ;;
-timeout) /bin/sleep 5 ;;
-*) printf '{{"error":{{"kind":"%s","message":"probe","hint":"try again"}}}}' "$VEGA_HC_TEST" >&2; exit 3 ;;
-esac
+    fs::write(&fake, format!(r#"#!/usr/bin/python3
+import json,os,sys,time
+open(os.environ['VEGA_HC_ARGS'],'w').write('\n'.join(sys.argv[1:])+'\n')
+r=json.loads(sys.stdin.readline())
+c=os.environ['VEGA_HC_TEST']
+t={{"address":"t7","state":"live","pid":{pid},"labels":{{}},"argv":[],"cwd":"/shell/vega","created_ms":0,"screen":"exact","cols":80,"rows":24}}
+if c=='hc_foreground': t.update(pid=0,foreground={{"pid":{pid},"name":"codex","argv":["codex"],"cwd":"/project"}})
+elif c=='hc_agent_cwd': t.update(foreground={{"pid":{pid},"name":"claude","argv":["claude"],"cwd":"/agent/rally-coach"}},status={{"app":"claude-code","state":"idle"}})
+elif c=='hc_agent_launch_cwd': t.update(foreground=None,status={{"app":"claude-code","state":"idle"}})
+elif c=='stale': t['pid']=4294967295
+elif c=='finished': t['state']='finished'
+elif c=='wrong_address': t['address']='t8'
+elif c=='bad': print('nope');sys.exit()
+elif c=='exit': sys.exit(4)
+elif c=='timeout': time.sleep(5)
+elif c=='on': t['address']='remote/t7'
+elif c not in ['hc']:
+ print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"error":{{"code":-32000,"message":"probe","data":{{"kind":c,"hint":"try again"}}}}}}));sys.exit(3)
+print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"result":t}}))
 "#)).unwrap();
     fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
     let herdr = dir.path().join("herdr");
@@ -144,13 +147,10 @@ esac
             String::from_utf8_lossy(&out.stderr)
         );
         if case == "on" {
-            assert_eq!(
-                fs::read_to_string(&args).unwrap(),
-                "--json\nrun\n--bg\n--on\nremote\n--\necho\nhi\n"
-            );
+            assert_eq!(fs::read_to_string(&args).unwrap(), "connect\n");
         }
         if case == "hc" {
-            assert_eq!(fs::read_to_string(&args).unwrap(), "--json\nget\nt7\n");
+            assert_eq!(fs::read_to_string(&args).unwrap(), "connect\n");
         }
         if ["herdr", "stale_herdr", "neither"].contains(&case) {
             assert!(!args.exists(), "{case} must not call hc");
@@ -171,18 +171,17 @@ fn fleet_prefers_hc_and_only_falls_back_when_empty() {
             }
             "empty" => assert_eq!(result.unwrap()[0]["label"], "legacy"),
             "bad" => assert_eq!(result.unwrap_err().code, "hc_bad_output"),
-            _ => assert_eq!(result.unwrap_err().code, "hc_error"),
+            _ => assert_eq!(result.unwrap_err().code, "hc_bad_output"),
         }
         return;
     }
     let d = tempfile::tempdir().unwrap();
-    for (name,text) in [("hc",r#"#!/bin/sh
-case "$VEGA_FLEET_TEST" in
-hc) echo '{"machines":[{"name":"corp","target":"user@corp:22","host":"corp","via":false}]}' ;;
-empty) echo '{"machines":[]}' ;;
-bad) echo '{}' ;;
-*) exit 1 ;;
-esac
+    for (name,text) in [("hc",r#"#!/usr/bin/python3
+import json,os,sys
+r=json.loads(sys.stdin.readline()); c=os.environ['VEGA_FLEET_TEST']
+if c=='failed':sys.exit(1)
+v={'machines':[]} if c=='empty' else {} if c=='bad' else {'machines':[{'name':'corp','target':'user@corp:22','host':'corp','via':False,'state':'connected','id':'id','version':'0.1.18'}]}
+print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':v}))
 "#),("herdr","#!/bin/sh\necho '[{\"label\":\"legacy\",\"target\":\"old\",\"enabled\":true}]'\ntouch \"$HOME/fallback\"\n")] {
         fs::write(d.path().join(name),text).unwrap();fs::set_permissions(d.path().join(name),fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -215,7 +214,11 @@ fn rpc_contract() {
                 "argv":["codex","literal $text; no shell"], "env":{"SPECIAL":"a b"},
                 "on":"remote", "outlive_parent":true,
             }),
-            Duration::from_millis(200),
+            if case == "timeout" {
+                Duration::from_millis(200)
+            } else {
+                Duration::from_secs(3)
+            },
         );
         match case.as_str() {
             "ok" => assert_eq!(result.unwrap()["address"], "remote/t7"),
@@ -231,10 +234,11 @@ fn rpc_contract() {
 [ "$1" = connect ] || exit 1
 cat > "$VEGA_HC_ARGS"
 case "$VEGA_HC_RPC_TEST" in
-ok) echo '{"jsonrpc":"2.0","id":1,"result":{"address":"remote/t7"}}' ;;
+ok) echo '{"jsonrpc":"2.0","id":1,"result":{"address":"remote/t7","labels":{},"argv":[],"cwd":"/fixture","state":"live","created_ms":0,"screen":"exact","cols":80,"rows":24}}' ;;
 error) echo '{"jsonrpc":"2.0","id":1,"error":{"message":"failed","data":{"kind":"spawn_failed","hint":"check cwd"}}}' ;;
 timeout) sleep 5 ;;
 wrong_id) echo '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+missing_field) echo '{"jsonrpc":"2.0","id":1,"result":{"address":"t7"}}' ;;
 missing_result) echo '{"jsonrpc":"2.0","id":1}' ;;
 *) echo not-json ;;
 esac
@@ -245,6 +249,7 @@ esac
         "error",
         "timeout",
         "wrong_id",
+        "missing_field",
         "missing_result",
         "malformed",
     ] {
@@ -310,16 +315,11 @@ fn empty_tui_environment_is_absent_for_history_and_errors() {
     );
 }
 
-// Keep the two hc wire contracts distinct: `ls` is a display summary, while
-// terminal.list and CLI get expose full Terminal metadata used by discovery.
+// Both inventory and individual reads preserve full RPC Terminal metadata.
 #[test]
 fn terminal_list_contract_preserves_full_metadata() {
     use serde_json::{json, Value};
     if env::var_os("VEGA_HC_LIST_TEST").is_some() {
-        let summary = hc_local(&["ls"]).unwrap();
-        assert_eq!(summary["terminals"][0]["status"], "working");
-        assert!(summary["terminals"][0].get("labels").is_none());
-        assert!(summary["terminals"][0].get("foreground").is_none());
         let list = vega_herdr::hc::terminal_list().unwrap();
         let terminal = &list["terminals"][0];
         assert_eq!(terminal["status"]["app"], "claude-code");
@@ -332,7 +332,7 @@ fn terminal_list_contract_preserves_full_metadata() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
-    let terminal = json!({"address":"t34", "name":"coach", "parent":"t2",
+    let terminal = json!({"created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"t34", "name":"coach", "parent":"t2",
         "state":"live", "cwd":"/home/user", "argv":["/bin/zsh","-l"],
         "pid":123, "turn":4, "foreground":{"argv":["claude"],
             "cwd":"/projects/rally-coach", "name":"claude", "pid":456},
@@ -348,12 +348,6 @@ fn terminal_list_contract_preserves_full_metadata() {
             "hidden_finished":0,"machines":[],"terminals":[
                 terminal,remote]}}),
         ),
-        (
-            "summary",
-            json!({"hidden_finished":0,"machines":[],"terminals":[{
-            "address":"t34","agent":"claude-code","cwd":"/home/user",
-            "state":"live","status":"working","turn":4,"where":"coach / 1"}]}),
-        ),
     ] {
         fs::write(dir.path().join(name), value.to_string()).unwrap();
     }
@@ -363,10 +357,12 @@ fn terminal_list_contract_preserves_full_metadata() {
         r#"#!/bin/sh
 case "$1 $2" in
  'connect ')
-   cat > "$VEGA_HC_ARGS"
-   cat "$VEGA_HC_LIST_TEST/list" ;;
- '--json ls') cat "$VEGA_HC_LIST_TEST/summary" ;;
- '--json get') cat "$VEGA_HC_LIST_TEST/terminal" ;;
+   read -r request
+   printf '%s' "$request" > "$VEGA_HC_ARGS"
+   case "$request" in
+    *'"method":"terminal.get"'*) printf '{"jsonrpc":"2.0","id":1,"result":'; cat "$VEGA_HC_LIST_TEST/terminal"; printf '}' ;;
+    *) cat "$VEGA_HC_LIST_TEST/list" ;;
+   esac ;;
  *) exit 1 ;;
 esac
 "#,
@@ -380,6 +376,7 @@ esac
             "terminal_list_contract_preserves_full_metadata",
             "--nocapture",
         ])
+        .env_remove("HC_TERMINAL_ID")
         .env("VEGA_HC_LIST_TEST", dir.path())
         .env("VEGA_HC_ARGS", &request)
         .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
@@ -394,6 +391,6 @@ esac
     let request: Value = serde_json::from_slice(&fs::read(request).unwrap()).unwrap();
     assert_eq!(
         request,
-        json!({"jsonrpc":"2.0","id":1,"method":"terminal.list","params":{}})
+        json!({"jsonrpc":"2.0","id":1,"method":"terminal.get","params":{"terminal":"t34"}})
     );
 }

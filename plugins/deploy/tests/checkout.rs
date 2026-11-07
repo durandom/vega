@@ -28,7 +28,12 @@ fn fixture_bin() -> &'static Path {
         let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("deploy-checkout-bin");
         fs::create_dir_all(&bin).unwrap();
         for (name, text) in [
-            ("hc", "#!/bin/sh\nif [ -f \"$HOME/machines.json\" ]; then cat \"$HOME/machines.json\"; else echo '{\"machines\":[]}'; fi\n"),
+            ("hc", r#"#!/bin/sh
+read -r request
+printf '{"jsonrpc":"2.0","id":1,"result":'
+if [ -f "$HOME/machines.json" ]; then cat "$HOME/machines.json"; else printf '{"machines":[]}'; fi
+printf '}'
+"#),
             (
                 "ssh",
                 "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/ssh-calls\"\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",
@@ -391,8 +396,8 @@ fn mixed_fleet(f: &Fixture) {
     fs::write(
         f.home.join("machines.json"),
         r#"{"machines":[
-        {"name":"target","host":"target","target":"fixture","via":false},
-        {"name":"provider","host":"provider","target":"do-not-ssh","via":true}
+        {"name":"target","host":"target","id":"id1","version":"0.1.18","state":"connected","target":"fixture","via":false},
+        {"name":"provider","host":"provider","id":"id2","version":"0.1.18","state":"connected","target":"do-not-ssh","via":true}
     ]}"#,
     )
     .unwrap();

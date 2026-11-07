@@ -978,3 +978,5 @@ mod tests {
 }
 
 pub mod history;
+
+mod hc_schema;

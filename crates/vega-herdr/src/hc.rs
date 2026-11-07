@@ -125,83 +125,112 @@ pub fn hc_local(args: &[&str]) -> Result<Value, Failure> {
     hc_on(None, args, None)
 }
 
-/// Target run/exec/file/doc commands with `--on`; terminal commands accept a
-/// machine-qualified address in argv with `target = None` (get/send/ls have
-/// no --on flag). Put program argv after `--`, as with the hc CLI.
+/// Compatibility argv for vega's existing callers, translated to schema-covered
+/// RPC requests. No CLI display JSON is parsed. Unknown arguments fail closed.
 pub fn hc_on(
     target: Option<&str>,
     args: &[&str],
     timeout: Option<Duration>,
 ) -> Result<Value, Failure> {
-    let mut cmd = Command::new("hc");
-    cmd.arg("--json");
-    let split = args.iter().position(|a| *a == "--").unwrap_or(args.len());
-    cmd.args(&args[..split]);
-    if let Some(m) = target {
-        cmd.args(["--on", m]);
-    }
-    cmd.args(&args[split..]);
-    let timeout = timeout.or_else(|| {
-        BOUNDED
-            .load(std::sync::atomic::Ordering::Relaxed)
-            .then_some(DAEMON_CALL_TIMEOUT)
-    });
-    let io = |e: std::io::Error| {
+    let usage = || {
         Failure::new(
-            "hc_not_found",
-            e.to_string(),
-            "install hc or put it on PATH",
+            "usage",
+            "unsupported hc operation or arguments",
+            "use hc::rpc with schema-covered parameters",
         )
     };
-    let out = match timeout {
-        None => cmd.output().map_err(io)?,
-        Some(t) => crate::output_within(&mut cmd, t)
-            .map_err(io)?
-            .ok_or_else(|| {
-                Failure::new(
-                    "hc_timeout",
-                    "hc did not answer before the deadline",
-                    "check that the core and target machine are reachable",
-                )
-            })?,
+    let mut p = serde_json::json!({});
+    let mut words = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        // Text/key payloads are literal argv, including strings beginning `--`.
+        if words.len() == 1 && matches!(args.first(), Some(&"send" | &"keys" | &"label")) {
+            words.extend_from_slice(&args[i..]);
+            break;
+        }
+        let a = args[i];
+        match a {
+            "--" => {
+                p["argv"] = serde_json::json!(&args[i + 1..]);
+                break;
+            }
+            "--bg" => p["wait"] = false.into(),
+            "--no-parent" => p["no_parent"] = true.into(),
+            "--outlive-parent" => p["outlive_parent"] = true.into(),
+            "--lines" | "--timeout" | "--if" | "--name" | "--cwd" | "--label" => {
+                i += 1;
+                let v = *args.get(i).ok_or_else(usage)?;
+                match a {
+                    "--lines" => p["lines"] = v.parse::<u64>().map_err(|_| usage())?.into(),
+                    "--timeout" => p["timeout"] = v.parse::<f64>().map_err(|_| usage())?.into(),
+                    "--label" => {
+                        let (k, v) = v.split_once('=').ok_or_else(usage)?;
+                        if p.get("labels").is_none() {
+                            p["labels"] = serde_json::json!({});
+                        }
+                        p["labels"][k] = v.into();
+                    }
+                    _ => p[a.trim_start_matches("--")] = v.into(),
+                }
+            }
+            _ if a.starts_with("--") => return Err(usage()),
+            _ => words.push(a),
+        }
+        i += 1;
+    }
+    let method = match args.first().copied() {
+        Some("machine") if words == ["ls"] => "machine.list".to_string(),
+        Some("ls") if words.is_empty() => "terminal.list".to_string(),
+        Some("exec") if words.is_empty() => "machine.exec".to_string(),
+        Some("run") if words.is_empty() => "terminal.run".to_string(),
+        Some(op @ ("get" | "kill" | "rm" | "read" | "send" | "keys" | "label")) => {
+            p["terminal"] = (*words.first().ok_or_else(usage)?).into();
+            match op {
+                "send" if words.len() == 2 => p["text"] = words[1].into(),
+                "keys" if words.len() >= 2 => p["keys"] = serde_json::json!(&words[1..]),
+                "label" if words.len() >= 2 => {
+                    p["labels"] = serde_json::json!({});
+                    for pair in &words[1..] {
+                        let (k, v) = pair.split_once('=').ok_or_else(usage)?;
+                        p["labels"][k] = v.into();
+                    }
+                }
+                "get" | "kill" | "rm" | "read" if words.len() == 1 => (),
+                _ => return Err(usage()),
+            }
+            format!("terminal.{op}")
+        }
+        _ => return Err(usage()),
     };
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    for stream in [&*stdout, &*stderr] {
-        if let Ok(v) = serde_json::from_str::<Value>(stream.trim()) {
-            if let Some(e) = v.get("error") {
-                let kind = e["kind"].as_str().unwrap_or("error");
-                let code = match kind {
-                    "not_found" => "pane_not_found".to_string(),
-                    "machine_unknown" => "unknown_machine".to_string(),
-                    "blocked" => "agent_blocked".to_string(),
-                    "invalid_params" | "needs_target" => "usage".to_string(),
-                    _ => format!("hc_{kind}"),
-                };
-                return Err(Failure::new(
-                    &code,
-                    e["message"].as_str().unwrap_or("hc failed"),
-                    e["hint"]
-                        .as_str()
-                        .unwrap_or("check the terminal and core state"),
-                ));
+    if let Some(m) = target {
+        p["on"] = m.into();
+    }
+    if [
+        "terminal.get",
+        "terminal.read",
+        "terminal.send",
+        "terminal.keys",
+        "terminal.kill",
+        "terminal.rm",
+        "terminal.run",
+    ]
+    .contains(&method.as_str())
+    {
+        if let Ok(caller) = env::var("HC_TERMINAL_ID") {
+            if !caller.is_empty() {
+                p["caller"] = caller.into();
             }
         }
     }
-    if !out.status.success() {
-        return Err(Failure::new(
-            "hc_error",
-            "hc exited without a structured error",
-            "check hc and the core state",
-        ));
-    }
-    serde_json::from_str(stdout.trim()).map_err(|_| {
-        Failure::new(
-            "hc_bad_output",
-            "hc returned non-JSON output",
-            "check hc --version",
-        )
-    })
+    rpc_with_timeout(
+        &method,
+        p,
+        timeout.or_else(|| {
+            BOUNDED
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .then_some(DAEMON_CALL_TIMEOUT)
+        }),
+    )
 }
 
 /// Full Terminal inventory (including remote machine addresses). The CLI `ls`
@@ -259,10 +288,24 @@ pub fn check_direction(target: &str) -> Result<(), Failure> {
 /// terminal.run accepts an environment separately from argv. EOF closes the
 /// one-shot connection after its reply; no core lifecycle command is issued.
 pub fn rpc(method: &str, params: Value, timeout: Duration) -> Result<Value, Failure> {
+    rpc_with_timeout(method, params, Some(timeout))
+}
+
+fn rpc_with_timeout(
+    method: &str,
+    params: Value,
+    timeout: Option<Duration>,
+) -> Result<Value, Failure> {
     use std::io::{Seek, Write};
+    crate::hc_schema::params(method, &params)
+        .map_err(|e| Failure::new("usage", e, "use the parameters in the pinned hc RPC schema"))?;
     let io = |e: std::io::Error| {
         Failure::new(
-            "hc_unavailable",
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "hc_not_found"
+            } else {
+                "hc_unavailable"
+            },
             e.to_string(),
             "check hc and the target machine connection",
         )
@@ -277,8 +320,11 @@ pub fn rpc(method: &str, params: Value, timeout: Duration) -> Result<Value, Fail
     )
     .map_err(io)?;
     input.rewind().map_err(io)?;
-    let out =
-        crate::output_with_stdin_within(Command::new("hc").arg("connect"), timeout, input.into())
+    let mut cmd = Command::new("hc");
+    cmd.arg("connect");
+    let out = match timeout {
+        None => cmd.stdin(input).output().map_err(io)?,
+        Some(timeout) => crate::output_with_stdin_within(&mut cmd, timeout, input.into())
             .map_err(io)?
             .ok_or_else(|| {
                 Failure::new(
@@ -286,7 +332,8 @@ pub fn rpc(method: &str, params: Value, timeout: Duration) -> Result<Value, Fail
                     "hc did not answer before the deadline",
                     "inspect vega mux --all before retrying; a launch may have completed",
                 )
-            })?;
+            })?,
+    };
     let bad = || {
         Failure::new(
             "hc_bad_output",
@@ -301,7 +348,13 @@ pub fn rpc(method: &str, params: Value, timeout: Duration) -> Result<Value, Fail
     if let Some(e) = reply.get("error") {
         let kind = e["data"]["kind"].as_str().unwrap_or("error");
         return Err(Failure::new(
-            &format!("hc_{kind}"),
+            &match kind {
+                "not_found" => "pane_not_found".into(),
+                "machine_unknown" => "unknown_machine".into(),
+                "blocked" => "agent_blocked".into(),
+                "invalid_params" | "needs_target" => "usage".into(),
+                _ => format!("hc_{kind}"),
+            },
             e["message"].as_str().unwrap_or("hc RPC failed"),
             e["data"]["hint"]
                 .as_str()
@@ -311,5 +364,19 @@ pub fn rpc(method: &str, params: Value, timeout: Duration) -> Result<Value, Fail
     if !out.status.success() {
         return Err(bad());
     }
-    reply.get("result").cloned().ok_or_else(bad)
+    let result = reply.get("result").cloned().ok_or_else(bad)?;
+    validate_result(method, &result)?;
+    Ok(result)
+}
+
+/// Validate a result from a streaming RPC connection against the pinned hc API.
+/// One-shot callers are checked by `rpc` automatically.
+pub fn validate_result(method: &str, result: &Value) -> Result<(), Failure> {
+    crate::hc_schema::result(method, result).map_err(|e| {
+        Failure::new(
+            "hc_bad_output",
+            e,
+            "check hc --version against the vendored schema",
+        )
+    })
 }

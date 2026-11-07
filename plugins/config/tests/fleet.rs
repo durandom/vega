@@ -9,7 +9,11 @@ fn fleet_is_explicit_and_empty_inventory_needs_no_registry() {
     let hc = bin.join("hc");
     fs::write(
         &hc,
-        "#!/bin/sh\necho called >> \"$HOME/hc-calls\"\nprintf '%s\\n' \"$TEST_FLEET\"\n",
+        r#"#!/bin/sh
+echo called >> "$HOME/hc-calls"
+read -r request
+printf '{"jsonrpc":"2.0","id":1,"result":%s}' "$TEST_FLEET"
+"#,
     )
     .unwrap();
     fs::set_permissions(&hc, fs::Permissions::from_mode(0o755)).unwrap();
@@ -37,7 +41,10 @@ fn fleet_is_explicit_and_empty_inventory_needs_no_registry() {
     let malformed = run(true, "{}");
     assert!(!malformed.status.success());
     assert!(String::from_utf8_lossy(&malformed.stdout).contains("hc_bad_output"));
-    let unavailable = run(true, r#"{"machines":[{"name":"remote"}]}"#);
+    let unavailable = run(
+        true,
+        r#"{"machines":[{"name":"remote","target":"remote","id":"id","host":"remote","version":"0.1.18","state":"unreachable"}]}"#,
+    );
     assert!(!unavailable.status.success());
     assert!(String::from_utf8_lossy(&unavailable.stdout).contains("registry_unavailable"));
 }

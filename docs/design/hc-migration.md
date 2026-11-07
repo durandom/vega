@@ -291,7 +291,7 @@ renices its shell before launch. The native parent and outlive-parent contract i
 unchanged. A bounded RPC timeout reports uncertain completion and asks callers to
 inspect terminals before retrying.
 
-Before a remote launch, `hc exec --on <machine>` invokes the target's `vega-mux
+Before a remote launch, `machine.exec {on: <machine>, argv: [...]}` invokes the target's `vega-mux
 prepare` helper. Existing trust and hook approval inheritance runs on that machine;
 local paths/configs are not consulted for remote trust. Matching vega binaries must
 be deployed to both ends. Unknown repositories and changed hooks still ask the user.
@@ -302,3 +302,46 @@ reason to infer idle from screen text or bypass the slice 3 delivery contract. T
 main session owns the harness upgrade and post-deploy idle-pointer verification.
 Core startup/launchd remains vega-0h4c.25; macOS privacy prompts are documented in
 [onboarding](onboarding.md#first-herdr-core-use-on-macos).
+
+### Pinned hc wire contract (vega-0h4c.31)
+
+`crates/vega-herdr/schema/hc-0.1.18.openrpc.json` is a byte-for-byte copy of
+herdr-core's `schema/released.openrpc.json`, version 0.1.18 (also the local hc
+version used for this migration). Upstream generates it from Rust types and
+checks append-only compatibility within this protocol generation. We do not
+depend on the unpublished herdr-core Rust crate.
+
+Refresh from a released upstream checkout with:
+
+```sh
+python3 scripts/refresh-hc-schema.py repos/herdr-core
+# In a worktree, pass the main checkout's herdr-core path if repos/ is absent.
+nice -n 10 mise run check
+```
+
+When the version changes, update the include path in `hc_schema.rs`, remove the
+previous snapshot and update this version note. Review the schema diff and any
+new validation vocabulary. The small checker covers the generated vocabulary:
+references, required/properties/additionalProperties, arrays, types, anyOf,
+enums and numeric/array bounds; `format` is an annotation. Extra result fields
+remain allowed for forward compatibility. Unsupported validation keywords fail
+closed. A refresh must keep the checker vocabulary test passing.
+
+`hc::rpc` checks every successful result against that method's result schema,
+including Python subprocess fixtures and Rust-authored responses. Negative tests
+exercise missing required fields, wrong types and an extra result envelope.
+`hc_local`/`hc_on` retain their internal argv interface for existing callers but
+translate the supported operations to RPC, rejecting unknown arguments. No hc
+CLI display JSON is parsed. `machine.exec` still returns base64 stdout/stderr and
+exit metadata; only the decoded program stdout is parsed as preparation JSON.
+Caller identity, machine scope, send guards and explicit deadlines are retained.
+
+Vegad uses a persistent plain-mode `events.subscribe` connection and checks its
+initial result against the same schema. Notifications (`event`, `heartbeat`,
+`missed`) are the exception to schema validation: OpenRPC describes method
+results, while their shapes and stream semantics live in upstream's
+`schema/README.md`. They remain handled by the stream parser and its tests.
+Gate detached cleanup still invokes `hc kill`/`hc rm` with output discarded;
+these are lifecycle commands without JSON reads. There are no remaining hc CLI
+JSON exceptions. The independent herdr TUI
+transport and its output shapes remain unchanged.
