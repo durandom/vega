@@ -14,14 +14,15 @@ vega uber audit [--last 10]        # one line per event: received, answered, sen
 vega uber brief [--show]           # ask the UACs; --show renders
 ```
 
+- hc and herdr share the host claim. Unavailable claimed backends fail closed;
+  concurrent writes return `claim_busy` (retry).
 - A live claim elsewhere refuses with `uber_exists`; a gone one is taken over (`took_over:`). Racing claims:
   newest wins; the loser releases (`uber_conflict`).
 - Engaged for 2 h after the Slayer's last input, until their herdr input elsewhere; idle, asks stay
   away. On `vega uber: you were idle (...)`: tell the Slayer once, then pull the brief.
-- Never write the Slayer's answer yourself. `vega uber answer` builds it only from a capture of their
-  input (written by a hook you cannot run): their pick in the AskUserQuestion dialog that showed `#a7` as
-  `vega uber show` rendered it, or a typed prompt naming `#a7`. Without `--capture`: `no_capture`, listing
-  the bound captures.
+- Never write the Slayer's answer yourself. Only hook captures count: their AskUserQuestion pick
+  showing `#a7` as rendered, or a typed prompt naming `#a7`.
+  Without `--capture`: `no_capture` lists bound captures.
 - L4 approval only from a picked option label; typed text or "Other" reaches the UAC as a comment.
 - Refusals: `capture_unbound` (no tag, or older than the ask), `capture_mismatch` (options reworded),
   `capture_unverified` (not in this session's log),

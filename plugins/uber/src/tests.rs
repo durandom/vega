@@ -71,6 +71,46 @@ fn a_returning_older_claim_is_superseded_not_the_uber() {
     assert_eq!(conflict(&superseded[0], &winner).code, "uber_conflict");
 }
 
+#[test]
+fn hc_and_herdr_on_one_host_share_the_claim_and_writer_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let (_server, client, kv) = broker(dir.path()).await;
+        let mut hc = here(dir.path(), "worker", "t7");
+        hc.panes = vec!["t7".into(), "w1:p1".into()];
+        let tui = Here {
+            host: hc.host.clone(),
+            pane: "w1:p1".into(),
+            panes: hc.panes.clone(),
+            file: hc.file.clone(),
+        };
+        for (a, b) in [(&hc, &tui), (&tui, &hc)] {
+            let lock = claim_lock(a).unwrap();
+            assert_eq!(
+                claim_on(&client, &kv, b, 100).await.unwrap_err().code,
+                "claim_busy"
+            );
+            drop(lock);
+            assert!(claim_on(&client, &kv, a, 100)
+                .await
+                .unwrap()
+                .lost_to
+                .is_none());
+            assert_eq!(
+                claim_on(&client, &kv, b, 200).await.unwrap_err().code,
+                "uber_exists"
+            );
+            assert!(claim_on(&client, &kv, a, 200).await.unwrap().already);
+            uber_state::remove(&hc.file).unwrap();
+            uber_state::unpublish(&kv, &hc.host).await.unwrap();
+        }
+    });
+}
+
 struct Server(Child);
 
 impl Drop for Server {

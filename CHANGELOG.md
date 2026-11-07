@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 125 · 2026-11-07
+
+- feature: `vega uber` claim, status, ask and brief work from hc terminals.
+  hc and herdr sessions share one host claim and check both local inventories;
+  concurrent claim/release operations refuse with `claim_busy` and can be retried.
+
 ## 124 · 2026-11-07
 
 - feature: hc calls use the versioned RPC API, including remote preparation and
