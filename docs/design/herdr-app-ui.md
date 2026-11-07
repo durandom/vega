@@ -104,7 +104,8 @@ remains a top-level row. Project totals omit zero values.
 vegad first resolves the foreground cwd. If no project resolves, it uses that
 terminal's space folder from the local core's `herdr-app` document (`doc.get`),
 without asking the desktop app or inspecting remote paths. Local-only project
-names come from Git's common directory so gate and linked worktrees share a name.
+names come from the identity's source/common-directory path, treating `.git` as
+its parent repository, so gate clones and linked worktrees share a name.
 New launches also retain their harness kind independently of the displayed glyph.
 
 Mail windows render read-only message cards from `vega post log --json` (an object

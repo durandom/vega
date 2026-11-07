@@ -452,7 +452,7 @@ export default class Agents extends View {
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
     const header = (g) => {
       const open = !this.folded.has(g.id);
-      const project = this.vegaTerminals.get(g.members[0]?.address)?.labels?.["vega.project-id"];
+      const project = g.members.map(a => this.vegaTerminals.get(a.address)?.labels?.["vega.project-id"]).find(Boolean);
       const totals = this.vegaTotals(g.members[0]?.address, project);
       const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       return h_flex()

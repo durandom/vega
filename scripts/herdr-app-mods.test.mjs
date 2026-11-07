@@ -184,7 +184,7 @@ function texts(node) { return elements(node).flatMap(n=>n.items.filter(i=>typeof
 test('machine/project tree has one child row, short names and positive totals only',()=>{
   const h=load('vega-agents');
   const agent=(address,space_name)=>({address,space_name,space:'s',tab:'tb',pane:address,status:'idle',program:{},seq:1});
-  h.api.agents=()=>[agent('ganymede/t2','vega'),agent('ganymede/t3','worker'),agent('ganymede/t4','vega')];
+  h.api.agents=()=>[agent('ganymede/t4','vega'),agent('ganymede/t2','vega'),agent('ganymede/t3','worker')];
   h.api.terminals=()=>[
     {address:'ganymede/t2',state:'live',labels:{'vega.project-id':'github.com/team/vega','vega.project':'github.com/team/vega'}},
     {address:'ganymede/t3',state:'live',parent:'ganymede/t2',labels:{'vega.project':'file:host:/tmp/gate'}},

@@ -4913,6 +4913,25 @@ struct Layout {
     tabs: Vec<serde_json::Value>,
 }
 
+fn project_display_name(id: &str) -> String {
+    // Local IDs carry the common directory; file IDs carry the source path.
+    // In either case `.git` names its parent repository, including gate clones.
+    let path = if id.starts_with("file:") || id.starts_with("local:") {
+        id.splitn(3, ':').nth(2).unwrap_or(id)
+    } else {
+        id
+    };
+    let path = std::path::Path::new(path);
+    let repo = if path.file_name().is_some_and(|n| n == ".git") {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    repo.file_name()
+        .map(|s| s.to_string_lossy().trim_end_matches(".git").to_string())
+        .unwrap_or_else(|| id.to_string())
+}
+
 impl Layout {
     fn read() -> (Layout, bool) {
         let mut layout = Layout::read_herdr();
@@ -4990,37 +5009,7 @@ impl Layout {
                 }
             }
             if let Some(key) = &id {
-                // Git IDs have a repository name; local-only IDs need the common
-                // directory to avoid showing a gate/worktree's temporary path.
-                let name = if !key.starts_with("file:") {
-                    key.rsplit('/')
-                        .next()
-                        .unwrap_or(key)
-                        .trim_end_matches(".git")
-                        .to_string()
-                } else {
-                    probes::resolve(
-                        std::path::Path::new(p["cwd"].as_str().unwrap_or_default()),
-                        &host,
-                    )
-                    .ok()
-                    .and_then(|project| {
-                        let common = project.location.common_dir;
-                        let repo = if common.file_name().is_some_and(|n| n == ".git") {
-                            common.parent()?
-                        } else {
-                            &common
-                        };
-                        Some(
-                            repo.file_name()?
-                                .to_string_lossy()
-                                .trim_end_matches(".git")
-                                .to_string(),
-                        )
-                    })
-                    .unwrap_or_else(|| key.rsplit('/').next().unwrap_or(key).to_string())
-                };
-                p["project_name"] = name.into();
+                p["project_name"] = project_display_name(key).into();
             }
             p["schema"] = 2.into();
             p["project"] = id.into();
@@ -7079,6 +7068,45 @@ mod tests {
             ["--token", "project=vega"]
         );
         assert_eq!(layout.agent_kind("t2"), Some("codex"));
+    }
+
+    #[test]
+    fn hc_local_only_project_displays_repository_name_instead_of_file_id() {
+        let repo = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        let layout = Layout {
+            panes: vec![
+                serde_json::json!({"pane_id":"t7", "cwd":repo.path(), "space_folder":"/ignored"}),
+            ],
+            workspaces: vec![],
+            tabs: vec![],
+        }
+        .resolve_projects();
+        let key = layout.panes[0]["project"].as_str().unwrap();
+        assert!(key.starts_with("local:"));
+        assert_eq!(
+            layout.project_token("t7", None),
+            [
+                "--token".to_string(),
+                format!(
+                    "project={}",
+                    repo.path().file_name().unwrap().to_string_lossy()
+                )
+            ]
+        );
+        for key in [
+            "github.com/team/vega",
+            "file:proteus:/src/vega/.git",
+            "file:proteus:/src/vega.git",
+            "local:proteus:/src/vega/.git",
+        ] {
+            assert_eq!(project_display_name(key), "vega");
+        }
     }
 
     #[test]
