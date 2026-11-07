@@ -445,3 +445,17 @@ fn log_without_pane_lists_the_archive_across_panes() {
         assert!(text.contains(t), "{text}");
     }
 }
+
+#[test]
+fn qualified_remote_hc_mail_fails_closed_without_registry_access() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    fixture(home);
+    for target in ["remote/t2", "hc:remote/t2"] {
+        let text = run(home, &["send", target, "hello"], false);
+        assert!(text.contains("registry_unavailable"), "{text}");
+        assert!(!text.contains("sent:"), "{text}");
+        assert!(!home.join("prompts").exists());
+        assert!(!home.join("state/vega/briefs").exists());
+    }
+}
