@@ -34,10 +34,11 @@ A host is one machine running vega; its name is `VEGA_POST_HOST` from the proces
 `$XDG_STATE_HOME/vega/vegad.env` (default `~/.local/state/vega/vegad.env`), then `hostname -s`.
 Empty overrides fall through; the result is lowercased and NATS subject separators become underscores.
 [herdr](https://github.com/herdrdev/herdr) is the terminal manager the agents run in; vega drives it through
-its CLI and socket and never forks it. herdr also knows other machines (`herdr machine list`), which is how
-`vega mux --machine <label>` acts on agents elsewhere. Each host runs its own [vegad](#vegad-the-relay-daemon).
+its CLI and socket and never forks it. `vega mux --machine <label>` and `vega deploy` read the saved fleet
+from `hc machine ls`, falling back to `herdr machine list` when hc is absent or its fleet is empty.
+Each host runs its own [vegad](#vegad-the-relay-daemon).
 
-- Show: `vega mux --all`, `vega deploy` (the vega commit each herdr machine runs), `vega onboard`.
+- Show: `vega mux --all`, `vega deploy` (the vega commit each saved SSH machine runs; hc `--via` transports are unsupported), `vega onboard`.
 - Design: [vegad.md](design/vegad.md) (herdr integration), [pane-control.md](design/pane-control.md).
 
 ## Workspace and pane

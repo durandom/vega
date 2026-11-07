@@ -1116,11 +1116,21 @@ mod tests {
         assert!(spawn_of_on(None, pane, "fix", "claude").is_none());
         assert!(spawn_of_on(None, "w1:p2", "fix", "codex").is_none());
         assert!(spawn_of_on(Some("other-host"), pane, "fix", "codex").is_none());
-        // Legacy records still decode with unknown tier/model.
+        // Legacy records belong to herdr and have unknown tier/model.
         let mut legacy = serde_json::to_value(&record).unwrap();
+        legacy.as_object_mut().unwrap().remove("backend");
         legacy.as_object_mut().unwrap().remove("tier");
         legacy.as_object_mut().unwrap().remove("model");
+        write(
+            &state_file_on("spawns", None, pane),
+            &serde_json::to_string(&legacy).unwrap(),
+        );
+        assert_eq!(
+            spawn_of_on(None, pane, "fix", "codex").unwrap().backend,
+            "herdr"
+        );
         let legacy: SpawnRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.backend, "herdr");
         assert_eq!(legacy.tier, None);
         assert_eq!(legacy.model, None);
     }

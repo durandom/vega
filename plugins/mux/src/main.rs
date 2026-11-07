@@ -1863,7 +1863,7 @@ fn remove_hint(checkout: &str) -> String {
     }
 }
 
-/// The ssh target herdr uses for a machine label.
+/// The saved fleet's SSH target for a machine label.
 fn ssh_target(label: &str) -> Option<String> {
     vega_herdr::hc::machines()
         .ok()?
@@ -1883,8 +1883,8 @@ fn remote_home(label: &str) -> Result<String, Failure> {
         .ok_or_else(|| {
             Failure::new(
                 "unknown_machine",
-                format!("no herdr machine labelled {label}"),
-                "run `herdr machine list` to see saved machines",
+                format!("no saved machine labelled {label}"),
+                "inspect `hc machine ls` (legacy fallback: `herdr machine list`)",
             )
         })?;
     let out = Command::new("ssh")
