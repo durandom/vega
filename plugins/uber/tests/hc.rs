@@ -202,6 +202,23 @@ esac
         String::from_utf8_lossy(&o.stdout).contains("hc_bad_output"),
         "{o:?}"
     );
+    // Mirror direction: an hc caller cannot replace a herdr-held claim when
+    // the herdr inventory is unavailable.
+    inventory(dir.path(), false);
+    vega_registry::uber_state::remove(&dir.path().join("state/vega/uber/claim.json")).unwrap();
+    let o = run(&c, &["claim"]);
+    assert!(o.status.success(), "{o:?}");
+    std::fs::rename(&herdr, dir.path().join("bin/herdr-disabled")).unwrap();
+    c.env_remove("HERDR_PANE_ID");
+    let o = run(&c, &["claim"]);
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(stdout.contains("herdr_not_found"), "{o:?}");
+    assert!(!stdout.contains("took_over:"), "{o:?}");
+    assert_eq!(
+        vega_registry::uber_state::local(&dir.path().join("state/vega/uber/claim.json"), "worker")
+            .unwrap()["pane"],
+        "w1:p1"
+    );
 }
 
 #[test]
