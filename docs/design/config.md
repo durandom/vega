@@ -109,8 +109,8 @@ and prior layout selection. An inactive layout update is checked when next selec
 
 The mod's `init()` invokes `~/.local/bin/vega-post relay start` once per instantiated copy. That
 idempotent command detaches vegad; a startup failure cannot break the element. The row polls
-`relay status --json` every 15 seconds and shows running, stopped or unavailable. It redraws only
-when that state changes. It reads badge snapshots with Python 3 and watches their XDG state folder
+`relay status --json` every 15 seconds and redraws its relay state, decision count and error display.
+Relay states are running, stopped or unavailable. It reads badge snapshots with Python 3 and watches their XDG state folder
 with a timer fallback. Only new decisions auto-open the inbox and post an actionable toast.
 Decision identities are remembered across restarts. The inbox never automatically focuses an input.
 The agents clone reads hc labels on render, without terminal polling. See [herdr-app UI](herdr-app-ui.md).

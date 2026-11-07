@@ -5572,27 +5572,15 @@ fn report_metadata(
             args.extend(["--clear-token".into(), "mail_since".into()]);
         }
         if terminals::is_hc(&pane) {
-            // A failed hc snapshot is not evidence for clearing metadata.
-            let Some(metadata) = layout.pane(&pane) else {
-                continue;
-            };
-            // Gate and mux also own role labels. Only an old uac role is ours
-            // to clear; a current UAC claim wins over another role.
-            if !uacs.iter().any(|(_, p, _)| p == &pane) {
-                if let Some(role) = metadata["labels"]["vega.role"]
-                    .as_str()
-                    .filter(|r| *r != "uac")
-                {
-                    args.extend(["--token".into(), format!("role={role}")]);
-                }
+            if let Some(cmd) = hc_metadata_cmd(
+                &layout,
+                d,
+                &pane,
+                uacs.iter().any(|(_, p, _)| p == &pane),
+                args,
+            ) {
+                cmds.push(cmd);
             }
-            if let Some(project) = metadata["project"].as_str() {
-                args.extend(["--token".into(), format!("project-id={project}")]);
-            }
-            if d.has_mail(&pane) {
-                args.extend(["--token".into(), format!("mail=✉ {}", d.mail_count(&pane))]);
-            }
-            cmds.push(sidebar::hc_labels(&pane, &args));
             continue;
         }
         let mut cmd: Vec<String> = vec![
@@ -5621,6 +5609,37 @@ fn report_metadata(
     phases.mark("hygiene");
     phases.log_if_slow("metadata");
     due
+}
+
+/// Build one hc report from the same snapshot used for project membership.
+/// A failed snapshot is not evidence for clearing metadata. Gate and mux also
+/// own role labels: only an old uac role is ours to clear, and a current claim wins.
+fn hc_metadata_cmd(
+    layout: &Layout,
+    delivery: &Delivery,
+    pane: &str,
+    uac: bool,
+    mut args: Vec<String>,
+) -> Option<Vec<String>> {
+    let metadata = layout.pane(pane)?;
+    if uac {
+        args.extend(["--token".into(), "role=uac".into()]);
+    } else if let Some(role) = metadata["labels"]["vega.role"]
+        .as_str()
+        .filter(|r| *r != "uac")
+    {
+        args.extend(["--token".into(), format!("role={role}")]);
+    }
+    if let Some(project) = metadata["project"].as_str() {
+        args.extend(["--token".into(), format!("project-id={project}")]);
+    }
+    if delivery.has_mail(pane) {
+        args.extend([
+            "--token".into(),
+            format!("mail=✉ {}", delivery.mail_count(pane)),
+        ]);
+    }
+    Some(sidebar::hc_labels(pane, &args))
 }
 
 /// Where a slow step spent its time: `slow: <step> phases: a 12 ms, ...`.
@@ -6929,6 +6948,40 @@ mod tests {
         assert_eq!(l.project_token("w1:p1", None), ["--token", "project=vega"]);
         // No workspace label anywhere: cleared.
         assert_eq!(l.project_token("w3:p1", None), ["--clear-token", "project"]);
+    }
+
+    #[test]
+    fn hc_metadata_keeps_claims_and_foreign_roles_and_reports_own_project_and_mail() {
+        let mut layout = Layout {
+            panes: vec![
+                serde_json::json!({"pane_id":"t7", "project":"git:own-project",
+                    "labels":{"vega.role":"gate-reviewer"}}),
+                serde_json::json!({"pane_id":"w1:p1", "workspace_id":"w1"}),
+            ],
+            workspaces: vec![serde_json::json!({"workspace_id":"w1", "label":"parent-project"})],
+            tabs: vec![],
+        };
+        let project = layout.project_token("t7", Some("w1:p1"));
+        assert_eq!(project, ["--token", "project=git:own-project"]);
+        let mut delivery = Delivery::default();
+        delivery.mail("t7", delivery::Sender::Other);
+        delivery.mail("t7", delivery::Sender::Other);
+        let report = |layout: &Layout, uac| {
+            hc_metadata_cmd(layout, &delivery, "t7", uac, project.to_vec()).unwrap()
+        };
+        let foreign = report(&layout, false);
+        assert!(foreign.contains(&"vega.role=gate-reviewer".into()));
+        assert!(foreign.contains(&"vega.project-id=git:own-project".into()));
+        assert!(foreign.contains(&"vega.project=git:own-project".into()));
+        assert!(foreign.contains(&"vega.mail=✉ 2".into()));
+        let current = report(&layout, true);
+        assert!(current.contains(&"vega.role=uac".into()));
+        assert!(!current.contains(&"vega.role=gate-reviewer".into()));
+        layout.panes[0]["labels"]["vega.role"] = "sentinel".into();
+        assert!(report(&layout, false).contains(&"vega.role=sentinel".into()));
+        layout.panes[0]["labels"]["vega.role"] = "uac".into();
+        assert!(report(&layout, false).contains(&"vega.role=".into()));
+        assert!(hc_metadata_cmd(&layout, &delivery, "t8", false, vec![]).is_none());
     }
 
     #[test]

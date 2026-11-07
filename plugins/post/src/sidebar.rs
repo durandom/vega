@@ -3,6 +3,7 @@
 //! report-metadata` commands; this thread sends a target's commands when they
 //! changed, and again before herdr's TTL drops them. A loop stalled on the
 //! broker, the registry or a slow refresh keeps its labels.
+//! hc terminals use `hc label` instead: changed values only, without TTL renewal.
 
 use std::collections::HashMap;
 use std::sync::mpsc;

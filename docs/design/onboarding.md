@@ -29,8 +29,8 @@ call `vega config` already makes. No check touches the network: `vega post` and 
 reachability themselves, and a probe that waits on an unreachable tailnet host would make the home view slow
 exactly for the outside user.
 
-Required means vega's core (spawning and coordinating agents in herdr panes, the guides, the config) does
-not work without it. Optional means one feature set is off; the core works.
+Required means the build tools, vega CLI and an agent. Optional means a backend or feature set;
+hc/herdr-app and the legacy herdr TUI are alternative terminal interfaces.
 
 | Component | Level | Check | Enables | How to get it |
 |---|---|---|---|---|
@@ -38,8 +38,11 @@ not work without it. Optional means one feature set is off; the core works.
 | `cargo` | required | `cargo` on PATH | building vega (toolchain pinned in `rust-toolchain.toml`) | https://rustup.rs |
 | `git` | required | `git` on PATH; version ≥ 2.54 for the wt-guard hook (a note, not a failure) | clone, upgrade, worktrees | the OS package manager |
 | `vega` | required | `vega` on PATH | every `vega <plugin>` call | `mise run install-cli`; put `~/.local/bin` on PATH |
-| `herdr` | required | `herdr` on PATH (or `HERDR_BIN_PATH`) | `vega mux`, `uac`, `board`, `open`; panes for agents | https://github.com/herdrdev/herdr |
 | `agent` | required | one of `~/.claude`, `~/.codex`, `~/.pi/agent` | the coding agents vega runs and configures | install Claude Code, Codex or pi and start it once |
+| `hc` | optional | `hc` on PATH | hc terminals, agent labels and the herdr-app backend | https://github.com/herdrdev/herdr-core |
+| `herdr-app` | optional | `herdr-app` on PATH | vega-agents sidebar and vega-inbox decisions | install herdr-app, then `vega config apply herdr-app` |
+| `python3` | optional | `python3` on PATH | herdr-app badge reader and layout maintenance | the OS package manager |
+| `herdr` | optional | `herdr` on PATH (or `HERDR_BIN_PATH`) | legacy TUI backend: board and agents in panes | https://github.com/herdrdev/herdr |
 | `chezmoi` | optional | absent, or managing none of vega's config targets | `vega config apply` writes every unit | drop vega's targets from the dotfiles (config.md, cut-over) |
 | `wt` | optional | `wt` on PATH | `vega mux spawn --worktree` with worktrunk (else herdr worktrees) | install worktrunk |
 | `dcg` | optional, recommended | executable on PATH plus valid `PreToolUse` command hooks in present Claude `settings.json` and Codex `hooks.json` | destructive command protection before shell execution | [dcg installation](https://github.com/Dicklesworthstone/destructive_command_guard#installation); register hooks with its installer, then `dcg doctor`; Claude repair: `dcg install` |

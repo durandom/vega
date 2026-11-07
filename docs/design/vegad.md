@@ -585,6 +585,9 @@ identity (`post_host`), while bd actors retain their local host contract.
 
 ## Sidebar
 
+hc terminals receive the same tokens as `vega.*` labels, on change only, without
+herdr's TTL renewal. See [herdr-app UI](herdr-app-ui.md) for the label and badge data paths.
+
 vegad reports herdr pane metadata every 15 s (tokens expire after 5 min without vegad; see Sidebar cost): a sentinel
 shows its spawn name, its task or done report as title, `$attention` and `$parent`; the UAC pane
 shows `<atom> UAC` and `$role`, plus its badges (see Badges); a pane

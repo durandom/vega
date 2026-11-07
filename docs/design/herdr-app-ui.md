@@ -32,7 +32,7 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
 - **Per terminal:** vegad writes the tokens it reports to herdr today (`report_metadata`,
   `plugins/post/src/main.rs`) as hc labels on hc terminals: `hc label <t> vega.notes=1 vega.waiting=...`
   (`key=` removes). The mod reads them from `terminals()[i].labels`; `render()` runs again on every change,
-  no polling.
+  plus the inherited 30-second timer for duration displays.
 - **Decisions and waiting panes:** the vegad badge file `$XDG_STATE_HOME/vega/badges/v2/<project>.json`,
   extended with the decision texts (bead id, title, question, project). The mod watches the folder with
   `watchFolder()`.

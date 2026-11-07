@@ -2,7 +2,8 @@ import { View } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { exec, home, theme, watchFolder, shared, setShared, openOverlay, notify, nextCommand, run } from "herdr";
 
-// The badge directory follows vegad's XDG environment, not the app config home.
+// Assumes the same user and XDG_STATE_HOME as vegad; this reads the mod's environment,
+// not the app config home. Both processes must share that state directory.
 // Read in one subprocess: no shell interpolation, no terminal/session identity.
 const readBadges = `import os,json,pathlib
 root=pathlib.Path(os.environ.get('XDG_STATE_HOME',str(pathlib.Path.home()/'.local/state')))/'vega/badges/v2'
