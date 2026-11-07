@@ -26,11 +26,12 @@ function toggleSidebar() {
   run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 268) : window()?.platform === "macos" ? 76 : 44 });
 }
 
-// vega's default symbol colours (crates/vega-herdr/src/theme.rs COLORS) plus git.
+// vega's default symbol colours (crates/vega-herdr/src/theme.rs COLORS) plus git
+// (plugins/config/src/herdr.rs GIT_CLEAN_COLOR / GIT_DIRTY_COLOR).
 const DEFAULT_COLORS = {
   uac: "#b56d0c", notes: "#2f7fd8", decisions: "#9a5cf0", waiting: "#d9465f",
   claude: "#c96442", codex: "#0e8f6f", copilot: "#8957e5", pi: "#1f8fb0", other_agent: "#808080",
-  git_clean: "#40a02b", git_dirty: "#df8e1d",
+  git_clean: "#45922a", git_dirty: "#f07830",
 };
 
 // [symbols.colors], [symbols.hosts], [symbols.host_colors] of theme.toml: flat `key = "value"` lines.

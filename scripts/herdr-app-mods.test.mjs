@@ -362,4 +362,7 @@ test('vega mod draws the shipped status line without the palette hint',()=>{
   h.api.spaces=()=>[];h.api.agents=()=>[];
   text=texts(h.render());
   assert(text.includes('This computer')&&text.includes('0 agents'),'falls back to this computer');
+  assert(!text.some(s=>s.startsWith('vega:')),'no error, no error text');
+  h.mod.error='hc machines: timeout';
+  assert(texts(h.render()).includes('vega: hc machines: timeout'),'a badge read error shows in the status line');
 });
