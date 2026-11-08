@@ -104,6 +104,7 @@ import sys,json,base64,os
 args=sys.argv[1:]
 with open(os.environ['TEST_HC_LOG'],'a') as f: f.write(json.dumps(args)+'\\n')
 if args[:2]==['machine','ls']:
+ if os.environ.get('TEST_MACHINE_SLOW'): __import__('time').sleep(1)
  print(json.dumps({'machines':[{'name':n,'state':'connected'} for n in ['ganymede','broken']]+[{'name':'offline','state':'disconnected'}]}))
 else:
  name=args[args.index('--on')+1]
@@ -432,4 +433,16 @@ test('relay starts only in the real default app and state homes',()=>{
     run({HERDR_APP_HOME:path.join(dir,'.config/herdr-app'),XDG_STATE_HOME:path.join(dir,'.local/state')});
     assert.deepEqual(fs.readFileSync(log,'utf8').trim().split('\n'),['relay start','relay start']);
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('timed-out machine list uses the last inventory and still reads connected remotes',()=>{
+  const h=load('vega'),f=transportFixture();
+  try {
+    // Shorten the transport deadline for the fake slow command; no real hc/core is used.
+    const script=vm.runInContext('collectBadges',h.api).replace('timeout=12','timeout=0.1');
+    const result=f.run(script,[vm.runInContext('readBadges',h.api),JSON.stringify([{name:'ganymede',state:'connected'}])],{TEST_MACHINE_SLOW:'1'});
+    assert.deepEqual(result.errors,[{source:'machines',message:'hc machine ls slow (12 s)'}]);
+    assert.equal(result.machines[0].name,'ganymede');
+    assert.equal(result.rows[0].machine,'ganymede');
+  } finally {f.close();}
 });
