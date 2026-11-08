@@ -338,15 +338,28 @@ pub fn apply(
         evidence.push(crate::evidence::change(ctx, unit, plan, file));
     }
     if plan.herdr_app_pending || previous_layout.as_deref() == Some("vega") {
-        let switched = app_command(ctx, &["do", "layout.switch", "--name", "vega"])
-            .and_then(|_| app_command(ctx, &["status"]))
-            .and_then(|v| {
-                if v["layout"] == "vega" && v["errors"].as_array().is_some_and(|a| a.is_empty()) {
-                    Ok(())
-                } else {
-                    Err(format!("vega layout was not accepted: {v}"))
+        // A fresh folder is visible on disk before the app's mod watcher sees it.
+        // Retry only that activation error, bounded to five seconds; other errors
+        // retain the normal rollback path and are never hidden by a retry.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let switched = loop {
+            let result = app_command(ctx, &["do", "layout.switch", "--name", "vega"])
+                .and_then(|_| app_command(ctx, &["status"]))
+                .and_then(|v| {
+                    if v["layout"] == "vega" && v["errors"].as_array().is_some_and(|a| a.is_empty())
+                    {
+                        Ok(())
+                    } else {
+                        Err(format!("vega layout was not accepted: {v}"))
+                    }
+                });
+            match &result {
+                Err(e) if e.contains("no mod folder") && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(100));
                 }
-            });
+                _ => break result,
+            }
+        };
         if let Err(e) = switched {
             let restored = match &file.live {
                 Some(text) => fs::write(&file.path, text),

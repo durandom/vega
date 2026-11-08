@@ -880,6 +880,13 @@ case "$1" in
       touch "$HERDR_APP_HOME/layout-error"
       echo '{"ok":true}'; exit 0
     fi
+    if test -f "$HERDR_APP_HOME/mod-pending"; then
+      rm "$HERDR_APP_HOME/mod-pending"
+      echo '{"error":"mod vega: no mod folder"}'; exit 1
+    fi
+    if test -f "$HERDR_APP_HOME/mod-missing"; then
+      echo '{"error":"mod vega: no mod folder"}'; exit 1
+    fi
     test -f "$HERDR_APP_HOME/layouts/vega.json" || exit 1
     echo selected > "$HERDR_APP_HOME/selected"
     echo '{"ok":true}';;
@@ -1112,4 +1119,54 @@ fn app_layout_drift_and_unit_dependency_order_are_visible() {
     let index = |u| selected.iter().position(|v| *v == u).unwrap();
     assert!(index(Unit::HerdrAppMods) < index(Unit::HerdrAppLayouts));
     assert!(index(Unit::HerdrAppLayouts) < index(Unit::HerdrAppSettings));
+}
+
+#[test]
+fn app_first_layout_apply_retries_fresh_mod_discovery() {
+    let (d, mut ctx) = setup();
+    ctx.herdr_app = fake_app(d.path());
+    let home = herdr_app::home(&ctx.env);
+    fs::create_dir_all(&home).unwrap();
+    let managed = BTreeSet::new();
+    assert!(!home.join("mods/vega").exists());
+    for unit in [
+        Unit::HerdrAppMods,
+        Unit::HerdrAppSidebar,
+        Unit::HerdrAppInbox,
+    ] {
+        assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
+    }
+    fs::write(home.join("mod-pending"), "").unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppLayouts, &managed).kind(),
+        "written"
+    );
+    let calls = fs::read_to_string(home.join("layout-calls")).unwrap();
+    assert_eq!(calls.matches("do layout.switch --name vega").count(), 2);
+    assert!(home.join("selected").exists());
+}
+
+#[test]
+fn app_layout_mod_discovery_retry_is_bounded_and_rolls_back() {
+    let (d, mut ctx) = setup();
+    ctx.herdr_app = fake_app(d.path());
+    let home = herdr_app::home(&ctx.env);
+    fs::create_dir_all(&home).unwrap();
+    let managed = BTreeSet::new();
+    for unit in [
+        Unit::HerdrAppMods,
+        Unit::HerdrAppSidebar,
+        Unit::HerdrAppInbox,
+    ] {
+        assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
+    }
+    fs::write(home.join("mod-missing"), "").unwrap();
+    let started = std::time::Instant::now();
+    let result = apply(&ctx, Unit::HerdrAppLayouts, &managed);
+    assert!(
+        matches!(result, Outcome::Rejected(ref errors) if errors.iter().any(|e| e.contains("no mod folder")))
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(15));
+    assert!(!home.join("layouts/vega.json").exists());
+    assert!(!home.join("selected").exists());
 }

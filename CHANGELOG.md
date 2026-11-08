@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 140 · 2026-11-08
+
+- feature: `vega config apply herdr-app` retries missing-mod layout activation for
+  up to five seconds while the app discovers freshly installed mod folders, so
+  the first apply can succeed in one run (vega-0h4c.22).
+
+## 139 · 2026-11-08
 ## 138 · 2026-11-08
 
 - feature: Scratch herdr-app instances with private app, config or state homes no
