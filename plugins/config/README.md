@@ -15,7 +15,10 @@ The non-modal inbox shows decisions and waiting panes; only new decisions auto-o
 Doctor includes local hc, herdr-app and Python 3 availability.
 The inbox also reads badges from connected hc machines and executes answers and
 dismissals in their recorded remote checkout. Python 3 is required on both ends;
-remote read failures show in the status line at its right end without hiding local cards.
+read failures show a short status-line error only after three consecutive failures
+per source, without hiding local or other hosts' cards. Failed sources keep their
+last good cards until the original 60-second expiry; a failed `hc machine ls`
+falls back to the last cached machine inventory.
 `infra` reports the optional `vegad-start` login job (`vega post relay install`);
 runtime daemon state remains in `vega post relay status`.
 
