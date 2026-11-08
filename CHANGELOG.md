@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 128 · 2026-11-08
+
+- feature: `vega mux spawn --worktree` on hc keeps the herdr-app space you are looking at:
+  the new worktree space opens in the background.
+
 ## 127 · 2026-11-08
 
 - feature: hc RPC calls keep their connection open until the reply arrives,

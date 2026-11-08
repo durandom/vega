@@ -4,6 +4,9 @@ from pathlib import Path
 root = Path(os.environ['HOME'])
 with (root/'app-calls').open('a') as f:
     f.write(' '.join(sys.argv[1:])+'\n')
+if sys.argv[1:] == ['ls'] and (root/'app-ls.json').exists():
+    print((root/'app-ls.json').read_text())
+    sys.exit(0)
 if sys.argv[1:3] != ['do', 'space.new']:
     print('{}')
     sys.exit(0)

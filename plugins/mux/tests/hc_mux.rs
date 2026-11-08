@@ -397,6 +397,12 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
     )
     .unwrap();
     fs::set_permissions(&wt, fs::Permissions::from_mode(0o755)).unwrap();
+    // The person looks at s1 while the sentinel's space is made.
+    fs::write(
+        f.root().join("app-ls.json"),
+        r#"{"spaces":[{"id":"s1","active":true},{"id":"s0","active":false}]}"#,
+    )
+    .unwrap();
     f.run(&[
         "spawn",
         "worker",
@@ -432,6 +438,10 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
             tree.display()
         )),
         "{app}"
+    );
+    assert!(
+        app.contains("do space.select --id s1"),
+        "the space shown before the spawn is shown again: {app}"
     );
     let wt_calls: Vec<Value> = fs::read_to_string(f.root().join("wt-calls"))
         .unwrap()

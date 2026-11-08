@@ -86,6 +86,8 @@ pub fn spawn(
         let (path, how) = worktree::hc_worktree(&cwd, &branch, base.as_deref())?;
         cwd = path;
         println!("worktree: {} ({how})", cell(&branch));
+        // space.new shows the new space; a spawn must not take the person's screen.
+        let shown = shown_space();
         let v = app(&["do", "space.new", "--name", &branch, "--folder", &cwd])?;
         placeholder = v["terminal"].as_str().map(String::from);
         space = v["space"].as_str().or(v["id"].as_str()).map(String::from);
@@ -95,6 +97,10 @@ pub fn spawn(
                 "new space has no id",
                 "inspect herdr-app ls before retrying",
             ));
+        }
+        if let Some(prev) = shown.filter(|p| Some(p) != space.as_ref()) {
+            // Best effort: the space exists either way; only the screen differs.
+            let _ = app(&["do", "space.select", "--id", &prev]);
         }
     }
     if machine().is_none() && !no_parent {
@@ -326,6 +332,16 @@ fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
     }
     serde_json::from_slice(&stdout)
         .map_err(|e| fail(format!("{target}: prepare output is not JSON: {e}")))
+}
+
+/// The space herdr-app shows now, if any.
+fn shown_space() -> Option<String> {
+    let v = app(&["ls"]).ok()?;
+    let shown = v["spaces"]
+        .as_array()?
+        .iter()
+        .find(|s| s["active"] == true)?;
+    shown["id"].as_str().map(String::from)
 }
 
 pub fn app(args: &[&str]) -> Result<Value, Failure> {
