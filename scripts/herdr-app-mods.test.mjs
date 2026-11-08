@@ -441,7 +441,7 @@ test('timed-out machine list uses the last inventory and still reads connected r
     // Shorten the transport deadline for the fake slow command; no real hc/core is used.
     const script=vm.runInContext('collectBadges',h.api).replace('timeout=12','timeout=0.1');
     const result=f.run(script,[vm.runInContext('readBadges',h.api),JSON.stringify([{name:'ganymede',state:'connected'}])],{TEST_MACHINE_SLOW:'1'});
-    assert.deepEqual(result.errors,[{source:'machines',message:'hc machine ls slow (12 s)'}]);
+    assert.deepEqual(result.errors,[{source:'machines',message:'hc machine ls slow (0.1 s)'}]);
     assert.equal(result.machines[0].name,'ganymede');
     assert.equal(result.rows[0].machine,'ganymede');
   } finally {f.close();}

@@ -20,7 +20,7 @@ print(json.dumps({'folder':str(root),'rows':rows}))`;
 const collectBadges = `import sys,json,subprocess,base64,concurrent.futures
 reader=sys.argv[1]
 def failure(label,e):
- return label+(' slow (12 s)' if isinstance(e,subprocess.TimeoutExpired) else ' unavailable')
+ return label+(' slow ('+format(e.timeout,'g')+' s)' if isinstance(e,subprocess.TimeoutExpired) else ' unavailable')
 def command(args):
  p=subprocess.run(args,capture_output=True,text=True,timeout=12)
  if p.returncode: raise ValueError(p.stderr or p.stdout or 'command failed')

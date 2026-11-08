@@ -96,8 +96,12 @@ up to eight parallel readers. This uses the app host's existing hc access and ne
 no additional NATS publication or ACL. Python 3 must be on PATH on both ends.
 Machine names equal registry hosts by convention. Disconnected machines are not
 read; their cards disappear. A failing reader does not hide local or other hosts'
-rows, and the status line shows the read error at its right end (decision 7). Original snapshot timestamps
-still expire after 60 seconds; reads never renew them. Hosts need synchronized clocks.
+rows. The status line shows a short error only after three consecutive failures
+for that source; a successful read resets its count (decision 7). Failed sources
+retain their last good rows, whose original timestamps still expire after 60
+seconds; reads never renew them. When `hc machine ls` fails or times out,
+collection continues using the last cached machine inventory. Hosts need
+synchronized clocks.
 
 Rows carry the source machine independently of project ID; decision seen/input/result
 keys include that machine, so identical project and bead IDs on two hosts do not
