@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 134 · 2026-11-08
+
+- feature: relay install always pins its resolved host and warns when a configured registry
+  cannot verify it. If your hostname differs (WSL `io-wsl`, registry `io`), run
+  `VEGA_POST_HOST=io vega post relay install` from the logged-in user session.
+
 ## 133 · 2026-11-08
 
 - feature: Skills library test fixtures isolate required executables in a private bin,

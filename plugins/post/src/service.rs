@@ -775,7 +775,7 @@ fn plan() -> Result<Plan, Failure> {
             "install vega first (`mise run install`), then run `vega post relay install`",
         ));
     }
-    let env = PINNED_ENV
+    let mut env: Vec<(String, String)> = PINNED_ENV
         .iter()
         .filter_map(|k| {
             env::var(k)
@@ -784,6 +784,9 @@ fn plan() -> Result<Plan, Failure> {
                 .map(|v| (k.to_string(), v))
         })
         .collect();
+    // Always pin the resolved identity, including an existing vegad.env pin.
+    env.retain(|(k, _)| k != "VEGA_POST_HOST");
+    env.push(("VEGA_POST_HOST".into(), host()));
     Ok(Plan {
         exe,
         container: toolbox_name(),
@@ -1034,10 +1037,43 @@ fn remove_login_for(m: Manager) -> Result<(), Failure> {
     Ok(())
 }
 
+/// Verification is advisory: a first host or an offline/local installation must
+/// still be installable. Do it before changing service files or starting vegad.
+fn install_host_warning() -> Result<Option<String>, Failure> {
+    if crate::url().is_empty() {
+        return Ok(None);
+    }
+    let resolved = host();
+    let known = crate::runtime()?.block_on(async {
+        tokio::time::timeout(crate::reach::WAIT, async {
+            let client = crate::connect("relay-install", None)
+                .await
+                .map_err(|e| e.message)?;
+            vega_registry::get_one(&client, &vega_registry::beat_key(&resolved)).await
+        })
+        .await
+    });
+    Ok(host_warning(&resolved, matches!(known, Ok(Ok(Some(_))))))
+}
+
+fn host_warning(resolved: &str, known: bool) -> Option<String> {
+    (!known).then(|| {
+        format!(
+            "relay host {resolved} is not verified in the registry (unknown or unavailable); \
+         if the hostname differs from the registry host, run \
+         `VEGA_POST_HOST=<registry-host> vega post relay install` before starting it; \
+         check `vega post relay status`"
+        )
+    })
+}
+
 /// `relay install`: migrates from a launchd / systemd unit, pins the env,
 /// links herdr's startup hook and starts vegad. Idempotent.
 pub fn install() -> Result<(), Failure> {
     let p = plan()?;
+    if let Some(warning) = install_host_warning()? {
+        eprintln!("warning: {warning}");
+    }
     if let Some(unit) = remove_legacy_unit()? {
         println!(
             "legacy_unit: {} (stopped, removed)",
@@ -1195,6 +1231,102 @@ mod tests {
     use super::*;
 
     #[test]
+    fn install_identity_checks_registry_and_preserves_wsl_pin() {
+        use std::net::TcpListener;
+        use std::os::unix::fs::PermissionsExt;
+        if env::var_os("VEGA_INSTALL_HOST_TEST").is_none() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = d.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            fs::write(bin.join("hostname"), "#!/bin/sh\necho io-wsl\n").unwrap();
+            fs::set_permissions(bin.join("hostname"), fs::Permissions::from_mode(0o755)).unwrap();
+            std::os::unix::fs::symlink(env::current_exe().unwrap(), bin.join("vega-post")).unwrap();
+            let port = TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let mut server = Command::new("nats-server")
+                .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"])
+                .arg(d.path().join("nats"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let status = Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "service::tests::install_identity_checks_registry_and_preserves_wsl_pin",
+                ])
+                .env_clear()
+                .env("VEGA_INSTALL_HOST_TEST", "1")
+                .env("VEGA_NATS_URL", format!("nats://127.0.0.1:{port}"))
+                .env("HOME", d.path())
+                .env("PATH", &bin)
+                .status()
+                .unwrap();
+            let _ = server.kill();
+            let _ = server.wait();
+            assert!(status.success());
+            return;
+        }
+        // The real hostname resolver and planner run against a WSL-style fake.
+        assert_eq!(host(), "io-wsl");
+        let rt = crate::runtime().unwrap();
+        rt.block_on(async {
+            let until = Instant::now() + Duration::from_secs(5);
+            let client = loop {
+                if let Ok(c) = async_nats::connect(crate::url()).await {
+                    break c;
+                }
+                assert!(Instant::now() < until);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            };
+            let kv = async_nats::jetstream::new(client)
+                .create_key_value(async_nats::jetstream::kv::Config {
+                    bucket: vega_registry::BUCKET.into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            kv.put(
+                vega_registry::beat_key("io"),
+                json!({"schema":2,"at":now_ms()/1000}).to_string().into(),
+            )
+            .await
+            .unwrap();
+        });
+        assert!(install_host_warning().unwrap().unwrap().contains("io-wsl"));
+        let initial = plan().unwrap();
+        assert!(initial
+            .env
+            .contains(&("VEGA_POST_HOST".into(), "io-wsl".into())));
+        env::set_var("VEGA_POST_HOST", "io");
+        assert!(install_host_warning().unwrap().is_none());
+        write_env_file(&plan().unwrap().env).unwrap();
+        env::remove_var("VEGA_POST_HOST");
+        assert_eq!(host(), "io");
+        let pinned = plan().unwrap();
+        assert!(pinned.env.contains(&("VEGA_POST_HOST".into(), "io".into())));
+        assert!(install_host_warning().unwrap().is_none());
+        env::set_var("VEGA_POST_HOST", "replacement");
+        assert!(plan()
+            .unwrap()
+            .env
+            .contains(&("VEGA_POST_HOST".into(), "replacement".into())));
+        env::set_var("VEGA_NATS_URL", "nats://127.0.0.1:1");
+        assert!(install_host_warning().unwrap().is_some());
+    }
+
+    #[test]
+    fn install_warns_for_unverified_host_identity() {
+        let warning = host_warning("io-wsl", false).unwrap();
+        assert!(warning.contains("io-wsl"));
+        assert!(warning.contains("VEGA_POST_HOST=<registry-host> vega post relay install"));
+        assert!(host_warning("io", true).is_none());
+    }
+
+    #[test]
     fn login_units_escape_arguments_and_preserve_detached_daemon() {
         let args = vec![
             "/home/A & B/vega-post".into(),
@@ -1264,6 +1396,7 @@ test -z "$FAIL_SYSTEMCTL""#,
         // Real planning and hook selection must work on a herdr-less host.
         assert!(dir_of("herdr").is_none());
         let planned = plan().expect("planning must not require herdr");
+        assert!(planned.env.contains(&("VEGA_POST_HOST".into(), host())));
         assert_eq!(
             link_herdr_plugin(&planned.exe.display().to_string(), None),
             "skipped (herdr not installed)"

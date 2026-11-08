@@ -100,6 +100,13 @@ before-login startup needs operator-configured lingering; the macOS job needs GU
 login. For toolbox installs, verify the host user systemd bus is accessible and the
 container still exists. Do not run installers from sentinel worktrees.
 
+When the OS hostname differs from the registry host, explicitly pin the registry
+identity at install: `VEGA_POST_HOST=io vega post relay install` on WSL named
+`io-wsl`. The installer always records the resolved host in `vegad.env` and warns
+when a configured registry cannot verify it. Check `vega post relay status` for
+`host: io`; hc machine names must also be `io`. Reinstall preserves the pin unless
+the installing shell explicitly overrides `VEGA_POST_HOST`.
+
 For remote inbox cards, install Python 3 on both machines and apply the updated
 herdr-app mods on the app host. Existing connected hc machines supply their badge
 files automatically. Answers and dismissals use that host's recorded checkout and
