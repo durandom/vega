@@ -15,7 +15,7 @@ The non-modal inbox shows decisions and waiting panes; only new decisions auto-o
 Doctor includes local hc, herdr-app and Python 3 availability.
 The inbox also reads badges from connected hc machines and executes answers and
 dismissals in their recorded remote checkout. Python 3 is required on both ends;
-remote read failures appear in the status tooltip without hiding local cards.
+remote read failures show in the status line at its right end without hiding local cards.
 `infra` reports the optional `vegad-start` login job (`vega post relay install`);
 runtime daemon state remains in `vega post relay status`.
 

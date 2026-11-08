@@ -432,18 +432,6 @@ export default class Agents extends View {
     return { ...c, hosts };
   }
 
-  // Project totals from the badge files: mail, decisions, waiting panes; positive ones only.
-  totalIcons(t, a, totals, project) {
-    return h_flex().gap(4).flex_none().children([
-      ["notes", "✉", () => openOverlay({mod:"vega-sidebar",kind:"window",key:`vega-notes-${project}`,width:700,height:500,props:{mail:a.address,notes:true}})],
-      ["decisions", "⚖", () => openOverlay({mod:"vega-inbox",kind:"window",key:"vega-inbox",keep:true,width:620,height:520,props:{project}})],
-      ["waiting", "✋", () => run("agent.focus",{terminal:totals?.waiting_panes?.[0]?.pane?.replace(/^hc:/,"") || a.address})],
-    ].filter(([key]) => totals[key] >= 1).map(([key,icon,action]) => div().id(`total-${a.address}-${key}`).text_size(11).text_color(t.muted)
-      .tooltip(`Project ${key}`).child(`${icon} ${totals[key]}`)
-      .on_mouse_down("left",(_e,cx) => cx.stop_propagation())
-      .on_click((_e,cx) => {cx.stop_propagation();action();})));
-  }
-
   vegaTotals(address, project) {
     const machine = address?.includes("/") ? address.split("/")[0] : "";
     return (shared("vega.badges") ?? []).find(r => r.project === project &&
@@ -512,13 +500,6 @@ export default class Agents extends View {
       }
       return true;
     });
-    const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
-    const projectOf = a => short(this.vegaTerminals.get(a.address)?.labels?.["vega.project"]) || a.space_name || "Unassigned";
-    // Machines as group headers, projects as rows: the TUI machines tree. This machine first.
-    const machineOf = a => a.address.includes("/") ? a.address.split("/")[0] : "Local";
-    const groupOf = machineOf;
-    const machineKey = a => a.address.includes("/") ? `1${machineOf(a)}` : "0";
-    if (sort.id === "project") list = [...list].sort((a,b) => machineKey(a).localeCompare(machineKey(b)) || projectOf(a).localeCompare(projectOf(b)) || rankOf(b)-rankOf(a));
     const pinned = list.filter((a) => a.pinned);
     const rest = list.filter((a) => !a.pinned);
     list = [...pinned, ...rest];
@@ -616,10 +597,6 @@ export default class Agents extends View {
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       // One line as in the TUI: status · u▲c · harness · name · vega tokens.
       const vlabels = this.vegaTerminals.get(a.address)?.labels ?? {};
-      const byProject = sort.id === "project";
-      // Under a space row the agent says what it does: its tab name or title.
-      const shownName = byProject && !isPinned ? (more ?? label(a)) : name;
-      const totals = byProject ? this.vegaTotals(a.address, vlabels["vega.project-id"]) : null;
       return h_flex()
         .id(`ag-${a.address}`)
         .px(6)
@@ -649,12 +626,11 @@ export default class Agents extends View {
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
           })).child(pic)))
-        .child(div().min_w(0).flex_shrink_1().truncate().text_color(idle ? t.muted : t.foreground).child(shownName))
-        .when(full && !byProject && Boolean(more), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(t.dim).child(`\u00b7 ${more}`)))
+        .child(div().min_w(0).flex_shrink_1().truncate().text_color(idle ? t.muted : t.foreground).child(name))
+        .when(full && Boolean(more), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(t.dim).child(`\u00b7 ${more}`)))
         .child(this.vegaIcons(a.address, t))
-        .when(Boolean(totals), el => el.child(this.totalIcons(t, a, totals, vlabels["vega.project-id"])))
         .child(div().flex_1())
-        .when(Boolean(machine) && !byProject, el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
+        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))));
@@ -665,9 +641,9 @@ export default class Agents extends View {
     const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
     for (const a of rest) {
       const r = rankOf(a) || RANK.idle;
-      const id = byPriority ? `sec-${r}` : sort.id === "project" ? `project-${groupOf(a)}` : `sp-${a.space}`;
+      const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
       if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
-      else groups.push({ id, label: byPriority ? SECTION[r] : sort.id === "project" ? groupOf(a) : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
+      else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
     }
 
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
@@ -691,7 +667,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
-        .when(byPriority || sort.id === "project" || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
+        .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
         .child(div().flex_1())
         .when(!open, (el) => el
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
