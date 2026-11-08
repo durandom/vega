@@ -51,13 +51,23 @@ local['machines']=machines
 local['errors']=errors
 print(json.dumps(local))`;
 
+// Scratch apps must never create a detached daemon with a private state home.
+// The login starter remains the primary owner; real-home UI startup is a fallback.
+const startRelay = `import os,pathlib,subprocess,sys
+home=pathlib.Path.home()
+def default(name,path):
+ value=os.environ.get(name)
+ return not value or pathlib.Path(value).expanduser().resolve()==path.resolve()
+if default('HERDR_APP_HOME',home/'.config/herdr-app') and default('XDG_CONFIG_HOME',home/'.config') and default('XDG_STATE_HOME',home/'.local/state'):
+ subprocess.run([sys.argv[1],'relay','start'],check=False)`;
+
 export default class Vega extends View {
   init(_props, cx) {
     this.state = "checking";
     this.refreshing = false;
     this.seen = new Set(shared("vega.seen-decisions") ?? []);
     cx.spawn(async (cx) => {
-      try { await exec(`${home()}/.local/bin/vega-post`, ["relay", "start"]); } catch (_) {}
+      try { await exec("python3", ["-c", startRelay, `${home()}/.local/bin/vega-post`]); } catch (_) {}
       await this.refresh(cx);
     });
     cx.timer.every(15000, (cx) => {

@@ -412,3 +412,24 @@ test('whole reader failures keep badges and report a short error only after thre
   await h.mod.refresh(h.cx);await h.mod.refresh(h.cx);
   assert.equal(h.mod.error,'badge reader unavailable');
 });
+
+test('relay starts only in the real default app and state homes',()=>{
+  const h=load('vega'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'vega-start-'));
+  try {
+    const bin=path.join(dir,'vega-post'),log=path.join(dir,'started');
+    fs.writeFileSync(bin,'#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_START_LOG"\n',{mode:0o755});
+    const env={...process.env,HOME:dir,TEST_START_LOG:log};
+    for(const key of ['HERDR_APP_HOME','XDG_CONFIG_HOME','XDG_STATE_HOME']) delete env[key];
+    const run=extra=>execFileSync('python3',['-c',vm.runInContext('startRelay',h.api),bin],{env:{...env,...extra}});
+    for(const extra of [
+      {HERDR_APP_HOME:path.join(dir,'scratch-app')},
+      {XDG_STATE_HOME:path.join(dir,'scratch-state')},
+      {XDG_CONFIG_HOME:path.join(dir,'scratch-config')},
+      {HERDR_APP_HOME:path.join(dir,'scratch-app'),XDG_STATE_HOME:path.join(dir,'scratch-state')},
+    ]) run(extra);
+    assert(!fs.existsSync(log),'scratch environments never launch the relay');
+    run({});
+    run({HERDR_APP_HOME:path.join(dir,'.config/herdr-app'),XDG_STATE_HOME:path.join(dir,'.local/state')});
+    assert.deepEqual(fs.readFileSync(log,'utf8').trim().split('\n'),['relay start','relay start']);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});

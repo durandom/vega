@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 138 · 2026-11-08
+
+- feature: Scratch herdr-app instances with private app, config or state homes no
+  longer start a detached vegad; real-home startup remains a fallback to the login
+  starter (vega-0h4c.33).
+
+## 137 · 2026-11-08
 ## 136 · 2026-11-08
 
 - feature: The herdr-app status line keeps badge state through a slow read and reports

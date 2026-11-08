@@ -36,8 +36,16 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
    This keeps the noise of GitHub durandom/vega#8 out of the window.
 
 7. **The status line is the shipped one without the palette hint.** The `vega` mod draws it in place of
-   `workspace-status` and keeps its background work (badge collection, vegad start, inbox auto-open); the
+   `workspace-status` and keeps its background work (badge collection, guarded vegad start, inbox auto-open); the
    former `vega · vegad running · ⚖ N` line is gone.
+
+The login starter installed by `vega post relay install` owns vegad startup. The
+`vega` mod also calls the idempotent `relay start` as a fallback, only when
+`HERDR_APP_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are unset or resolve to
+`~/.config/herdr-app`, `~/.config` and `~/.local/state` respectively. Scratch apps
+with a private app/config/state home never start a daemon. Scratch probes must
+stop every app or core they start; the mod does not own or stop the shared vegad.
+The herdr TUI startup hook is unchanged.
 
 ## Data path
 

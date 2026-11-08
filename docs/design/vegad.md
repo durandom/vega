@@ -141,7 +141,7 @@ The socket client uses socket2 for a portable connect deadline on Unix sockets.
 
 ## Lifecycle (vega-lhc.54)
 
-vegad needs starting, not supervising. herdr, herdr-app and the board can start it;
+vegad needs starting, not supervising. herdr, the real-home herdr-app and the board can start it;
 it upgrades itself in place. Amendment vega-0h4c.25: hosts used remotely need an
 independent login starter, even with neither UI open. `relay install` now writes
 `~/Library/LaunchAgents/vega.vegad-start.plist` (macOS GUI login domain) or
@@ -182,6 +182,11 @@ plugin pane is no host either: a PTY, closed by the user, gone after a server re
 - Login: the launchd/systemd user starter installed by `relay install`.
 - herdr: plugin `vega.vegad` (written and linked by `relay install`) runs `vega-post relay start`
   as its `[[startup]]` hook, at every server start and again on every live handoff.
+- herdr-app: the `vega` mod is a fallback starter only for the default real home:
+  `HERDR_APP_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` must be unset or resolve to
+  `~/.config/herdr-app`, `~/.config`, `~/.local/state`. Scratch apps never start it;
+  their owner must stop any app/core explicitly started for a probe. The login
+  starter remains the primary startup path.
 - The board: it shows vegad's state (running, pid, version, binary current or stale) and `V`
   starts it.
 - By hand: `vega post relay start`.
