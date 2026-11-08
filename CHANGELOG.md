@@ -7,8 +7,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 ## 128 · 2026-11-08
 
-- feature: `vega mux spawn --worktree` on hc keeps the herdr-app space you are looking at:
-  the new worktree space opens in the background.
+- feature: `vega mux spawn --worktree` on hc selects the herdr-app space you were looking at
+  again, so the new worktree space opens in the background; it warns on stderr when it cannot.
 
 ## 127 · 2026-11-08
 

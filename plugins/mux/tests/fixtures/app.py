@@ -7,6 +7,9 @@ with (root/'app-calls').open('a') as f:
 if sys.argv[1:] == ['ls'] and (root/'app-ls.json').exists():
     print((root/'app-ls.json').read_text())
     sys.exit(0)
+if sys.argv[1:3] == ['do', 'space.select'] and (root/'app-select-fails').exists():
+    print('{"error":"no such space"}')
+    sys.exit(1)
 if sys.argv[1:3] != ['do', 'space.new']:
     print('{}')
     sys.exit(0)

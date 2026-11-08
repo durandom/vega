@@ -379,6 +379,51 @@ fn qualified_mail_preserves_the_machine_host_convention() {
 }
 
 #[test]
+fn hc_worktree_warns_when_the_shown_space_cannot_be_reselected() {
+    let f = Fixture::new();
+    let tree = f.root().join("worktree");
+    fs::create_dir(&tree).unwrap();
+    let wt = f.root().join("bin/wt");
+    fs::write(
+        &wt,
+        r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+root=Path(os.environ['HOME'])
+with open(root/'wt-calls','a') as f: f.write(json.dumps(sys.argv[1:])+'\n')
+if sys.argv[1:] == ['--version']: print('fixture wt')
+else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_branch':'main'}))
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&wt, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        f.root().join("app-ls.json"),
+        r#"{"spaces":[{"id":"s1","active":true}]}"#,
+    )
+    .unwrap();
+    fs::write(f.root().join("app-select-fails"), "").unwrap();
+    let o = f
+        .cmd()
+        .args([
+            "spawn",
+            "worker",
+            "--kind",
+            "codex",
+            "--worktree",
+            "fix-branch",
+            "--",
+            "-m",
+            "chosen",
+        ])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    success(o);
+    assert!(err.contains("cannot show space s1 again"), "{err}");
+}
+
+#[test]
 fn hc_worktree_uses_wt_path_and_the_created_app_space() {
     let f = Fixture::new();
     let tree = f.root().join("worktree");

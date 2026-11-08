@@ -1,7 +1,7 @@
 The backend follows the caller's verified terminal; --backend herdr|hc overrides it.
 In hc, spawn opens a tab in the caller's herdr-app space, keeps the native parent link,
 and uses --outlive-parent. --worktree uses wt and a new app space, opened
-in the background: the space shown before stays shown. Explicit --at split
+in the background: the space shown before is selected again (a warning on stderr when that fails). Explicit --at split
 or --at workspace is currently TUI-only. hc receives env separately through terminal.run and the task at launch;
 show reports startup output. Session IDs are captured by ancestry-verified vega calls
 from the child, for commands such as mux and post.

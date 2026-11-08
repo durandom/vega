@@ -88,6 +88,9 @@ pub fn spawn(
         println!("worktree: {} ({how})", cell(&branch));
         // space.new shows the new space; a spawn must not take the person's screen.
         let shown = shown_space();
+        if let Err(f) = &shown {
+            eprintln!("warning: cannot read the shown herdr-app space ({}); the new space may take the screen", f.message);
+        }
         let v = app(&["do", "space.new", "--name", &branch, "--folder", &cwd])?;
         placeholder = v["terminal"].as_str().map(String::from);
         space = v["space"].as_str().or(v["id"].as_str()).map(String::from);
@@ -98,9 +101,14 @@ pub fn spawn(
                 "inspect herdr-app ls before retrying",
             ));
         }
-        if let Some(prev) = shown.filter(|p| Some(p) != space.as_ref()) {
-            // Best effort: the space exists either way; only the screen differs.
-            let _ = app(&["do", "space.select", "--id", &prev]);
+        if let Some(prev) = shown.ok().flatten().filter(|p| Some(p) != space.as_ref()) {
+            // The space exists either way; a failed reselect only leaves it shown.
+            if let Err(f) = app(&["do", "space.select", "--id", &prev]) {
+                eprintln!(
+                    "warning: cannot show space {prev} again ({}); the new space is shown",
+                    f.message
+                );
+            }
         }
     }
     if machine().is_none() && !no_parent {
@@ -334,14 +342,21 @@ fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
         .map_err(|e| fail(format!("{target}: prepare output is not JSON: {e}")))
 }
 
-/// The space herdr-app shows now, if any.
-fn shown_space() -> Option<String> {
-    let v = app(&["ls"]).ok()?;
-    let shown = v["spaces"]
-        .as_array()?
+/// The space herdr-app shows now; `None` when none is shown.
+fn shown_space() -> Result<Option<String>, Failure> {
+    let v = app(&["ls"])?;
+    let spaces = v["spaces"].as_array().ok_or_else(|| {
+        Failure::new(
+            "app_bad_output",
+            "herdr-app ls has no spaces list",
+            "inspect herdr-app status",
+        )
+    })?;
+    Ok(spaces
         .iter()
-        .find(|s| s["active"] == true)?;
-    shown["id"].as_str().map(String::from)
+        .find(|s| s["active"] == true)
+        .and_then(|s| s["id"].as_str())
+        .map(String::from))
 }
 
 pub fn app(args: &[&str]) -> Result<Value, Failure> {
