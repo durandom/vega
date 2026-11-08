@@ -144,7 +144,9 @@ Remote transport or inner-command failures keep the card open. Waiting panes
 retain their qualified machine address, and positive group totals still match
 both source machine and project.
 
-`space.new` creates a shell before mux starts a worktree agent. New launches link
+`space.new` creates a shell before mux starts a worktree agent. It also shows the
+new space, so mux reads the shown space (`herdr-app ls`) first and selects it again
+afterwards: a spawn must not take the person's screen. New launches link
 that exact placeholder and worker with ownership labels. `mux close` removes the
 placeholder only when the space has no other live terminal and its foreground
 has not changed to another program; normal app reconciliation then removes the

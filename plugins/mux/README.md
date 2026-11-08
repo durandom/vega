@@ -9,7 +9,8 @@ can override it). hc launches use `--outlive-parent`, the shared harness default
 repo trust, a separate API environment map, and the caller's `herdr.space` label.
 Remote launches run the target's `vega-mux prepare` helper to inherit its existing
 repository trust and hook approvals; matching vega versions are needed on both ends. `--worktree` uses
-worktrunk and `herdr-app do space.new`; explicit `--at split|workspace` is TUI-only.
+worktrunk and `herdr-app do space.new`, then selects the space shown before, so the new space
+opens in the background; explicit `--at split|workspace` is TUI-only.
 Target commands accept `hc:t7` or `hc:machine/t7` independently of the caller's world.
 `--machine` lookup uses `hc machine ls`, falling back to `herdr machine list` when hc
 is absent or its fleet is empty. hc remote spawn refuses corporate-to-private control.
