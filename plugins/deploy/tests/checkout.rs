@@ -28,11 +28,14 @@ fn fixture_bin() -> &'static Path {
         let bin = Path::new(env!("CARGO_TARGET_TMPDIR")).join("deploy-checkout-bin");
         fs::create_dir_all(&bin).unwrap();
         for (name, text) in [
-            ("hc", r#"#!/bin/sh
-read -r request
-printf '{"jsonrpc":"2.0","id":1,"result":'
-if [ -f "$HOME/machines.json" ]; then cat "$HOME/machines.json"; else printf '{"machines":[]}'; fi
-printf '}'
+            ("hc", r#"#!/usr/bin/python3
+import json,os,pathlib,sys
+assert sys.argv[1:] == ['connect']
+request=json.loads(sys.stdin.readline())
+assert request['method']=='machine.list'
+path=pathlib.Path(os.environ['HOME'])/'machines.json'
+result=json.loads(path.read_text()) if path.exists() else {'machines':[]}
+print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}))
 "#),
             (
                 "ssh",

@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 127 · 2026-11-08
+
+- feature: hc RPC calls keep their connection open until the reply arrives,
+  fixing lost replies from slow commands and remote agent preparation.
+
 ## 126 · 2026-11-08
 
 - unit: The herdr-app sidebar mod is renamed `vega-agents` -> `vega-sidebar` (unit

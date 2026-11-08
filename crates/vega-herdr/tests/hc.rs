@@ -239,6 +239,92 @@ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':v}))
 }
 
 #[test]
+fn rpc_keeps_stdin_open_and_bounds_process_cleanup() {
+    if let Ok(case) = env::var("VEGA_HC_PIPE_TEST") {
+        let start = std::time::Instant::now();
+        let result = if case == "unbounded" {
+            hc_local(&["exec", "--", "true"])
+        } else {
+            vega_herdr::hc::rpc(
+                "machine.exec",
+                serde_json::json!({"argv":["true"]}),
+                Duration::from_millis(600),
+            )
+        };
+        if case == "timeout" || case == "descendant" {
+            assert_eq!(result.unwrap_err().code, "hc_timeout");
+        } else {
+            let result = result.unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(result["stdout"], "");
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("hc");
+    fs::write(&fake, r#"#!/usr/bin/python3
+import json,os,select,sys,time
+assert sys.argv[1:] == ['connect']
+r=json.loads(sys.stdin.readline())
+assert r['method']=='machine.exec' and r['params']=={'argv':['true']}
+case=os.environ['VEGA_HC_PIPE_TEST']
+if case=='descendant':
+ if os.fork(): os._exit(0)
+if case in ('timeout','descendant'):
+ open(os.environ['VEGA_HC_PID'],'w').write(str(os.getpid()))
+ time.sleep(30)
+ sys.exit(1)
+# Real hc drops a pending reply when its request stream reaches EOF.
+if select.select([sys.stdin],[],[],0.15)[0] and sys.stdin.readline()=='':
+ sys.exit(0)
+open(os.environ['VEGA_HC_PID'],'w').write(str(os.getpid()))
+print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':{'code':0,'signal':None,'stdout':'','stderr':'','ms':150,'truncated':False,'timed_out':False}}),flush=True)
+# The caller must finish on the reply, even if the process stays alive.
+time.sleep(30)
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    for case in ["bounded", "unbounded", "timeout", "descendant"] {
+        let pid_file = dir.path().join(case);
+        let out = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "rpc_keeps_stdin_open_and_bounds_process_cleanup",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env("VEGA_HC_PIPE_TEST", case)
+            .env("VEGA_HC_PID", &pid_file)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{case}: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let pid = fs::read_to_string(pid_file).unwrap();
+        // A killed orphan can briefly remain as a zombie until init reaps it.
+        for attempt in 0..50 {
+            let state = Command::new("ps")
+                .args(["-o", "stat=", "-p", pid.trim()])
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&state.stdout);
+            if state.trim().is_empty() || state.trim().starts_with('Z') {
+                break;
+            }
+            assert!(
+                attempt < 49,
+                "{case}: hc process {pid} survived cleanup ({state})"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+#[test]
 fn rpc_contract() {
     if let Ok(case) = env::var("VEGA_HC_RPC_TEST") {
         let result = vega_herdr::hc::rpc(
@@ -265,7 +351,8 @@ fn rpc_contract() {
     let fake = dir.path().join("hc");
     fs::write(&fake, r#"#!/bin/sh
 [ "$1" = connect ] || exit 1
-cat > "$VEGA_HC_ARGS"
+IFS= read -r request
+printf '%s\n' "$request" > "$VEGA_HC_ARGS"
 case "$VEGA_HC_RPC_TEST" in
 ok) echo '{"jsonrpc":"2.0","id":1,"result":{"address":"remote/t7","labels":{},"argv":[],"cwd":"/fixture","state":"live","created_ms":0,"screen":"exact","cols":80,"rows":24}}' ;;
 error) echo '{"jsonrpc":"2.0","id":1,"error":{"message":"failed","data":{"kind":"spawn_failed","hint":"check cwd"}}}' ;;

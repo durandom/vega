@@ -300,23 +300,12 @@ pub(crate) fn output_with_stdin_within(
             .take()
             .map(|s| Box::new(s) as Box<dyn Read + Send>),
     );
-    let kill = |mut child: std::process::Child| {
-        // Include descendants holding stdout/stderr open after the direct
-        // child exits; joining pipe readers must not bypass the deadline.
-        unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
-        }
-        // Reap off the caller: even SIGKILL can wait on a kernel I/O stall.
-        thread::spawn(move || {
-            let _ = child.wait();
-        });
-    };
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
         if start.elapsed() >= timeout {
-            kill(child);
+            kill_and_reap(child);
             return Ok(None);
         }
         thread::sleep(Duration::from_millis(20));
@@ -332,10 +321,68 @@ pub(crate) fn output_with_stdin_within(
             stderr,
         })),
         _ => {
-            kill(child);
+            kill_and_reap(child);
             Ok(None)
         }
     }
+}
+
+/// End the isolated command, including descendants retaining its pipes, and
+/// reap off the caller: even SIGKILL can wait on a kernel I/O stall.
+fn kill_and_reap(mut child: std::process::Child) {
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
+/// Exchange one newline-delimited request/reply while keeping stdin open.
+/// The deadline covers writing and reading; cleanup never waits on the caller.
+pub(crate) fn rpc_line_within(
+    cmd: &mut Command,
+    input: Vec<u8>,
+    timeout: Option<Duration>,
+) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::process::CommandExt;
+    let start = Instant::now();
+    let mut child = cmd
+        .process_group(0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let result = (|| {
+            stdin.write_all(&input)?;
+            let mut line = Vec::new();
+            BufReader::new(stdout).read_until(b'\n', &mut line)?;
+            Ok(line)
+        })();
+        // hc connect exits at stdin EOF, dropping any in-flight replies.
+        drop(stdin);
+        let _ = tx.send(result);
+    });
+    let result = match timeout {
+        Some(timeout) => match rx.recv_timeout(timeout.saturating_sub(start.elapsed())) {
+            Ok(result) => result.map(Some),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(e) => Err(std::io::Error::other(e)),
+        },
+        None => rx
+            .recv()
+            .map_err(std::io::Error::other)
+            .and_then(|r| r.map(Some)),
+    };
+    // A reply completes this connection. Neither exit status nor descendants
+    // retaining inherited pipes should delay a one-shot RPC.
+    kill_and_reap(child);
+    result
 }
 
 fn hint_for(code: &str) -> &'static str {

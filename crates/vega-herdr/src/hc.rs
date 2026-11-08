@@ -296,7 +296,6 @@ fn rpc_with_timeout(
     params: Value,
     timeout: Option<Duration>,
 ) -> Result<Value, Failure> {
-    use std::io::{Seek, Write};
     crate::hc_schema::params(method, &params)
         .map_err(|e| Failure::new("usage", e, "use the parameters in the pinned hc RPC schema"))?;
     let io = |e: std::io::Error| {
@@ -310,30 +309,22 @@ fn rpc_with_timeout(
             "check hc and the target machine connection",
         )
     };
-    let mut input = tempfile::tempfile().map_err(io)?;
-    writeln!(
-        input,
-        "{}",
-        serde_json::json!({
-            "jsonrpc":"2.0", "id":1, "method":method, "params":params
-        })
-    )
-    .map_err(io)?;
-    input.rewind().map_err(io)?;
+    let mut input = serde_json::to_vec(&serde_json::json!({
+        "jsonrpc":"2.0", "id":1, "method":method, "params":params
+    }))
+    .expect("JSON value serializes");
+    input.push(b'\n');
     let mut cmd = Command::new("hc");
     cmd.arg("connect");
-    let out = match timeout {
-        None => cmd.stdin(input).output().map_err(io)?,
-        Some(timeout) => crate::output_with_stdin_within(&mut cmd, timeout, input.into())
-            .map_err(io)?
-            .ok_or_else(|| {
-                Failure::new(
-                    "hc_timeout",
-                    "hc did not answer before the deadline",
-                    "inspect vega mux --all before retrying; a launch may have completed",
-                )
-            })?,
-    };
+    let line = crate::rpc_line_within(&mut cmd, input, timeout)
+        .map_err(io)?
+        .ok_or_else(|| {
+            Failure::new(
+                "hc_timeout",
+                "hc did not answer before the deadline",
+                "inspect vega mux --all before retrying; a launch may have completed",
+            )
+        })?;
     let bad = || {
         Failure::new(
             "hc_bad_output",
@@ -341,7 +332,7 @@ fn rpc_with_timeout(
             "check hc --version and inspect vega mux --all before retrying",
         )
     };
-    let reply: Value = serde_json::from_slice(&out.stdout).map_err(|_| bad())?;
+    let reply: Value = serde_json::from_slice(&line).map_err(|_| bad())?;
     if reply["jsonrpc"] != "2.0" || reply["id"] != 1 {
         return Err(bad());
     }
@@ -360,9 +351,6 @@ fn rpc_with_timeout(
                 .as_str()
                 .unwrap_or("inspect vega mux --all before retrying"),
         ));
-    }
-    if !out.status.success() {
-        return Err(bad());
     }
     let result = reply.get("result").cloned().ok_or_else(bad)?;
     validate_result(method, &result)?;
