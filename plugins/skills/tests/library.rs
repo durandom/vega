@@ -19,6 +19,10 @@ struct Env {
 
 impl Env {
     fn new() -> Self {
+        Self::with_host_path(&env::var_os("PATH").unwrap_or_default())
+    }
+
+    fn with_host_path(host_path: &std::ffi::OsStr) -> Self {
         let root = tempfile::tempdir().unwrap();
         let bin = root.path().join("bin");
         fs::create_dir_all(&bin).unwrap();
@@ -30,15 +34,27 @@ impl Env {
             &format!("[ \"$1\" = --skill ] && printf '%s' '{GOOD}'"),
         );
         // Only the tools the plugin needs; never the real vega-* plugins.
-        let mut dirs = vec![bin];
         for tool in ["git", "skills", "node"] {
-            if let Some(d) = tool_dir(tool) {
-                if !dirs.contains(&d) {
-                    dirs.push(d);
+            if let Some(d) = tool_dir_in(tool, host_path) {
+                let target = d.join(tool).canonicalize().unwrap();
+                if tool == "git" {
+                    // The host git may itself be vega's shim. Give only that
+                    // subprocess its original PATH so it can find real git.
+                    let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+                    script(
+                        &bin.join(tool),
+                        &format!(
+                            "PATH={} exec {} \"$@\"",
+                            quote(&host_path.to_string_lossy()),
+                            quote(&target.to_string_lossy())
+                        ),
+                    );
+                } else {
+                    std::os::unix::fs::symlink(target, bin.join(tool)).unwrap();
                 }
             }
         }
-        let path = env::join_paths(dirs).unwrap().into_string().unwrap();
+        let path = bin.into_os_string().into_string().unwrap();
         let e = Env { root, path };
         e.git(&e.dir("project"), &["init", "-q"]);
         e
@@ -163,7 +179,11 @@ fn skill(dir: &Path, name: &str, description: &str) {
 }
 
 fn tool_dir(tool: &str) -> Option<PathBuf> {
-    env::split_paths(&env::var_os("PATH")?)
+    tool_dir_in(tool, &env::var_os("PATH")?)
+}
+
+fn tool_dir_in(tool: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    env::split_paths(path)
         .find(|d| d.join(tool).is_file())
         .map(|d| d.canonicalize().unwrap_or(d))
 }
@@ -216,6 +236,57 @@ fn guides_index_has_no_library_rows() {
         !stdout.contains("  foo,") && !stdout.contains("  bar,"),
         "{stdout}"
     );
+}
+
+#[test]
+fn guide_discovery_is_isolated_from_the_host_node_directory() {
+    let Some(node_dir) = tool_dir("node") else {
+        return;
+    };
+    for shared_plugins in [false, true] {
+        let host = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            node_dir.join("node").canonicalize().unwrap(),
+            host.path().join("node"),
+        )
+        .unwrap();
+        if shared_plugins {
+            script(
+                &host.path().join("vega-leaked"),
+                &format!("printf '%s' '{GOOD}'"),
+            );
+        }
+        let host_path = env::join_paths(
+            std::iter::once(host.path().to_path_buf())
+                .chain(env::split_paths(&env::var_os("PATH").unwrap_or_default())),
+        )
+        .unwrap();
+        let e = Env::with_host_path(&host_path);
+        e.library();
+        let (out, stdout) = e.run(&["lib", "sync"]);
+        assert!(out.status.success(), "{stdout}");
+        let (out, stdout) = e.run(&[]);
+        assert!(out.status.success(), "{stdout}");
+        assert!(stdout.contains("plugins[1]{name,description}:"), "{stdout}");
+        let (out, stdout) = e.run(&["good"]);
+        assert!(out.status.success(), "{stdout}");
+        assert_eq!(stdout, GOOD);
+        let (out, stdout) = e.run(&["foo"]);
+        assert_eq!(out.status.code(), Some(2), "{stdout}");
+        assert!(stdout.contains("valid names: good,"), "{stdout}");
+        assert!(
+            stdout.contains("foo is a library skill: run `vega skills lib show foo`"),
+            "{stdout}"
+        );
+        // The required node remains executable inside the isolated fixture.
+        assert!(e
+            .cmd("node", &e.home())
+            .arg("--version")
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
 }
 
 #[test]

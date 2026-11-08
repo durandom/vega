@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 133 · 2026-11-08
+
+- feature: Skills library test fixtures isolate required executables in a private bin,
+  so host plugins beside node cannot leak into guide discovery (vega-0h4c.29).
+
 ## 132 · 2026-11-08
 
 - feature: Gate starts resolve hc author metadata before creating running review records,
