@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 129 · 2026-11-08
+
+- feature: vegad labels the hc terminals of a core with no machines added (io, deimos):
+  hc 0.1.18 omits the empty `machines` list from `terminal.list`, which vega rejected before.
+
 ## 128 · 2026-11-08
 
 - feature: `vega mux spawn --worktree` on hc selects the herdr-app space you were looking at

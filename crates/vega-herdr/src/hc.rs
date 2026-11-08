@@ -352,9 +352,22 @@ fn rpc_with_timeout(
                 .unwrap_or("inspect vega mux --all before retrying"),
         ));
     }
-    let result = reply.get("result").cloned().ok_or_else(bad)?;
+    let mut result = reply.get("result").cloned().ok_or_else(bad)?;
+    fill_empty_machines(method, &mut result);
     validate_result(method, &result)?;
     Ok(result)
+}
+
+/// hc 0.1.18 drops an empty `machines` from `terminal.list` (ListResult has
+/// `skip_serializing_if = "Vec::is_empty"` without `default`), although its own
+/// schema requires it. A core with no machines added (io, deimos) means `[]`.
+fn fill_empty_machines(method: &str, result: &mut Value) {
+    if method == "terminal.list" {
+        if let Some(o) = result.as_object_mut() {
+            o.entry("machines")
+                .or_insert_with(|| Value::Array(Vec::new()));
+        }
+    }
 }
 
 /// Validate a result from a streaming RPC connection against the pinned hc API.

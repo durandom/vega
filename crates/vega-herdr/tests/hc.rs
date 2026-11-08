@@ -514,3 +514,39 @@ esac
         json!({"jsonrpc":"2.0","id":1,"method":"terminal.get","params":{"terminal":"t34"}})
     );
 }
+
+/// hc 0.1.18 omits an empty `machines` from terminal.list (io, deimos: no
+/// machines added); vega reads it as `[]` instead of rejecting the listing.
+#[test]
+fn terminal_list_without_machines_reads_as_empty() {
+    if env::var("VEGA_HC_NO_MACHINES").is_ok() {
+        let list = vega_herdr::hc::terminal_list().unwrap();
+        assert_eq!(list["machines"], serde_json::json!([]));
+        assert_eq!(list["terminals"][0]["address"], "t3");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("hc");
+    fs::write(&fake, r#"#!/bin/sh
+[ "$1" = connect ] || exit 1
+IFS= read -r request
+echo '{"jsonrpc":"2.0","id":1,"result":{"hidden_finished":0,"terminals":[{"address":"t3","labels":{},"argv":[],"cwd":"/fixture","state":"live","created_ms":0,"screen":"exact","cols":80,"rows":24}]}}'
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = Command::new(env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "terminal_list_without_machines_reads_as_empty",
+            "--nocapture",
+        ])
+        .env("VEGA_HC_NO_MACHINES", "1")
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
