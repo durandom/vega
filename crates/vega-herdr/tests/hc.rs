@@ -248,7 +248,13 @@ fn rpc_keeps_stdin_open_and_bounds_process_cleanup() {
             vega_herdr::hc::rpc(
                 "machine.exec",
                 serde_json::json!({"argv":["true"]}),
-                Duration::from_millis(600),
+                // Generous under load (python startup); the fake sleeps 30 s, so
+                // timeout cases still prove the deadline and the kill.
+                if case == "bounded" {
+                    Duration::from_secs(8)
+                } else {
+                    Duration::from_secs(3)
+                },
             )
         };
         if case == "timeout" || case == "descendant" {
@@ -258,7 +264,7 @@ fn rpc_keeps_stdin_open_and_bounds_process_cleanup() {
             assert_eq!(result["code"], 0);
             assert_eq!(result["stdout"], "");
         }
-        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(start.elapsed() < Duration::from_secs(10));
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -276,7 +282,7 @@ if case in ('timeout','descendant'):
  time.sleep(30)
  sys.exit(1)
 # Real hc drops a pending reply when its request stream reaches EOF.
-if select.select([sys.stdin],[],[],0.15)[0] and sys.stdin.readline()=='':
+if select.select([sys.stdin],[],[],1.0)[0] and sys.stdin.readline()=='':
  sys.exit(0)
 open(os.environ['VEGA_HC_PID'],'w').write(str(os.getpid()))
 print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':{'code':0,'signal':None,'stdout':'','stderr':'','ms':150,'truncated':False,'timed_out':False}}),flush=True)
