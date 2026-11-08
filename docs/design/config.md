@@ -98,8 +98,10 @@ reviewed source; it never runs the generator. There is no automatic rebase.
 
 Layout selection is **not a settings key** in 0.1.13: `layout.switch` persists `shared("layout")` in
 app-owned `shared.json`. First apply requires a running app and all three vega mods, writes the
-layout, calls `layout.switch --name vega`, then verifies the selected name and empty error list. A
-failed activation restores the old file and reports `rejected`; a missing app rejects before writing.
+layout, calls `layout.switch --name vega`, then verifies the selected name and empty error list.
+A `no mod folder` activation error is retried for up to five seconds while the app discovers
+freshly installed mod folders; other errors fail immediately. A failed activation restores the
+old file and reports `rejected`; a missing app rejects before writing.
 Successful selection is recorded in `$XDG_STATE_HOME/vega/herdr-app-layout-selected`; later applies
 preserve the user's layout choice. To return explicitly: `herdr-app do layout.switch --name vega`.
 Vega never edits `shared.json` or layout click state. The app has no standalone layout checker in
@@ -107,10 +109,14 @@ Vega never edits `shared.json` or layout click state. The app has no standalone 
 currently selected vega layout are also verified through the app; rejection restores the old file
 and prior layout selection. An inactive layout update is checked when next selected by the app.
 
-The mod's `init()` invokes `~/.local/bin/vega-post relay start` once per instantiated copy. That
-idempotent command detaches vegad; a startup failure cannot break the element. The row polls
-`relay status --json` every 15 seconds and redraws its relay state, decision count and error display.
-Relay states are running, stopped or unavailable. It reads badge snapshots with Python 3 and watches their XDG state folder
+The login starter installed by `vega post relay install` owns vegad startup. As a fallback,
+the mod's `init()` runs a Python 3 guard and invokes `~/.local/bin/vega-post relay start` only
+when `HERDR_APP_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are unset or resolve to
+`~/.config/herdr-app`, `~/.config` and `~/.local/state`. Scratch copies with private homes never
+start vegad. The idempotent command detaches vegad; a startup failure cannot break the element.
+The row polls `relay status --json` every 15 seconds in the background and shows the shipped
+workspace status line with badge-read errors after three consecutive failures.
+It reads badge snapshots with Python 3 and watches their XDG state folder
 with a timer fallback. Only new decisions auto-open the inbox and post an actionable toast.
 Decision identities are remembered across restarts. The inbox never automatically focuses an input.
 The agents clone reads hc labels on render, without terminal polling. See [herdr-app UI](herdr-app-ui.md).

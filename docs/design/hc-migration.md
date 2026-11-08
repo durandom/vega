@@ -30,7 +30,12 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
    `relay install` also installs a login starter on macOS and Linux for hosts without
    either UI. It calls the same detached, idempotent starter; vegad retains its lock
    and self-exec lifecycle. No hc core job is installed or changed. See
-   [vegad](vegad.md) "Lifecycle".
+   [vegad](vegad.md) "Lifecycle". Amendment vega-0h4c.33: the login starter is
+   primary; the mod is a fallback starter only for the default real home. It starts
+   vegad only when `HERDR_APP_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are
+   unset or resolve to `~/.config/herdr-app`, `~/.config` and `~/.local/state`.
+   Scratch apps with private app/config/state homes never start vegad. The herdr
+   TUI startup hook is unchanged.
    Core ownership decision (Slayer, 2026-11-07): `hc machine`/SSH keeps starting
    remote cores, including on reconnect. Vega installs only vegad's login job;
    the operator removes the experimental `dev.vega.hc-core` job on ganymede.
@@ -42,7 +47,7 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
    `shared.json` (not settings). The clone records its source app version; `vega config` reports
    version/hash drift. An explicit maintenance generator inserts the block at main's status anchor;
    its output is committed and reviewed. Apply never regenerates it. No automatic rebase.
-   The element's `init()` starts vegad; it shows minimal relay state now, with labels, toasts and
+   The element's `init()` provides that guarded startup fallback; the status line keeps labels, toasts and
    focus in slice 5. See [config](config.md) "Vega layout and startup mod".
 6. **hc notes stay on; done goes through vega post (Slayer, 2026-11-06).** hc types a note into the parent
    only when a child cannot report itself (blocked, error, exit), never a done. A sentinel's done report
@@ -97,7 +102,7 @@ fills the registry from `herdr agent list` only, so an hc agent can neither be f
 | No harness session id (gate verdict, reopen, transcript) | The agent's own env (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), recorded in vega state at first contact |
 | No env flag on `hc run` (API has `env`) | mux uses `terminal.run` over `hc connect`, with separate env and direct harness argv |
 | No sidebar tokens, toasts, focus events | A vega herdr-app mod: renders `vega.*` labels, shows toasts and `$upgrade` from an hc doc, writes focus into an hc doc for `human.rs`/`waiting.rs` |
-| No startup hook for vegad | The vega mod runs `vega-post relay start` in `init()` (decision 5); the TUI plugin stays a no-op-if-running starter until the TUI goes |
+| No startup hook for vegad | The vega mod guards `vega-post relay start` in `init()` to default real homes (decision 5); the TUI plugin stays a no-op-if-running starter until the TUI goes |
 | No plugin panes or actions (board, open) | board as a terminal via `herdr-app do pane.split --argv`, open as a mod |
 | `hc send` always presses Enter | Draft restore around a mail pointer is dropped for hc; `hc send --if idle` replaces the stash |
 | Children end with their parent by default | `--outlive-parent` on every vega spawn (decision 4) |
