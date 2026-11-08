@@ -184,7 +184,10 @@ as two tokens on every agent pane of its own herdr (same source and TTL):
   contrast as the badge colours. herdr matches the token's exact value, blank included.
 - `$label`: on a sentinel `<sentinel symbol> <tab label>` (its name when the tab has no label), on any
   other agent pane its tab label (the kind's name without one, e.g. `pi`), so several agents in one
-  workspace stay apart; on the UAC pane vegad clears it and the `$uac` tokens show instead.
+  workspace stay apart; on the UAC pane vegad clears it and the `$uac` tokens show instead. An hc
+  terminal without a tab label uses its hc name before the kind's name. A sentinel spawned onto this
+  machine from another one (`vega mux spawn --machine`) has its spawn record on the parent's host; vegad
+  knows it by its `vega.role=sentinel` label and shows `<sentinel symbol> <hc name>`.
 
 Every agent row thus starts with its kind: `<claude> u▲c ✉ 3`, `<claude> ⚙ readable`, `<pi> nba-loop`. Tab labels
 come from one `herdr tab list` per refresh. `display_agent` is reported as before, for setups
