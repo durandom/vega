@@ -19,6 +19,8 @@ print(json.dumps({'folder':str(root),'rows':rows}))`;
 // change is needed; hc's SSH connection already authorizes execution there.
 const collectBadges = `import sys,json,subprocess,base64,concurrent.futures
 reader=sys.argv[1]
+def failure(label,e):
+ return label+(' slow (12 s)' if isinstance(e,subprocess.TimeoutExpired) else ' unavailable')
 def command(args):
  p=subprocess.run(args,capture_output=True,text=True,timeout=12)
  if p.returncode: raise ValueError(p.stderr or p.stdout or 'command failed')
@@ -28,7 +30,7 @@ for row in local['rows']: row['machine']=''
 errors=[]
 try: machines=command(['hc','machine','ls','--json'])['machines']
 except (OSError,ValueError,KeyError,subprocess.TimeoutExpired) as e:
- machines=[]; errors.append('hc machines: '+str(e))
+ machines=json.loads(sys.argv[2]); errors.append({'source':'machines','message':failure('hc machine ls',e)})
 def remote(m):
  name=m['name']
  try:
@@ -40,11 +42,12 @@ def remote(m):
    row['machine']=name
    row['waiting_panes']=[dict(w,pane='hc:'+name+'/'+w['pane'].removeprefix('hc:')) for w in row.get('waiting_panes',[]) if w.get('pane','').removeprefix('hc:').startswith('t') and '/' not in w['pane']]
   return rows,None
- except (OSError,ValueError,KeyError,TypeError,subprocess.TimeoutExpired) as e: return [],name+': '+str(e)
+ except (OSError,ValueError,KeyError,TypeError,subprocess.TimeoutExpired) as e: return [],{'source':name,'message':failure('hc '+name+' badges',e)}
 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
  for rows,error in pool.map(remote,[m for m in machines if m.get('state')=='connected']):
   local['rows'].extend(rows)
   if error: errors.append(error)
+local['machines']=machines
 local['errors']=errors
 print(json.dumps(local))`;
 
@@ -70,10 +73,15 @@ export default class Vega extends View {
   }
 
   async badges(cx) {
-    const result = await exec("python3", ["-c", collectBadges, readBadges]);
-    if (result.code !== 0) throw new Error(result.stderr || "Cannot read badges");
+    const result = await exec("python3", ["-c", collectBadges, readBadges, JSON.stringify(this.machines ?? [])]);
+    if (result.code !== 0) throw new Error("badge reader unavailable");
     const data = JSON.parse(result.stdout);
-    this.error = data.errors?.length ? data.errors.join("; ") : null;
+    this.machines = data.machines ?? this.machines;
+    const errors = data.errors ?? [];
+    this.readErrors(errors);
+    const failed = new Set(errors.map(e => e.source));
+    // Keep only failed sources; successful empty reads and removed machines clear old rows.
+    data.rows.push(...(shared("vega.badges") ?? []).filter(r => failed.has(r.machine || "local")));
     const now = Date.now()/1000;
     const rows = data.rows.filter(r => now-r.at <= 60);
     // A changed timestamp renews freshness, but never reopens an old decision.
@@ -104,6 +112,12 @@ export default class Vega extends View {
     }
   }
 
+  readErrors(errors) {
+    const previous = this.failures ?? new Map();
+    this.failures = new Map(errors.map(e => [e.source, (previous.get(e.source) ?? 0) + 1]));
+    this.error = errors.filter(e => this.failures.get(e.source) >= 3).map(e => e.message).join("; ") || null;
+  }
+
   async refresh(cx) {
     if (this.refreshing) return;
     this.refreshing = true;
@@ -116,7 +130,7 @@ export default class Vega extends View {
       }
     } catch (_) {}
     try { await this.badges(cx); }
-    catch (e) { this.error = String(e); }
+    catch (_) { this.readErrors([{source: "reader", message: "badge reader unavailable"}]); }
     finally { this.refreshing = false; }
     this.state = state;
     cx.notify();

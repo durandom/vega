@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 136 · 2026-11-08
+
+- feature: The herdr-app status line keeps badge state through a slow read and reports
+  a short error only after three consecutive failures (vega-0h4c.36).
+
 ## 135 · 2026-11-08
 
 - feature: mail to `machine/tN` checks hc when a fresh registry has not listed the

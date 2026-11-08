@@ -125,13 +125,13 @@ else:
 test('remote badges unwrap hc JSON, qualify only local hc waiters, isolate an unavailable machine',()=>{
   const h=load('vega'),f=transportFixture();
   try {
-    const result=f.run(vm.runInContext('collectBadges',h.api),[vm.runInContext('readBadges',h.api)]);
+    const result=f.run(vm.runInContext('collectBadges',h.api),[vm.runInContext('readBadges',h.api),'[]']);
     assert.equal(result.rows.length,1);
     assert.equal(result.rows[0].machine,'ganymede');
     assert.equal(result.rows[0].decision_texts[0].question,'What next?');
     assert.equal(result.rows[0].checkout,'/repo with spaces');
     assert.deepEqual(result.rows[0].waiting_panes,[{pane:'hc:ganymede/t7',name:'Remote',attention:'asking'}]);
-    assert(result.errors.some(e=>e.startsWith('broken:')));
+    assert(result.errors.some(e=>e.source==='broken' && e.message==='hc broken badges unavailable'));
     assert(!fs.readFileSync(f.log,'utf8').includes('"--on", "offline"'));
   } finally { f.close(); }
 });
@@ -383,4 +383,32 @@ test('theme.toml symbol colours override defaults and key host colours by label'
   h.api.terminals=()=>[{address:'ganymede/t9',state:'live',labels:{'vega.host':'♃₃'}},{address:'t1',state:'live',labels:{'vega.host':'♆₈'}}];
   const text=texts(h.render());
   assert(text.includes('♃₃'),'remote space row names its machine by label');
+});
+
+for (const source of ['machines','ganymede']) test(`badge failures retain last good state and debounce ${source}`,async()=>{
+  const h=load('vega');h.mod.seen=new Set();h.mod.watching=true;
+  const r={...row(),machine:'ganymede'};
+  let data={rows:[r],machines:[{name:'ganymede',state:'connected'}]};
+  h.api.exec=async()=>({code:0,stdout:JSON.stringify(data)});
+  await h.mod.badges(h.cx);
+  data={rows:source==='machines'?[r]:[],errors:[{source,message:'hc read slow (12 s)'}]};
+  await h.mod.badges(h.cx);
+  assert.equal(h.mod.error,null);
+  assert.equal(h.state.get('vega.badges').length,1);
+  await h.mod.badges(h.cx);assert.equal(h.mod.error,null);
+  await h.mod.badges(h.cx);assert.equal(h.mod.error,'hc read slow (12 s)');
+  data={rows:[]};await h.mod.badges(h.cx);
+  assert.equal(h.mod.error,null);assert.equal(h.state.get('vega.badges').length,0);
+  data={rows:[],errors:[{source,message:'hc read unavailable'}]};
+  await h.mod.badges(h.cx);assert.equal(h.mod.error,null,'success resets the streak');
+});
+
+test('whole reader failures keep badges and report a short error only after three failures',async()=>{
+  const h=load('vega');h.mod.seen=new Set();h.mod.watching=true;
+  h.state.set('vega.badges',[row()]);
+  h.api.exec=async(bin)=>bin==='python3'?{code:1,stderr:'raw exception'}:{code:0,stdout:'{"running":true}'};
+  await h.mod.refresh(h.cx);assert.equal(h.mod.error,null);
+  assert.equal(h.state.get('vega.badges').length,1);
+  await h.mod.refresh(h.cx);await h.mod.refresh(h.cx);
+  assert.equal(h.mod.error,'badge reader unavailable');
 });
