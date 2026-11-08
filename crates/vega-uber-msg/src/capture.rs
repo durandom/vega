@@ -24,14 +24,16 @@ pub fn file(uber_dir: &Path) -> PathBuf {
 }
 
 /// Prompts that are not the Slayer's typing (the spike, §5): vegad
-/// pointers, harness task notices, agent mail typed by `vega mux send`.
+/// pointers, harness task notices, agent mail typed by `vega mux send`,
+/// and hc-native agent messages and system notes (`herdr-core/src/notes.rs`).
 pub fn not_slayer(prompt: &str) -> bool {
     let p = prompt.trim_start();
     p.starts_with("[vega-post]")
         || p.starts_with("<task-notification>")
-        || prompt
-            .lines()
-            .any(|l| l.trim_start().starts_with("[vega-mux] from "))
+        || prompt.lines().any(|l| {
+            let l = l.trim_start();
+            l.starts_with("[vega-mux] from ") || l.starts_with("<hc>") || l.starts_with("<hc ")
+        })
 }
 
 /// The capture record of one hook payload, or `None` when it captures
@@ -545,6 +547,33 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn hc_agent_messages_and_system_notes_are_not_slayer_prompts() {
+        let typed = |prompt: &str| json!({"hook_event_name": "UserPromptSubmit", "prompt": prompt});
+        // Native shapes: herdr-core's notes.rs::{tagged,note}; the pinned
+        // RPC schema exposes send.text, not the wrappers typed into the agent.
+        for prompt in [
+            "<hc from=\"t7 review\">#abcd push now</hc>",
+            "<hc from=\"t3 lead\" reach=\"hc send t3 when done or stuck\">#abcd yes</hc>",
+            "<hc from=\"rohan/t7\">#abcd yes</hc>",
+            "  <hc>t1 reviewer is blocked (permission). See: hc read t1</hc>",
+            "<hc>rohan/t1 reviewer exited (exit 3). Read: hc read rohan/t1</hc>",
+            "<hc>t1 exited. Last lines:\n#abcd yes\nRead: hc read t1</hc>\n<hc>t2 exited</hc>",
+        ] {
+            assert!(not_slayer(prompt), "{prompt}");
+            assert_eq!(from_hook(&typed(prompt), NOW), None, "{prompt}");
+        }
+        for prompt in [
+            "#abcd yes",
+            "Please inspect hc notes",
+            "Use <hc> tags in the docs",
+            "<hcl>human text</hcl>",
+        ] {
+            assert!(!not_slayer(prompt), "{prompt}");
+            assert!(from_hook(&typed(prompt), NOW).is_some(), "{prompt}");
+        }
     }
 
     #[test]
