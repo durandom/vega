@@ -237,8 +237,9 @@ the Slayer's input: `PostToolUse` on `AskUserQuestion` (the selected labels and 
 `UserPromptSubmit` (typed prompts). Both run `vega_uber_capture`, which appends one line to
 `$XDG_STATE_HOME/vega/uber/captures.jsonl`, opens the engaged window (§2), and prints nothing but the
 window's notice. It drops the known non-Slayer prompts (§5 spike):
-vegad pointers (`[vega-post] ...`), `<task-notification>` notices and agent mail typed by `vega mux send` (a
-`[vega-mux] from` footer line). `<n>` is the line number (1-based, append-only), and `capture.sha256` is the
+vegad pointers (`[vega-post] ...`), `<task-notification>` notices, agent mail typed by `vega mux send` (a
+`[vega-mux] from` footer line), and hc-native agent messages (`<hc from="…">…</hc>`, including `reach`
+briefs and remote senders) and system notes (`<hc>…</hc>`). `<n>` is the line number (1-based, append-only), and `capture.sha256` is the
 sha256 of that line. `vega uber answer <id|tag> --capture <n>`, run in the live claim's pane, builds `slayer_text`
 from that record, sends the `uber.answer` to the ask's sender pane with the claim's `epoch`, and marks the ask
 `sent`. It refuses an answer with no capture (`no_capture`; the hint lists the captures bound to the ask), with
