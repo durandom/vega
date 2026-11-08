@@ -593,7 +593,12 @@ machines ganymede saved) for "proteus is offline". Who is reachable is vega post
   answer within 2 s, or no registry right: a `warning:` line, and the mail goes. A local target the
   registry does not show open is checked in herdr, the truth for its own panes (the registry trails a
   new pane by up to one reconcile, and is off in local mode); a remote child whose record is newer
-  than its host's beat (+40 s) is not proven gone. Tool mail
+  than its host's beat (+40 s) is not proven gone. For a machine-qualified hc target,
+  the machine must first match a registry host. If its fresh registry omits the terminal,
+  send asks hc `terminal.get` for `machine/tN` with a 2 s deadline; a live terminal
+  allows mail immediately, closing the post-spawn registry lag window. Finished, missing,
+  unavailable or malformed hc results do not override the registry's absence. TUI targets
+  keep the existing checks. Tool mail
   (`--from-tool`) is not checked by the registry. Inbox-only hosts check local targets in herdr;
   explicit cross-host targets use quarantine as described above.
 - **Bounce**: delivery keeps each unread mail's sender (host, pane, agent) next to its arrival time.

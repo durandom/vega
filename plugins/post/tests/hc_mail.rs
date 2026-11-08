@@ -786,3 +786,99 @@ fn rpc_inventory_attributes_project_from_foreground_cwd() {
         })
     });
 }
+
+#[test]
+fn qualified_send_checks_hc_when_registry_has_not_seen_new_terminal() {
+    let sender = Fixture::new();
+    let mut receiver = Fixture::new_host("remote");
+    receiver.url = sender.url.clone();
+    // A fresh host with no agent entry reproduces the post-spawn race. There
+    // is deliberately no lineage record: any qualified send must work.
+    runtime().block_on(async {
+        let c = async_nats::connect(&sender.url).await.unwrap();
+        async_nats::jetstream::new(c.clone())
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "VEGA_INBOX_remote".into(),
+                subjects: vec!["vega.inbox.remote.>".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let kv = vega_registry::bucket(&c).await.unwrap();
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        kv.put(
+            vega_registry::beat_key("remote"),
+            json!({"schema":2,"at":at}).to_string().into(),
+        )
+        .await
+        .unwrap();
+    });
+    let source: Value =
+        serde_json::from_slice(&fs::read(sender.home.path().join("hc.json")).unwrap()).unwrap();
+    let mut terminal = source["terminals"][1].clone();
+    terminal["address"] = json!("remote/t2");
+    // The fake result and recorded params use the pinned hc 0.1.18 schema,
+    // in addition to the production RPC boundary's validation.
+    vega_herdr::hc::validate_result("terminal.get", &terminal).unwrap();
+    write(
+        &sender.home.path().join("remote-hc.json"),
+        &json!({"terminals":[terminal]}),
+    );
+    sender.post(&["send", "remote/t2", "first send after spawn"], "t1");
+    assert!(receiver
+        .post(&["inbox"], "t2")
+        .contains("first send after spawn"));
+    let lookups = || fs::read_to_string(sender.home.path().join("remote-lookups")).unwrap();
+    for line in lookups().lines() {
+        let request: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(request["method"], "terminal.get");
+        assert_eq!(request["params"]["terminal"], "remote/t2");
+        // hc::rpc validates these params against the pinned schema before invoking the fake.
+    }
+    for inventory in [
+        {
+            terminal["state"] = json!("finished");
+            vega_herdr::hc::validate_result("terminal.get", &terminal).unwrap();
+            json!({"terminals":[terminal]})
+        },
+        json!({"terminals":[]}),
+        json!({"terminals":[],"unavailable":true}),
+    ] {
+        write(&sender.home.path().join("remote-hc.json"), &inventory);
+        let out = sender
+            .command(&["send", "remote/t2", "must remain gone"], Some("t1"))
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("pane_gone"),
+            "{out:?}"
+        );
+    }
+    let before = lookups();
+    for args in [
+        vec!["send", "unknown/t2", "unknown host"],
+        vec!["send", "remote/t2", "--host", "testhost", "wrong host"],
+    ] {
+        let out = sender.command(&args, Some("t1")).output().unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("machine_host"));
+    }
+    let out = sender
+        .command(
+            &["send", "w1:p9", "--host", "remote", "TUI missing"],
+            Some("t1"),
+        )
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(
+        lookups(),
+        before,
+        "TUI panes must never be checked through hc"
+    );
+    assert!(!receiver.post(&["inbox"], "t2").contains("must remain gone"));
+}

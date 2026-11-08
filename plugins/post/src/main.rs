@@ -1384,7 +1384,8 @@ fn local_pane_open(pane: &str) -> Option<bool> {
 
 /// The pane and host to mail, checked in the registry (reach.rs). `--uac`
 /// resolves the project's UAC from one registry read. A pane its fresh host
-/// no longer lists fails with `pane_gone`; when the registry cannot tell
+/// no longer lists fails with `pane_gone`, unless the verified machine's hc
+/// still reports the qualified terminal live. When the registry cannot tell
 /// (stale host, no answer), the warning comes back and the mail goes.
 async fn resolve_target(
     client: &async_nats::Client,
@@ -1447,7 +1448,7 @@ async fn resolve_target(
             Ok(Err(e)) => Err(format!("registry: {e}")),
             Err(_) => Err("the registry did not answer within 2 s".to_string()),
         };
-    if let Some(machine) = machine {
+    if let Some(machine) = machine.as_deref() {
         let view = fetched.as_ref().map_err(|why| {
             Failure::new(
                 "registry_unavailable",
@@ -1455,7 +1456,7 @@ async fn resolve_target(
                 "restore registry access and retry; no mail was enqueued",
             )
         })?;
-        view.check_hc_machine(&machine)?;
+        view.check_hc_machine(machine)?;
     }
     if !check {
         return Ok((target, to_host, None));
@@ -1466,6 +1467,18 @@ async fn resolve_target(
     };
     if reached == reach::Reach::Open {
         return Ok((target, to_host, None));
+    }
+    // A remote core knows about a newly spawned terminal before vegad's next
+    // registry reconcile. Only use hc after the qualified machine/host check
+    // above, and only positive liveness evidence can override the registry.
+    if reached == reach::Reach::Gone {
+        if let Some(machine) = machine.as_deref() {
+            let address = format!("{machine}/{target}");
+            let terminal = vega_herdr::hc::hc_on(None, &["get", &address], Some(reach::WAIT));
+            if terminal.is_ok_and(|t| t["state"] == "live") {
+                return Ok((target, to_host, None));
+            }
+        }
     }
     let unsure = |why: &str| {
         Some(format!(

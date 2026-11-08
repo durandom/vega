@@ -10,7 +10,13 @@ def error(kind):
     sys.exit(9)
 def load(): return json.loads((home/'hc.json').read_text())
 def get(p):
-    for t in load()['terminals']:
+    inventory = load()
+    if '/' in p and (home/'remote-hc.json').exists():
+        assert request['method'] == 'terminal.get'
+        with (home/'remote-lookups').open('a') as f: f.write(json.dumps(request)+'\n')
+        inventory = json.loads((home/'remote-hc.json').read_text())
+        if inventory.get('unavailable'): error('unavailable')
+    for t in inventory['terminals']:
         if t['address'] == p:
             t['pid'] = int(os.environ['FAKE_PID'])
             return t
