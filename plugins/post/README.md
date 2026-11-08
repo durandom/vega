@@ -20,7 +20,8 @@ hc machine names must equal vega registry hosts. `vega post send ganymede/t7 "pi
 (also `hc:ganymede/t7`) routes to host `ganymede` and terminal `t7` without `--host`.
 The registry must contain that host; unknown hosts or unavailable checks fail before
 enqueueing. A stale host remains known and follows the existing reachability warning
-policy. A conflicting `--host` cannot remap a qualified address. Unqualified `t7
+policy. If a fresh registry has not listed the terminal yet, a live hc result for
+`machine/t7` allows the send immediately. A conflicting `--host` cannot remap a qualified address. Unqualified `t7
 --host <host>` keeps its existing explicit-host behavior. Inbox-only hosts cannot
 verify remote names and must use that explicit form from a reply command.
 `vega config infra --fleet` checks names and reports `hc machine rename <old> <host>`

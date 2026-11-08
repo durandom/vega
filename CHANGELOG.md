@@ -5,13 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
-## 136 · 2026-11-08
+## 135 · 2026-11-08
 
 - feature: mail to `machine/tN` checks hc when a fresh registry has not listed the
   terminal yet, so the first send after a remote spawn works immediately. The machine
   must still match a verified registry host; TUI mail keeps its existing checks.
 
-## 135 · 2026-11-08
 ## 134 · 2026-11-08
 
 - feature: relay install always pins its resolved host and warns when a configured registry
