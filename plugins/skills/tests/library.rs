@@ -36,7 +36,22 @@ impl Env {
         // Only the tools the plugin needs; never the real vega-* plugins.
         for tool in ["git", "skills", "node"] {
             if let Some(d) = tool_dir_in(tool, host_path) {
-                let target = d.join(tool).canonicalize().unwrap();
+                let mut target = d.join(tool).canonicalize().unwrap();
+                if tool == "node" {
+                    // A version-manager shim (mise, asdf) resolves to the
+                    // manager itself, which needs the real HOME and config.
+                    // Link the binary node reports instead.
+                    if let Ok(o) = Command::new(d.join(tool))
+                        .args(["-p", "process.execPath"])
+                        .env("PATH", host_path)
+                        .output()
+                    {
+                        let real = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                        if o.status.success() && !real.is_empty() {
+                            target = PathBuf::from(real);
+                        }
+                    }
+                }
                 if tool == "git" {
                     // The host git may itself be vega's shim. Give only that
                     // subprocess its original PATH so it can find real git.
