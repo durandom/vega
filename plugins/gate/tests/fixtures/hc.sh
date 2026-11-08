@@ -24,6 +24,10 @@ else:
  if op=="send": a += [p["text"]]
 with (root/"hc.log").open("a") as f: f.write(" ".join(a)+"\n")
 if op=="get":
+ n=number("hc-get-n",0)+1; (root/"hc-get-n").write_text(str(n))
+ if n==number("hc-get-fail-at",-1):
+  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32000,"message":"author lookup failed","data":{"kind":"not_found"}}}))
+  sys.exit()
  f=root/("hc-"+p["terminal"]+".json")
  if f.exists(): emit(json.loads(f.read_text()));sys.exit()
  t=terminal(p["terminal"])

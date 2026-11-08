@@ -963,6 +963,14 @@ fn spawn_review(
     }
     fs::write(&prompt_file, task).map_err(|e| format!("prompt: {e}"))?;
 
+    // Resolve author metadata before creating running records: a failed get
+    // has no reviewer state that could later retire those records.
+    let author_info = if backend == Backend::Hc {
+        Some(terminal::get(&author_pane)?)
+    } else {
+        None
+    };
+
     let who = format!("{}/{model}", cand.kind);
     let mut beads = Vec::new();
     for s in segs {
@@ -996,7 +1004,7 @@ fn spawn_review(
         tab_name(branch)
     };
     let (ok, text, pane) = if backend == Backend::Hc {
-        let info = terminal::get(&author_pane)?;
+        let info = author_info.as_ref().expect("hc author metadata resolved");
         if let Some(line) = vega_herdr::launch::apply(&cand.kind, &clone.to_string_lossy()) {
             eprintln!("vega gate: {line}");
         }

@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 132 · 2026-11-08
+
+- feature: Gate starts resolve hc author metadata before creating running review records,
+  so a failed lookup leaves no orphan running beads (vega-0h4c.16).
+
 ## 131 · 2026-11-08
 
 - feature: Uber Slayer input captures exclude hc-native agent messages and system notes,

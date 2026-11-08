@@ -558,6 +558,33 @@ fn hc_start_launches_visible_detached_reviewer_and_keeps_backend() {
 }
 
 #[test]
+fn hc_author_lookup_failure_before_spawn_creates_no_running_beads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    // Count the successful path's gets up to run, then fail the last get:
+    // the author metadata lookup in spawn_review (after identity checks).
+    let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
+    assert!(o.status.success(), "{}", out(&o));
+    let calls = log(tmp.path(), "hc");
+    let gets = calls
+        .lines()
+        .take_while(|l| !l.starts_with("run "))
+        .filter(|l| l.starts_with("get "))
+        .count();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    fs::write(tmp.path().join("hc-get-fail-at"), gets.to_string()).unwrap();
+    let o = run(&work, tmp.path(), &[("HC_TERMINAL_ID", "t1")], &["start"]);
+    assert!(!o.status.success(), "{}", out(&o));
+    assert!(out(&o).contains("author lookup failed"), "{}", out(&o));
+    assert!(!log(tmp.path(), "hc").contains("run --bg"));
+    assert!(!log(tmp.path(), "bd").contains("verdict=running"));
+    let state = tmp.path().join("state/vega/gate");
+    assert!(!state.exists() || fs::read_dir(state).unwrap().next().is_none());
+}
+
+#[test]
 fn hc_stale_context_is_an_error_not_no_terminal_fail_open() {
     let tmp = tempfile::tempdir().unwrap();
     let work = feature(tmp.path());
