@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 130 · 2026-11-08
+
+- feature: sentinels spawned onto a machine from another one (rally-ng's io lanes) show their
+  name in the sidebar instead of their agent kind.
+
 ## 129 · 2026-11-08
 
 - feature: vegad labels the hc terminals of a core with no machines added (io, deimos):

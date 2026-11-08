@@ -5111,10 +5111,21 @@ impl Layout {
         uac: bool,
     ) -> [String; 2] {
         let tab = self.tab_label(id);
+        // An hc terminal names itself. A sentinel spawned from another machine
+        // has no spawn record here; its role label and name still say what it is.
+        let hc = self.pane(id).filter(|_| terminals::is_hc(id));
+        let hc_name = hc
+            .and_then(|p| p["name"].as_str())
+            .filter(|n| !n.is_empty());
+        let sentinel = sentinel.or_else(|| {
+            hc_name.filter(|_| hc.is_some_and(|p| p["labels"]["vega.role"] == "sentinel"))
+        });
         let label = match sentinel {
             _ if uac => None,
             Some(name) => Some(sentinel_label(sym, tab.unwrap_or(name))),
-            None => self.agent_kind(id).map(|k| tab.unwrap_or(k).to_string()),
+            None => self
+                .agent_kind(id)
+                .map(|k| tab.or(hc_name).unwrap_or(k).to_string()),
         };
         match label {
             Some(l) => ["--token".into(), format!("label={l}")],
@@ -6976,6 +6987,30 @@ mod tests {
         assert_eq!(
             l.label_token(&sym, "w1:p4", None, false),
             ["--clear-token", "label"]
+        );
+        // hc terminals without a local spawn record (spawned from another
+        // machine): a sentinel by its role label and name, else its name.
+        let remote = Layout {
+            panes: vec![
+                serde_json::json!({"pane_id":"t4", "agent":"codex", "name":"gcam",
+                    "labels":{"vega.role":"sentinel"}}),
+                serde_json::json!({"pane_id":"t5", "agent":"codex", "name":"helper", "labels":{}}),
+                serde_json::json!({"pane_id":"t6", "agent":"codex", "name":null, "labels":{}}),
+            ],
+            workspaces: vec![],
+            tabs: vec![],
+        };
+        assert_eq!(
+            remote.label_token(&sym, "t4", None, false),
+            ["--token", "label=S gcam"]
+        );
+        assert_eq!(
+            remote.label_token(&sym, "t5", None, false),
+            ["--token", "label=helper"]
+        );
+        assert_eq!(
+            remote.label_token(&sym, "t6", None, false),
+            ["--token", "label=codex"]
         );
     }
 
