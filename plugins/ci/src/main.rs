@@ -28,6 +28,12 @@ const SKILL: &str = include_str!("../SKILL.md");
     after_help = "Without a command: this host's watches from vegad's cache (no API call) and, for GitHub, the gh rate limit.\n\nExamples:\n  vega ci                      # watches, verdicts, gh limit\n  vega ci watch                # the current branch; the result arrives as mail\n  vega ci watch 42             # PR #42 of this checkout's repo\n  vega ci show o/r#42          # the checks of the current head\n  vega ci unwatch 42"
 )]
 struct Cli {
+    /// Emit one schema-versioned JSON object (home view only)
+    #[arg(long)]
+    json: bool,
+    /// Filter watches by normalized project ID (JSON defaults to cwd project)
+    #[arg(long)]
+    project: Option<String>,
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
     #[arg(long)]
     skill: bool,
@@ -102,12 +108,17 @@ fn main() -> ExitCode {
                 .map(str::trim)
                 .collect::<Vec<_>>()
                 .join(" ");
-            print_failure(&Failure::new(
+            let failure = Failure::new(
                 "usage",
                 message.trim_start_matches("error: "),
-                "valid usage below",
-            ));
-            print!("{}", Cli::command().render_help());
+                "vega ci --help",
+            );
+            if env::args().any(|a| a == "--json") {
+                vega_herdr::print_failure_json(&failure);
+            } else {
+                print_failure(&failure);
+                print!("{}", Cli::command().render_help());
+            }
             return ExitCode::from(2);
         }
     };
@@ -119,16 +130,34 @@ fn main() -> ExitCode {
         print!("{SKILL}");
         return ExitCode::SUCCESS;
     }
-    let result = match cli.cmd {
-        None => home(),
-        Some(Cmd::Watch { sel, pane }) => watch(&sel, pane),
-        Some(Cmd::Unwatch { sel, pane }) => unwatch(&sel, pane),
-        Some(Cmd::Show { sel, all }) => show(&sel, all),
+    let result = if (cli.json || cli.project.is_some()) && cli.cmd.is_some() {
+        Err(Failure::new(
+            "usage",
+            "--json and --project apply to the home view",
+            "vega ci --json [--project <id>]",
+        ))
+    } else {
+        match cli.cmd {
+            None if cli.json => home_json(cli.project.as_deref()),
+            None if cli.project.is_some() => Err(Failure::new(
+                "usage",
+                "--project requires --json",
+                "vega ci --json --project <id>",
+            )),
+            None => home(),
+            Some(Cmd::Watch { sel, pane }) => watch(&sel, pane),
+            Some(Cmd::Unwatch { sel, pane }) => unwatch(&sel, pane),
+            Some(Cmd::Show { sel, all }) => show(&sel, all),
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => {
-            print_failure(&f);
+            if cli.json {
+                vega_herdr::print_failure_json(&f);
+            } else {
+                print_failure(&f);
+            }
             ExitCode::from(if f.code == "usage" { 2 } else { 1 })
         }
     }
@@ -322,6 +351,35 @@ fn rate_line(now: i64) -> String {
         ),
         None => "gh: core limit not seen yet (vegad records it with its first poll)".into(),
     }
+}
+
+fn home_json(project: Option<&str>) -> Result<(), Failure> {
+    let cwd_project = env::current_dir()
+        .ok()
+        .and_then(|d| vega_herdr::project::resolve(&d, &vega_herdr::state::post_host()).ok());
+    let project = project.or_else(|| cwd_project.as_ref().map(|p| p.id.as_str()));
+    let watches = store::watches();
+    let mut targets: Vec<(Target, Vec<String>)> = Vec::new();
+    for w in watches {
+        if project.is_some_and(|p| p != format!("{}/{}", w.target.host, w.target.repo)) {
+            continue;
+        }
+        match targets.iter_mut().find(|(t, _)| *t == w.target) {
+            Some((_, panes)) => panes.push(w.pane),
+            None => targets.push((w.target, vec![w.pane])),
+        }
+    }
+    let rows: Vec<_> = targets.iter().map(|(t, panes)| {
+        let s = store::load_state(t).filter(|s| s.target.as_ref() == Some(t));
+        let verdict = s.as_ref().filter(|s| s.polled > 0).map(|s| s.summary().verdict.as_str()).unwrap_or("unpolled");
+        let failed: Vec<_> = s.as_ref().map(|s| s.checks().into_iter().filter(|c| c.bucket == Bucket::Fail).map(|c| c.name).collect()).unwrap_or_default();
+        serde_json::json!({"project":format!("{}/{}",t.host,t.repo),"target":t.label(),"watchers":panes,"state":s.as_ref().map(|s| if s.ended.is_some() {"ended"} else if s.error.is_some() {"error"} else if s.polled > 0 {"active"} else {"unpolled"}).unwrap_or("unpolled"),"head":s.as_ref().and_then(|s| s.head.as_deref()),"polled":s.as_ref().map(|s| s.polled),"error":s.as_ref().and_then(|s| s.error.as_deref()),"verdict":verdict,"failed_checks":failed})
+    }).collect();
+    println!(
+        "{}",
+        serde_json::json!({"schema":1,"project":project,"watches":rows})
+    );
+    Ok(())
 }
 
 fn home() -> Result<(), Failure> {

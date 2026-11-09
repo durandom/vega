@@ -11,6 +11,7 @@ name = "vega-ci"
 path = "src/main.rs"
 
 [dependencies]
+serde_json = "1"
 vega-build = { path = "../../crates/vega-build" }
 clap = { version = "4", features = ["derive"] }
 vega-ci-watch = { path = "../../crates/vega-ci-watch" }
