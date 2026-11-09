@@ -39,34 +39,104 @@ fn main() -> ExitCode {
         print!("{}", help(args.first().map(String::as_str).unwrap_or("")));
         return ExitCode::SUCCESS;
     }
-    let result = match args.as_slice() {
-        [a] if ["--version", "-V", "-v"].contains(&a.as_str()) => {
-            println!("{}", vega_build::version_line!());
-            Ok(())
+    let json = args.iter().any(|a| a == "--json");
+    let listing = args.is_empty()
+        || args
+            .first()
+            .is_some_and(|a| a == "list" || a.starts_with("--"));
+    let result = if listing && (json || args.iter().any(|a| a == "--project")) {
+        list_options(&args)
+    } else if json {
+        Err(usage("--json is supported by notify [list]"))
+    } else {
+        match args.as_slice() {
+            [a] if ["--version", "-V", "-v"].contains(&a.as_str()) => {
+                println!("{}", vega_build::version_line!());
+                Ok(())
+            }
+            [a] if a == "--skill" => {
+                print!("{SKILL}");
+                Ok(())
+            }
+            [a, b, _from] if a == "remote-update" && b == "--from" => remote_update(),
+            [] => {
+                let bin = env::current_exe()
+                    .map(|p| vega_herdr::collapse_home(&p.to_string_lossy()))
+                    .unwrap_or_else(|_| "vega-notify".into());
+                println!("bin: {}", cell(&bin));
+                println!("description: Raise and settle blocking asks for the operator");
+                run(Cmd::List)
+            }
+            _ => parse(&args).and_then(run),
         }
-        [a] if a == "--skill" => {
-            print!("{SKILL}");
-            Ok(())
-        }
-        [a, b, _from] if a == "remote-update" && b == "--from" => remote_update(),
-        [] => {
-            let bin = env::current_exe()
-                .map(|p| vega_herdr::collapse_home(&p.to_string_lossy()))
-                .unwrap_or_else(|_| "vega-notify".into());
-            println!("bin: {}", cell(&bin));
-            println!("description: Raise and settle blocking asks for the operator");
-            run(Cmd::List)
-        }
-        _ => parse(&args).and_then(run),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            vega_herdr::print_failure(&e);
+            if json {
+                vega_herdr::print_failure_json(&e);
+            } else {
+                vega_herdr::print_failure(&e);
+            }
             ExitCode::from(if e.code == "usage" { 2 } else { 1 })
         }
     }
 }
+fn list_options(args: &[String]) -> Result<(), Failure> {
+    let mut project = None;
+    let mut json = false;
+    let mut i = usize::from(args.first().is_some_and(|a| a == "list"));
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" if !json => json = true,
+            "--project" if project.is_none() => {
+                i += 1;
+                project = Some(
+                    args.get(i)
+                        .filter(|s| !s.is_empty() && !s.starts_with('-'))
+                        .ok_or_else(|| usage("--project requires a project ID"))?
+                        .clone(),
+                );
+            }
+            a => {
+                return Err(usage(format!(
+                    "unknown or duplicate argument {a}; valid flags: --project --json"
+                )))
+            }
+        }
+        i += 1;
+    }
+    let store = store()?;
+    let host = vega_herdr::state::post_host();
+    let (remote, registry_error) = if vega_herdr::state::is_inbox_only(&host) {
+        (Vec::new(), Some(vega_registry::INBOX_ONLY_OFF.to_string()))
+    } else {
+        match vega_registry::read_notes_blocking(TIMEOUT) {
+            Ok(n) => (n, None),
+            Err(e) => (Vec::new(), Some(e)),
+        }
+    };
+    let mut notes = asks::open(store.list(), remote, &host);
+    notes.retain(|n| {
+        project
+            .as_ref()
+            .is_none_or(|p| n.project.as_ref() == Some(p))
+    });
+    if json {
+        println!(
+            "{}",
+            json!({"schema":1,"asks":notes.iter().map(|n| json!({"id":format!("{}={}", n.host,n.id),"host":n.host,"level":n.level,"project":n.project,"pane":n.pane,"line":n.title,"bead":n.bead,"cmd":n.cmd,"acknowledged":n.acked})).collect::<Vec<_>>(),"registry_error":registry_error})
+        );
+    } else {
+        if let Some(e) = registry_error {
+            println!("registry: off ({})", cell(&e));
+        }
+        print_list(&notes, notes::now_ms());
+        notifier_health();
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq)]
 enum Cmd {
     List,

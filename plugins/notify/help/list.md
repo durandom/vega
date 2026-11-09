@@ -9,3 +9,4 @@ An inbox-only host skips the read by design and prints
 Examples:
   vega notify
   vega notify list
+--json emits {schema: 1, asks: [...], registry_error}; --project <project-id> filters exact project IDs.

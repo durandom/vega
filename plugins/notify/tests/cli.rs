@@ -238,3 +238,36 @@ fn inbox_only_host_skips_the_registry_read() {
     );
     assert!(!text.contains("this host's asks only"), "{text}");
 }
+
+#[test]
+fn json_list_is_one_object_filters_projects_and_formats_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    for project in ["one", "two"] {
+        let o = run(
+            tmp.path(),
+            "io",
+            &[
+                "info",
+                "demo: hello -> t1",
+                "--pane",
+                "t1",
+                "--project",
+                project,
+            ],
+        );
+        assert!(o.status.success());
+    }
+    let o = run(tmp.path(), "io", &["list", "--json", "--project", "one"]);
+    assert!(o.status.success());
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["schema"], 1);
+    assert_eq!(v["asks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["asks"][0]["project"], "one");
+    assert!(v["asks"][0]["id"].is_string());
+    assert!(v["asks"][0]["line"].is_string());
+    let o = run(tmp.path(), "io", &["--json", "--bad"]);
+    assert_eq!(o.status.code(), Some(2));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["error"]["code"], "usage");
+    assert!(v["error"]["hint"].is_string());
+}

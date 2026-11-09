@@ -16,3 +16,4 @@ Examples:
   vega notify action "orrery: please test apply -> w43:p1" --bead orrery-1
   vega notify resolve --key github.com/durandom/orrery/w43:p1
   vega notify ack proteus=1800000000000
+vega notify [list] [--json] [--project <project-id>]: read open asks as one schema-1 JSON object or TOON.
