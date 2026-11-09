@@ -818,9 +818,21 @@ export default class Agents extends View {
         .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(display))
         .when(Boolean(git), el => el.child(div().flex_none().text_size(11.5).text_color(git === "✓" ? C.git_clean : C.git_dirty).child(git)))
         .child(div().flex_1())
-        .when(totals.notes >= 1, el => el.child(badge("notes", "✉", totals.notes, () => openOverlay({ mod: "vega-sidebar", kind: "window", key: `vega-notes-${project}`, width: 700, height: 500, props: { mail: uac.address, notes: true } }), gid)))
-        .when(totals.decisions >= 1, el => el.child(badge("decisions", "⚖", totals.decisions, () => openOverlay({ mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true, width: 620, height: 520, props: { project } }), gid)))
-        .when(totals.waiting >= 1, el => el.child(badge("waiting", "✋", totals.waiting, () => run("agent.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address }), gid)))
+        // One summary badge per project (decisions, waiting, notes), coloured by the most urgent;
+        // details live in the project window and the status line (vega-0h4c.50).
+        .when((totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0) >= 1, el => {
+          const urgent = (totals.decisions ?? 0) + (totals.waiting ?? 0);
+          return el.child(div().id(`total-${gid}`).flex_none().px(5).rounded(8).text_size(11).font_semibold()
+            .bg(urgent ? t.blocked : t.raised).text_color(urgent ? t.background : t.foreground)
+            .tooltip(`⚖ ${totals.decisions ?? 0} decisions · ✋ ${totals.waiting ?? 0} waiting · ✉ ${totals.notes ?? 0} notes`)
+            .child(String((totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0)))
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => this.openProject(project, cx, totals.decisions ? "decisions" : "overview")));
+        })
+        .child(div().id(`gear-${gid}`).flex_none().text_color(t.dim).cursor_pointer().tooltip("Project window")
+          .child(svg("mods/workspace-chrome/settings.svg").size(12).text_color(t.dim))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => this.openProject(project, cx)))
         .when(!open, el => el.child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim))));
       if (open) for (const a of members) out.push(...withTree(a));
     }
@@ -880,7 +892,9 @@ export default class Agents extends View {
   }
 
   // uac and kind are drawn before the name, as in the TUI row.
+  // Per-agent signals only; project-wide notes and decisions sit in the project badge.
   vegaIcons(address, t, skip = ["uac", "kind"]) {
+    skip = [...skip, "notes", "decisions"];
     const labels = this.vegaTerminals?.get(address)?.labels ?? {};
     const focus = () => run("agent.focus", {terminal: address});
     const inbox = () => openOverlay({mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true,

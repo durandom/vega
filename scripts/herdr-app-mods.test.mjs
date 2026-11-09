@@ -81,12 +81,12 @@ test('each agent icon stops row propagation and routes its own action',()=>{
   const h=load('vega-sidebar');
   h.mod.vegaTerminals=new Map([['t7',{labels:{'vega.mail':'2','vega.decisions':'1','vega.waiting':'1','vega.kind':'C','vega.uac':'UAC','vega.git':'dirty'}}]]);
   const icons=h.mod.vegaIcons('t7',{}).items;
-  assert.equal(icons.length,4,'uac and kind sit before the name, as in the TUI row');
+  assert.equal(icons.length,3,'uac and kind sit before the name; project decisions sit in the project badge');
   for(const icon of icons)icon.handlers.on_click({},h.cx);
-  assert.equal(h.calls.filter(c=>c[0]==='stop').length,4);
+  assert.equal(h.calls.filter(c=>c[0]==='stop').length,3);
   h.mod.vegaTerminals.set('t8',{labels:{'vega.git':'\u2800'}});
   assert.equal(h.mod.vegaIcons('t8',{}).items.length,0,'a blank token draws nothing');
-  assert(h.calls.some(c=>c[0]==='open'&&c[1].mod==='vega-inbox'));
+  assert(!h.calls.some(c=>c[0]==='open'&&c[1].mod==='vega-inbox'),'agent rows no longer open the inbox');
   assert(h.calls.some(c=>c[0]==='open'&&c[1].props?.mail==='t7'));
   assert(h.calls.some(c=>c[0]==='run'&&c[1]==='agent.focus'));
 });
@@ -252,7 +252,8 @@ test('UAC projects hold their agents across machines in dragged order; other spa
   assert(text.includes('♃₃')&&text.includes('♆₈'),'machine symbol on every row');
   assert(text.includes('Spaces')&&at('space-sp3')>at('uac-github.com/team/vega'),'a space without a UAC follows under Spaces');
   assert(!ids.includes('space-sp1'),'no folder rows inside a UAC project');
-  assert(text.includes('✉ 2'));assert(!text.includes('✉ 9'),'totals come from the UAC\'s machine');
+  const totals=nodes.filter(n=>typeof n.idValue==='string'&&n.idValue.startsWith('total-')).map(n=>n.tooltipValue);
+  assert(totals.some(t=>t.includes('✉ 2 notes')));assert(!totals.some(t=>t.includes('✉ 9')),'totals come from the UAC\'s machine');
   // Drag vega above lanista; the order is kept.
   const press=(id,ev)=>elements(h.render()).find(n=>n.idValue===id).handlers[ev]({},h.cx);
   press('uac-github.com/team/vega','on_mouse_down');press('uac-github.com/team/lanista','on_mouse_move');press('uac-github.com/team/lanista','on_mouse_up');
