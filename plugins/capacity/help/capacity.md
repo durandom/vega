@@ -40,3 +40,7 @@ Examples:
   vega capacity plan claude --this-week   # he uses one within seven days
   vega capacity used claude
 vega capacity --json: schema-1 object with windows, source_error and ledger_error; seconds and percentages are numeric.
+Windows include account_id, fresh credits (or null) and on_credits. A thin binding
+window with fresh spendable credits shows on credits and gives no spawn warning;
+missing/stale credits show credits unknown and retain the warning. Balances are
+decimal strings in provider credit units. Credit freshness is at most 120 seconds.

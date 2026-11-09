@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{parse_rfc3339, Reading, Sample, Scope, Source};
+use super::{parse_rfc3339, Credits, Reading, Sample, Scope, Source};
 use crate::output_within;
 
 /// token-burn reads SQLite and answers in about a second.
@@ -104,13 +104,21 @@ pub(super) fn sample(status: &[Value], forecast: &[Value]) -> Sample {
             } else {
                 r["RemainingPercent"].as_f64().unwrap_or(0.0)
             };
-            let runs_out_at = forecast
-                .iter()
-                .find(|f| f["provider"] == provider && f["window_name"] == window)
+            let account = r["AccountID"].as_str().unwrap_or_default();
+            let forecast_row = forecast.iter().find(|f| {
+                f["provider"] == provider
+                    && f["window_name"] == window
+                    && f["account_id"].as_str().unwrap_or_default() == account
+            });
+            let credits = credits(&r["overage_credits"])
+                .or_else(|| forecast_row.and_then(|f| credits(&f["overage_credits"])));
+            let runs_out_at = forecast_row
                 .filter(|f| f["confidence"].as_f64().unwrap_or(0.0) >= MIN_CONFIDENCE)
                 .and_then(|f| f["estimated_100_at"].as_str().and_then(parse_rfc3339));
             Reading {
                 provider: provider.into(),
+                account_id: account.into(),
+                credits,
                 window: window.into(),
                 scope: Scope::Account,
                 left,
@@ -123,10 +131,59 @@ pub(super) fn sample(status: &[Value], forecast: &[Value]) -> Sample {
     Sample { readings }
 }
 
+/// Reject partial flags and missing timestamps: quota age cannot date credit flags.
+fn credits(v: &Value) -> Option<Credits> {
+    Some(Credits {
+        has_credits: v["has_credits"].as_bool()?,
+        unlimited: v["unlimited"].as_bool()?,
+        overage_limit_reached: v["overage_limit_reached"].as_bool()?,
+        balance: v["balance"]
+            .as_str()
+            .filter(|b| !b.is_empty())
+            .map(String::from),
+        observed_at: v["observed_at"].as_str().and_then(parse_rfc3339)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn credits_join_forecast_by_provider_and_account_and_require_complete_flags() {
+        let credit = json!({"has_credits":true,"unlimited":false,"overage_limit_reached":false,"balance":"60827.22","observed_at":"2026-10-10T07:39:45Z"});
+        let status = json!([
+            {"Provider":"codex","AccountID":"other","WindowName":"primary","RemainingPercent":0},
+            {"Provider":"codex","AccountID":"main","WindowName":"primary","RemainingPercent":0}
+        ]);
+        let forecast = json!([{"provider":"codex","account_id":"main","window_name":"primary","overage_credits":credit}]);
+        let sample = sample(status.as_array().unwrap(), forecast.as_array().unwrap());
+        assert!(sample.readings[0].credits.is_none());
+        let windows =
+            super::super::windows(&sample, parse_rfc3339("2026-10-10T07:40:00Z").unwrap());
+        assert!(windows[0].binding);
+        assert!(
+            !windows[1].binding,
+            "same-named windows from another account must not bind too"
+        );
+
+        assert_eq!(
+            sample.readings[1]
+                .credits
+                .as_ref()
+                .unwrap()
+                .balance
+                .as_deref(),
+            Some("60827.22")
+        );
+        let mut partial = credit.clone();
+        partial.as_object_mut().unwrap().remove("has_credits");
+        assert!(credits(&partial).is_none());
+        partial = credit;
+        partial.as_object_mut().unwrap().remove("observed_at");
+        assert!(credits(&partial).is_none());
+    }
 
     #[test]
     fn maps_token_burn_rows_and_drops_weak_forecasts() {

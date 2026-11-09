@@ -40,6 +40,7 @@ vega must not be chained to token-burn, and a provider new to the source must no
 | Field | Meaning |
 |---|---|
 | `provider`, `window` | the source's names, taken as they come |
+| `account_id`, `credits` | account identity and independently dated overage credit state (or unknown) |
 | `scope` | `account` or `model:<name>`, from the window scopes below (adapters set `account`) |
 | `left` | percent left; 0 when the source says the limit is reached |
 | `reset_at`, `runs_out_at`, `observed_at` | reset, confident forecast run-out, sample time (Unix seconds) |
@@ -112,6 +113,35 @@ token_burn: ok (v0.1.37, no service, sample 0m old)
   version and the user service (`token-burn service-status --json`: running, installed, none). A sample can
   be fresh without the service (the daemon run another way), so the sample age decides `ok`. Not ok adds a
   `help:` line (`token-burn install`, `token-burn once --store`); vega never runs them.
+
+## Overage credits (vega-lweq)
+
+token-burn 774f459 exposes `overage_credits` on status/forecast JSON rows.
+The adapter keeps accounts separate (`Provider`/`AccountID` on status,
+`provider`/`account_id` on forecast). Each reading carries its account's
+credit flags and exact decimal balance; balance is in provider credit units,
+not USD. Status credit state takes precedence, with matching forecast data
+as a fallback. All three boolean flags and the credit object's `observed_at`
+are required. A quota sample's observation time cannot date the credits.
+
+At evaluation time, credits older than 120 seconds or in the future become
+unknown, independently of the quota sample's 30-minute staleness threshold.
+token-burn also rejects incoherent remote flag sets (timestamps spanning more
+than two seconds) and omits a balance not aligned with those flags.
+vega does not reconstruct flags or balances from the raw gauges.
+
+A thin binding window with `(has_credits || unlimited)` and
+`!overage_limit_reached` is usable on credits. Its TOON runs_out cell and spawn
+summary say `on credits <balance>` or `on credits unlimited`; an absent balance
+is explicit. No thin-capacity spawn warning is emitted. Nil/stale credit state
+says `credits unknown` and preserves the existing warning behavior; known empty
+credits and overage limits also preserve it. Planned resets and overrides retain
+their existing independent behavior. Quota percentages remain unchanged.
+
+Capacity JSON schema 1 adds `account_id`, `credits` (fresh state or null) and
+`on_credits` (binding windows only) to each window. Credit `observed_at` is Unix
+seconds, `balance` is a string or null, and the flags are booleans. The shared
+headroom model supplies the same behavior to `vega uac status` and mux spawns.
 
 ## Rejected
 

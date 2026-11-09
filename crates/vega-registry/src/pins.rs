@@ -313,6 +313,8 @@ mod tests {
         use vega_herdr::capacity::{Reading, Sample, Scope, STALE_SECS};
         let row = |left, reset| Reading {
             provider: "antigravity".into(),
+            account_id: String::new(),
+            credits: None,
             window: "test".into(),
             scope: Scope::Account,
             left,

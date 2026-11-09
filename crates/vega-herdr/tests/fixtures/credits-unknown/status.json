@@ -1,0 +1,12 @@
+[
+  {
+    "Provider": "codex",
+    "AccountID": "codex-main",
+    "WindowName": "primary",
+    "RemainingPercent": 0,
+    "LimitReached": true,
+    "ResetAt": "2026-10-12T00:00:00Z",
+    "ObservedAt": "2026-10-10T07:39:45Z",
+    "overage_credits": null
+  }
+]

@@ -33,6 +33,30 @@ pub const SOON_SECS: i64 = 2 * 3600;
 /// The daemon polls every five minutes: an older sample is stale.
 pub const STALE_SECS: i64 = 30 * 60;
 
+/// Remote credit flags expire independently of quota window samples.
+pub const CREDIT_STALE_SECS: i64 = 120;
+
+/// Spendable overage credits, in provider credit units (never inferred USD).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Credits {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    pub overage_limit_reached: bool,
+    pub balance: Option<String>,
+    /// Oldest flag observation, Unix seconds; not the quota observation.
+    pub observed_at: i64,
+}
+
+impl Credits {
+    pub fn fresh(&self, now: i64) -> bool {
+        self.observed_at <= now && now.saturating_sub(self.observed_at) <= CREDIT_STALE_SECS
+    }
+
+    pub fn spendable(&self) -> bool {
+        (self.has_credits || self.unlimited) && !self.overage_limit_reached
+    }
+}
+
 /// What a window limits.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Scope {
@@ -69,6 +93,8 @@ impl Scope {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reading {
     pub provider: String,
+    pub account_id: String,
+    pub credits: Option<Credits>,
     pub window: String,
     pub scope: Scope,
     /// Percent left; 0 when the source says the limit is reached.
@@ -151,6 +177,9 @@ pub fn provider_for(kind: &str, args: &[String]) -> Option<&'static str> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Headroom {
     pub provider: String,
+    pub account_id: String,
+    /// Only fresh credit observations survive Headroom::at.
+    pub credits: Option<Credits>,
     pub window: String,
     pub scope: Scope,
     /// Percent left; 0 when the source says the limit is reached.
@@ -177,6 +206,8 @@ impl Headroom {
             .map(|t| t - now);
         Headroom {
             provider: r.provider.clone(),
+            account_id: r.account_id.clone(),
+            credits: r.credits.as_ref().filter(|c| c.fresh(now)).cloned(),
             window: r.window.clone(),
             scope: r.scope.clone(),
             left: if passed { 100.0 } else { r.left },
@@ -194,7 +225,34 @@ impl Headroom {
 
     /// Thin and covered by neither a planned reset nor an override.
     pub fn warns(&self) -> bool {
-        self.thin() && self.cover.is_none()
+        self.thin() && self.cover.is_none() && !self.on_credits()
+    }
+
+    /// A thin window remains usable while this account has fresh spendable credits.
+    pub fn on_credits(&self) -> bool {
+        self.thin() && self.credits.as_ref().is_some_and(Credits::spendable)
+    }
+
+    /// Explain credit availability only when quota headroom needs attention.
+    pub fn credit_status(&self) -> Option<String> {
+        if !self.thin() {
+            return None;
+        }
+        Some(match &self.credits {
+            Some(c) if c.overage_limit_reached => "overage limit reached".into(),
+            Some(c) if c.spendable() => {
+                if c.unlimited {
+                    "on credits unlimited".into()
+                } else {
+                    c.balance
+                        .as_ref()
+                        .map(|b| format!("on credits {b}"))
+                        .unwrap_or_else(|| "on credits (balance unknown)".into())
+                }
+            }
+            Some(_) => "no spendable credits".into(),
+            None => "credits unknown".into(),
+        })
     }
 
     /// Sets the cover from the Slayer's ledger.
@@ -223,6 +281,9 @@ impl Headroom {
             s += &format!("; out in ~{}", duration(o));
         }
         if let Some(c) = &self.cover {
+            s += &format!("; {c}");
+        }
+        if let Some(c) = self.credit_status() {
             s += &format!("; {c}");
         }
         if self.stale() {
@@ -266,11 +327,13 @@ pub struct Window {
 pub fn windows(sample: &Sample, now: i64) -> Vec<Window> {
     let mut out = Vec::new();
     for p in providers(sample) {
-        let binding = for_provider(sample, p, now).map(|h| h.window);
+        let binding = for_provider(sample, p, now).map(|h| (h.window, h.account_id));
         for r in sample.readings.iter().filter(|r| r.provider == p) {
             let headroom = Headroom::at(r, now);
             out.push(Window {
-                binding: binding.as_deref() == Some(headroom.window.as_str()),
+                binding: binding.as_ref().is_some_and(|(window, account)| {
+                    *window == headroom.window && *account == headroom.account_id
+                }),
                 headroom,
             });
         }
@@ -317,6 +380,7 @@ fn table(sample: Result<Sample, String>, ledger: Option<&Ledger>, now: i64) -> V
             None => {}
         }
         runs_out.extend(h.cover.clone());
+        runs_out.extend(h.credit_status());
         let owned = ledger
             .providers
             .get(&h.provider)
@@ -328,7 +392,7 @@ fn table(sample: Result<Sample, String>, ledger: Option<&Ledger>, now: i64) -> V
             h.window,
             percent(h.left),
             h.resets_in.map(duration).unwrap_or_default(),
-            runs_out.join("; "),
+            crate::cell(&runs_out.join("; ")),
             owned
         ));
     }
@@ -508,6 +572,67 @@ mod tests {
 
     fn strs(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn credit_fixture(name: &str) -> Sample {
+        let source = TokenBurn {
+            bin: "/nonexistent/token-burn".into(),
+            fixture: Some(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures")
+                    .join(name)
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        };
+        read_from(&source, &Scopes::parse(scopes::DEFAULT).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn fresh_credit_fixtures_cover_exhaustion_but_denied_unknown_and_stale_warn() {
+        let now = at_recording();
+        for (fixture, usable, label) in [
+            ("credits", true, "on credits 60827.2200000000"),
+            ("credits-limit", false, "overage limit reached"),
+            ("credits-unknown", false, "credits unknown"),
+        ] {
+            let sample = credit_fixture(fixture);
+            let h = for_provider(&sample, "codex", now).unwrap();
+            assert_eq!(h.left, 0.0);
+            assert_eq!(h.on_credits(), usable);
+            let (text, warning) = spawn_check("codex", &[], Ok(sample), &Ledger::default(), now);
+            assert!(text.contains(label), "{text}");
+            assert_eq!(warning.is_none(), usable);
+        }
+        let sample = credit_fixture("credits");
+        let observed = sample.readings[0].credits.as_ref().unwrap().observed_at;
+        assert!(for_provider(&sample, "codex", observed + CREDIT_STALE_SECS)
+            .unwrap()
+            .on_credits());
+        assert!(
+            !for_provider(&sample, "codex", observed + CREDIT_STALE_SECS + 1)
+                .unwrap()
+                .on_credits()
+        );
+        for at in [now + CREDIT_STALE_SECS + 1, now - 60] {
+            let h = for_provider(&sample, "codex", at).unwrap();
+            assert!(h.credits.is_none());
+            assert!(!h.on_credits());
+            assert!(h.warns());
+        }
+        let mut sample = credit_fixture("credits");
+        let credit = sample.readings[0].credits.as_mut().unwrap();
+        credit.unlimited = true;
+        credit.has_credits = false;
+        credit.balance = None;
+        let h = for_provider(&sample, "codex", now).unwrap();
+        assert_eq!(h.credit_status().as_deref(), Some("on credits unlimited"));
+        assert!(!h.warns());
+        let credit = sample.readings[0].credits.as_mut().unwrap();
+        credit.unlimited = false;
+        let h = for_provider(&sample, "codex", now).unwrap();
+        assert!(h.warns());
+        assert_eq!(h.credit_status().as_deref(), Some("no spendable credits"));
     }
 
     #[test]
@@ -702,7 +827,10 @@ mod tests {
         );
         let (field, warning) =
             spawn_check("claude", &[], Ok(s), &Ledger::default(), at_recording());
-        assert_eq!(field, "capacity: claude 6% left (five_hour, resets in 2h)");
+        assert_eq!(
+            field,
+            "capacity: claude 6% left (five_hour, resets in 2h; credits unknown)"
+        );
         assert!(warning
             .unwrap()
             .starts_with("warning: claude binding window is thin"));
@@ -733,13 +861,13 @@ mod tests {
         let (field, warning) = spawn_check("claude", &[], Ok(thin_claude()), &l, at_recording());
         assert_eq!(
             field,
-            "capacity: claude 6% left (five_hour, resets in 2h; out in ~1h; reset planned this week)"
+            "capacity: claude 6% left (five_hour, resets in 2h; out in ~1h; reset planned this week; credits unknown)"
         );
         assert_eq!(warning, None);
         let lines = status_lines(Ok(thin_claude()), &Ok(l), at_recording());
         assert_eq!(
             lines[1],
-            "  claude,five_hour,6%,2h,in ~1h; reset planned this week,1"
+            "  claude,five_hour,6%,2h,in ~1h; reset planned this week; credits unknown,1"
         );
     }
 
@@ -748,7 +876,10 @@ mod tests {
         let mut l = Ledger::default();
         l.override_until("claude", "2026-10-12").unwrap();
         let (field, warning) = spawn_check("claude", &[], Ok(thin_claude()), &l, at_recording());
-        assert!(field.ends_with("; override until 2026-10-12)"), "{field}");
+        assert!(
+            field.ends_with("; override until 2026-10-12; credits unknown)"),
+            "{field}"
+        );
         assert_eq!(warning, None);
         // After its day the warning is back.
         let later = at_recording() + 3 * 86400;
@@ -767,7 +898,10 @@ mod tests {
             "{w}"
         );
         let lines = status_lines(Ok(thin_claude()), &Ok(owned(1)), at_recording());
-        assert_eq!(lines[1], "  claude,five_hour,6%,2h,in ~1h (soon),1");
+        assert_eq!(
+            lines[1],
+            "  claude,five_hour,6%,2h,in ~1h (soon); credits unknown,1"
+        );
     }
 
     #[test]
@@ -798,7 +932,7 @@ mod tests {
         let (field, warning) = spawn_check("pi", &args, Ok(s), &Ledger::default(), at_recording());
         assert_eq!(
             field,
-            "capacity: xai 30% left (weekly, resets in 3d16h; out in ~1h30m)"
+            "capacity: xai 30% left (weekly, resets in 3d16h; out in ~1h30m; credits unknown)"
         );
         assert!(warning.is_some());
     }

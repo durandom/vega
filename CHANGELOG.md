@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 150 · 2026-11-09
+
+- feature: `vega capacity` shows thin or exhausted windows as `on credits` when
+  token-burn reports fresh spendable overage credits, suppressing the capacity
+  warning on spawn. JSON adds account IDs, credit flags/balance and `on_credits`;
+  missing or stale credits remain unknown and keep the warning. Balances retain
+  their provider credit units (vega-lweq; token-burn 774f459 or newer).
+
 ## 149 · 2026-11-09
 
 - feature: `vega notify [list]`, `vega ci`, `vega capacity`, `vega bd status`

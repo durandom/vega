@@ -75,7 +75,7 @@ fn json_view(
     let empty = Ledger::default();
     let rows: Vec<_> = sample.as_ref().map(|s| capacity::windows(s, now)).unwrap_or_default().into_iter().map(|w| {
         let h = if w.binding { w.headroom.covered_by(ledger.as_ref().unwrap_or(&empty), now) } else { w.headroom };
-        serde_json::json!({"provider":h.provider,"window":h.window,"scope":h.scope.text(),"left_percent":h.left,"used_percent":100.0-h.left,"binding":w.binding,"resets_in":h.resets_in,"runs_out_in":h.out_in,"sample_age":h.age,"stale":h.stale(),"override":h.cover,"warns":w.binding && h.warns()})
+        serde_json::json!({"provider":h.provider,"account_id":h.account_id,"credits":h.credits,"on_credits":w.binding && h.on_credits(),"window":h.window,"scope":h.scope.text(),"left_percent":h.left,"used_percent":100.0-h.left,"binding":w.binding,"resets_in":h.resets_in,"runs_out_in":h.out_in,"sample_age":h.age,"stale":h.stale(),"override":h.cover,"warns":w.binding && h.warns()})
     }).collect();
     serde_json::json!({"schema":1,"windows":rows,"source_error":sample.as_ref().err(),"ledger_error":ledger.as_ref().err()})
 }
@@ -165,6 +165,9 @@ fn table(rows: Vec<Window>, ledger: &Ledger, now: i64) -> Vec<String> {
             None => {}
         }
         runs_out.extend(h.cover.clone());
+        if w.binding {
+            runs_out.extend(h.credit_status());
+        }
         out.push(format!(
             "  {},{},{},{}%,{},{},{}",
             h.provider,
@@ -206,6 +209,45 @@ mod tests {
         Health {
             version: Ok(Some("v0.1.37".into())),
             service: Service::Running,
+        }
+    }
+
+    #[test]
+    fn credit_fixtures_show_in_toon_and_json_without_changing_percentages() {
+        for (fixture, on_credits, label) in [
+            ("credits", true, "on credits 60827.2200000000"),
+            ("credits-limit", false, "overage limit reached"),
+            ("credits-unknown", false, "credits unknown"),
+        ] {
+            let source = capacity::token_burn::TokenBurn {
+                bin: "/nonexistent/token-burn".into(),
+                fixture: Some(
+                    std::path::Path::new(FIXTURE)
+                        .parent()
+                        .unwrap()
+                        .join(fixture)
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+            };
+            let sample = capacity::read_from(
+                &source,
+                &capacity::scopes::Scopes::parse(capacity::scopes::DEFAULT).unwrap(),
+            )
+            .unwrap();
+            let json = json_view(&Ok(sample.clone()), &Ok(Ledger::default()), AT);
+            let row = &json["windows"][0];
+            assert_eq!(row["account_id"], "codex-main");
+            assert_eq!(row["on_credits"], on_credits);
+            assert_eq!(row["warns"], !on_credits);
+            assert_eq!(row["left_percent"], 0.0);
+            if fixture == "credits-unknown" {
+                assert!(row["credits"].is_null());
+            } else {
+                assert_eq!(row["credits"]["balance"], "60827.2200000000");
+            }
+            let lines = view(Ok(sample), &Ok(Ledger::default()), &ok(), AT);
+            assert!(lines.iter().any(|l| l.contains(label)), "{lines:?}");
         }
     }
 

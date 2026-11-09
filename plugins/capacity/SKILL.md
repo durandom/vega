@@ -10,7 +10,9 @@ token-burn (the Slayer's quota monitor) stores a usage sample of each provider e
 - `vega capacity`: every window per provider: scope, percent left, reset, `runs_out` from a confident forecast, `binding: yes` on the account window with the least left per provider (the one the spawn warning and `vega uac status` read). `model:<name>` windows (`seven_day_fable`) show, but never bind; the scopes are the config source `capacity/windows.toml` (`vega config init capacity/windows.toml` to override). Then the resets ledger and a `token_burn:` health line (version, user service, sample age).
 - Ledger, only on the Slayer's word: `resets <provider> <n>` (owned), `plan <provider> --this-week|--at YYYY-MM-DD|--clear`, `used <provider>`, `override <provider> --until YYYY-MM-DD|--clear`. A plan with a reset owned, or an override, covers a thin window: no spawn warning.
 - `vega uac capacity ...` is an alias.
+- Fresh spendable overage credits cover a thin binding window: `on credits <balance>` or `on credits unlimited`, no spawn warning. Balance is in provider credit units, never USD. Missing/stale credits show `credits unknown` and retain the warning; an overage limit also retains it.
+- `vega capacity --json` returns a schema-1 object with windows, including account IDs, fresh credit flags/balances (or null), and `on_credits`. TOON stays the default.
 
-Advisory only: vega never picks the kind. A thin binding window (under 10% or out within 2h) means: spawn another kind or provider if the run outlasts it, or ask the Slayer about a reset.
+Advisory only: vega never picks the kind. An uncovered thin binding window (under 10% or out within 2h) means: spawn another kind or provider if the run outlasts it, or ask the Slayer about a reset.
 
 `token_burn: stale` or `missing`: say so in the report and follow its `help:` line with the user; do not install or start token-burn unasked.

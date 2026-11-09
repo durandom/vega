@@ -262,5 +262,8 @@ them into zeros. No mod changes belong to this backend slice.
 Plugin READMEs document nullable fields and units. Lists are arrays even when
 empty. IDs are full normalized project identities. Timestamps use Unix seconds,
 durations seconds, percentages numbers. Capacity cover includes planned resets
-and overrides. On-credits capacity is deferred pending token-burn-cu9's final
-CLI fields and freshness contract (vega-lweq); absent credits must not be guessed.
+and overrides. Capacity rows additionally have `account_id`, `credits` (fresh
+flags, exact decimal balance, Unix observed_at; otherwise null), and `on_credits`.
+A thin binding window on spendable credits keeps its quota percentages and sets
+`on_credits: true`, `warns: false`. Missing/stale credit data stays unknown;
+provider credit units must not be rendered as USD (vega-lweq).
