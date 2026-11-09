@@ -104,7 +104,7 @@ import sys,json,base64,os
 args=sys.argv[1:]
 with open(os.environ['TEST_HC_LOG'],'a') as f: f.write(json.dumps(args)+'\\n')
 if args[:2]==['machine','ls']:
- if os.environ.get('TEST_MACHINE_SLOW'): __import__('time').sleep(1)
+ if os.environ.get('TEST_MACHINE_SLOW'): __import__('time').sleep(5)
  print(json.dumps({'machines':[{'name':n,'state':'connected'} for n in ['ganymede','broken']]+[{'name':'offline','state':'disconnected'}]}))
 else:
  name=args[args.index('--on')+1]
@@ -439,9 +439,9 @@ test('timed-out machine list uses the last inventory and still reads connected r
   const h=load('vega'),f=transportFixture();
   try {
     // Shorten the transport deadline for the fake slow command; no real hc/core is used.
-    const script=vm.runInContext('collectBadges',h.api).replace('timeout=12','timeout=0.1');
+    const script=vm.runInContext('collectBadges',h.api).replace('timeout=12','timeout=1.5');
     const result=f.run(script,[vm.runInContext('readBadges',h.api),JSON.stringify([{name:'ganymede',state:'connected'}])],{TEST_MACHINE_SLOW:'1'});
-    assert.deepEqual(result.errors,[{source:'machines',message:'hc machine ls slow (0.1 s)'}]);
+    assert.deepEqual(result.errors,[{source:'machines',message:'hc machine ls slow (1.5 s)'}]);
     assert.equal(result.machines[0].name,'ganymede');
     assert.equal(result.rows[0].machine,'ganymede');
   } finally {f.close();}
@@ -452,7 +452,7 @@ test('timed-out machine list uses the last inventory and still reads connected r
 test('remote vegad start goes through hc exec, only in real homes, and runs relay start there',()=>{
   const h=load('vega'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'vega-remote-'));
   try {
-    const schema=JSON.parse(fs.readFileSync(new URL('../crates/vega-herdr/schema/hc-0.1.18.openrpc.json',import.meta.url),'utf8'));
+    const schema=JSON.parse(fs.readFileSync(new URL('../crates/vega-herdr/schema/hc-0.1.19.openrpc.json',import.meta.url),'utf8'));
     const names=schema.methods.find(m=>m.name==='machine.exec').params.map(p=>p.name);
     fs.mkdirSync(path.join(dir,'.local/bin'),{recursive:true});
     fs.writeFileSync(path.join(dir,'.local/bin/vega-post'),'#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_START_LOG"\n',{mode:0o755});
