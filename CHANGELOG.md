@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 149 · 2026-11-09
+
+- feature: `vega notify [list]`, `vega ci`, `vega capacity`, `vega bd status`
+  and `vega uac` accept opt-in `--json` for the project Overview. Responses
+  are schema-1 objects with explicit empty lists and structured errors;
+  notify, CI and Beads status support exact project filters. UAC JSON selects
+  its project from cwd without a calling pane. TOON remains the default
+  (vega-0h4c.50.4). On-credits awaits token-burn's CLI read contract.
+
 ## 148 · 2026-11-09
 
 - feature: `vega project config` stores personal display names and labels by project ID;

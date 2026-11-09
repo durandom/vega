@@ -243,3 +243,24 @@ cleanup. No worktrunk hooks or badge schema changes are involved.
 The Slayer kept decisions limited to projects with a claimed UAC (item 6:
 decisions belong to the UAC) and kept the existing Git tooltip (item 8). The
 toast-position upstream request is drafted only in the bead notes.
+## Overview CLI data sources (vega-0h4c.50.4)
+
+The Overview tab calls `exec("vega", [..., "--json"], {cwd, on})` in the selected
+project checkout on its source machine. Each command emits one object with
+`schema: 1`; errors use `{error: {code, message, hint}}` and nonzero exit codes.
+TOON remains the default. Retain unavailable/unknown values rather than turn
+them into zeros. No mod changes belong to this backend slice.
+
+| argv before --json | Data | Scope |
+| --- | --- | --- |
+| `notify list --project <id>` | `asks`, `registry_error` | Open asks for exact project; no acknowledgement |
+| `ci --project <id>` | `watches`: target, state, verdict, failed_checks, watchers, head, polled, error | Target host/repo; JSON defaults to cwd project |
+| `capacity` | `windows`: provider/window/scope, left/used percentages, binding, reset/forecast seconds, age/stale, override, warns; source/ledger errors | Selected machine's accounts |
+| `bd status --project <id>` | `projects`: location, state, last_pull/last_push, conflict, sync details | Provisioned local clones of exact project |
+| `uac` | `agents`, receiving-host mail `grants`, `unreachable`, `registry_error` | Cwd project and group; no caller pane required |
+
+Plugin READMEs document nullable fields and units. Lists are arrays even when
+empty. IDs are full normalized project identities. Timestamps use Unix seconds,
+durations seconds, percentages numbers. Capacity cover includes planned resets
+and overrides. On-credits capacity is deferred pending token-burn-cu9's final
+CLI fields and freshness contract (vega-lweq); absent credits must not be guessed.
