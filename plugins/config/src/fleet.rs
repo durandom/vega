@@ -37,11 +37,16 @@ pub fn check() -> Result<bool, Failure> {
         println!("fleet: 0 hc machines configured");
         return Ok(true);
     }
-    let view = vega_registry::read_blocking(Duration::from_secs(3)).map_err(|why| {
+    let view = vega_registry::read_blocking_cli(Duration::from_secs(3)).map_err(|why| {
+        let hint = if why == vega_registry::INBOX_ONLY_OFF {
+            "run it on an owner host (proteus, ganymede, io): an inbox-only host cannot read the registry"
+        } else {
+            "restore registry access and rerun vega config infra --fleet"
+        };
         Failure::new(
             "registry_unavailable",
             format!("cannot check hc machine names: {why}"),
-            "restore registry access and rerun vega config infra --fleet",
+            hint,
         )
     })?;
     let gaps = mismatches(machines, &view)?;

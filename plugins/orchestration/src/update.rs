@@ -70,7 +70,7 @@ pub fn coordinator(actor: &Actor, explicit: Option<&str>) -> Result<Endpoint, Fa
     if h == host() {
         return local_endpoint(&pane);
     }
-    let view = vega_registry::read_blocking(Duration::from_secs(3)).map_err(|_| {
+    let view = vega_registry::read_blocking_cli(Duration::from_secs(3)).map_err(|_| {
         fail(
             "wait_coordinator",
             "coordinator identity is unknown (registry unavailable)",
@@ -132,7 +132,7 @@ pub fn apply(from: &str, req: &Request) -> Result<Receipt, Failure> {
     let here = host();
     let registry = if from != here {
         Some(
-            vega_registry::read_blocking(Duration::from_secs(3)).map_err(|_| {
+            vega_registry::read_blocking_cli(Duration::from_secs(3)).map_err(|_| {
                 fail(
                     "wait_identity",
                     "remote waiter identity is unknown (registry unavailable)",

@@ -247,7 +247,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
         })
         .collect();
     // The registry (other hosts' lineage, UACs, statuses), in parallel.
-    let reg = thread::spawn(|| vega_registry::read_blocking(Duration::from_secs(4)));
+    let reg = thread::spawn(|| vega_registry::read_blocking_cli(Duration::from_secs(4)));
     let local = terminal::local()?;
 
     let bin = env::current_exe()
@@ -310,6 +310,9 @@ fn home(mode: Mode) -> Result<(), Failure> {
                         "registry: {} hosts in sync",
                         machines_in(v).iter().filter(|h| v.fresh(h)).count()
                     ),
+                    Err(e) if e == vega_registry::INBOX_ONLY_OFF => {
+                        println!("registry: off ({e})")
+                    }
                     Err(e) => println!(
                         "registry: off ({}); parents and attention from this machine only",
                         cell(e)
@@ -1181,7 +1184,7 @@ fn answer_here(id: &str, text: &str) -> Result<(), Failure> {
     let me = vega_herdr::hc::own_terminal()
         .map(|t| t.pane().to_string())
         .unwrap_or_default();
-    let reg = thread::spawn(|| vega_registry::read_blocking(Duration::from_secs(4)));
+    let reg = thread::spawn(|| vega_registry::read_blocking_cli(Duration::from_secs(4)));
     let agents = terminal::local().map(|s| s.agents);
     let registry = reg
         .join()

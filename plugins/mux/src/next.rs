@@ -33,10 +33,12 @@ pub fn run(statuses: &[String]) -> Result<(), Failure> {
                 .map(crate::backend::normalize),
         );
     }
-    let registry = match vega_registry::read_blocking(Duration::from_secs(3)) {
+    let registry = match vega_registry::read_blocking_cli(Duration::from_secs(3)) {
         Ok(view) => view.waiting(),
         Err(why) => {
-            eprintln!("warning: registry: {why}; this host's agents only");
+            if why != vega_registry::INBOX_ONLY_OFF {
+                eprintln!("warning: registry: {why}; this host's agents only");
+            }
             Vec::new()
         }
     };

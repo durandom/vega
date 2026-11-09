@@ -921,7 +921,10 @@ fn login_removal_report(r: Result<Option<PathBuf>, Failure>) -> (Option<String>,
         ),
         Ok(None) => (None, false),
         Err(e) => (
-            Some(format!("warning: old login job not removed: {}", e.message)),
+            Some(format!(
+                "warning: old login job not removed: {} ({})",
+                e.message, e.hint
+            )),
             true,
         ),
     }
@@ -934,6 +937,10 @@ fn install_host_warning() -> Result<Option<String>, Failure> {
         return Ok(None);
     }
     let resolved = host();
+    // An inbox-only host cannot read the registry by design: nothing to verify.
+    if vega_herdr::state::is_inbox_only(&resolved) {
+        return Ok(None);
+    }
     let known = crate::runtime()?.block_on(async {
         tokio::time::timeout(crate::reach::WAIT, async {
             let client = crate::connect("relay-install", None)
@@ -1215,6 +1222,10 @@ mod tests {
             .contains(&("VEGA_POST_HOST".into(), "replacement".into())));
         env::set_var("VEGA_NATS_URL", "nats://127.0.0.1:1");
         assert!(install_host_warning().unwrap().is_some());
+        // An inbox-only host cannot read the registry: no false warning.
+        env::set_var("VEGA_POST_INBOX_ONLY", "replacement");
+        assert!(install_host_warning().unwrap().is_none());
+        env::remove_var("VEGA_POST_INBOX_ONLY");
     }
 
     #[test]
@@ -1317,6 +1328,8 @@ case "$1" in print) test -f "$HOME/loaded" ;; bootout) test -z "$FAIL_BOOTOUT" &
                     .starts_with("warning: old login job not removed")
         );
         assert!(mac.exists());
+        let (line, _) = login_removal_report(Err(Failure::new("x", "boom", "run: fix it")));
+        assert!(line.unwrap().ends_with("boom (run: fix it)"));
         let (line, warning) = login_removal_report(Ok(Some(mac.clone())));
         assert!(!warning && line.unwrap().contains("removed"));
         unsafe {

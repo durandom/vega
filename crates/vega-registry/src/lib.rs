@@ -855,6 +855,19 @@ pub fn read_blocking(timeout: Duration) -> Result<View, String> {
     })
 }
 
+/// Why a CLI path skips the registry on an inbox-only host.
+pub const INBOX_ONLY_OFF: &str = "inbox-only host: local agents only";
+
+/// `read_blocking` for CLI paths: an inbox-only host cannot read the bucket
+/// by design (the broker denies it), so skip the wait and return
+/// `Err(INBOX_ONLY_OFF)` at once. Owners keep the plain read.
+pub fn read_blocking_cli(timeout: Duration) -> Result<View, String> {
+    if vega_herdr::state::is_inbox_only(&vega_herdr::state::post_host()) {
+        return Err(INBOX_ONLY_OFF.to_string());
+    }
+    read_blocking(timeout)
+}
+
 /// The subject of a last-by-subject direct get of `key`: the only registry
 /// subject a host with `auth-config --registry-read <host>=<key>` may publish
 /// (vega-lhc.90). No stream info: its `subjects_filter` would list every key.
@@ -1060,6 +1073,15 @@ mod tests {
         assert_eq!(url(), "nats://broker.example:4222");
         std::env::set_var("VEGA_NATS_URL", "nats://override.example:4222");
         assert_eq!(url(), "nats://override.example:4222");
+        // An inbox-only host skips the read at once; an owner would dial.
+        std::env::set_var("VEGA_POST_HOST", "puck");
+        std::env::set_var("VEGA_POST_INBOX_ONLY", "puck");
+        let t = std::time::Instant::now();
+        assert_eq!(
+            read_blocking_cli(Duration::from_secs(30)).unwrap_err(),
+            INBOX_ONLY_OFF
+        );
+        assert!(t.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

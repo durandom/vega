@@ -96,6 +96,10 @@ member; member claims name the coordination project ID. Member records need no
 local checkout: they confer routing, not a filesystem location. Existing
 registry publication and `post send --uac` routing consume these unchanged;
 inbox-only hosts retain local records without new broker or ACL rights.
+An inbox-only host (deimos, puck) cannot read the registry by design, so `vega uac`
+skips the read (no 4 s wait) and prints `registry: off (inbox-only host: local agents
+only)`; `vega mux next` and `vega config infra --fleet` skip it the same way.
+Owners keep the registry read.
 Repeated claim is idempotent. Release removes this pane's group records even
 after manifest edits. Beads, attention and sentinel ownership stay per repo.
 

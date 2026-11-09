@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 143 · 2026-11-09
+
+- feature: an inbox-only host (deimos, puck) no longer waits 4 s and reports a registry timeout:
+  `vega uac` prints `registry: off (inbox-only host: local agents only)`, and `vega mux next`,
+  `vega config infra --fleet` and the wait commands skip the read too. `vega post relay install`
+  on such a host no longer warns that the host is not verified, and the old-login-job warning
+  names its next step (vega-0h4c.44).
+
 ## 142 · 2026-11-09
 
 - feature: an inbox-only hc machine (puck) is a known registry host without a beat, so adopt, mux
