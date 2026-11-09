@@ -47,18 +47,17 @@ reparented away from the `toolbox run` tree). No code change was needed.
                  │                         │
   agent ──cli──► vegad (per machine) ◄── herdr events.subscribe (status, pane closed)
     ▲                │
-    └── one typed line: "[vega-post] 3 new. Run: vega post inbox"   (only when the agent is free)
+    └── one typed line: "[vega-post] 3 new. Run: vega post inbox"   (behind the input draft guard)
 ```
 
 Jobs, all in one process:
 
 1. **Deliver mail.** Every message, local or remote, is a post message with a correlation id.
-2. **Deliver when free.** vegad watches each agent's status. It types the pointer only when the
-   recipient is `idle` or `done`, and coalesces everything pending into one line. `--now` overrides
-   for urgent messages ("stop"). Mail from the recipient's recorded parent (its task channel, known
-   from `FROM_PANE` and the `parents/` records) is also typed while the recipient is `working`:
-   Claude and Codex queue typed input as a follow-up, so a decision reaches a sentinel in a long
-   turn (vega-lhc.44; a codex sentinel held five parent mails through a 5 h turn). Never while
+2. **Deliver behind the draft guard.** vegad watches each agent's status. It types the pointer when
+   the recipient is `idle`, `done` or `working`, and coalesces everything pending into one line.
+   Parent and peer mail both queue while the agent works (vega-0h4c.52); a non-empty input box
+   holds the pointer. `--now` is for urgent messages ("stop"). Claude and Codex queue typed input
+   as a follow-up, so steering reaches an agent during a long turn. Never while
    `blocked` (a dialog: a stray Enter can approve; herdr also rejects it) or `unknown`, and the
    draft guard stays in front. Such a pointer stands for the rest of that turn: no second line
    until the inbox is read or a new turn starts. Lost pointers (vega-lhc.73): a turn that ends on
@@ -94,7 +93,7 @@ Jobs, all in one process:
    (`HC_DRAFT_QUIET`), an empty box at once; no stash or restore, as `hc send` submits. `hc read` is
    plain text: known Codex placeholder hints count as empty (the sourced list is
    `CODEX_PLACEHOLDERS` in `delivery.rs`); a Claude suggestion costs one 60 s wait. Transcript and
-   footer activity never extend the hold. Parent mail can arrive while Codex works, and the
+   footer activity never extend the hold. Parent and peer mail can arrive while Codex works, and the
    relay logs once per hold instead of every draft check. Unlike the rules above, an hc screen with
    no known input box, or one that cannot be read, releases the pointer at once (the 20 s quiet rule
    does not apply), and an unreadable draft sends no notification after 5 minutes (the hold ends

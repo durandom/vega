@@ -6,7 +6,7 @@ description: Sends and reads agent mail through a NATS broker, also across machi
 # vega post: mail
 
 1. `vega post`: broker, pane, unread count. `vega post log`: archive, without marking read.
-2. `vega post send <pane> "<text>"` stores the message; `--host <machine>` for another machine. The target gets its pointer when idle or done; mail from its parent also while it works; `--now` only for urgent mail ("stop"). Do not poll: the reply arrives as a pointer.
+2. `vega post send <pane> "<text>"` stores mail; `--host <machine>` sends remotely. Parent and peer pointers arrive while working, behind the input draft guard; blocked/unknown targets wait. `--now` only for urgent mail ("stop"). Do not poll: replies arrive as pointers.
    - Targets: hc `t7`/`hc:t7`, TUI `w1:p2`/`herdr:w1:p2`. hc blocked terminals wait.
    - `machine/t7` or `hc:machine/t7` uses registry host `machine`, without --host.
      hc names must equal registry hosts; unknown/unverifiable hosts fail before send.

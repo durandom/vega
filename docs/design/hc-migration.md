@@ -263,7 +263,7 @@ Canonical and bare targets share inbox subjects and consumers.
 
 The parent confirmed parity with existing TUI delivery after a scratch hc
 0.1.18 probe proved that `--if idle` rejects `done` (exit 10): fresh `idle` uses
-`hc send --if idle`; fresh `done` uses plain `hc send`; parent/urgent mail may
+`hc send --if idle`; fresh `done` uses plain `hc send`; parent, peer and urgent mail may
 also use plain send while `working`. No `--force`, and blocked/unknown states
 wait. A failed send keeps the pointer pending. The get/send race can queue the
 pointer if work starts meanwhile; hc still refuses blocked. An atomic hc
@@ -282,7 +282,7 @@ Unchanged for `HC_DRAFT_QUIET` (60 s) or
 an empty box lets it go. No stash, clear or restore (`hc send` submits). `hc read` is plain text, so
 known Codex placeholders count as empty (`CODEX_PLACEHOLDERS` in `delivery.rs`, sourced from
 [Codex rust-v0.100.0](https://github.com/openai/codex/blob/rust-v0.100.0/codex-rs/tui/src/chatwidget.rs#L7060-L7069)
-and the supplied live neutral label). Parent mail reaches a working Codex agent with a placeholder
+and the supplied live neutral label). Parent and peer mail reaches a working Codex agent with a placeholder
 immediately. Claude's dim suggestion reads as a draft and delays a pointer once by 60 s. The relay
 logs once per hold, rather than every draft check. A screen with no known
 input box, or an unreadable one, releases the pointer at once; no 5-minute notification exists. Switch off: set

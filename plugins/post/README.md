@@ -42,7 +42,8 @@ after the pointer, or, when it cannot be typed back, keeps holding with one noti
 known input box holds the pointer until it has been unchanged for 20 s (one notification after 5 busy
 minutes). hc terminals differ: a draft holds only while it changes and goes 60 s after the last
 input change, with no stash or restore; transcript and footer changes do not extend the hold.
-Known Codex placeholder hints count as empty, so parent mail can reach working Codex agents immediately.
+Known Codex placeholder hints count as empty, so parent and peer mail can reach working Codex agents immediately.
+Both parent and peer pointers queue while an agent works; blocked or unknown targets wait.
 A screen with no known input box does not hold. `vega mux send --now` pastes without the guard. See
 [Draft guard](../../docs/design/vegad.md).
 

@@ -257,7 +257,7 @@ enum Cmd {
     /// Watch this machine's inboxes and type a pointer into each target pane
     #[command(
         args_conflicts_with_subcommands = true,
-        after_help = "Types a pointer only when the target agent is idle or done (herdr agent status), one line for all pending mail; `send --now` skips the wait.\nAgent status: herdr event stream (socket), else `herdr agent list` polling; `relay status` shows the mode.\nOne relay per host: a lock (~/.local/state/vega/post-relay-<host>.lock) stops a second one.\nThe herdr-app mod (locally and on hc machines) and the optional herdr hook start it. It outlives either UI and self-upgrades.\n\nExamples:\n  vega post relay start          # start vegad detached unless it runs (the app mod and herdr hook do this)\n  vega post relay status         # running or not, pid, version, binary current/stale, last log lines\n  vega post relay install        # once per machine: optional herdr hook, pinned env\n  vega post relay                # foreground; fails if a relay already runs\n  vega post relay --once         # notify pending mail now (ignores agent status), then exit"
+        after_help = "Types one pointer for all pending mail while the target is idle, done or working, behind the input draft guard; blocked or unknown targets wait. `send --now` is urgent.\nAgent status: herdr event stream (socket), else `herdr agent list` polling; `relay status` shows the mode.\nOne relay per host: a lock (~/.local/state/vega/post-relay-<host>.lock) stops a second one.\nThe herdr-app mod (locally and on hc machines) and the optional herdr hook start it. It outlives either UI and self-upgrades.\n\nExamples:\n  vega post relay start          # start vegad detached unless it runs (the app mod and herdr hook do this)\n  vega post relay status         # running or not, pid, version, binary current/stale, last log lines\n  vega post relay install        # once per machine: optional herdr hook, pinned env\n  vega post relay                # foreground; fails if a relay already runs\n  vega post relay --once         # notify pending mail now (ignores agent status), then exit"
     )]
     Relay {
         /// Notify pending mail now, whatever the agent status, then exit
@@ -1659,7 +1659,7 @@ fn send(
         if now {
             "at once (--now)"
         } else {
-            "when the target is idle or done"
+            "also while the target works, once its input box is clear"
         }
     );
     println!("help: the reply arrives as your own pointer; do not poll");
@@ -4065,9 +4065,11 @@ const UNKNOWN_QUIET: Duration = Duration::from_secs(20);
 /// The `seen` prefix of an unknown screen; the screen itself follows.
 const UNKNOWN: &str = "\0unknown:";
 
-/// hc draft hold: switch it off (`false`) once every core carries herdr-core
-/// 3ba03e6 ("keep agent messages out of unfinished drafts", not in a release
-/// up to 0.1.19), which makes `terminal.send` wait itself.
+/// Temporary hold; simplify in vega-0h4c.53 after herdrdev/herdr-core ships:
+/// #64/3ba03e6, c72b82d (draft_wait), #187 (ANSI reads), #75/#208 (send-only-if-empty).
+/// Switch it off (`false`) once every core carries 3ba03e6 ("keep agent
+/// messages out of unfinished drafts", not released up to 0.1.19), which
+/// makes `terminal.send` wait itself.
 const HC_DRAFT_HOLD: bool = true;
 
 /// A draft in an hc terminal that has not changed this long is let through
@@ -4208,8 +4210,15 @@ impl Drafts {
             Some(Draft::Text(t)) => t,
             // Watch only the input, so transcript/footer activity cannot
             // extend a hold on opaque Codex, multiline pi or pasted drafts.
-            Some(Draft::Opaque) => delivery::draft_input(shown.unwrap_or_default())
-                .expect("a recognized opaque draft has an input box"),
+            Some(Draft::Opaque) => match delivery::draft_input(shown.unwrap_or_default()) {
+                Some(input) => input,
+                None => {
+                    // Treat an unrecognized input like an unknown hc screen;
+                    // a future parser change must never panic the relay.
+                    self.seen.remove(pane);
+                    return false;
+                }
+            },
             _ => {
                 self.seen.remove(pane);
                 return false;

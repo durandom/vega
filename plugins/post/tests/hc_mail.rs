@@ -391,21 +391,20 @@ fn hc_parent_queue_done_silence_and_closure_use_the_existing_ledger() {
         "discovery is not a new brief"
     );
     f.status("t2", "working", 1);
-    f.post(&["send", "t2", "ordinary-waits"], "w1:p1");
-    wait(f.home.path(), "ordinary mail seen", || {
-        f.log().contains("seen: w1:p1 -> t2")
-    });
-    assert!(f.prompts("t2").is_empty());
+    f.post(&["send", "t2", "peer-queued"], "w1:p1");
+    wait(f.home.path(), "peer queue", || !f.prompts("t2").is_empty());
+    assert!(f.post(&["inbox"], "t2").contains("peer-queued"));
+    let before = f.prompts("t2").len();
     f.post(&["send", "hc:t2", "parent-queued"], "t1");
     wait(f.home.path(), "parent queue", || {
-        !f.prompts("t2").is_empty()
+        f.prompts("t2").len() > before
     });
     assert!(!f.prompts("t2").last().unwrap()["args"]
         .as_array()
         .unwrap()
         .contains(&json!("--if")));
     let inbox = f.post(&["inbox"], "t2");
-    assert!(inbox.contains("ordinary-waits") && inbox.contains("parent-queued"));
+    assert!(inbox.contains("parent-queued"));
     f.post(
         &[
             "done",
@@ -565,7 +564,7 @@ fn hc_status_race_keeps_pointer_pending_and_local_delivery_uses_hc() {
 }
 
 #[test]
-fn parent_pointer_reaches_working_codex_with_a_plain_placeholder_immediately() {
+fn peer_pointer_reaches_working_codex_with_a_plain_placeholder_immediately() {
     let mut f = Fixture::new();
     let home = f.home.path();
     let file = home.join("hc.json");
@@ -575,9 +574,9 @@ fn parent_pointer_reaches_working_codex_with_a_plain_placeholder_immediately() {
     write(&file, &terminals);
     fs::write(home.join("hc-screen"), "output\n› Ask Codex to do anything\n\n  GPT-6.1-Sol medium · vega.sidebar-config · sidebar-config · Working · 475K window · Context 29% used\n  ← for agents · ? for shortcuts\n").unwrap();
     f.start();
-    f.post(&["send", "hc:t2", "steer-working-codex"], "t1");
+    f.post(&["send", "hc:t2", "steer-working-codex"], "w1:p1");
     // The fixture's deadline is 35 s, below the 60 s quiet hold.
-    wait(f.home.path(), "parent pointer without a draft hold", || {
+    wait(f.home.path(), "peer pointer without a draft hold", || {
         !f.prompts("t2").is_empty()
     });
     assert!(!f.log().contains("pointer held: t2"), "{}", f.log());
@@ -592,6 +591,7 @@ fn parent_pointer_reaches_working_codex_with_a_plain_placeholder_immediately() {
 fn pointer_waits_for_a_draft_in_an_hc_input_box_and_goes_at_once_on_an_empty_one() {
     let mut f = Fixture::new();
     f.start();
+    f.status("t2", "working", 1);
     let screen = f.home.path().join("hc-screen");
     fs::write(
         &screen,

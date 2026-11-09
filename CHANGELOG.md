@@ -7,10 +7,12 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 ## 147 · 2026-11-09
 
-- feature: parent mail reaches working Codex hc agents with an empty prompt immediately
+- feature: parent and peer mail reaches working agents behind the input draft guard;
+  Codex hc agents with an empty prompt receive pointers immediately
   (vega-0h4c.52). Known Codex placeholder hints count as empty; only changes in the input box
   extend the 60 s draft hold. Output and footer activity no longer delay mail, and the relay
-  logs a hold once instead of logging every draft check.
+  logs a hold once instead of logging every draft check. Multiline Codex drafts hold even
+  when the first prompt line is empty.
 
 ## 146 · 2026-11-09
 

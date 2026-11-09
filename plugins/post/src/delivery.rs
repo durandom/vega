@@ -63,7 +63,7 @@ pub struct Delivery {
     status: HashMap<String, String>,
     pending: HashSet<String>,
     urgent: HashSet<String>,
-    /// Pending panes with mail from their parent: typed while working too.
+    /// Pending panes whose mail can be queued while working (parent or peer).
     queued: HashSet<String>,
     /// Pane -> pointer state.
     pointed: HashMap<String, Pointed>,
@@ -170,9 +170,10 @@ fn older(since: u64, now: u64) -> bool {
     now.saturating_sub(since) >= STALE.as_millis() as u64
 }
 
-/// Who sent the mail, for when its pointer may be typed.
+/// Who sent the mail. Parent and peer pointers both queue while working.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sender {
+    /// Peer or tool mail: typed while working too, behind the draft guard.
     Other,
     /// The recipient's recorded parent: typed while working too.
     Parent,
@@ -210,8 +211,7 @@ impl Delivery {
         self.pending.insert(pane.to_string());
         match from {
             Sender::Urgent => self.urgent.insert(pane.to_string()),
-            Sender::Parent => self.queued.insert(pane.to_string()),
-            Sender::Other => false,
+            Sender::Parent | Sender::Other => self.queued.insert(pane.to_string()),
         };
         self.touch(pane);
     }
@@ -333,15 +333,18 @@ impl Delivery {
         &self.bounces
     }
 
-    /// Panes worth a broker call now: urgent ones; pending free ones
-    /// (working too for parent mail) unless pointed and checked within
-    /// RECHECK, or held after a provider abort; and free ones the safety net
-    /// re-points. `ignore_status` (relay `--once`) treats every pending
-    /// pane as free.
+    /// Allow queued input for parent and peer mail, including pending peer
+    /// mail restored from a relay version that did not set `queued` for it.
     pub fn may_queue(&self, pane: &str) -> bool {
-        self.urgent.contains(pane) || self.queued.contains(pane)
+        self.urgent.contains(pane)
+            || self.queued.contains(pane)
+            || self.status_of(pane) == "working"
     }
 
+    /// Panes worth a broker call now: urgent ones; pending idle, done or
+    /// working ones unless recently checked or held after a provider abort;
+    /// and free ones the safety net re-points. `ignore_status` (`--once`)
+    /// treats every pending pane as free.
     pub fn candidates(&self, ignore_status: bool) -> Vec<String> {
         let now = now_ms();
         let panes: HashSet<&String> = self.pending.iter().chain(self.arrivals.keys()).collect();
@@ -356,9 +359,7 @@ impl Delivery {
                 if !self.pending.contains(*p) {
                     return !ignore_status && is_free(status) && !held && self.stale(p, now);
                 }
-                let free = ignore_status
-                    || is_free(status)
-                    || (status == "working" && self.queued.contains(*p));
+                let free = ignore_status || is_free(status) || status == "working";
                 free && !held
                     && self
                         .pointed
@@ -686,6 +687,9 @@ fn input_box<'a, 'b>(lines: &'a [&'b str]) -> Option<&'a [&'b str]> {
 
 // Plain-text hc reads lose the dim styling. Exact known placeholders only:
 // current neutral label: live screen in vega-0h4c.52;
+// Temporary hc/Codex workaround: herdrdev/herdr-core #64/3ba03e6,
+// c72b82d (draft_wait), #187 (ANSI reads), #75/#208 (send-only-if-empty).
+// Simplify once upstream ships: vega-0h4c.53.
 // rotating hints: https://github.com/openai/codex/blob/rust-v0.100.0/codex-rs/tui/src/chatwidget.rs#L7060-L7069
 const CODEX_PLACEHOLDERS: &[&str] = &[
     "Ask Codex to do anything",
@@ -1012,17 +1016,28 @@ mod tests {
     }
 
     #[test]
-    fn mail_waits_while_working_then_one_line() {
+    fn peer_mail_queues_while_working_as_one_line() {
         let mut d = d("working");
         d.mail("w1:p1", Sender::Other);
         d.mail("w1:p1", Sender::Other);
         d.mail("w1:p1", Sender::Other);
-        assert!(d.candidates(false).is_empty());
-        d.status("w1:p1", "idle");
         assert_eq!(d.candidates(false), vec!["w1:p1"]);
+        assert!(d.may_queue("w1:p1"));
         assert_eq!(d.decide("w1:p1", 3, 0), Decision::Type);
         d.typed("w1:p1", 0, true);
         assert!(d.candidates(false).is_empty());
+    }
+
+    #[test]
+    fn restored_peer_mail_without_the_old_parent_queue_flag_can_queue_while_working() {
+        let mut d = d("working");
+        d.mail("w1:p1", Sender::Other);
+        d.queued.clear(); // State persisted before peer delivery was enabled.
+        let mut restored = Delivery::default();
+        restored.import(&d.export());
+        restored.status("w1:p1", "working");
+        assert_eq!(restored.candidates(false), vec!["w1:p1"]);
+        assert!(restored.may_queue("w1:p1"));
     }
 
     #[test]
@@ -1095,7 +1110,7 @@ mod tests {
         }
         let mut d = d("working");
         d.mail("w1:p1", Sender::Other);
-        assert!(d.candidates(false).is_empty());
+        assert_eq!(d.candidates(false), vec!["w1:p1"]);
         d.mail("w1:p1", Sender::Parent);
         assert_eq!(d.candidates(false), vec!["w1:p1"]);
         // Blocked meanwhile (a dialog): wait, then working again: go.
