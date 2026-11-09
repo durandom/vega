@@ -137,7 +137,13 @@ esac"#,
         let listing = call(&[]);
         assert!(listing.contains("t2") && listing.contains("w1:p2"));
         assert!(!listing.contains("remote/t9"));
-        assert!(call(&["status"]).contains("project:"));
+        let status = call(&["status"]);
+        assert!(status.contains("project:"));
+        assert!(
+            status.contains("registry: off (inbox-only host: local agents only)"),
+            "{status}"
+        );
+        assert!(!status.contains("parents and attention from this machine only"));
         assert!(call(&["adopt", child, "--headless"]).contains("told: yes"));
         let other_child = if hc { "w1:p2" } else { "t2" };
         let other_target = if hc { "herdr:w1:p2" } else { "hc:t2" };

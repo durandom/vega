@@ -16,6 +16,21 @@ use vega_herdr::{agent_name, herdr_local, Failure};
 /// Statuses `--status` accepts.
 pub const STATUSES: [&str; 2] = ["done", "blocked"];
 
+/// Other hosts' waiters from the registry, and the stderr warning when it is
+/// unreadable. An inbox-only host skips the read by design: no warning.
+fn registry_waiting(
+    read: Result<vega_registry::View, String>,
+) -> (Vec<waiting::Candidate>, Option<String>) {
+    match read {
+        Ok(view) => (view.waiting(), None),
+        Err(why) if why == vega_registry::INBOX_ONLY_OFF => (Vec::new(), None),
+        Err(why) => (
+            Vec::new(),
+            Some(format!("warning: registry: {why}; this host's agents only")),
+        ),
+    }
+}
+
 pub fn run(statuses: &[String]) -> Result<(), Failure> {
     let mut agents = herdr_local(&["agent", "list"])
         .ok()
@@ -33,15 +48,12 @@ pub fn run(statuses: &[String]) -> Result<(), Failure> {
                 .map(crate::backend::normalize),
         );
     }
-    let registry = match vega_registry::read_blocking_cli(Duration::from_secs(3)) {
-        Ok(view) => view.waiting(),
-        Err(why) => {
-            if why != vega_registry::INBOX_ONLY_OFF {
-                eprintln!("warning: registry: {why}; this host's agents only");
-            }
-            Vec::new()
-        }
-    };
+    let (registry, warning) = registry_waiting(vega_registry::read_blocking_cli(
+        Duration::from_secs(3),
+    ));
+    if let Some(w) = warning {
+        eprintln!("{w}");
+    }
     let (here, all) = candidates(&waiting::read(), &agents, registry);
     let Some(c) = waiting::pick(&all, statuses) else {
         let what = statuses.join(" or ");
@@ -219,6 +231,18 @@ mod tests {
         assert_eq!(machine_for("titan", &m).as_deref(), Some("Build box"));
         assert_eq!(machine_for("deimos", &m), None);
         assert_eq!(machine_for("io", &Value::Null), None);
+    }
+
+    #[test]
+    fn inbox_only_host_skips_the_registry_without_a_warning() {
+        let (w, warning) = registry_waiting(Err(vega_registry::INBOX_ONLY_OFF.to_string()));
+        assert!(w.is_empty() && warning.is_none());
+        let (w, warning) = registry_waiting(Err("registry read timed out".into()));
+        assert!(w.is_empty());
+        assert_eq!(
+            warning.unwrap(),
+            "warning: registry: registry read timed out; this host's agents only"
+        );
     }
 
     #[test]

@@ -47,4 +47,20 @@ printf '{"jsonrpc":"2.0","id":1,"result":%s}' "$TEST_FLEET"
     );
     assert!(!unavailable.status.success());
     assert!(String::from_utf8_lossy(&unavailable.stdout).contains("registry_unavailable"));
+    let mut c = Command::new(env!("CARGO_BIN_EXE_vega-config"));
+    let inbox_only = c
+        .env_clear()
+        .env("HOME", home.path())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("VEGA_POST_HOST", "puck")
+        .env("VEGA_POST_INBOX_ONLY", "puck")
+        .env(
+            "TEST_FLEET",
+            r#"{"machines":[{"name":"remote","target":"remote","id":"id","host":"remote","version":"0.1.18","state":"unreachable"}]}"#,
+        )
+        .args(["infra", "--fleet"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&inbox_only.stdout);
+    assert!(text.contains("registry_unavailable") && text.contains("run it on an owner host"), "{text}");
 }
