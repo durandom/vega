@@ -199,7 +199,7 @@ export default class Vega extends View {
       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
-      // A failed badge read (a machine unreachable, a reader error) shows at the right end.
+      // A failed badge read or remote vegad start (a machine unreachable, a reader error) shows at the right end.
       .when(Boolean(shown), el => el.child(div().flex_1()).child(div().id("vega-error").truncate().text_color(t.blocked).tooltip(shown).child(`vega: ${shown}`)));
   }
 }

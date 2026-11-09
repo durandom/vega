@@ -199,11 +199,11 @@ fn vegad_is_recommended_also_without_a_broker() {
     if std::env::var_os("XDG_DATA_HOME").is_none() {
         assert!(!vegad_installed(&env));
         // An app-only host has the pinned env and no herdr plugin manifest.
-        let login = env.state.join("vega/vegad.env");
-        fs::create_dir_all(login.parent().unwrap()).unwrap();
-        fs::write(&login, "VEGA_POST_HOST=x\n").unwrap();
+        let pinned_env = env.state.join("vega/vegad.env");
+        fs::create_dir_all(pinned_env.parent().unwrap()).unwrap();
+        fs::write(&pinned_env, "VEGA_POST_HOST=x\n").unwrap();
         assert!(vegad_installed(&env));
-        fs::remove_file(login).unwrap();
+        fs::remove_file(pinned_env).unwrap();
         assert!(!vegad_installed(&env));
         let p = d.path().join(".local/share/vega/herdr-plugin");
         fs::create_dir_all(&p).unwrap();

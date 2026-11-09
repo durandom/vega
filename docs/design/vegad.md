@@ -175,14 +175,14 @@ plugin pane is no host either: a PTY, closed by the user, gone after a server re
 
 **Who starts it**
 
-- Login: the launchd/systemd user starter installed by `relay install`.
+- herdr-app (primary, vega-0h4c.42): the `vega` mod runs `vega-post relay start` on its own host
+  at app start, and through `hc exec` on every connected hc machine (at start, when a machine
+  connects, then every five minutes; that host's `vegad.env` pin applies). Only in the default
+  real home: `HERDR_APP_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` must be unset or resolve to
+  `~/.config/herdr-app`, `~/.config`, `~/.local/state`. Scratch apps never start it; their owner
+  must stop any app/core explicitly started for a probe. There is no login job.
 - herdr: plugin `vega.vegad` (written and linked by `relay install`) runs `vega-post relay start`
   as its `[[startup]]` hook, at every server start and again on every live handoff.
-- herdr-app: the `vega` mod is a fallback starter only for the default real home:
-  `HERDR_APP_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` must be unset or resolve to
-  `~/.config/herdr-app`, `~/.config`, `~/.local/state`. Scratch apps never start it;
-  their owner must stop any app/core explicitly started for a probe. The login
-  starter remains the primary startup path.
 - The board: it shows vegad's state (running, pid, version, binary current or stale) and `V`
   starts it.
 - By hand: `vega post relay start`.
