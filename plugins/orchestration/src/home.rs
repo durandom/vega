@@ -272,7 +272,7 @@ pub fn run(parent: Option<&str>) -> Result<(), Failure> {
     );
     println!("description: Project waits and evidence for supervised coordination");
     println!("project: {}", cell(&project));
-    let registry = vega_registry::read_blocking(Duration::from_secs(3));
+    let registry = vega_registry::read_blocking_cli(Duration::from_secs(3));
     let mut rows = Vec::new();
     let panes = registry
         .as_ref()
