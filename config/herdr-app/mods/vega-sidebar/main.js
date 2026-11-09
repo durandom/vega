@@ -77,7 +77,8 @@ const kidStatus = (k, listed) => {
 };
 // Later stages add tab descriptors and renderers here without changing the shell.
 const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab" }, { id: "board", label: "Board", render: "boardTab" },
-  { id: "decisions", label: "Decisions", render: "decisionsTab" }, { id: "uac", label: "UAC", render: "uacTab" },
+  { id: "decisions", label: "Decisions", render: "decisionsTab" }, { id: "notes", label: "Notes", render: "notesTab" },
+  { id: "uac", label: "UAC", render: "uacTab" },
   { id: "config", label: "Config", render: "configTab" }];
 
 // A command in a project's checkout: locally via exec, on an hc machine through `hc exec --json`
@@ -151,7 +152,9 @@ export default class Agents extends View {
         this.focusHandle = cx.focus_handle?.();
         this.focusHandle?.focus();
         cx.spawn(cx => this.readOverview(cx));
-        cx.timer.every(15000, cx => { this.readOverview(cx); if (this.currentTab() === "board") this.readBoard(cx); });
+        cx.timer.every(15000, cx => { this.readOverview(cx); if (this.currentTab() === "board") this.readBoard(cx); this.readNotes(cx); });
+        cx.spawn(cx => this.readNotes(cx));
+        if (props()?.follow) cx.timer.every(1000, () => this.followFocus());
         this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
         this.expanded = new Set(); this.readyLimit = 12;
       }
@@ -236,13 +239,65 @@ export default class Agents extends View {
   // One draggable window per project (key: project ID) with its tabs. No terminal block:
   // a terminal rendered in this window and in its pane at once jitters (vega-0h4c.50).
   // A click on an agent row focuses that agent's terminal in the main view instead.
-  openProject(project, cx, tab = null) {
+  openProject(project, cx, tab = null, follow = false) {
     cx?.stop_propagation?.();
     if (!project) return;
     const uac = terminals().find(x => x.state === "live" && x.labels?.["vega.role"] === "uac"
       && x.labels?.["vega.project-id"] === project);
-    openOverlay({ kind: "window", key: `vega-project-${project}`, width: 640, height: 0.7,
-      mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null, tab } });
+    openOverlay({ kind: "window", key: follow ? "vega-project-follow" : `vega-project-${project}`, width: 640, height: 0.7,
+      mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null, tab, follow } });
+  }
+
+  // Notes the human was shown (vega post notes): this project's, plus project-less ones
+  // (quarantine, drafts) on the UAC pane they were raised for.
+  async readNotes(cx) {
+    if (this.readingNotes) return;
+    this.readingNotes = true;
+    let notes;
+    try {
+      const r = await exec("vega", ["post", "notes", "--json"], { timeout: 10000 });
+      if (r.code !== 0) throw new Error((r.stderr || r.stdout || "notes failed").trim());
+      notes = r.stdout.split("\n").filter(l => l.trim().startsWith("{")).map(l => JSON.parse(l))
+        .filter(n => n.project === props().projectConfig || (!n.project && n.pane === props().uac));
+    } catch (e) { notes = String(e.message ?? e); }
+    this.readingNotes = false;
+    const sig = JSON.stringify(notes);
+    if (sig !== this.notesSig) { this.notesSig = sig; this.notes = notes; cx.notify(); }
+  }
+
+  async markNotes(action, cx) {
+    const list = Array.isArray(this.notes) ? this.notes : [];
+    const upto = {};
+    for (const n of list) if (!upto[n.host] || n.id > upto[n.host]) upto[n.host] = n.id;
+    const args = ["post", "notes", action];
+    for (const [host, id] of Object.entries(upto)) args.push("--upto", `${host}=${id}`);
+    if (!Object.keys(upto).length) return;
+    const r = await exec("vega", args, { timeout: 10000 });
+    this.notesResult = r.code === 0 ? (action === "read" ? "Marked read." : "Cleared.") : (r.stderr || r.stdout || "failed").trim();
+    this.notesSig = null;
+    await this.readNotes(cx);
+    cx.notify();
+  }
+
+  notesTab(t) {
+    if (this.notes === undefined) return div().text_color(t.dim).child("Reading notes…");
+    if (typeof this.notes === "string") return div().text_color(t.blocked).child(this.notes);
+    const button = (id, label, action) => div().id(id).px(10).py(4).rounded(6).bg(t.raised).cursor_pointer().child(label)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => action(cx)); });
+    if (!this.notes.length) return v_flex().items_center().gap(4).py(12).child(div().child("No notes"))
+      .child(div().text_size(11).text_color(t.dim).child(this.notesResult ?? "Nothing was shown to you for this project."));
+    return v_flex().gap(8)
+      .child(h_flex().gap(8).items_center()
+        .child(button("notes-read", "Mark all read", cx => this.markNotes("read", cx)))
+        .child(button("notes-clear", "Clear", cx => this.markNotes("clear", cx)))
+        .when(Boolean(this.notesResult), el => el.child(div().text_size(11).text_color(t.dim).child(this.notesResult))))
+      .children(this.notes.map(n => v_flex().id(`note-${n.host}-${n.id}`).gap(4).p(10).rounded(8).bg(t.surface)
+        .child(h_flex().gap(6).items_center()
+          .child(div().w(8).h(8).rounded(4).flex_none().bg(n.unread ? t.blocked : t.dim))
+          .child(div().text_size(11).text_color(t.dim).child(`${n.kind ?? "note"} · ${n.host} · ${new Date(n.id).toLocaleString()}`)))
+        .child(div().font_semibold().child(n.title ?? ""))
+        .child(div().text_size(11.5).text_color(t.foreground).child((n.body ?? "").slice(0, 800)))));
   }
 
   // Overview data the terminal labels do not carry. Beads counts come from `bd status --json`
@@ -525,20 +580,46 @@ export default class Agents extends View {
       .when(Boolean(this.saved), el => el.child("Saved"));
   }
 
+  // Follow mode: one shared window (key vega-project-follow) that reopens in place on the
+  // focused terminal's project. Pinned: one window per project (key vega-project-<id>).
+  followFocus() {
+    if (!props()?.follow) return;
+    const all = terminals().filter(x => x.state === "live");
+    const term = all.find(x => x.address === focused()?.terminal);
+    const project = term?.labels?.["vega.project-id"];
+    if (project && project !== props().projectConfig) this.openProject(project, null, this.currentTab(), true);
+  }
+
+  togglePin() {
+    const project = props().projectConfig, tab = this.currentTab();
+    closeOverlay(props().overlay);
+    this.openProject(project, null, tab, !props().follow);
+  }
+
   projectOverlay(t) {
     const tab = PROJECT_TABS.find(tab => tab.id === (this.projectTab ?? props()?.tab)) ?? PROJECT_TABS[0];
-    return v_flex().size_full().p(12).gap(12).bg(t.popover).text_color(t.foreground).text_size(12.8)
+    const uac = terminals().find(x => x.address === props().uac);
+    const name = this.preferences?.projects?.[props().projectConfig]?.name || uac?.labels?.["vega.project"] || props().projectConfig.split("/").pop();
+    const stop = el => el.on_mouse_down("left", (_e, cx) => cx.stop_propagation());
+    return v_flex().size_full().p(12).gap(10).bg(t.popover).text_color(t.foreground).text_size(12.8)
       .when(Boolean(this.focusHandle), el => el.track_focus(this.focusHandle)
         .on_mouse_down("left", () => this.focusHandle.focus()))
       .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
-      .child(h_flex().gap(12).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
-        .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
-        .on_click((_e, cx) => { this.projectTab = item.id; if (item.id === "board") cx.spawn(cx => this.readBoard(cx)); cx.notify(); }).child(item.label)))
+      // Title bar: presses here are not stopped, so they drag the window (kind "window").
+      .child(h_flex().id("project-titlebar").gap(8).items_center().h(26).px(6).rounded(6).bg(t.surface)
+        .child(div().text_color(t.dim).child("⠿"))
+        .child(div().font_semibold().child(name))
+        .child(div().text_size(11).text_color(t.dim).truncate().child(props().projectConfig))
         .child(div().flex_1())
-        .child(div().id("close-project").px(8).py(5).rounded(6).cursor_pointer()
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click(() => closeOverlay(props().overlay)).child("Close")))
-      .child(div().text_size(11).text_color(t.dim).child(props().projectConfig))
+        .child(stop(div().id("project-pin").px(6).py(2).rounded(4).cursor_pointer().bg(t.raised)
+          .tooltip(props().follow ? "Following the focused project: click to pin this one" : "Pinned to this project: click to follow the focus")
+          .on_click(() => this.togglePin()).child(props().follow ? "↺ follow" : "📌 pinned")))
+        .child(stop(div().id("close-project").px(6).py(2).rounded(4).cursor_pointer()
+          .tooltip("Close (Esc)").on_click(() => closeOverlay(props().overlay)).child("✕"))))
+      .child(h_flex().gap(8).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
+        .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
+        .on_click((_e, cx) => { this.projectTab = item.id; if (item.id === "board") cx.spawn(cx => this.readBoard(cx)); if (item.id === "notes") cx.spawn(cx => this.readNotes(cx)); cx.notify(); })
+        .child(item.id === "notes" && this.notes?.length ? `${item.label} ${this.notes.filter(n => n.unread).length || ""}`.trim() : item.label))))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)))
       .child(v_flex().id(`project-body-${tab.id}`).flex_1().min_h(0).overflow_y_scrollbar()
         .child(tab.id !== "config" ? this[tab.render](t) : this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable")));
@@ -827,7 +908,9 @@ export default class Agents extends View {
             .tooltip(`⚖ ${totals.decisions ?? 0} decisions · ✋ ${totals.waiting ?? 0} waiting · ✉ ${totals.notes ?? 0} notes`)
             .child(String((totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0)))
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-            .on_click((_e, cx) => this.openProject(project, cx, totals.decisions ? "decisions" : "overview")));
+            .on_click((_e, cx) => totals.decisions ? this.openProject(project, cx, "decisions")
+              : totals.waiting ? (cx.stop_propagation(), run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address }))
+              : this.openProject(project, cx, "notes")));
         })
         .child(div().id(`gear-${gid}`).flex_none().text_color(t.dim).cursor_pointer().tooltip("Project window")
           .child(svg("mods/workspace-chrome/settings.svg").size(12).text_color(t.dim))

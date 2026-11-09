@@ -566,13 +566,13 @@ test('project Config overlay loads once, saves argv including label removal, and
   popup.api.exec=async(bin,args)=>{popup.calls.push(['exec',bin,args]);return {code:0,stdout:JSON.stringify({projects:{[project]:{name:'Name',labels:['work','old']}},views:{}})};};
   popup.mod.init({},popup.cx);await popup.flush();
   let text=texts(popup.render());assert(text.includes('Config'));assert(!text.includes('Rename'));
-  assert.equal(popup.mod.nameInput.value(),'Name');assert.equal(popup.calls.filter(c=>c[0]==='exec').length,1);
+  assert.equal(popup.mod.nameInput.value(),'Name');assert.equal(popup.calls.filter(c=>c[0]==='exec'&&c[2]?.[0]==='project').length,1);
   popup.mod.nameInput.set_value('');popup.mod.labelsInput.set_value('work, private, private');
   popup.api.exec=async(bin,args)=>{popup.calls.push(['exec',bin,args]);return {code:1,stderr:'Read only'};};
   elements(popup.render()).find(n=>n.idValue==='save-project').handlers.on_click({},popup.cx);await popup.flush();
   assert(texts(popup.render()).some(s=>s.includes('Read only')));
   assert.equal(popup.mod.labelsInput.value(),'work, private, private');
-  assert.deepEqual(Array.from(popup.calls.filter(c=>c[0]==='exec').at(-1)[2]),['project','config',project,'--name','','--label','work','--label','private','--unlabel','old','--json']);
+  assert.deepEqual(Array.from(popup.calls.filter(c=>c[0]==='exec'&&c[2]?.[0]==='project').at(-1)[2]),['project','config',project,'--name','','--label','work','--label','private','--unlabel','old','--json']);
   popup.api.exec=async()=>({code:0,stdout:JSON.stringify({projects:{[project]:{name:'',labels:['work','private']}}})});
   await popup.mod.saveProject(popup.cx);assert(texts(popup.render()).includes('Saved'));
   popup.render().handlers.on_key_down({keystroke:'escape'},popup.cx);
