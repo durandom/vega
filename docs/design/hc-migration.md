@@ -313,9 +313,14 @@ Core startup/launchd remains vega-0h4c.25; macOS privacy prompts are documented 
 
 ### Pinned hc wire contract (vega-0h4c.31)
 
-`crates/vega-herdr/schema/hc-0.1.18.openrpc.json` is a byte-for-byte copy of
-herdr-core's `schema/released.openrpc.json`, version 0.1.18 (also the local hc
-version used for this migration). Upstream generates it from Rust types and
+`crates/vega-herdr/schema/hc-0.1.19.openrpc.json` is a byte-for-byte copy of
+herdr-core's `schema/released.openrpc.json`, version 0.1.19 (also the local hc
+version used for this migration). 0.1.19 differs from 0.1.18 only in `info.version`:
+no method or schema added, removed or changed, so a 0.1.18 peer still validates.
+herdrdev/herdr-core#190 (`ListResult.machines` omitted when empty) is not fixed in
+0.1.19. For #191 (exec cancelled on EOF), the connection handler in `server.rs`
+still aborts running execs when the connection closes; it is unchanged between
+0.1.18 and 0.1.19. Vega keeps its workarounds while such cores exist. Upstream generates it from Rust types and
 checks append-only compatibility within this protocol generation. We do not
 depend on the unpublished herdr-core Rust crate.
 

@@ -521,7 +521,7 @@ esac
     );
 }
 
-/// hc 0.1.18 omits an empty `machines` from terminal.list (io, deimos: no
+/// hc 0.1.18 and 0.1.19 omit an empty `machines` from terminal.list (io, deimos: no
 /// machines added); vega reads it as `[]` instead of rejecting the listing.
 #[test]
 fn terminal_list_without_machines_reads_as_empty() {

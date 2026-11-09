@@ -937,6 +937,26 @@ fn app_mod_stages_rejects_and_replaces_the_whole_folder() {
         apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()),
         Outcome::Unchanged
     );
+    // App-generated editor files are app-owned: no drift, and they survive a replacement.
+    fs::write(dir.join("gpui-kit.d.ts"), "app types").unwrap();
+    fs::write(dir.join("jsconfig.json"), "app config").unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()),
+        Outcome::Unchanged
+    );
+    fs::write(dir.join("main.js"), "edited").unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::HerdrAppMods, &BTreeSet::new()).kind(),
+        "written"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("gpui-kit.d.ts")).unwrap(),
+        "app types"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("jsconfig.json")).unwrap(),
+        "app config"
+    );
     // Drift consisting only of an extra file still replaces the folder.
     fs::write(dir.join("extra"), "extra").unwrap();
     assert_eq!(

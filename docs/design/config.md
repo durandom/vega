@@ -77,9 +77,10 @@ whole mod folder from two source files; local overrides
 resolve per file. It stages both files together and requires the installed `herdr-app check` to pass
 before touching the target. A missing checker or a failed check reports `rejected`. Replacement moves
 the old folder, including stale files, to `~/.config/herdr-app/.vega-mod.<name>-bak`; other mods stay
-untouched. Any chezmoi-managed descendant prevents replacement.
+untouched. `gpui-kit.d.ts` and `jsconfig.json` (editor typings the app writes into every mod folder) are app-owned:
+they never count as drift and are carried over into the replacement. Any chezmoi-managed descendant prevents replacement.
 
-`herdr-app.layouts` owns `layouts/vega.json`: a clone of the installed 0.1.13 `main`, with its
+`herdr-app.layouts` owns `layouts/vega.json`: a clone of the installed 0.1.14 `main`, with its
 `cloned_from` provenance and a small, always visible vega status row below the work area's status bar.
 Shipped layouts are replaced on every app start and reject structural changes, so this clone is
 maintained by vega. `vega config` compares its `cloned_from.version` with `herdr-app --version` and
@@ -96,7 +97,7 @@ A missing, duplicated or changed anchor refuses without touching the old output.
 `--app-version` and `--output` support isolated maintenance/tests. Config apply only writes the
 reviewed source; it never runs the generator. There is no automatic rebase.
 
-Layout selection is **not a settings key** in 0.1.13: `layout.switch` persists `shared("layout")` in
+Layout selection is **not a settings key** in 0.1.14: `layout.switch` persists `shared("layout")` in
 app-owned `shared.json`. First apply requires a running app and all three vega mods, writes the
 layout, calls `layout.switch --name vega`, then verifies the selected name and empty error list.
 A `no mod folder` activation error is retried for up to five seconds while the app discovers
@@ -105,7 +106,7 @@ old file and reports `rejected`; a missing app rejects before writing.
 Successful selection is recorded in `$XDG_STATE_HOME/vega/herdr-app-layout-selected`; later applies
 preserve the user's layout choice. To return explicitly: `herdr-app do layout.switch --name vega`.
 Vega never edits `shared.json` or layout click state. The app has no standalone layout checker in
-0.1.13; vega checks JSON/root shape and verifies the first activation in the app. Updates to the
+0.1.14; vega checks JSON/root shape and verifies the first activation in the app. Updates to the
 currently selected vega layout are also verified through the app; rejection restores the old file
 and prior layout selection. An inactive layout update is checked when next selected by the app.
 

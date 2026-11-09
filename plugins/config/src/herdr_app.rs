@@ -169,6 +169,9 @@ pub fn app_error(file: &Path, since: SystemTime, wait: Duration) -> Option<Strin
 
 /// The vega mod owns its entire folder; local overrides resolve per shipped file.
 const MOD_FILES: [&str; 2] = ["main.js", "mod.json"];
+/// Editor helpers herdr-app (re)writes into every mod folder on start. The app owns
+/// them: they never count as drift and survive a folder replacement.
+const APP_FILES: [&str; 2] = ["gpui-kit.d.ts", "jsconfig.json"];
 
 fn mod_name(unit: crate::Unit) -> Option<&'static str> {
     match unit {
@@ -198,9 +201,12 @@ pub fn plan(ctx: &crate::Ctx, unit: crate::Unit) -> Result<crate::Plan, String> 
         }
         p.herdr_app_pending = fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink())
             || fs::read_dir(&dir).is_ok_and(|entries| {
-                entries
-                    .flatten()
-                    .any(|e| !MOD_FILES.iter().any(|n| e.file_name() == *n))
+                entries.flatten().any(|e| {
+                    !MOD_FILES
+                        .iter()
+                        .chain(&APP_FILES)
+                        .any(|n| e.file_name() == *n)
+                })
             });
         if p.herdr_app_pending {
             p.notes.push(
@@ -306,7 +312,7 @@ pub fn apply(
     ) {
         return Outcome::Rejected(vec!["vega layout: missing or invalid root type".into()]);
     }
-    // There is no standalone layout checker in herdr-app 0.1.13. The supported
+    // There is no standalone layout checker in herdr-app 0.1.14. The supported
     // switch command validates activation, and owns persistence in shared.json.
     let mut previous_layout = None;
     if plan.herdr_app_pending {
@@ -448,13 +454,17 @@ fn apply_mod(
     let target = app_home.join("mods").join(name);
     let backup = app_home.join(format!(".vega-mod.{name}-bak"));
     let result = || -> std::io::Result<()> {
-        // The checker generates editor helpers alongside main.js. They are not
-        // source files and would otherwise make every following apply drift.
-        for name in ["gpui-kit.d.ts", "jsconfig.json"] {
+        // The checker generates editor helpers alongside main.js (with the staging
+        // folder as its home). Drop those and carry over the app's own copies.
+        for name in APP_FILES {
             match fs::remove_file(folder.join(name)) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(e),
+            }
+            let live = target.join(name);
+            if fs::symlink_metadata(&live).is_ok_and(|m| m.is_file()) {
+                fs::copy(&live, folder.join(name))?;
             }
         }
         fs::create_dir_all(target.parent().unwrap())?;

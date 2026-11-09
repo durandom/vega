@@ -820,7 +820,7 @@ fn qualified_send_checks_hc_when_registry_has_not_seen_new_terminal() {
         serde_json::from_slice(&fs::read(sender.home.path().join("hc.json")).unwrap()).unwrap();
     let mut terminal = source["terminals"][1].clone();
     terminal["address"] = json!("remote/t2");
-    // The fake result and recorded params use the pinned hc 0.1.18 schema,
+    // The fake result and recorded params use the pinned hc 0.1.19 schema,
     // in addition to the production RPC boundary's validation.
     vega_herdr::hc::validate_result("terminal.get", &terminal).unwrap();
     write(

@@ -358,7 +358,7 @@ fn rpc_with_timeout(
     Ok(result)
 }
 
-/// hc 0.1.18 drops an empty `machines` from `terminal.list` (ListResult has
+/// hc 0.1.18 and 0.1.19 drop an empty `machines` from `terminal.list` (ListResult has
 /// `skip_serializing_if = "Vec::is_empty"` without `default`), although its own
 /// schema requires it. A core with no machines added (io, deimos) means `[]`.
 fn fill_empty_machines(method: &str, result: &mut Value) {

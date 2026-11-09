@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 139 · 2026-11-09
+
+- unit: `herdr-app.layouts` is rebased onto the shipped `main` of herdr-app 0.1.14 (no structural change
+  versus 0.1.13), so the layout drift note is gone (vega-0h4c.41).
+- unit: the three herdr-app mod units treat `gpui-kit.d.ts` and `jsconfig.json`, which the app writes into
+  every mod folder, as app-owned: they show `ok` after an app restart instead of `differs`, and survive a
+  folder replacement (vega-0h4c.40).
+- feature: vega now checks hc results against the vendored hc 0.1.19 schema (identical to 0.1.18 apart from
+  the version; 0.1.18 cores still validate). The empty-`machines` workaround stays: 0.1.19 still omits it.
+
 ## 138 · 2026-11-08
 
 - feature: `vega config apply herdr-app` retries missing-mod layout activation for
