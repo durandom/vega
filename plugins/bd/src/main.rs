@@ -33,6 +33,9 @@ const SKILL: &str = include_str!("../SKILL.md");
     after_help = "Without a command: the same as `vega bd status`.\n\nExamples:\n  vega bd init                 # provision this project\n  vega bd status               # sync state of every provisioned project\n  vega bd resume               # after resolving a conflict\n  vega bd resume --project VEGA   # by unique database or project ID; use a local path for multiple clones"
 )]
 struct Cli {
+    /// Emit one schema-versioned JSON object (status only)
+    #[arg(long, global = true)]
+    json: bool,
     /// Print the agent guide for this plugin, SKILL.md form (read by `vega skills`)
     #[arg(long)]
     skill: bool,
@@ -64,7 +67,11 @@ enum Cmd {
     #[command(
         after_help = "Tables: projects (beads sync), problems, doctor, git (vegad's fetch and fast-forward of the default branch per repo), git_problems, worktrees_behind.\n\nExamples:\n  vega bd status"
     )]
-    Status,
+    Status {
+        /// Filter by normalized project ID
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Sync a stopped project again (after resolving its conflict)
     Resume {
         /// A unique project ID/database, or a local location from `vega bd status`; `~` expanded, a trailing `/`, the dir without `.git`/`.bare` or a checkout dir work too [default: this checkout's]
@@ -88,12 +95,17 @@ fn main() -> ExitCode {
                 .map(str::trim)
                 .collect::<Vec<_>>()
                 .join(" ");
-            print_failure(&Failure::new(
+            let failure = Failure::new(
                 "usage",
                 message.trim_start_matches("error: "),
-                "valid usage below",
-            ));
-            print!("{}", Cli::command().render_help());
+                "vega bd --help",
+            );
+            if env::args().any(|a| a == "--json") {
+                vega_herdr::print_failure_json(&failure);
+            } else {
+                print_failure(&failure);
+                print!("{}", Cli::command().render_help());
+            }
             return ExitCode::from(2);
         }
     };
@@ -106,7 +118,20 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let result = match cli.cmd {
-        None | Some(Cmd::Status) => status(),
+        None if cli.json => status_json(None),
+        None => status(),
+        Some(Cmd::Status { project }) if cli.json => status_json(project.as_deref()),
+        Some(Cmd::Status { project: None }) => status(),
+        Some(Cmd::Status { .. }) => Err(Failure::new(
+            "usage",
+            "--project requires --json",
+            "vega bd status --json --project <id>",
+        )),
+        _ if cli.json => Err(Failure::new(
+            "usage",
+            "--json applies to status",
+            "vega bd status --json",
+        )),
         Some(Cmd::Init {
             prefix,
             database,
@@ -117,7 +142,11 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => {
-            print_failure(&f);
+            if cli.json {
+                vega_herdr::print_failure_json(&f);
+            } else {
+                print_failure(&f);
+            }
             ExitCode::from(if f.code == "usage" { 2 } else { 1 })
         }
     }
@@ -722,6 +751,15 @@ fn print_after(database: &str, url: &str, data: &Path) {
     println!(
         "help: vega bd status   # ahead, behind, last sync; no manual bd dolt pull/push needed"
     );
+}
+
+fn status_json(project: Option<&str>) -> Result<(), Failure> {
+    let rows: Vec<_> = store::projects().iter().filter(|p| project.is_none_or(|id| id == p.key)).map(|p| {
+        let s = store::state(&p.key, &p.common);
+        serde_json::json!({"project":p.key,"common_dir":p.common,"checkout":p.dir,"database":p.database,"state":s.label(p),"last_pull":s.pulled,"last_push":s.pushed,"conflict":if s.is_stopped(p) { s.stop_reason.as_deref() } else { None },"sync":s})
+    }).collect();
+    println!("{}", serde_json::json!({"schema":1,"projects":rows}));
+    Ok(())
 }
 
 fn status() -> Result<(), Failure> {

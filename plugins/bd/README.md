@@ -20,3 +20,18 @@ missing configuration returns `remote_unconfigured`. Creating a missing database
 also requires `VEGA_BD_SQL` or `vega/bd.sql` under that config directory
 (`host:port`); missing configuration returns `sql_unconfigured` before SQL or
 credential access. Environment overrides win; there is no automatic estate remote.
+## Overview JSON (schema 1)
+
+`vega bd status --json [--project <project-id>]` (or `vega bd --json`) emits
+`{schema: 1, projects: [...]}` without invoking bd, doctor, or git sync.
+It lists provisioned locations on this host; exact project filtering retains
+multiple clones. Rows have `project`, `common_dir`, `checkout`, `database`,
+`state` (`pending`, `ok`, `error`, `stopped`), `last_pull` and `last_push`
+(Unix seconds, 0 means never), `conflict` (active stop reason|null), and `sync`
+(recorded `head`, `ahead`, `behind`, `pull_tried`, `pulled`, `pushed`, `synced`,
+`seen_write`, `error`, `stopped`, `stop_reason`). A stop may be a rejected push:
+show its reason rather than assume a merge conflict.
+
+JSON is supported for status only. Errors use `{error: {code, message, hint}}`
+(exit 2 usage, 1 runtime). Empty lists are arrays; TOON remains the default.
+Consumers should ignore future additive fields.
