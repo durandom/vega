@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 151 · 2026-11-09
+
+- feature: herdr-app project window. Right-click, the settings icon or the summary badge on a
+  UAC project in the sidebar opens a draggable window with Overview, Board, Decisions, Notes,
+  UAC and Config tabs; pin it per project or let it follow the focused project. The status line
+  shows the focused project's decisions, asks, notes, beads, CI, capacity and beads sync, each
+  opening the window on its tab. Sidebar project headers show one summary badge instead of
+  separate mail, decision and waiting icons (vega-0h4c.50). Apply with `vega config apply herdr-app`.
+
 ## 150 · 2026-11-09
 
 - feature: `vega capacity` shows thin or exhausted windows as `on credits` when

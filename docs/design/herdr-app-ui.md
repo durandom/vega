@@ -267,3 +267,31 @@ flags, exact decimal balance, Unix observed_at; otherwise null), and `on_credits
 A thin binding window on spendable credits keeps its quota percentages and sets
 `on_credits: true`, `warns: false`. Missing/stale credit data stays unknown;
 provider credit units must not be rendered as USD (vega-lweq).
+
+## Project window, status line and sidebar badge (vega-0h4c.50, built live)
+
+Each place has one job: the sidebar navigates, the status line shows the focused project's
+context, the project window holds details and actions.
+
+- **Project window** (`vega-sidebar`, overlay kind `window`): opened by right-click on a UAC
+  project header, its settings icon, its summary badge, or a status line segment. No terminal
+  block inside: a terminal rendered in the window and in its pane at once jitters; agent rows
+  focus the terminal in the main view instead (`pane.focus`). The title bar is not
+  propagation-stopped, so pressing it drags the window. A pin toggle switches between
+  pinned (key `vega-project-<project id>`, one window per project) and follow (key
+  `vega-project-follow`; each second the window reopens in place on the focused terminal's
+  project, keeping the tab). The window owns a focus handle so Esc closes it.
+  Tabs: Overview (UAC, needs-you tiles, beads counts, sentinels with beads, CI watches,
+  capacity bars), Board (in progress / ready / blocked from `bd`, expandable rows),
+  Decisions (answer via `vega uac answer`, dismiss via `bd close --reason`), Notes
+  (`vega post notes --json` for the project or the UAC pane; mark read / clear with `--upto`),
+  UAC, Config. Remote projects run `bd` and `vega` through `hc exec` on their machine, as
+  vega-inbox does. Reads poll every 15 s and redraw only when the data changed.
+- **Status line** (`vega` mod): after machine, branch and agent count, segments for the focused
+  terminal's project: name with decisions, asks and notes; beads in progress and ready; CI;
+  the capacity of the focused agent's provider (claude, codex, zai for pi); beads sync. Each
+  segment opens the project window on its tab. Local projects only for asks, beads and CI.
+- **Sidebar**: one summary badge per project (decisions + waiting + notes; blocked colour when
+  a decision or a waiting agent is in it). A click opens the most urgent view: Decisions, the
+  waiting pane, else Notes. Agent rows keep per-agent signals only (mail, waiting, git).
+- Colours come from theme tokens only (working, blocked, done, idle), for light and dark.
