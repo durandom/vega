@@ -375,7 +375,7 @@ operator pair grant to reach an agent; otherwise they become human notices:
   `vega.quarantine.<self>.>` and answers through its existing `allow_responses`. No stream, no
   provisioning.
 - Local send (vega-lhc.248): on a host in the inbox-only list (`VEGA_POST_INBOX_ONLY`, else
-  `$XDG_CONFIG_HOME/vega/inbox-only`, else `deimos`), same-host `vega post send` and `done`
+  `$XDG_CONFIG_HOME/vega/inbox-only`, else `deimos` and `puck`), same-host `vega post send` and `done`
   deliver direct herdr prompts with local reply tokens and parent/child supervision. No broker
   access, pair grant or inbox archive is involved. `--uac` resolves open local v2 UAC claims,
   including IDs, aliases and `.`; remote UAC enumeration and `--uber` remain unavailable.

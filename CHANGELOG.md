@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 140 · 2026-11-09
+
+- feature: puck (corp work Mac) joins deimos in the built-in inbox-only host list: its mail goes to
+  quarantine and it never mails agents, as its broker key already enforces. A configured
+  `~/.config/vega/inbox-only` or `VEGA_POST_INBOX_ONLY` still replaces the default.
+
 ## 139 · 2026-11-09
 
 - unit: `herdr-app.layouts` is rebased onto the shipped `main` of herdr-app 0.1.14 (no structural change

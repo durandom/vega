@@ -289,8 +289,12 @@ pub fn host_token(h: &str) -> String {
 /// --inbox-only`): their replies go into quarantine, a notice for the human
 /// only (vega-lhc.83). `VEGA_POST_INBOX_ONLY` (comma list; set but empty: none),
 /// else `$XDG_CONFIG_HOME/vega/inbox-only` (one host per line, `#` comments),
-/// else deimos (Slayer decision 2026-10-07). The broker enforces it; this list
+/// else the corp hosts deimos (Slayer decision 2026-10-07) and puck (2026-11-09).
+/// The broker enforces it; this list
 /// only picks the way and the wording.
+/// Corp hosts with an inbox-only broker key when no list is configured.
+const DEFAULT_INBOX_ONLY: [&str; 2] = ["deimos", "puck"];
+
 pub fn inbox_only_hosts() -> Vec<String> {
     if let Ok(v) = env::var("VEGA_POST_INBOX_ONLY") {
         return parse_hosts(&v.replace(',', "\n"));
@@ -302,7 +306,7 @@ pub fn inbox_only_hosts() -> Vec<String> {
         .map(|c| Path::new(&c).join("vega").join("inbox-only"));
     match file.and_then(|f| std::fs::read_to_string(f).ok()) {
         Some(text) => parse_hosts(&text),
-        None => vec!["deimos".into()],
+        None => DEFAULT_INBOX_ONLY.iter().map(|h| h.to_string()).collect(),
     }
 }
 
@@ -1182,6 +1186,7 @@ mod tests {
             vec!["deimos".to_string(), "eris_local".to_string()]
         );
         assert!(parse_hosts("").is_empty());
+        assert_eq!(DEFAULT_INBOX_ONLY, ["deimos", "puck"]);
     }
 
     #[test]
