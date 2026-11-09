@@ -108,3 +108,4 @@ Examples:
   vega capacity plan claude --this-week   # the Slayer resets claude this week
   vega skills uac        # the role guide
   vega uac rules        # the coordinator rules
+vega uac --json: schema-1 facility object (project, agents, grants, unreachable, registry_error), selected by cwd; no calling pane required.

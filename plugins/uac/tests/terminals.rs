@@ -134,6 +134,20 @@ esac"#,
             text
         };
         assert!(call(&["claim"]).contains("(you)"));
+        let json_text = call(&["--json"]);
+        let json: serde_json::Value = serde_json::from_str(&json_text).unwrap();
+        assert_eq!(json["schema"], 1);
+        assert_eq!(json["project"], "github.com/example/project");
+        assert!(json["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["pane"] == "t2"));
+        assert!(json["grants"].is_array());
+        let bad = invoke(&["--json", "--bad"], hc);
+        assert_eq!(bad.status.code(), Some(2));
+        let error: serde_json::Value = serde_json::from_slice(&bad.stdout).unwrap();
+        assert_eq!(error["error"]["code"], "usage");
         let listing = call(&[]);
         assert!(listing.contains("t2") && listing.contains("w1:p2"));
         assert!(!listing.contains("remote/t9"));

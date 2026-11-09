@@ -48,17 +48,33 @@ const MACHINE_TIMEOUT: Duration = Duration::from_secs(8);
 const HELP: &str = include_str!("../help/uac.md");
 
 fn run(mode: Mode) -> ExitCode {
+    let json = matches!(mode, Mode::Json);
     match home(mode) {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => {
-            print_failure(&f);
-            ExitCode::from(1)
+            if json {
+                vega_herdr::print_failure_json(&f);
+            } else {
+                print_failure(&f);
+            }
+            ExitCode::from(if json && f.code == "usage" { 2 } else { 1 })
         }
     }
 }
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--json") && !args.iter().any(|a| a == "--help" || a == "-h") {
+        if args == ["--json"] {
+            return run(Mode::Json);
+        }
+        vega_herdr::print_failure_json(&Failure::new(
+            "usage",
+            "--json applies to the facility view",
+            "vega uac --json",
+        ));
+        return ExitCode::from(2);
+    }
     if args.first().is_some_and(|a| a == "group") {
         return match group::run(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
@@ -216,6 +232,7 @@ fn machines() -> Vec<String> {
 
 /// What `home` does after it collected the project's agents.
 enum Mode {
+    Json,
     View,
     Status,
     /// `vega uac ask`: the question and `--within`.
@@ -228,13 +245,27 @@ enum Mode {
 
 fn home(mode: Mode) -> Result<(), Failure> {
     let status = matches!(mode, Mode::Status);
+    let json = matches!(mode, Mode::Json);
     let Me {
         pane: my_pane,
         workspace: my_ws,
         program,
         cwd: my_cwd,
         ..
-    } = terminal::identity()?;
+    } = if json {
+        Me {
+            pane: String::new(),
+            workspace: String::new(),
+            agent: String::new(),
+            program: String::new(),
+            cwd: env::current_dir()
+                .map_err(|e| Failure::new("cwd", e.to_string(), "run in a project checkout"))?
+                .to_string_lossy()
+                .into_owned(),
+        }
+    } else {
+        terminal::identity()?
+    };
     // Remote machines answer over ssh: ask them in parallel with the local one.
     let remote: Vec<_> = machines()
         .into_iter()
@@ -253,21 +284,24 @@ fn home(mode: Mode) -> Result<(), Failure> {
     let bin = env::current_exe()
         .map(|p| collapse_home(&p.display().to_string()))
         .unwrap_or_else(|_| "unknown".into());
-    println!("bin: {bin}");
-    println!("description: UAC facility console: every agent on this project across terminal backends and hosts, with parent and bead");
-    print!("{}", vega_herdr::daemon_health::status());
-    let my_name = local
-        .agents
-        .iter()
-        .find(|a| a["pane_id"] == my_pane.as_str())
-        .map(agent_name)
-        .unwrap_or("-");
-    println!("me: {}", me_line(&my_pane, &program, my_name, &my_cwd));
-
+    if !json {
+        println!("bin: {bin}");
+        println!("description: UAC facility console: every agent on this project across terminal backends and hosts, with parent and bead");
+        print!("{}", vega_herdr::daemon_health::status());
+        let my_name = local
+            .agents
+            .iter()
+            .find(|a| a["pane_id"] == my_pane.as_str())
+            .map(agent_name)
+            .unwrap_or("-");
+        println!("me: {}", me_line(&my_pane, &program, my_name, &my_cwd));
+    }
     let project = project_key(&local.workspaces, &my_ws, &my_cwd)?;
-    match &project {
-        Some(p) => println!("project: {}", cell(p)),
-        None => println!("project: none (not in a git repo); showing only workspace {my_ws}"),
+    if !json {
+        match &project {
+            Some(p) => println!("project: {}", cell(p)),
+            None => println!("project: none (not in a git repo); showing only workspace {my_ws}"),
+        }
     }
     let registry = reg
         .join()
@@ -303,6 +337,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
             Mode::Adopt(target, machine, headless) => {
                 return adopt(target, machine.as_deref(), &my_pane, *headless)
             }
+            Mode::Json => {}
             _ => {
                 println!("uac: {}", uac_line(p, &my_pane, &local.agents, view));
                 match &registry {
@@ -337,7 +372,9 @@ fn home(mode: Mode) -> Result<(), Failure> {
         projects.insert(p.clone());
     }
 
-    grants::listing()?;
+    if !json {
+        grants::listing()?;
+    }
 
     let mut snapshots = vec![local];
     let mut unreachable = Vec::new();
@@ -510,6 +547,21 @@ fn home(mode: Mode) -> Result<(), Failure> {
     }
     rows.sort_by(|a, b| (a.rank, &a.machine).cmp(&(b.rank, &b.machine)));
 
+    if json {
+        let grants = vega_herdr::mail_grants::list()
+            .map_err(|e| Failure::new("grant_store", e, "inspect vega/mail-grants state files"))?;
+        println!(
+            "{}",
+            facility_json(
+                project.as_deref(),
+                &rows,
+                &grants,
+                &unreachable,
+                registry.as_ref().err()
+            )
+        );
+        return Ok(());
+    }
     if let Mode::Ask(question, within) = &mode {
         return ask(&rows, &host, question, within.as_deref());
     }
@@ -642,6 +694,23 @@ struct Row {
     /// Relay mail observation; absent metadata means unknown.
     unread: String,
     rank: usize,
+}
+
+fn facility_json(
+    project: Option<&str>,
+    rows: &[Row],
+    grants: &[vega_herdr::mail_grants::Grant],
+    unreachable: &[String],
+    registry_error: Option<&String>,
+) -> Value {
+    let agents: Vec<_> = rows.iter().map(|r| serde_json::json!({
+        "project":r.project,"machine":r.machine,"pane":r.pane,"name":r.name,"tab":r.tab,
+        "kind":r.kind,"status":r.status,"attention":r.attention.map(Attention::as_str),
+        "parent":r.parent,"mode":r.mode,"bead":r.bead,"unread_mail":r.unread,
+        "tier":r.selection.as_ref().map(|s| &s.0),"model":r.selection.as_ref().map(|s| &s.1),"ci":r.ci
+    })).collect();
+    let grants: Vec<_> = grants.iter().map(|g| serde_json::json!({"sender":g.sender.label(),"target":g.target.label(),"status":if g.revoked.is_some() {"revoked"} else if g.live(vega_herdr::mail_grants::now()) {"live"} else {"expired"},"created":g.created,"expires":g.expires,"revoked":g.revoked})).collect();
+    serde_json::json!({"schema":1,"project":project,"agents":agents,"grants":grants,"unreachable":unreachable,"registry_error":registry_error})
 }
 
 fn agent_table(rows: &[Row]) -> Vec<String> {
@@ -1862,6 +1931,32 @@ fn shorten(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn facility_json_has_agent_and_grant_rows_even_when_empty() {
+        let v = facility_json(Some("github.com/team/repo"), &[], &[], &[], None);
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["agents"], serde_json::json!([]));
+        assert_eq!(v["grants"], serde_json::json!([]));
+        let r = row("t1", "fixture", Some(Attention::Silent));
+        let v = facility_json(None, &[r], &[], &[], None);
+        assert_eq!(v["agents"][0]["pane"], "t1");
+        assert_eq!(v["agents"][0]["attention"], "silent");
+        assert!(v["agents"][0]["model"].is_null());
+        use vega_herdr::mail_grants::{Grant, Peer};
+        let g = Grant {
+            sender: Peer::parse("io:t1").unwrap(),
+            target: Peer::parse("fixture:t2").unwrap(),
+            created: 1,
+            expires: u64::MAX,
+            revoked: None,
+        };
+        let v = facility_json(None, &[], &[g], &[], None);
+        assert_eq!(v["grants"][0]["sender"], "io:t1");
+        assert_eq!(v["grants"][0]["target"], "fixture:t2");
+        assert_eq!(v["grants"][0]["status"], "live");
+        assert!(v["grants"][0]["revoked"].is_null());
+    }
 
     #[test]
     fn skill_has_valid_frontmatter() {

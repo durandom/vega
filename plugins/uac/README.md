@@ -50,3 +50,19 @@ worktree cleanup; `vega uac prune` applies it without force. See `prune --help`.
 
 Project identity uses the flag-day v2 protocol; deployment and exact-grant
 requirements are in [the registry cutover handoff](../../docs/design/project-registry-cutover.md).
+## Overview JSON (schema 1)
+
+`vega uac --json` selects the project from cwd without requiring a calling pane
+or claiming a UAC. It emits `{schema: 1, project: string|null, agents: [...],
+grants: [...], unreachable: [string], registry_error: string|null}`. Project
+membership includes configured group members. Agent rows have `project`,
+`machine`, `pane`, `name`, `tab`, `kind`, `status`, `attention` (string|null),
+`parent`, `mode`, `bead`, `unread_mail`, `tier` and `model` (string|null), and
+`ci` (target labels). Grant rows are receiving-host mail pair grants with
+`sender`, `target`, `status` (`live`, `expired`, `revoked`), `created`, `expires`
+(Unix seconds), and `revoked` (Unix seconds|null). Registry errors retain local
+rows; unreachable machines are explicit. Reads do not write a UAC status report.
+
+Errors use `{error: {code, message, hint}}` (exit 2 usage, 1 runtime).
+Empty lists are arrays; TOON remains the default. Consumers should ignore
+future additive fields.
