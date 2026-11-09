@@ -1064,6 +1064,13 @@ fn status_value() -> Result<Value, Failure> {
     }))
 }
 
+/// The `relay status` line for an old login job; none once it is gone.
+fn login_service_line(v: &Value) -> Option<String> {
+    v["login_service"].as_str().map(|job| {
+        format!("login_service: {job} (old login job; `vega post relay install` removes it)")
+    })
+}
+
 pub fn status(as_json: bool) -> Result<(), Failure> {
     load_env_file();
     let v = status_value()?;
@@ -1092,8 +1099,8 @@ pub fn status(as_json: bool) -> Result<(), Failure> {
     if let Some(u) = v["legacy_unit"].as_str() {
         println!("legacy_unit: {u} (installed; `vega post relay install` migrates)");
     }
-    if let Some(job) = v["login_service"].as_str() {
-        println!("login_service: {job} (old login job; `vega post relay install` removes it)");
+    if let Some(line) = login_service_line(&v) {
+        println!("{line}");
     }
     let log = log_path()?;
     let tail = fs::read_to_string(&log)
@@ -1258,6 +1265,19 @@ case "$1" in print) test -f "$HOME/loaded" ;; bootout) test -z "$FAIL_BOOTOUT" &
             return;
         }
         let calls = || fs::read_to_string(home().unwrap().join("calls")).unwrap_or_default();
+        // relay status names an old job of this OS's manager with the removal hint, and drops
+        // the line once the job is gone.
+        let ours = login_path(manager().expect("launchd or systemd")).unwrap();
+        fs::create_dir_all(ours.parent().unwrap()).unwrap();
+        fs::write(&ours, "old job").unwrap();
+        let line = login_service_line(&status_value().unwrap()).expect("old job reported");
+        assert!(line.starts_with("login_service: "), "{line}");
+        assert!(
+            line.ends_with("(old login job; `vega post relay install` removes it)"),
+            "{line}"
+        );
+        fs::remove_file(&ours).unwrap();
+        assert_eq!(login_service_line(&status_value().unwrap()), None);
         let mac = login_path(Manager::Launchd).unwrap();
         fs::create_dir_all(mac.parent().unwrap()).unwrap();
         fs::write(&mac, "old job").unwrap();
