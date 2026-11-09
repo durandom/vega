@@ -40,7 +40,8 @@ A pointer never joins text the user is typing (the draft guard): vegad reads the
 Codex and pi and holds the pointer while it has a draft; a draft left 5 minutes is stashed and typed back
 after the pointer, or, when it cannot be typed back, keeps holding with one notification. A screen with no
 known input box holds the pointer until it has been unchanged for 20 s (one notification after 5 busy
-minutes). `vega mux send --now` pastes without the guard. See
+minutes). hc terminals differ: a draft holds only while it changes and goes 60 s after the last
+change, with no stash or restore. `vega mux send --now` pastes without the guard. See
 [Draft guard](../../docs/design/vegad.md).
 
 Reply commands carry a timestamped `--re` token. Replies within 120 seconds count toward the eight-hop

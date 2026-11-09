@@ -275,7 +275,8 @@ hc receives no draft-clear/restore keystrokes.
 **Draft hold (vega-0h4c.47).** herdr-core 0.1.19 types into unfinished drafts. Until a release
 carries 3ba03e6 (sends wait up to 60 s since the last key), vegad holds pointers to hc terminals
 itself: it reads the screen (`terminal.read`, local `tN` or `machine/tN`), parses it with
-`delivery::draft` and holds while the draft text changes; unchanged for `HC_DRAFT_QUIET` (60 s) or
+`delivery::draft` and holds while the draft text changes (the whole screen for drafts it cannot read: Codex, multi-line pi,
+pastes); unchanged for `HC_DRAFT_QUIET` (60 s) or
 an empty box lets it go. No stash, clear or restore (`hc send` submits). `hc read` is plain text, so
 Claude's dim suggestion reads as a draft and delays a pointer once by 60 s. Switch off: set
 `HC_DRAFT_HOLD` to `false` in `plugins/post/src/main.rs` once cores carry 3ba03e6.

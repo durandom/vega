@@ -4209,7 +4209,9 @@ impl Drafts {
     fn hc_watch(&mut self, pane: &str, shown: Option<&str>, now: Instant) -> bool {
         let text = match shown.map(delivery::draft) {
             Some(Draft::Text(t)) => t,
-            Some(Draft::Opaque) => OPAQUE.into(),
+            // Text the screen does not hold (Codex, multi-line pi, pastes): watch
+            // the whole screen, so typing restarts the wait.
+            Some(Draft::Opaque) => format!("{OPAQUE}{}", shown.unwrap_or_default()),
             _ => {
                 self.seen.remove(pane);
                 return false;
@@ -6695,12 +6697,13 @@ mod tests {
     const CLAUDE_MORE: &str = "done\n────────\n❯ typing on\n────────\n status\n";
     const CLAUDE_EMPTY: &str = "done\n────────\n❯ \n────────\n status\n";
     const CODEX: &str = "done\n› typing\n  GPT-6 medium · vega · Ready\n";
+    const CODEX_MORE: &str = "done\n› typing on\n  GPT-6 medium · vega · Ready\n";
     const PI: &str = "out\n────────\ntyping\n────────\n";
 
     #[test]
     fn hc_draft_holds_while_changing_and_goes_when_quiet() {
         for pane in ["t6", "io/t6"] {
-            for (box_, more) in [(CLAUDE, CLAUDE_MORE), (CODEX, CODEX), (PI, PI)] {
+            for (box_, more) in [(CLAUDE, CLAUDE_MORE), (CODEX, CODEX_MORE), (PI, PI)] {
                 let mut d = Drafts::default();
                 let t0 = Instant::now();
                 let at = |s: u64| t0 + Duration::from_secs(s);

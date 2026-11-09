@@ -89,7 +89,8 @@ Jobs, all in one process:
    prompt`.
    hc terminals (vega-0h4c.47, until cores carry herdr-core 3ba03e6; `HC_DRAFT_HOLD` in
    `plugins/post/src/main.rs`) get a lighter guard: the screen comes from `terminal.read` (local
-   `tN` or `machine/tN`), a draft holds while its text changes and goes after 60 s unchanged
+   `tN` or `machine/tN`), a draft holds while its text changes (for drafts the screen cannot read,
+   Codex, multi-line pi and pastes: while the screen changes) and goes after 60 s unchanged
    (`HC_DRAFT_QUIET`), an empty box at once; no stash or restore, as `hc send` submits. `hc read` is
    plain text, so a Claude suggestion costs one 60 s wait. See hc-migration.md.
 3. **Gather.** `vega post ask <targets...> --fields task,branch,bead,blockers` sends one question
