@@ -106,7 +106,7 @@ Views live in the same TOML file, through `vega project view <name>
 [--label <label>]... [--machine <machine>]... [--json]`; filter flags replace both dimensions.
 `--delete` removes a saved view. The popup selects, edits, saves and deletes views.
 The built-in `all` view is reserved and matches everything; a deleted selection falls
-back to All. Only the active view name and existing drag order are localStorage UI state;
+back to All. The active view name and existing drag order are this feature's localStorage UI state;
 config and view definitions are never persisted in the mod's shared/local state.
 A single CLI read loads both tables at startup and every five seconds; readers retain
 their last good snapshot and show errors. Reopening an overlay reads fresh preferences.

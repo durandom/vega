@@ -257,7 +257,11 @@ export default class Agents extends View {
   }
 
   async saveView(cx, remove = false, id = this.viewName.value().trim()) {
-    if (this.saving || !id || id === "all") return;
+    if (this.saving) return;
+    if (!id || id === "all") {
+      this.configError = "Enter a view name other than all (reserved for All).";
+      cx.notify(); return;
+    }
     this.saving = true; this.configError = null; cx.notify();
     const args = ["project", "view", id];
     if (remove) args.push("--delete");
@@ -282,6 +286,7 @@ export default class Agents extends View {
   viewMenu(t) {
     const select = (id) => { localStorage.setItem("active-view", id); closeOverlay(props().overlay); };
     return v_flex().size_full().overflow_y_scrollbar().p(12).gap(9).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
       .child(div().id("view-all").cursor_pointer().child("All").on_click(() => select("all")))
       .children(Object.entries(this.preferences.views ?? {}).map(([id, view]) => h_flex().gap(8)
         .child(div().id(`view-${id}`).flex_1().cursor_pointer().child(id).on_click(() => select(id)))

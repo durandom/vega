@@ -660,3 +660,33 @@ test('dragging a filtered view swaps visible slots and preserves hidden project 
   restarted.storage.set('project-order',stored);restarted.mod.init({},restarted.cx);
   assert.deepEqual(projectHeaders(restarted),[c,b,otherB,a].map(id=>`uac-${id}`));
 });
+
+test('deleting the selected view restores the All header and unfiltered projects and spaces',async()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  let prefs={projects:{[project]:{name:'Project A',labels:['work']}},views:{Focus:{labels:['work'],machines:['puck']}}};
+  h.api.exec=async(bin)=>({code:0,stdout:bin==='vega'?JSON.stringify(prefs):''});
+  h.storage.set('active-view','Focus');h.mod.init({},h.cx);await h.flush();
+  let tree=h.render();assert(texts(tree).includes('Focus'));
+  assert(!elements(tree).some(n=>n.idValue==='space-scratch'));
+  prefs={...prefs,views:{}};await h.mod.refreshPreferences(h.cx);
+  tree=h.render();const selector=elements(tree).find(n=>n.idValue==='ag-views');
+  assert.deepEqual(texts(selector),['All']);
+  assert(elements(tree).some(n=>n.idValue==='space-scratch'));
+  assert(elements(tree).some(n=>n.idValue===`uac-${project}`));
+});
+
+test('view editor explains invalid names and empty filters; Escape cancels without writing',async()=>{
+  const h=load('vega-sidebar');h.setProps({viewMenu:true,overlay:'views'});
+  h.api.exec=async()=>({code:0,stdout:'{"projects":{},"views":{}}'});
+  h.mod.init({},h.cx);await h.flush();
+  h.api.exec=async()=>{assert.fail('invalid view must not execute a write');};
+  for(const name of ['', 'all']) {
+    h.mod.viewName.set_value(name);h.mod.viewLabels.set_value('work');
+    await h.mod.saveView(h.cx);
+    assert(texts(h.render()).some(s=>s.includes('Enter a view name')));
+  }
+  h.mod.viewName.set_value('Work');h.mod.viewLabels.set_value('');await h.mod.saveView(h.cx);
+  assert(texts(h.render()).some(s=>s.includes('Choose at least one label or machine')));
+  h.render().handlers.on_key_down({keystroke:'escape'},h.cx);
+  assert(h.calls.some(c=>c[0]==='close'&&c[1]==='views'));
+});
