@@ -212,6 +212,27 @@ fn hc_next_focuses_through_app() {
 }
 
 #[test]
+fn next_on_an_inbox_only_host_skips_the_registry_without_a_warning() {
+    let f = Fixture::new();
+    f.spawn();
+    let run = |inbox_only: bool| {
+        let mut c = f.cmd();
+        if inbox_only {
+            c.env("VEGA_POST_HOST", "puck")
+                .env("VEGA_POST_INBOX_ONLY", "puck");
+        }
+        c.arg("next").output().unwrap()
+    };
+    let skipped = run(true);
+    let err = String::from_utf8_lossy(&skipped.stderr);
+    assert!(!err.contains("warning: registry:"), "{err}");
+    assert!(String::from_utf8_lossy(&skipped.stdout).contains("none:"));
+    // An owner host still says that the registry is unreadable.
+    let owner = run(false);
+    assert!(String::from_utf8_lossy(&owner.stderr).contains("warning: registry:"));
+}
+
+#[test]
 fn hc_dialog_answer_rechecks_and_moves_question() {
     let f = Fixture::new();
     f.spawn();
