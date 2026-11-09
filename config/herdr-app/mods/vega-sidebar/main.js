@@ -2,7 +2,7 @@
 // A viewed done agent stays in Done until left.
 
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home } from "herdr";
 
 function find(node, id) {
@@ -122,7 +122,7 @@ export default class Agents extends View {
       });
       return;
     }
-    if (props()?.sortMenu) return;
+    if (props()?.sortMenu || props()?.spaceMenu) return;
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
@@ -218,6 +218,41 @@ export default class Agents extends View {
         .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().child(s.label))
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
+  }
+
+  openSpaceMenu(space, cx) {
+    cx.stop_propagation();
+    openOverlay({ mod: "vega-sidebar", kind: "popup", width: 260, height: 100,
+      props: { spaceMenu: { id: space.id, name: space.name } } });
+  }
+
+  spaceMenu(t) {
+    const space = props().spaceMenu;
+    return v_flex().w_full().p(8).gap(8).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .on_key_down((e, cx) => {
+        if (e.keystroke === "escape") {
+          cx.stop_propagation();
+          closeOverlay(props().overlay);
+        }
+      })
+      .child(this.renameInput
+        ? v_flex().gap(6)
+          .child(div().text_size(11).text_color(t.dim).child("Rename space"))
+          .child(Input.new(this.renameInput).h(32).px(8).rounded(6).border_1().border_color(t.input).bg(t.background))
+        : div().id("rename-space").h(31).px(8).rounded(7).cursor_pointer().hover(el => el.bg(t.hover))
+          .on_click((_e, cx) => {
+            this.renameInput = InputState.new({ value: space.name });
+            this.renameInput.on("submit", () => {
+              const name = this.renameInput.value().trim();
+              if (!name) return;
+              run("space.rename", { id: space.id, name });
+              closeOverlay(props().overlay);
+            });
+            // Only the explicit Rename action takes the keyboard; render never does.
+            this.renameInput.focus();
+            cx.notify();
+          })
+          .child("Rename"));
   }
 
   peek(addr) {
@@ -396,6 +431,7 @@ export default class Agents extends View {
           .when(sp.active, el => el.bg(t.selected))
           .cursor_pointer().hover(s => s.bg(t.hover))
           .on_click(() => run("space.select", { id: sp.id }))
+          .on_mouse_down("right", (_e, cx) => this.openSpaceMenu(sp, cx))
           .child(div().min_w(0).flex_shrink_1().truncate().text_color(t.muted).child(sp.name))
           .child(div().flex_1())
           .child(div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live)] ?? t.dim)
@@ -471,6 +507,7 @@ export default class Agents extends View {
           .when(Boolean(m.title), el => el.child(div().font_semibold().child(m.title)))
           .child(div().child(m.text ?? m.body ?? ""))) : [div().child("No mail.")]) : [div().child(this.mail)]));
     if (props()?.sortMenu) return this.sortMenu(t);
+    if (props()?.spaceMenu) return this.spaceMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();

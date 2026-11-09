@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-function load(name) {
+function load(name, {allowFocus=false}={}) {
   const state = new Map(), storage = new Map(), calls = [], tasks = [], commands = [];
   let props = {}, rendering = false;
   function el() {
@@ -14,13 +14,13 @@ function load(name) {
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
       if(k==='id'||k==='tooltip')return v=>{o[k+'Value']=v;return proxy;};
-      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up')return (...a)=>{o.handlers[k]=a.at(-1);return proxy;};
+      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down')o.mouseButton=a[0];return proxy;};
       return ()=>proxy;
     }});return proxy;
   }
   const cx={notify(){},stop_propagation(){calls.push(['stop']);},timer:{every(){}},spawn(f){const p=f(cx);tasks.push(p);return p;}};
   const api={View:class {},div:el,h_flex:el,v_flex:el,svg:el,image:el,
-    InputState:{new(){assert.equal(rendering,false,'input state created in render');let value='';return {on(){},value:()=>value,set_value:v=>{value=v;},focus(){throw Error('focus stolen');}};}},
+    InputState:{new(options={}){assert.equal(rendering,false,'input state created in render');let value=options.value??'';return {handlers:{},on(event,f){this.handlers[event]=f;},value:()=>value,set_value:v=>{value=v;},focus(){assert(allowFocus,'focus stolen');calls.push(['focus']);}};}},
     Input:{new:el},theme:()=>({}),shared:k=>state.get(k),setShared:(k,v)=>state.set(k,v),
     props:()=>props,home:()=>'/scratch',terminals:()=>[{address:'t7',state:'live'}],
     agents:()=>[],panes:()=>[],spaces:()=>[],focused:()=>null,layout:()=>null,window:()=>null,
@@ -183,6 +183,43 @@ function elements(node) {
   return [node,...node.items.flatMap(elements)];
 }
 function texts(node) { return elements(node).flatMap(n=>n.items.filter(i=>typeof i==='string')); }
+
+test('space context menu renames local and qualified remote IDs on submit; Escape cancels',()=>{
+  for (const id of ['sp-local','puck/sp-remote']) {
+    const h=load('vega-sidebar');
+    h.api.spaces=()=>[{id,name:'uac',machine:id.includes('/')?'puck':null,tabs:[]}];
+    h.mod.init({},h.cx);
+    const space=elements(h.render()).find(n=>n.idValue===`space-${id}`);
+    assert.equal(space.mouseButton,'right');
+    space.handlers.on_mouse_down({button:'right'},h.cx);
+    assert(h.calls.some(c=>c[0]==='stop'));
+    assert(!h.calls.some(c=>c[0]==='run'&&c[1]==='space.select'));
+    const spec=h.calls.find(c=>c[0]==='open')[1];
+    assert.equal(spec.kind,'popup');assert.equal(spec.props.spaceMenu.id,id);
+    for (const cancel of [true,false]) {
+      const popup=load('vega-sidebar',{allowFocus:true});
+      popup.setProps({...spec.props,overlay:'rename-popup'});popup.mod.init({},popup.cx);
+      assert(!popup.calls.some(c=>c[0]==='focus'));
+      elements(popup.render()).find(n=>n.idValue==='rename-space').handlers.on_click({},popup.cx);
+      assert.equal(popup.mod.renameInput.value(),'uac');
+      popup.render();popup.render();
+      assert.equal(popup.calls.filter(c=>c[0]==='focus').length,1,'only explicit Rename focuses');
+      popup.mod.renameInput.set_value('   ');popup.mod.renameInput.handlers.submit({},popup.cx);
+      assert(!popup.calls.some(c=>c[0]==='run'),'empty names do not submit');
+      popup.mod.renameInput.set_value('fullsend');
+      if (cancel) {
+        popup.render().handlers.on_key_down({keystroke:'escape'},popup.cx);
+        assert(!popup.calls.some(c=>c[0]==='run'),'Escape never renames');
+      } else {
+        // InputState emits submit for Enter.
+        popup.mod.renameInput.handlers.submit({},popup.cx);
+        const call=popup.calls.find(c=>c[0]==='run');
+        assert.equal(call[1],'space.rename');assert.equal(call[2].id,id);assert.equal(call[2].name,'fullsend');
+      }
+      assert(popup.calls.some(c=>c[0]==='close'&&c[1]==='rename-popup'));
+    }
+  }
+});
 
 test('UAC projects hold their agents across machines in dragged order; other spaces follow',()=>{
   const h=load('vega-sidebar');

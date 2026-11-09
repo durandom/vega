@@ -47,6 +47,17 @@ with a private app/config/state home never start a daemon. Scratch probes must
 stop every app or core they start; the mod does not own or stop the shared vegad.
 The herdr TUI startup hook is unchanged.
 
+## Space rename (vega-0h4c.48)
+
+Right-clicking a space row in the default UAC / spaces view opens a small
+`kind: "popup"` overlay, following the sort menu pattern. Rename replaces the
+menu item with an input prefilled with that space's name. Only the explicit
+Rename click focuses that input; input state is created in the event handler,
+never during render. Enter submits a nonempty trimmed name through
+`run("space.rename", {id, name})` and closes the popup. The original space ID is
+kept intact, including a remote machine prefix such as `puck/sp…`. Escape closes
+the popup without submitting, and a right-click does not select the space.
+
 ## Data path
 
 - **Per terminal:** vegad writes the tokens it reports to herdr today (`report_metadata`,

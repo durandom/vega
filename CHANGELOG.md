@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 145 · 2026-11-09
+
+- feature: right-click a space in the vega sidebar and choose Rename to edit its name.
+  Enter saves local and remote space names; Escape cancels (vega-0h4c.48).
+
 ## 144 · 2026-11-09
 
 - feature: vegad's draft guard covers hc terminals again (vega-0h4c.47): a pointer no longer joins
