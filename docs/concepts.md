@@ -129,9 +129,9 @@ answers. `vega mux send --now` pastes directly, as does the fallback when no veg
 
 ## vegad: the relay daemon
 
-vegad is `vega post relay start`: one detached daemon per host, started at login by
-a launchd/systemd user job (`vega post relay install`, once per host). The optional
-herdr hook and herdr-app mod also start it idempotently; vegad self-upgrades. It delivers mail and
+vegad is `vega post relay start`: one detached daemon per host, started by the herdr-app mod (locally and via `hc exec` on connected machines) or
+the herdr hook (`vega post relay install` pins its env, once per host); both start it
+idempotently; vegad self-upgrades. It delivers mail and
 pointers, watches agent status through herdr events and wakes a parent on a done report, a question, a
 silent or exited child, publishes this host's agents to the registry (a KV bucket on the broker), and runs the
 beads sync, git sync (fetch every 5 min, fast-forward of

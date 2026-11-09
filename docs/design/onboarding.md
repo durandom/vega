@@ -84,7 +84,7 @@ screen; approving it on the initiating machine does not resolve it.
 If terminals were created before the signed Core bundle upgrade, recreate those
 terminals after the user has resolved access; restarting only the core does not
 repair their old holders. Do not restart other users’ terminals to diagnose this.
-The vegad login job does not start an hc core or alter an existing core LaunchAgent.
+vegad startup does not start an hc core or alter an existing core LaunchAgent.
 `hc machine`/SSH owns remote core startup, including reconnects (Slayer decision,
 2026-11-07). Do not install a competing hc login job; the operator removes the
 experimental `dev.vega.hc-core` job on ganymede separately.

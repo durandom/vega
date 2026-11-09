@@ -25,7 +25,7 @@ main path.
 ## Shape
 
 `vegad` is the existing `vega post relay` service, grown up. One per machine. herdr starts it, it
-upgrades itself in place, and a login job also starts it without either UI (see Lifecycle).
+upgrades itself in place, and the herdr-app mod starts it locally and on connected hc machines (see Lifecycle).
 
 On Silverblue the binaries are built in a toolbox (newer glibc) but herdr's startup hook runs on the
 host, where they fail with `GLIBC_x not found`. `relay install` detects a toolbox
@@ -208,7 +208,7 @@ loser fails on the lock and exits.
 handoff (the old server exits each herdr update) and drop its delivery state each time. Mail,
 commands and the registry do not need herdr; agent status falls back to `herdr agent list` polling
 (one log line per outage, not per poll) and retries the stream, so vegad picks up the next server
-by itself. After a reboot the login job starts vegad; before login mail waits in
+by itself. After a reboot the herdr-app mod or the herdr hook starts vegad; until then mail waits in
 JetStream. The start rescans it.
 
 **Upgrade in place.** vegad records the identity of its executable (device, inode, size, mtime of
@@ -235,8 +235,8 @@ changes size or mtime. On macOS the first launch of a new file takes a few secon
 
 **Migration.** `relay install` (the user runs it once per host): stops and removes the launchd
 plist / systemd supervising unit if present, writes `vegad.env`, writes and links
-plugin vega.vegad when herdr is installed, starts vegad and installs the new login
-starter. herdr is optional. `relay uninstall`: removes the login job, stops vegad,
+plugin vega.vegad when herdr is installed, starts vegad and removes an old login
+job. herdr is optional. `relay uninstall`: removes any old login job, stops vegad,
 unlinks the plugin, and removes any leftover old supervising unit. Until a host
 is migrated, `relay start` with no relay running kickstarts its old unit as before. A relay from
 before self-exec does not upgrade itself: `relay status` shows it `stale` until `relay install`.

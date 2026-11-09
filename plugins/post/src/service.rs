@@ -909,6 +909,24 @@ fn remove_login_for(m: Manager) -> Result<Option<PathBuf>, Failure> {
     Ok(Some(path))
 }
 
+/// What `relay install` says about the old login job: the line, and whether it is a warning.
+fn login_removal_report(r: Result<Option<PathBuf>, Failure>) -> (Option<String>, bool) {
+    match r {
+        Ok(Some(job)) => (
+            Some(format!(
+                "login_service: {} (removed; vegad starts from the herdr-app vega mod)",
+                collapse_home(&job.display().to_string())
+            )),
+            false,
+        ),
+        Ok(None) => (None, false),
+        Err(e) => (
+            Some(format!("warning: old login job not removed: {}", e.message)),
+            true,
+        ),
+    }
+}
+
 /// Verification is advisory: a first host or an offline/local installation must
 /// still be installable. Do it before changing service files or starting vegad.
 fn install_host_warning() -> Result<Option<String>, Failure> {
@@ -973,13 +991,9 @@ pub fn install() -> Result<(), Failure> {
         None => start_exe(&p.exe)?,
     }
     // Migration: a login job from before vega-0h4c.42 is removed; failing to do so only warns.
-    match remove_login() {
-        Ok(Some(job)) => println!(
-            "login_service: {} (removed; vegad starts from the herdr-app vega mod)",
-            collapse_home(&job.display().to_string())
-        ),
-        Ok(None) => {}
-        Err(e) => eprintln!("warning: old login job not removed: {}", e.message),
+    match login_removal_report(remove_login()) {
+        (line, false) => line.iter().for_each(|l| println!("{l}")),
+        (line, true) => line.iter().for_each(|l| eprintln!("{l}")),
     }
     println!("help: vega post relay status");
     Ok(())
@@ -1218,7 +1232,7 @@ mod tests {
                 (
                     "launchctl",
                     r#"echo "$*" >> "$HOME/calls"
-case "$1" in print) test -f "$HOME/loaded" ;; bootout) /bin/rm -f "$HOME/loaded" ;; esac"#,
+case "$1" in print) test -f "$HOME/loaded" ;; bootout) test -z "$FAIL_BOOTOUT" && /bin/rm -f "$HOME/loaded" ;; esac"#,
                 ),
                 ("systemctl", r#"echo "$*" >> "$HOME/calls""#),
             ] {
@@ -1268,6 +1282,27 @@ case "$1" in print) test -f "$HOME/loaded" ;; bootout) /bin/rm -f "$HOME/loaded"
         );
         assert!(!linux.exists());
         assert!(calls().contains("--user disable --now vega-vegad-start.service"));
+        // A job that cannot be unloaded only warns during install and stays for repair.
+        fs::write(&mac, "old job").unwrap();
+        fs::write(home().unwrap().join("loaded"), "").unwrap();
+        // This subprocess is the only reader/writer of its environment.
+        unsafe {
+            env::set_var("FAIL_BOOTOUT", "yes");
+        }
+        let (line, warning) = login_removal_report(remove_login_for(Manager::Launchd));
+        assert!(
+            warning
+                && line
+                    .unwrap()
+                    .starts_with("warning: old login job not removed")
+        );
+        assert!(mac.exists());
+        let (line, warning) = login_removal_report(Ok(Some(mac.clone())));
+        assert!(!warning && line.unwrap().contains("removed"));
+        unsafe {
+            env::remove_var("FAIL_BOOTOUT");
+        }
+        fs::remove_file(&mac).unwrap();
         // Real planning and hook selection still work on a herdr-less host, and write no job.
         let planned = plan().expect("planning must not require herdr");
         assert!(planned.env.contains(&("VEGA_POST_HOST".into(), host())));
