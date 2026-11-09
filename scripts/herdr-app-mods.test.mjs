@@ -560,8 +560,8 @@ test('project Config overlay loads once, saves argv including label removal, and
   header.handlers['on_mouse_down:right']({},h.cx);
   assert(!h.calls.some(c=>c[0]==='run'&&c[1]==='space.rename'));
   const win=h.calls.find(c=>c[0]==='open')[1];assert.equal(win.kind,'window');assert.equal(win.key,`vega-project-${project}`);
-  const spec=win.layout.children[0].content;assert.equal(spec.props.projectConfig,project);
-  const popup=load('vega-sidebar');popup.setProps({...spec.props,overlay:'config'});
+  const spec=win;assert.equal(spec.mod,'vega-sidebar');assert.equal(spec.props.projectConfig,project);
+  const popup=load('vega-sidebar');popup.setProps({...spec.props,tab:'config',overlay:'config'});
   popup.api.exec=async(bin,args)=>{popup.calls.push(['exec',bin,args]);return {code:0,stdout:JSON.stringify({projects:{[project]:{name:'Name',labels:['work','old']}},views:{}})};};
   popup.mod.init({},popup.cx);await popup.flush();
   let text=texts(popup.render());assert(text.includes('Config'));assert(!text.includes('Rename'));

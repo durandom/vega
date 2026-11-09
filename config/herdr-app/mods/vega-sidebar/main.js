@@ -76,7 +76,7 @@ const kidStatus = (k, listed) => {
   return s === "error" ? "blocked" : s === "done" ? "idle" : s;
 };
 // Later stages add tab descriptors and renderers here without changing the shell.
-const PROJECT_TABS = [{ id: "config", label: "Config", render: "configTab" }];
+const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab" }, { id: "uac", label: "UAC", render: "uacTab" },{ id: "config", label: "Config", render: "configTab" }];
 const values = input => [...new Set(input.split(",").map(s => s.trim()).filter(Boolean))];
 const machineOf = address => address?.includes("/") ? address.split("/")[0] : "local";
 
@@ -128,6 +128,13 @@ export default class Agents extends View {
         this.loading = false;
         cx.notify();
       });
+      if (props()?.projectConfig) {
+        // A window does not take the keyboard when it opens: own a focus handle so Esc works.
+        this.focusHandle = cx.focus_handle?.();
+        this.focusHandle?.focus();
+        cx.spawn(cx => this.readOverview(cx));
+        cx.timer.every(15000, cx => this.readOverview(cx));
+      }
       return;
     }
     if (props()?.spaceMenu) return;
@@ -206,19 +213,117 @@ export default class Agents extends View {
     finally { this.readingPreferences = false; cx.notify(); }
   }
 
-  openProject(project, cx) {
-    cx.stop_propagation();
+  // One draggable window per project (key: project ID) with its tabs. No terminal block:
+  // a terminal rendered in this window and in its pane at once jitters (vega-0h4c.50).
+  // A click on an agent row focuses that agent's terminal in the main view instead.
+  openProject(project, cx, tab = null) {
+    cx?.stop_propagation?.();
     if (!project) return;
-    // Spike (vega-0h4c.50): one draggable window per project, its tabs beside the UAC's terminal.
     const uac = terminals().find(x => x.state === "live" && x.labels?.["vega.role"] === "uac"
       && x.labels?.["vega.project-id"] === project);
-    const panel = { id: "project-panel", type: "block", size: { weight: 2 },
-      content: { mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null } } };
-    const layout = uac
-      ? { id: "project-root", type: "row", gap: 8, padding: 8, children: [panel,
-          { id: "project-uac", type: "block", size: { weight: 3 }, content: { terminal: uac.address } }] }
-      : { id: "project-root", type: "row", padding: 8, children: [panel] };
-    openOverlay({ kind: "window", key: `vega-project-${project}`, width: 0.8, height: 0.8, layout });
+    openOverlay({ kind: "window", key: `vega-project-${project}`, width: 640, height: 0.7,
+      mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null, tab } });
+  }
+
+  // Overview data the terminal labels do not carry. Beads counts come from `bd status --json`
+  // in the UAC's checkout; remote projects wait for the corp-host check (vega-0h4c.50.2).
+  async readOverview(cx) {
+    const uac = terminals().find(x => x.address === props()?.uac);
+    if (!uac || this.readingOverview) return;
+    if (uac.address.includes("/")) { this.beads = "remote"; cx.notify(); return; }
+    this.readingOverview = true;
+    let beads;
+    try {
+      const r = await exec("bd", ["status", "--json"], { cwd: uac.cwd, timeout: 10000 });
+      // Tolerate log lines before the JSON object.
+      beads = r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))).summary : (r.stderr || "bd failed").trim();
+    } catch (e) { beads = String(e); }
+    this.readingOverview = false;
+    // Redraw only on a change: the window polls, most reads are equal.
+    const sig = JSON.stringify(beads);
+    if (sig !== this.beadsSig) { this.beadsSig = sig; this.beads = beads; cx.notify(); }
+  }
+
+  overviewTab(t) {
+    const all = terminals();
+    const uac = all.find(x => x.address === props().uac);
+    if (!uac) return div().text_color(t.dim).child("No live UAC for this project.");
+    const kids = all.filter(x => x.parent === uac.address && x.state === "live");
+    const totals = this.vegaTotals(uac.address, props().projectConfig) ?? {};
+    const since = uac.status_ms ? duration(Date.now() - uac.status_ms) : "";
+    const tile = (id, icon, n, label, color, action) => v_flex().id(`ov-${id}`).flex_1().p(10).gap(2).rounded(8)
+      .bg(t.surface).when(Boolean(action) && n > 0, el => el.cursor_pointer()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(() => action()))
+      .child(h_flex().gap(6).items_center()
+        .child(div().text_size(16).text_color(n > 0 ? color : t.dim).child(icon))
+        .child(div().text_size(18).font_semibold().text_color(n > 0 ? t.foreground : t.dim).child(String(n ?? "–"))))
+      .child(div().text_size(11).text_color(t.dim).child(label));
+    const b = typeof this.beads === "object" && this.beads ? this.beads : null;
+    // Status colours come from the theme only, so light and dark both work.
+    const statusColor = s => ({ working: t.working, blocked: t.blocked, done: t.done, idle: t.idle })[s] ?? t.unknown ?? t.dim;
+    const section = (label, n) => h_flex().gap(8).items_center().pt(2)
+      .child(div().text_size(10.5).font_semibold().text_color(t.dim).child(`${label.toUpperCase()} ${n}`))
+      .child(div().flex_1().h(1).bg(t.border));
+    const row = x => h_flex().id(`ov-row-${x.address}`).gap(8).px(8).py(5).rounded(6).cursor_pointer()
+      .when(x.address === focused()?.terminal, el => el.bg(t.raised))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); run("pane.focus", { terminal: x.address }); })
+      .child(div().w(8).h(8).rounded(4).flex_none().bg(statusColor(x.status)))
+      .child(div().flex_1().min_w(0).child(x.name || x.address))
+      .child(div().w(70).flex_none().text_color(t.dim).child(x.agent ?? x.program?.key ?? ""))
+      .child(div().w(64).flex_none().text_color(t.dim).child(x.status ?? ""));
+    const inbox = () => openOverlay({ mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true, width: 620, height: 520, props: { project: props().projectConfig } });
+    const notes = () => openOverlay({ mod: "vega-sidebar", kind: "window", key: `vega-notes-${props().projectConfig}`, width: 700, height: 500, props: { mail: uac.address, notes: true } });
+    const waiting = () => run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address });
+    const empty = (title, hint, action) => v_flex().items_center().gap(4).py(10)
+      .child(div().text_color(t.foreground).child(title))
+      .child(div().text_size(11).text_color(t.dim).child(hint))
+      .when(Boolean(action), el => el.child(div().id(`ov-retry-${title}`).mt(4).px(10).py(4).rounded(6).cursor_pointer().bg(t.raised)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { this.beadsSig = null; cx.spawn(cx => this.readOverview(cx)); }).child(action)));
+    const beadsBody = this.beads === undefined
+      ? div().text_size(11).text_color(t.dim).child("Reading beads…")
+      : this.beads === "remote" ? empty("Remote project", "Beads on other machines are not read yet.")
+      : typeof this.beads === "string" ? empty("Beads unavailable", this.beads.split("\n")[0].slice(0, 120), "Retry")
+      : h_flex().gap(8)
+        .child(tile("progress", "◐", b.in_progress_issues ?? 0, "in progress", t.working))
+        .child(tile("ready", "○", b.ready_issues ?? 0, "ready", t.done))
+        .child(tile("blocked", "✗", b.blocked_issues ?? 0, "blocked", t.blocked));
+    return v_flex().gap(12)
+      .child(h_flex().gap(8).items_center()
+        .child(div().w(8).h(8).rounded(4).flex_none().bg(statusColor(uac.status)))
+        .child(div().font_semibold().child("UAC"))
+        .child(div().text_color(t.dim).child(`${uac.address} · ${uac.agent ?? ""} · ${uac.status ?? ""}${since ? ` ${since}` : ""}`)))
+      .child(section("Needs you", (totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0)))
+      .child(h_flex().gap(8)
+        .child(tile("decisions", "⚖", totals.decisions ?? 0, "decisions", t.blocked, inbox))
+        .child(tile("waiting", "✋", totals.waiting ?? 0, "waiting on you", t.blocked, waiting))
+        .child(tile("notes", "✉", totals.notes ?? 0, "notes", t.accent, notes)))
+      .child(section("Beads", b ? (b.in_progress_issues ?? 0) + (b.ready_issues ?? 0) + (b.blocked_issues ?? 0) : "–"))
+      .child(beadsBody)
+      .child(section("Sentinels", kids.length))
+      .child(v_flex().gap(2)
+        .children(kids.length ? kids.map(row) : [empty("No sentinels", "The UAC has none running.")]))
+      .child(div().text_size(11).text_color(t.dim).child("Asks, CI, capacity, beads sync: coming with vega --json (vega-0h4c.50.4)"));
+  }
+
+  uacTab(t) {
+    const all = terminals();
+    const uac = all.find(x => x.address === props().uac);
+    if (!uac) return div().text_color(t.dim).child("No live UAC for this project.");
+    const kids = all.filter(x => x.parent === uac.address && x.state === "live");
+    const row = (x, role) => h_flex().id(`uac-row-${x.address}`).gap(8).px(8).py(6).rounded(6).cursor_pointer()
+      .when(x.address === focused()?.terminal, el => el.bg(t.raised))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); run("pane.focus", { terminal: x.address }); })
+      .child(div().w(80).flex_none().text_color(t.dim).child(x.address))
+      .child(div().flex_1().min_w(0).child(x.name || role))
+      .child(div().w(90).flex_none().text_color(t.dim).child(x.agent ?? x.program?.key ?? x.app ?? ""))
+      .child(div().w(70).flex_none().child(x.status ?? ""));
+    return v_flex().gap(4)
+      .child(row(uac, "UAC"))
+      .child(div().pt(8).text_size(11).text_color(t.dim).child(`Sentinels (${kids.length}) · click to focus`))
+      .children(kids.map(k => row(k, "sentinel")));
   }
 
   async saveProject(cx) {
@@ -253,8 +358,10 @@ export default class Agents extends View {
   }
 
   projectOverlay(t) {
-    const tab = PROJECT_TABS.find(tab => tab.id === this.projectTab) ?? PROJECT_TABS[0];
+    const tab = PROJECT_TABS.find(tab => tab.id === (this.projectTab ?? props()?.tab)) ?? PROJECT_TABS[0];
     return v_flex().size_full().p(12).gap(12).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .when(Boolean(this.focusHandle), el => el.track_focus(this.focusHandle)
+        .on_mouse_down("left", () => this.focusHandle.focus()))
       .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
       .child(h_flex().gap(12).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
         .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
@@ -265,7 +372,7 @@ export default class Agents extends View {
           .on_click(() => closeOverlay(props().overlay)).child("Close")))
       .child(div().text_size(11).text_color(t.dim).child(props().projectConfig))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)))
-      .child(this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable"));
+      .child(tab.id !== "config" ? this[tab.render](t) : this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable"));
   }
 
   async saveView(cx, remove = false, id = this.viewName.value().trim()) {
