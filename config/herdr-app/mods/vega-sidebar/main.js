@@ -238,10 +238,21 @@ export default class Agents extends View {
       // Tolerate log lines before the JSON object.
       beads = r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))).summary : (r.stderr || "bd failed").trim();
     } catch (e) { beads = String(e); }
+    // vega's --json views (vega-0h4c.50.4), run in the UAC's checkout so they pick its project.
+    const vega = async args => {
+      try {
+        const r = await exec("vega", [...args, "--json"], { cwd: uac.cwd, timeout: 10000 });
+        return r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) : null;
+      } catch { return null; }
+    };
+    const [asks, ci, capacity, facility] = await Promise.all([
+      vega(["notify", "list", "--project", props().projectConfig]), vega(["ci"]), vega(["capacity"]), vega(["uac"])]);
+    const ov = { asks: asks?.asks ?? null, watches: ci?.watches ?? null,
+      capacity: capacity?.windows?.filter(w => w.binding) ?? null, agents: facility?.agents ?? [] };
     this.readingOverview = false;
     // Redraw only on a change: the window polls, most reads are equal.
-    const sig = JSON.stringify(beads);
-    if (sig !== this.beadsSig) { this.beadsSig = sig; this.beads = beads; cx.notify(); }
+    const sig = JSON.stringify([beads, ov]);
+    if (sig !== this.beadsSig) { this.beadsSig = sig; this.beads = beads; this.ov = ov; cx.notify(); }
   }
 
   overviewTab(t) {
@@ -270,8 +281,17 @@ export default class Agents extends View {
       .on_click((_e, cx) => { cx.stop_propagation(); run("pane.focus", { terminal: x.address }); })
       .child(div().w(8).h(8).rounded(4).flex_none().bg(statusColor(x.status)))
       .child(div().flex_1().min_w(0).child(x.name || x.address))
+      .child(div().w(110).flex_none().text_color(t.dim).whitespace_nowrap().child(this.ov?.agents?.find(a => a.pane === x.address)?.bead || ""))
       .child(div().w(70).flex_none().text_color(t.dim).child(x.agent ?? x.program?.key ?? ""))
       .child(div().w(64).flex_none().text_color(t.dim).child(x.status ?? ""));
+    const ov = this.ov ?? {};
+    const bar = w => h_flex().gap(8).items_center()
+      .child(div().w(90).flex_none().text_color(t.dim).child(w.provider))
+      .child(div().flex_1().h(4).rounded(2).bg(t.border)
+        .child(div().h(4).rounded(2).w(`${Math.max(0, Math.min(100, w.left_percent))}%`)
+          .bg(w.left_percent < 20 ? t.blocked : w.left_percent < 50 ? (t.ansi3 ?? t.working) : t.done)))
+      .child(div().w(70).flex_none().text_right().text_color(w.stale ? t.dim : t.foreground)
+        .child(`${Math.round(w.left_percent)} %${w.override ? " ⚑" : ""}`));
     const inbox = () => openOverlay({ mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true, width: 620, height: 520, props: { project: props().projectConfig } });
     const notes = () => openOverlay({ mod: "vega-sidebar", kind: "window", key: `vega-notes-${props().projectConfig}`, width: 700, height: 500, props: { mail: uac.address, notes: true } });
     const waiting = () => run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address });
@@ -294,17 +314,30 @@ export default class Agents extends View {
         .child(div().w(8).h(8).rounded(4).flex_none().bg(statusColor(uac.status)))
         .child(div().font_semibold().child("UAC"))
         .child(div().text_color(t.dim).child(`${uac.address} · ${uac.agent ?? ""} · ${uac.status ?? ""}${since ? ` ${since}` : ""}`)))
-      .child(section("Needs you", (totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0)))
+      .child(section("Needs you", (totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0) + (ov.asks?.length ?? 0)))
       .child(h_flex().gap(8)
         .child(tile("decisions", "⚖", totals.decisions ?? 0, "decisions", t.blocked, inbox))
+        .child(tile("asks", "⚠", ov.asks?.length ?? 0, "asks", t.blocked))
         .child(tile("waiting", "✋", totals.waiting ?? 0, "waiting on you", t.blocked, waiting))
         .child(tile("notes", "✉", totals.notes ?? 0, "notes", t.accent, notes)))
+      .when(Boolean(ov.asks?.length), el => el.child(v_flex().gap(2).children(ov.asks.slice(0, 5).map((a, i) =>
+        div().id(`ov-ask-${i}`).px(8).text_size(11.5).text_color(t.foreground).child(`⚠ ${a.text ?? a.what ?? a.message ?? JSON.stringify(a).slice(0, 100)}`)))))
       .child(section("Beads", b ? (b.in_progress_issues ?? 0) + (b.ready_issues ?? 0) + (b.blocked_issues ?? 0) : "–"))
       .child(beadsBody)
       .child(section("Sentinels", kids.length))
       .child(v_flex().gap(2)
         .children(kids.length ? kids.map(row) : [empty("No sentinels", "The UAC has none running.")]))
-      .child(div().text_size(11).text_color(t.dim).child("Asks, CI, capacity, beads sync: coming with vega --json (vega-0h4c.50.4)"));
+      .child(section("CI", ov.watches?.length ?? "–"))
+      .child(ov.watches?.length
+        ? v_flex().gap(2).children(ov.watches.map((w, i) => h_flex().id(`ov-ci-${i}`).gap(8).px(8)
+            .child(div().w(8).h(8).rounded(4).flex_none().bg(/green|pass|success/.test(w.verdict ?? w.state ?? "") ? t.done : /red|fail/.test(w.verdict ?? w.state ?? "") ? t.blocked : t.working))
+            .child(div().flex_1().min_w(0).child(String(w.target ?? w.ref ?? w.pr ?? "")))
+            .child(div().text_color(t.dim).child(String(w.verdict ?? w.state ?? "")))))
+        : div().px(8).text_size(11).text_color(t.dim).child(ov.watches ? "No CI watches." : "CI not read."))
+      .child(section("Capacity", ""))
+      .child(ov.capacity?.length
+        ? v_flex().gap(4).px(8).children(ov.capacity.map(bar))
+        : div().px(8).text_size(11).text_color(t.dim).child("Capacity not read."));
   }
 
   uacTab(t) {
