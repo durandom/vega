@@ -565,6 +565,27 @@ fn hc_status_race_keeps_pointer_pending_and_local_delivery_uses_hc() {
 }
 
 #[test]
+fn pointer_waits_for_a_draft_in_an_hc_input_box_and_goes_at_once_on_an_empty_one() {
+    let mut f = Fixture::new();
+    f.start();
+    let screen = f.home.path().join("hc-screen");
+    fs::write(
+        &screen,
+        "done\n────────\n❯ half a sentence\n────────\n status\n",
+    )
+    .unwrap();
+    f.post(&["send", "t2", "drafted"], "w1:p1");
+    wait(f.home.path(), "hold logged", || {
+        f.log().contains("pointer held: t2 has a draft")
+    });
+    assert!(f.prompts("t2").is_empty(), "pointer joined a draft");
+    fs::write(&screen, "done\n────────\n❯ \n────────\n status\n").unwrap();
+    wait(f.home.path(), "pointer after the box emptied", || {
+        !f.prompts("t2").is_empty()
+    });
+}
+
+#[test]
 fn inbox_only_ambiguous_backend_name_requires_an_explicit_terminal_id() {
     let f = Fixture::new();
     let file = f.home.path().join("hc.json");

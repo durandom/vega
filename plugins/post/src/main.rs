@@ -4068,6 +4068,16 @@ const UNKNOWN_QUIET: Duration = Duration::from_secs(20);
 /// The `seen` prefix of an unknown screen; the screen itself follows.
 const UNKNOWN: &str = "\0unknown:";
 
+/// hc draft hold: switch it off (`false`) once every core carries herdr-core
+/// 3ba03e6 ("keep agent messages out of unfinished drafts", not in a release
+/// up to 0.1.19), which makes `terminal.send` wait itself.
+const HC_DRAFT_HOLD: bool = true;
+
+/// A draft in an hc terminal that has not changed this long is let through
+/// (herdr-core 3ba03e6 waits 60 s since the last key). `hc read` is plain
+/// text, so a Claude suggestion reads as a draft and costs this once.
+const HC_DRAFT_QUIET: Duration = Duration::from_secs(60);
+
 /// Drafts in input lines (delivery::draft): pointers never join them.
 #[derive(Default)]
 struct Drafts {
@@ -4088,7 +4098,7 @@ impl Drafts {
     /// holds until it is quiet.
     fn holds(&mut self, pane: &str) -> bool {
         if terminals::is_hc(pane) {
-            return false;
+            return HC_DRAFT_HOLD && self.hc_holds(pane, Instant::now());
         }
         let now = Instant::now();
         if self
@@ -4178,6 +4188,53 @@ impl Drafts {
         args.extend(keys);
         let _ = herdr(&args);
         !settles(pane, |d| d == Draft::None)
+    }
+
+    /// hc terminal (local `t6` or remote `machine/t6`): hold while the input
+    /// box has text that still changes; go at once on an empty box, an
+    /// unreadable or unknown screen, or text unchanged for HC_DRAFT_QUIET.
+    /// Never clears or restores: `hc send` submits with Enter.
+    fn hc_holds(&mut self, pane: &str, now: Instant) -> bool {
+        if self
+            .seen
+            .get(pane)
+            .is_some_and(|(_, _, read)| now.duration_since(*read) < DRAFT_RECHECK)
+        {
+            return true;
+        }
+        let shown = screen(pane);
+        self.hc_watch(pane, shown.as_deref(), now)
+    }
+
+    fn hc_watch(&mut self, pane: &str, shown: Option<&str>, now: Instant) -> bool {
+        let text = match shown.map(delivery::draft) {
+            Some(Draft::Text(t)) => t,
+            Some(Draft::Opaque) => OPAQUE.into(),
+            _ => {
+                self.seen.remove(pane);
+                return false;
+            }
+        };
+        let since = match self.seen.get(pane) {
+            Some((old, since, _)) if *old == text => *since,
+            Some(_) => now,
+            None => {
+                log(&format!(
+                    "pointer held: {pane} has a draft in its input line"
+                ));
+                now
+            }
+        };
+        if now.duration_since(since) >= HC_DRAFT_QUIET {
+            log(&format!(
+                "draft quiet {} s: {pane}; pointer goes",
+                now.duration_since(since).as_secs()
+            ));
+            self.seen.remove(pane);
+            return false;
+        }
+        self.seen.insert(pane.to_string(), (text, since, now));
+        true
     }
 
     /// An unknown screen (delivery::Draft::Unknown): the pointer waits until
@@ -6632,6 +6689,50 @@ mod tests {
         assert_eq!(id, bounce_msg_id("h", &b(1), &o("claude")), "a retry");
         assert_ne!(id, bounce_msg_id("h", &b(1), &o("codex")), "another agent");
         assert_ne!(id, bounce_msg_id("h", &b(2), &o("claude")), "another close");
+    }
+
+    const CLAUDE: &str = "done\n────────\n❯ typing\n────────\n status\n";
+    const CLAUDE_MORE: &str = "done\n────────\n❯ typing on\n────────\n status\n";
+    const CLAUDE_EMPTY: &str = "done\n────────\n❯ \n────────\n status\n";
+    const CODEX: &str = "done\n› typing\n  GPT-6 medium · vega · Ready\n";
+    const PI: &str = "out\n────────\ntyping\n────────\n";
+
+    #[test]
+    fn hc_draft_holds_while_changing_and_goes_when_quiet() {
+        for pane in ["t6", "io/t6"] {
+            for (box_, more) in [(CLAUDE, CLAUDE_MORE), (CODEX, CODEX), (PI, PI)] {
+                let mut d = Drafts::default();
+                let t0 = Instant::now();
+                let at = |s: u64| t0 + Duration::from_secs(s);
+                assert!(
+                    d.hc_watch(pane, Some(box_), t0),
+                    "{pane}: first sight holds"
+                );
+                assert!(d.hc_watch(pane, Some(box_), at(59)), "{pane}: 59 s holds");
+                assert!(!d.hc_watch(pane, Some(box_), at(60)), "{pane}: 60 s goes");
+                assert!(d.seen.is_empty() && d.stashed.is_empty());
+                // A changing draft restarts the watch.
+                let mut d = Drafts::default();
+                assert!(d.hc_watch(pane, Some(box_), t0));
+                if more != box_ {
+                    assert!(d.hc_watch(pane, Some(more), at(50)), "changed restarts");
+                    assert!(d.hc_watch(pane, Some(more), at(100)), "50 s since change");
+                    assert!(!d.hc_watch(pane, Some(more), at(110)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hc_empty_box_unknown_or_unreadable_screen_goes_at_once() {
+        let mut d = Drafts::default();
+        let t0 = Instant::now();
+        assert!(!d.hc_watch("t6", Some(CLAUDE_EMPTY), t0));
+        assert!(!d.hc_watch("t6", Some("$ ls\n"), t0), "unknown screen");
+        assert!(!d.hc_watch("t6", None, t0), "unreadable");
+        assert!(d.hc_watch("t6", Some(CLAUDE), t0));
+        assert!(!d.hc_watch("t6", Some(CLAUDE_EMPTY), t0), "sent: clears");
+        assert!(d.seen.is_empty());
     }
 
     #[test]

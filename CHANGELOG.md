@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 144 · 2026-11-09
+
+- feature: vegad's draft guard covers hc terminals again (vega-0h4c.47): a pointer no longer joins
+  text in a Claude, Codex or pi input box. It waits while the draft changes and goes 60 s after the
+  last change, at once on an empty box. Nothing is stashed or restored. Temporary until cores carry
+  herdr-core 3ba03e6; `HC_DRAFT_HOLD` in `plugins/post/src/main.rs` switches it off.
+
 ## 143 · 2026-11-09
 
 - feature: an inbox-only host (deimos, puck) no longer waits 4 s and reports a registry timeout:
