@@ -121,3 +121,27 @@ fn binds(out: &str, prefix: &str) -> bool {
     out.lines()
         .any(|l| l.starts_with(&format!("  {prefix}")) && l.ends_with(",yes"))
 }
+
+#[test]
+fn json_windows_and_errors_have_stable_shape() {
+    let tmp = tempfile::tempdir().unwrap();
+    let o = run(tmp.path(), &["--json"]);
+    assert!(o.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["schema"], 1);
+    let rows = v["windows"].as_array().unwrap();
+    assert_eq!(rows.len(), 14);
+    for row in rows {
+        assert!(row["left_percent"].is_number());
+        assert!(row["used_percent"].is_number());
+        assert!(row["binding"].is_boolean());
+        assert!(row["stale"].is_boolean());
+        assert!(row.as_object().unwrap().contains_key("runs_out_in"));
+        assert!(row.as_object().unwrap().contains_key("override"));
+    }
+    let o = run(tmp.path(), &["--json", "--bad"]);
+    assert_eq!(o.status.code(), Some(2));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["error"]["code"], "usage");
+    assert!(!tmp.path().join("state").exists());
+}

@@ -27,6 +27,7 @@ fn main() -> ExitCode {
         print!("{HELP}");
         return ExitCode::SUCCESS;
     }
+    let json = args.iter().any(|a| a == "--json");
     let result = match args.as_slice() {
         [a] if a == "-V" || a == "--version" => {
             println!("{}", vega_build::version_line!());
@@ -36,16 +37,47 @@ fn main() -> ExitCode {
             print!("{SKILL}");
             Ok(())
         }
+        [a] if a == "--json" => home_json(),
+        _ if json => Err(Failure::new(
+            "usage",
+            "--json applies to the capacity view",
+            "vega capacity --json",
+        )),
         [] => home(),
         _ => change(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => {
-            print_failure(&f);
+            if json {
+                vega_herdr::print_failure_json(&f);
+            } else {
+                print_failure(&f);
+            }
             ExitCode::from(if f.code == "usage" { 2 } else { 1 })
         }
     }
+}
+
+fn home_json() -> Result<(), Failure> {
+    let file = ledger::file()?;
+    let sample = capacity::read();
+    let ledger = resets::load(&file);
+    println!("{}", json_view(&sample, &ledger, capacity::now()));
+    Ok(())
+}
+
+fn json_view(
+    sample: &Result<Sample, String>,
+    ledger: &Result<Ledger, String>,
+    now: i64,
+) -> serde_json::Value {
+    let empty = Ledger::default();
+    let rows: Vec<_> = sample.as_ref().map(|s| capacity::windows(s, now)).unwrap_or_default().into_iter().map(|w| {
+        let h = if w.binding { w.headroom.covered_by(ledger.as_ref().unwrap_or(&empty), now) } else { w.headroom };
+        serde_json::json!({"provider":h.provider,"window":h.window,"scope":h.scope.text(),"left_percent":h.left,"used_percent":100.0-h.left,"binding":w.binding,"resets_in":h.resets_in,"runs_out_in":h.out_in,"sample_age":h.age,"stale":h.stale(),"override":h.cover,"warns":w.binding && h.warns()})
+    }).collect();
+    serde_json::json!({"schema":1,"windows":rows,"source_error":sample.as_ref().err(),"ledger_error":ledger.as_ref().err()})
 }
 
 fn home() -> Result<(), Failure> {

@@ -39,3 +39,4 @@ Examples:
   vega capacity resets claude 2           # the Slayer holds two claude resets
   vega capacity plan claude --this-week   # he uses one within seven days
   vega capacity used claude
+vega capacity --json: schema-1 object with windows, source_error and ledger_error; seconds and percentages are numeric.
