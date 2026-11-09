@@ -102,6 +102,14 @@ pub fn print_failure(f: &Failure) {
     println!("  {},{},{}", f.code, cell(&f.message), cell(&f.hint));
 }
 
+/// Render the shared error contract for opt-in machine consumers.
+pub fn print_failure_json(f: &Failure) {
+    println!(
+        "{}",
+        serde_json::json!({"error": {"code": f.code, "message": f.message, "hint": f.hint}})
+    );
+}
+
 pub fn local_host() -> String {
     Command::new("hostname")
         .arg("-s")
