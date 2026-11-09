@@ -76,7 +76,25 @@ const kidStatus = (k, listed) => {
   return s === "error" ? "blocked" : s === "done" ? "idle" : s;
 };
 // Later stages add tab descriptors and renderers here without changing the shell.
-const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab" }, { id: "uac", label: "UAC", render: "uacTab" },{ id: "config", label: "Config", render: "configTab" }];
+const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab" }, { id: "board", label: "Board", render: "boardTab" },
+  { id: "decisions", label: "Decisions", render: "decisionsTab" }, { id: "uac", label: "UAC", render: "uacTab" },
+  { id: "config", label: "Config", render: "configTab" }];
+
+// A command in a project's checkout: locally via exec, on an hc machine through `hc exec --json`
+// (base64 stdout/stderr, decoded in Python as vega-inbox does).
+const remoteAction = `import sys,json,base64,subprocess
+machine,cwd,program,*args=sys.argv[1:]
+p=subprocess.run(['hc','exec','--json','--on',machine,'--cwd',cwd,'--timeout','30','--',program,*args],capture_output=True,text=True,timeout=35)
+if p.returncode: print(json.dumps({'code':p.returncode,'stdout':p.stdout,'stderr':p.stderr}))
+else:
+ v=json.loads(p.stdout)
+ print(json.dumps({'code':v['code'],'stdout':base64.b64decode(v['stdout'],validate=True).decode('utf-8',errors='replace'),'stderr':base64.b64decode(v['stderr'],validate=True).decode('utf-8',errors='replace')}))`;
+async function inCheckout(machine, cwd, program, args) {
+  if (!machine) return exec(program, args, { cwd, timeout: 15000 });
+  const r = await exec("python3", ["-c", remoteAction, machine, cwd, program, ...args]);
+  return r.code === 0 ? JSON.parse(r.stdout) : r;
+}
+const jsonOf = out => JSON.parse(out.slice(Math.min(...["[", "{"].map(c => out.indexOf(c)).filter(i => i >= 0))));
 const values = input => [...new Set(input.split(",").map(s => s.trim()).filter(Boolean))];
 const machineOf = address => address?.includes("/") ? address.split("/")[0] : "local";
 
@@ -133,7 +151,9 @@ export default class Agents extends View {
         this.focusHandle = cx.focus_handle?.();
         this.focusHandle?.focus();
         cx.spawn(cx => this.readOverview(cx));
-        cx.timer.every(15000, cx => this.readOverview(cx));
+        cx.timer.every(15000, cx => { this.readOverview(cx); if (this.currentTab() === "board") this.readBoard(cx); });
+        this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
+        this.expanded = new Set(); this.readyLimit = 12;
       }
       return;
     }
@@ -340,6 +360,121 @@ export default class Agents extends View {
         : div().px(8).text_size(11).text_color(t.dim).child("Capacity not read."));
   }
 
+  currentTab() { return this.projectTab ?? props()?.tab ?? PROJECT_TABS[0].id; }
+
+  // The badge row of this project (machine, checkout, decision texts), written by the vega mod.
+  badgeRow() {
+    const uac = terminals().find(x => x.address === props()?.uac);
+    const machine = uac?.address?.includes("/") ? uac.address.split("/")[0] : "";
+    const row = (shared("vega.badges") ?? []).find(r => r.project === props()?.projectConfig && (r.machine || "") === machine);
+    return { machine: machine || null, checkout: row?.checkout ?? uac?.cwd ?? null, row };
+  }
+
+  async readBoard(cx) {
+    if (this.readingBoard) return;
+    const { machine, checkout } = this.badgeRow();
+    if (!checkout) { this.board = "No checkout known for this project."; cx.notify(); return; }
+    this.readingBoard = true;
+    const bd = async args => {
+      const r = await inCheckout(machine, checkout, "bd", [...args, "--json"]);
+      if (r.code !== 0) throw new Error((r.stderr || r.stdout || `bd ${args[0]} failed`).trim().split("\n")[0]);
+      return jsonOf(r.stdout);
+    };
+    let board;
+    try {
+      const [progress, ready, blocked] = await Promise.all([bd(["list", "--status", "in_progress"]), bd(["ready", "--limit", "50"]), bd(["blocked"])]);
+      board = { progress, ready, blocked };
+    } catch (e) { board = String(e.message ?? e); }
+    this.readingBoard = false;
+    const sig = JSON.stringify(board);
+    if (sig !== this.boardSig) { this.boardSig = sig; this.board = board; cx.notify(); }
+  }
+
+  boardTab(t) {
+    const section = (label, n) => h_flex().gap(8).items_center().pt(4)
+      .child(div().text_size(10.5).font_semibold().text_color(t.dim).child(`${label.toUpperCase()} ${n}`))
+      .child(div().flex_1().h(1).bg(t.border));
+    if (this.board === undefined) return div().text_color(t.dim).child("Reading beads…");
+    if (typeof this.board === "string") return v_flex().items_center().gap(6).py(12)
+      .child(div().child("Beads unavailable")).child(div().text_size(11).text_color(t.dim).child(this.board.slice(0, 160)))
+      .child(div().id("board-retry").px(10).py(4).rounded(6).cursor_pointer().bg(t.raised)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { this.boardSig = null; cx.spawn(cx => this.readBoard(cx)); }).child("Retry"));
+    const bead = (b, extra, color) => {
+      const open = this.expanded.has(b.id);
+      return v_flex().id(`bead-${b.id}`).px(8).py(4).rounded(6).cursor_pointer().when(open, el => el.bg(t.surface))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { open ? this.expanded.delete(b.id) : this.expanded.add(b.id); cx.notify(); })
+        .child(h_flex().gap(8).items_center()
+          .child(div().w(8).h(8).rounded(4).flex_none().bg(color))
+          .child(div().w(22).flex_none().text_color(t.dim).child(`P${b.priority ?? "?"}`))
+          .child(div().w(110).flex_none().text_color(t.dim).whitespace_nowrap().child(b.id))
+          .child(div().flex_1().min_w(0).whitespace_nowrap().child(b.title ?? ""))
+          .when(Boolean(extra), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(extra))))
+        .when(open, el => el.child(v_flex().gap(4).pt(6).pl(16).text_size(11.5)
+          .child(div().text_color(t.foreground).child((b.description ?? "").slice(0, 600)))
+          .when(Boolean(b.acceptance_criteria), el => el.child(div().text_color(t.dim).child(`Done when: ${b.acceptance_criteria.slice(0, 300)}`)))));
+    };
+    const { progress = [], ready = [], blocked = [] } = this.board;
+    const shown = ready.slice(0, this.readyLimit);
+    return v_flex().id("board-body").gap(4)
+      .child(section("In progress", progress.length))
+      .children(progress.length ? progress.map(b => bead(b, (b.assignee ?? "").split(".").pop(), t.working)) : [div().px(8).text_size(11).text_color(t.dim).child("Nothing in progress.")])
+      .child(section("Ready", ready.length))
+      .children(shown.map(b => bead(b, b.issue_type, t.done)))
+      .when(ready.length > shown.length, el => el.child(div().id("board-more").px(8).py(4).cursor_pointer().text_color(t.accent)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { this.readyLimit += 20; cx.notify(); }).child(`Show more (${ready.length - shown.length})`)))
+      .child(section("Blocked", blocked.length))
+      .children(blocked.slice(0, 20).map(b => bead(b, `← ${(b.blocked_by ?? []).slice(0, 2).join(", ")}`, t.blocked)));
+  }
+
+  // Answer or dismiss a decision, as vega-inbox does: `vega uac answer` or `bd close --reason`.
+  decide(d, dismiss, cx) {
+    const { machine, checkout } = this.badgeRow();
+    const text = this.decisionInputs.get(d.id)?.value().trim() ?? "";
+    if (this.decisionBusy.has(d.id)) return;
+    if (!checkout || !text) { this.decisionResults.set(d.id, !checkout ? "Project checkout unavailable." : "Enter an answer or dismissal reason."); cx.notify(); return; }
+    this.decisionBusy.add(d.id); this.decisionResults.delete(d.id); cx.notify();
+    cx.spawn(async cx => {
+      try {
+        const r = dismiss ? await inCheckout(machine, checkout, "bd", ["close", d.id, "--reason", text])
+          : await inCheckout(machine, checkout, "vega", ["uac", "answer", d.id, text]);
+        if (r.code === 0) this.decisionDone.add(d.id);
+        this.decisionResults.set(d.id, r.code === 0 ? (dismiss ? "Dismissed." : "Answer sent to the UAC.") : (r.stderr || r.stdout || `Failed (${r.code})`).trim());
+      } catch (e) { this.decisionResults.set(d.id, String(e)); }
+      finally { this.decisionBusy.delete(d.id); cx.notify(); }
+    });
+  }
+
+  decisionsTab(t) {
+    const { row } = this.badgeRow();
+    const list = (row?.decision_texts ?? []).filter(d => !this.decisionDone.has(d.id));
+    const done = [...this.decisionResults.entries()].filter(([id]) => this.decisionDone.has(id));
+    if (!list.length) return v_flex().items_center().gap(4).py(12)
+      .child(div().child("No open decisions"))
+      .child(div().text_size(11).text_color(t.dim).child(row ? "The UAC has nothing waiting for you." : "No badge data for this project yet."))
+      .children(done.map(([id, msg]) => div().text_size(11).text_color(t.dim).child(`${id}: ${msg}`)));
+    const button = (id, label, action) => div().id(id).px(12).py(5).rounded(6).bg(t.raised).cursor_pointer().child(label)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); action(cx); });
+    return v_flex().id("decisions-body").gap(10).children(list.map(d => {
+      if (!this.decisionInputs.has(d.id)) {
+        const input = InputState.new({ placeholder: "Your answer (or dismissal reason)…" });
+        this.decisionInputs.set(d.id, input);
+      }
+      return v_flex().id(`decision-${d.id}`).gap(6).p(10).rounded(8).bg(t.surface)
+        .child(div().text_size(11).text_color(t.dim).child(d.id))
+        .child(div().font_semibold().child(d.title ?? ""))
+        .child(div().child(d.question || "No question text provided."))
+        .child(Input.new(this.decisionInputs.get(d.id)).h(32).px(8).rounded(6).border_1().border_color(t.input).bg(t.background))
+        .child(h_flex().gap(8)
+          .child(button(`answer-${d.id}`, this.decisionBusy.has(d.id) ? "Sending…" : "Answer", cx => this.decide(d, false, cx)))
+          .child(button(`dismiss-${d.id}`, "Dismiss", cx => this.decide(d, true, cx))))
+        .when(this.decisionResults.has(d.id), el => el.child(div().text_size(11).text_color(t.dim).child(this.decisionResults.get(d.id))));
+    }));
+  }
+
   uacTab(t) {
     const all = terminals();
     const uac = all.find(x => x.address === props().uac);
@@ -398,14 +533,15 @@ export default class Agents extends View {
       .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
       .child(h_flex().gap(12).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
         .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
-        .on_click((_e, cx) => { this.projectTab = item.id; cx.notify(); }).child(item.label)))
+        .on_click((_e, cx) => { this.projectTab = item.id; if (item.id === "board") cx.spawn(cx => this.readBoard(cx)); cx.notify(); }).child(item.label)))
         .child(div().flex_1())
         .child(div().id("close-project").px(8).py(5).rounded(6).cursor_pointer()
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click(() => closeOverlay(props().overlay)).child("Close")))
       .child(div().text_size(11).text_color(t.dim).child(props().projectConfig))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)))
-      .child(tab.id !== "config" ? this[tab.render](t) : this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable"));
+      .child(v_flex().id(`project-body-${tab.id}`).flex_1().min_h(0).overflow_y_scrollbar()
+        .child(tab.id !== "config" ? this[tab.render](t) : this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable")));
   }
 
   async saveView(cx, remove = false, id = this.viewName.value().trim()) {
