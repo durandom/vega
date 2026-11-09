@@ -197,11 +197,17 @@ fn matches(s: &Selector, n: &Note) -> bool {
     }
 }
 fn gather(store: &Store, host: &str) -> Vec<Note> {
-    let remote = match vega_registry::read_notes_blocking(TIMEOUT) {
-        Ok(n) => n,
-        Err(e) => {
-            println!("registry: off ({}); this host's asks only", cell(&e));
-            Vec::new()
+    // An inbox-only host cannot read the registry by design: skip the wait.
+    let remote = if vega_herdr::state::is_inbox_only(&vega_herdr::state::post_host()) {
+        println!("registry: off ({})", vega_registry::INBOX_ONLY_OFF);
+        Vec::new()
+    } else {
+        match vega_registry::read_notes_blocking(TIMEOUT) {
+            Ok(n) => n,
+            Err(e) => {
+                println!("registry: off ({}); this host's asks only", cell(&e));
+                Vec::new()
+            }
         }
     };
     asks::open(store.list(), remote, host)
