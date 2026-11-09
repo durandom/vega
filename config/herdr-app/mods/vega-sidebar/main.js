@@ -443,7 +443,10 @@ export default class Agents extends View {
   // spaces without a UAC. Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
   projectTree(t, all, list, shown, now) {
     const { live, labelsOf, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
-    const projects = this.orderedProjects(uacs);
+    const projects = this.orderedProjects(uacs).filter(p => {
+      const uac = uacs.get(p);
+      return this.matchesView(uac.labels?.["vega.project-id"], machineOf(uac.address));
+    });
     const C = this.colors();
     const kindOf = (k) => {
       const key = (labelsOf(k.address)["vega.harness"] || k.program?.key || k.app || "").toLowerCase();
@@ -500,7 +503,6 @@ export default class Agents extends View {
       const uac = uacs.get(p);
       const ul = uac.labels ?? {};
       const project = ul["vega.project-id"];
-      if (!this.matchesView(project, machineOf(uac.address))) continue;
       const display = this.preferences?.projects?.[project]?.name || ul["vega.project"]?.split("/").at(-1) || p.split("/").at(-1);
       const totals = this.vegaTotals(uac.address, project) ?? {};
       const members = list.filter(a => projectOfAgent(a) === p)
@@ -559,10 +561,13 @@ export default class Agents extends View {
 
   // Drag one project above another; the order stays across restarts.
   move(projects, from, to) {
-    const order = [...new Set([...(this.order ?? []), ...projects])].filter(p => p !== from);
-    order.splice(order.indexOf(to), 0, from);
-    this.order = order;
-    try { localStorage.setItem("project-order", JSON.stringify(order)); } catch (_) {}
+    const all = this.orderedProjects(this.projectGroups(terminals()).uacs);
+    const visible = projects.filter(p => p !== from);
+    visible.splice(visible.indexOf(to), 0, from);
+    // Reorder only the visible slots, so hidden projects keep their positions.
+    const selected = new Set(projects);
+    this.order = all.map(p => selected.has(p) ? visible.shift() : p);
+    try { localStorage.setItem("project-order", JSON.stringify(this.order)); } catch (_) {}
   }
 
   // Colours from ~/.config/vega/theme.toml [symbols.colors] and [symbols.host_colors], else

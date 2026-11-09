@@ -19,8 +19,10 @@ const GUIDE: &str = include_str!("../PROJECT.md");
     about = "Personal project display names, labels and sidebar views"
 )]
 struct Cli {
+    /// Print the agent guide for this plugin, SKILL.md form (read by vega skills)
     #[arg(long)]
     skill: bool,
+    /// Print the bare version
     #[arg(short = 'V', short_alias = 'v', long)]
     version: bool,
     #[command(subcommand)]

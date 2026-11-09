@@ -89,6 +89,8 @@ empty defaults, and a read never creates the file.
 
 Right-clicking a project header or its UAC row opens a popup with a descriptor-driven
 tab bar. Stage 1 exposes only Config (display name, comma-separated labels, Save).
+This requires the full `vega.project-id` label; legacy UACs without that label remain
+visible but cannot open Config until vegad supplies their stable identity.
 Later stages add UAC, Board, Decisions and Notifications descriptors and renderers.
 Inputs load once on opening, never autofocus, and remain editable on save errors.
 Save uses argv via `exec("vega", ["project", "config", ...])` on the app host, including
@@ -196,8 +198,8 @@ labels in headers. Legacy short labels join a UAC only when unambiguous.
 A listed child appears only in its visible ancestor's tree,
 including children with panes in another space. A child whose ancestor is absent
 remains a top-level row. Project totals omit zero values.
-This tree rule also applies to pinned children: they stay under their visible
-parent rather than receiving a second top-level pinned row.
+Existing terminal pin labels do not change the manual project order. Listed
+children remain under their visible parent regardless of those labels.
 
 vegad first resolves the foreground cwd. If no project resolves, it uses that
 terminal's space folder from the local core's `herdr-app` document (`doc.get`),

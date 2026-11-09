@@ -624,3 +624,39 @@ test('view popup selects, saves and deletes CLI-owned views without persisting c
   const source=fs.readFileSync(new URL('../config/herdr-app/mods/vega-sidebar/main.js',import.meta.url),'utf8');
   assert(!source.includes('sortMenu'));assert(!source.includes('Grouped by space'));assert(!source.includes('Sort agents'));
 });
+
+function orderedProjectsFixture(h) {
+  const ids=['github.com/team/a','github.com/team/b','gitlab.com/other/b','github.com/team/c'];
+  h.api.terminals=()=>ids.map((id,i)=>({address:`t${i}`,state:'live',labels:{'vega.role':'uac','vega.project-id':id,'vega.project':id.split('/').at(-1)}}));
+  h.api.agents=()=>ids.map((id,i)=>({address:`t${i}`,space:'s',tab:'tb',pane:`t${i}`,status:'idle',program:{}}));
+  return ids;
+}
+const projectHeaders=h=>elements(h.render()).map(n=>n.idValue).filter(id=>typeof id==='string'&&id.startsWith('uac-'));
+
+test('legacy short-name manual order applies only to unambiguous project IDs after restart',()=>{
+  const h=load('vega-sidebar'),[a,b,otherB,c]=orderedProjectsFixture(h);
+  h.storage.set('project-order',JSON.stringify(['c','b','a']));
+  h.mod.init({},h.cx);
+  assert.deepEqual(projectHeaders(h),[c,a,b,otherB].map(id=>`uac-${id}`),
+    'unique c and a retain saved precedence; neither same-named b inherits the ambiguous saved b position');
+  assert.equal(JSON.stringify(h.calls.filter(c=>c[0]==='order').at(-1)[1]),JSON.stringify(['t3','t0','t1','t2']),
+    'navigation follows the migrated manual order');
+});
+
+test('dragging a filtered view swaps visible slots and preserves hidden project positions across restart',()=>{
+  const h=load('vega-sidebar'),[a,b,otherB,c]=orderedProjectsFixture(h);
+  h.storage.set('project-order',JSON.stringify([a,b,otherB,c]));
+  h.storage.set('active-view','Focus');
+  h.mod.init({},h.cx);
+  h.mod.preferences={projects:{[a]:{labels:['work']},[c]:{labels:['work']}},views:{Focus:{labels:['work'],machines:[]}}};
+  assert.deepEqual(projectHeaders(h),[`uac-${a}`,`uac-${c}`]);
+  const press=(id,event)=>elements(h.render()).find(n=>n.idValue===`uac-${id}`).handlers[event]({},h.cx);
+  press(c,'on_mouse_down');press(a,'on_mouse_move');press(a,'on_mouse_up');
+  assert.deepEqual(projectHeaders(h),[`uac-${c}`,`uac-${a}`]);
+  const stored=h.storage.get('project-order');
+  assert.deepEqual(JSON.parse(stored),[c,b,otherB,a], 'hidden b projects keep their exact saved slots');
+  h.storage.set('active-view','all');assert.deepEqual(projectHeaders(h),[c,b,otherB,a].map(id=>`uac-${id}`));
+  const restarted=load('vega-sidebar');orderedProjectsFixture(restarted);
+  restarted.storage.set('project-order',stored);restarted.mod.init({},restarted.cx);
+  assert.deepEqual(projectHeaders(restarted),[c,b,otherB,a].map(id=>`uac-${id}`));
+});

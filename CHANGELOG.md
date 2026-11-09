@@ -9,8 +9,9 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: `vega project config` stores personal display names and labels by project ID;
   `vega project view` saves label/machine filters in `~/.config/vega/projects.toml`.
-  Right-click a sidebar project or UAC row for Config. The header switches views;
-  project ordering is manual only. Non-UAC Spaces rows retain Rename (vega-0h4c.49).
+  Right-click a sidebar project or UAC row for Config. Priority and Grouped by space
+  sort modes are removed; the header switches saved views. Project ordering is manual
+  only. Non-UAC Spaces rows retain Rename (vega-0h4c.49).
 
 ## 147 · 2026-11-09
 
