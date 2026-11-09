@@ -98,6 +98,31 @@ async function inCheckout(machine, cwd, program, args) {
 }
 const jsonOf = out => JSON.parse(out.slice(Math.min(...["[", "{"].map(c => out.indexOf(c)).filter(i => i >= 0))));
 const values = input => [...new Set(input.split(",").map(s => s.trim()).filter(Boolean))];
+// An input inside the project window: the window refocuses its own handle on every left press
+// (for Esc), so the press must stop here or the input loses the focus it just took.
+const inputBox = (t, state, h = 32) => div().on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+  .child(Input.new(state).h(h).px(8).rounded(6).border_1().border_color(t.input).bg(t.background));
+// A small pill: a label on a project, a view's filter, a toggle in an editor.
+const pill = (t, id, text, { on = false, action = null, tooltip = null } = {}) => div().id(id).flex_none().px(6).rounded(8)
+  .text_size(10.5).bg(on ? t.accent : t.raised).text_color(on ? t.background : t.dim)
+  .when(Boolean(tooltip), el => el.tooltip(tooltip))
+  .when(Boolean(action), el => el.cursor_pointer()
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .on_click((_e, cx) => { cx.stop_propagation(); action(cx); cx.notify(); }))
+  .child(text);
+// Toggle one entry in a comma-separated input (the editors keep their state in inputs).
+const toggleValue = (state, value) => {
+  const list = values(state.value());
+  state.set_value((list.includes(value) ? list.filter(v => v !== value) : [...list, value]).join(", "));
+};
+// Ad-hoc filter by one label, set by clicking a label pill in the sidebar (no saved view).
+const LABEL_VIEW = "label:";
+// The active view lives in shared state: localStorage is per mod copy, so the filter popup
+// could not reach the sidebar through it. The sidebar copies it to its own localStorage to
+// keep it across restarts; shared state is empty after a restart, so that copy is the fallback.
+const VIEW_KEY = "vega.view";
+const activeView = () => shared(VIEW_KEY) ?? localStorage.getItem("active-view") ?? "all";
+const setActiveView = id => { setShared(VIEW_KEY, id); localStorage.setItem("active-view", id); };
 const machineOf = address => address?.includes("/") ? address.split("/")[0] : "local";
 
 function duration(ms) {
@@ -142,8 +167,11 @@ export default class Agents extends View {
         const config = this.preferences.projects?.[props()?.projectConfig];
         if (props()?.projectConfig && !this.configError) {
           this.nameInput = InputState.new({ value: config?.name ?? "", placeholder: "Default project name" });
-          this.labelsInput = InputState.new({ value: (config?.labels ?? []).join(", "), placeholder: "work, private" });
+          this.nameInput.on("submit", (_e, cx) => cx.spawn(cx => this.saveProject(cx)));
+          this.labelsInput = InputState.new({ placeholder: "Add a label, Enter" });
+          this.labelsInput.on("submit", (_e, cx) => cx.spawn(cx => this.addLabels(cx)));
           this.originalLabels = config?.labels ?? [];
+          this.labels = [...this.originalLabels];
         }
         this.loading = false;
         cx.notify();
@@ -165,7 +193,7 @@ export default class Agents extends View {
     }
     if (props()?.spaceMenu) return;
     this.preferences = { projects: {}, views: {} };
-    this.activeView = localStorage.getItem("active-view") ?? "all";
+    this.activeView = activeView();
     cx.spawn(cx => this.refreshPreferences(cx));
     cx.timer.every(5000, cx => this.refreshPreferences(cx));
     this.folded = new Set();
@@ -584,7 +612,7 @@ export default class Agents extends View {
         .child(div().text_size(11).text_color(t.dim).child(d.id))
         .child(div().font_semibold().child(d.title ?? ""))
         .child(div().child(d.question || "No question text provided."))
-        .child(Input.new(this.decisionInputs.get(d.id)).h(32).px(8).rounded(6).border_1().border_color(t.input).bg(t.background))
+        .child(inputBox(t, this.decisionInputs.get(d.id)))
         .child(h_flex().gap(8)
           .child(button(`answer-${d.id}`, this.decisionBusy.has(d.id) ? "Sending…" : "Answer", cx => this.decide(d, false, cx)))
           .child(button(`dismiss-${d.id}`, "Dismiss", cx => this.decide(d, true, cx))))
@@ -614,7 +642,8 @@ export default class Agents extends View {
   async saveProject(cx) {
     if (this.saving || !this.nameInput) return;
     this.saving = true; this.configError = null; cx.notify();
-    const labels = values(this.labelsInput.value());
+    this.saved = false;
+    const labels = [...this.labels];
     const args = ["project", "config", props().projectConfig, "--name", this.nameInput.value().trim()];
     for (const label of labels) args.push("--label", label);
     for (const label of this.originalLabels) if (!labels.includes(label)) args.push("--unlabel", label);
@@ -624,22 +653,53 @@ export default class Agents extends View {
       if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Save failed");
       const saved = JSON.parse(r.stdout).projects[props().projectConfig];
       this.originalLabels = saved.labels;
+      this.labels = [...saved.labels];
       this.saved = true;
+      await this.refreshPreferences(cx);
     } catch (e) { this.configError = String(e); }
     finally { this.saving = false; cx.notify(); }
   }
 
+  // Labels save at once: add from the input (commas split), remove by a pill's ✕.
+  async addLabels(cx) {
+    const add = values(this.labelsInput.value()).filter(l => !this.labels.includes(l));
+    this.labelsInput.set_value("");
+    if (!add.length) return;
+    this.labels.push(...add);
+    await this.saveProject(cx);
+  }
+
+  async setLabel(label, on, cx) {
+    if (on === this.labels.includes(label)) return;
+    this.labels = on ? [...this.labels, label] : this.labels.filter(l => l !== label);
+    await this.saveProject(cx);
+  }
+
   configTab(t) {
-    const field = (label, input) => v_flex().gap(5)
-      .child(div().text_size(11).text_color(t.dim).child(label))
-      .child(Input.new(input).h(32).px(8).rounded(6).border_1().border_color(t.input).bg(t.background));
-    return v_flex().gap(12)
-      .child(field("Display name (empty uses project name)", this.nameInput))
-      .child(field("Labels (comma separated)", this.labelsInput))
-      .child(div().id("save-project").h(30).px(8).rounded(6).cursor_pointer().bg(t.raised)
-        .on_click((_e, cx) => cx.spawn(cx => this.saveProject(cx)))
-        .child(this.saving ? "Saving…" : "Save"))
-      .when(Boolean(this.saved), el => el.child("Saved"));
+    const heading = label => div().text_size(11).text_color(t.dim).child(label);
+    const button = (id, label, action) => div().id(id).flex_none().px(10).py(5).rounded(6).cursor_pointer().bg(t.raised)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => action(cx)); }).child(label);
+    // Labels other projects use, offered as one-click additions.
+    const known = [...new Set(Object.values(this.preferences?.projects ?? {}).flatMap(p => p.labels ?? []))]
+      .filter(l => !this.labels.includes(l)).sort();
+    return v_flex().gap(14)
+      .child(v_flex().gap(5).child(heading("Display name (empty uses the project name)"))
+        .child(h_flex().gap(8).items_center()
+          .child(div().flex_1().child(inputBox(t, this.nameInput)))
+          .child(button("save-project", this.saving ? "Saving…" : "Save", cx => this.saveProject(cx)))))
+      .child(v_flex().gap(6).child(heading("Labels · group and filter projects in the sidebar"))
+        .child(h_flex().gap(6).flex_wrap().items_center()
+          .children(this.labels.length ? this.labels.map(l => pill(t, `label-${l}`, `${l}  ✕`, { on: true,
+            tooltip: "Remove", action: cx => cx.spawn(cx => this.setLabel(l, false, cx)) }))
+            : [div().text_size(11).text_color(t.dim).child("No labels yet.")]))
+        .child(h_flex().gap(8).items_center()
+          .child(div().flex_1().child(inputBox(t, this.labelsInput)))
+          .child(button("add-label", "Add", cx => this.addLabels(cx))))
+        .when(known.length > 0, el => el.child(h_flex().gap(6).flex_wrap().items_center()
+          .child(div().text_size(11).text_color(t.dim).child("Used elsewhere:"))
+          .children(known.map(l => pill(t, `known-label-${l}`, `+ ${l}`, { action: cx => cx.spawn(cx => this.setLabel(l, true, cx)) }))))))
+      .when(Boolean(this.saved), el => el.child(div().text_size(11).text_color(t.dim).child("Saved")));
   }
 
   // Follow mode: one shared window (key vega-project-follow) that reopens in place on the
@@ -709,29 +769,54 @@ export default class Agents extends View {
     try {
       const r = await exec("vega", args);
       if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Save view failed");
+      // A saved view is shown at once; deleting the shown view goes back to All.
+      if (!remove) setActiveView(id);
+      else if (activeView() === id) setActiveView("all");
       await this.refreshPreferences(cx);
     } catch (e) { this.configError = String(e); }
     finally { this.saving = false; cx.notify(); }
   }
 
   viewMenu(t) {
-    const select = (id) => { localStorage.setItem("active-view", id); closeOverlay(props().overlay); };
-    return v_flex().size_full().overflow_y_scrollbar().p(12).gap(9).bg(t.popover).text_color(t.foreground).text_size(12.8)
+    const select = (id) => { setActiveView(id); closeOverlay(props().overlay); };
+    const active = activeView();
+    const heading = label => div().pt(4).text_size(10.5).font_semibold().text_color(t.dim).child(label.toUpperCase());
+    const link = (id, label, action) => div().id(id).flex_none().px(6).py(2).rounded(4).cursor_pointer().text_size(11)
+      .text_color(t.dim).hover(s => s.bg(t.raised).text_color(t.foreground)).on_click(action).child(label);
+    const choice = (id, label, on, detail, action) => h_flex().id(id).gap(8).items_center().px(8).py(5).rounded(6)
+      .cursor_pointer().when(on, el => el.bg(t.raised)).hover(s => s.bg(t.raised)).on_click(action)
+      .child(div().w(12).flex_none().text_color(t.accent).child(on ? "✓" : ""))
+      .child(div().flex_none().child(label))
+      .child(h_flex().flex_1().min_w(0).gap(4).flex_wrap().children(detail));
+    // Every label on any project and every machine with a terminal, offered as toggles.
+    const labels = [...new Set(Object.values(this.preferences.projects ?? {}).flatMap(p => p.labels ?? []))].sort();
+    const machines = [...new Set(["local", ...terminals().map(x => machineOf(x.address))])].sort();
+    const chosenLabels = values(this.viewLabels.value()), chosenMachines = values(this.viewMachines.value());
+    const toggles = (kind, all, chosen, state) => h_flex().gap(6).flex_wrap().items_center()
+      .children(all.length ? all.map(v => pill(t, `pick-${kind}-${v}`, v, { on: chosen.includes(v), action: () => toggleValue(state, v) }))
+        : [div().text_size(11).text_color(t.dim).child(kind === "label" ? "No labels yet: add them in a project's Config tab." : "")]);
+    return v_flex().size_full().overflow_y_scrollbar().p(12).gap(6).bg(t.popover).text_color(t.foreground).text_size(12.8)
       .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
-      .child(div().id("view-all").cursor_pointer().child("All").on_click(() => select("all")))
-      .children(Object.entries(this.preferences.views ?? {}).map(([id, view]) => h_flex().gap(8)
-        .child(div().id(`view-${id}`).flex_1().cursor_pointer().child(id).on_click(() => select(id)))
-        .child(div().id(`edit-view-${id}`).cursor_pointer().child("Edit").on_click((_e, cx) => {
+      .child(heading("Show"))
+      .child(choice("view-all", "All", active === "all", [], () => select("all")))
+      .children(labels.map(l => choice(`view-label-${l}`, `#${l}`, active === LABEL_VIEW + l, [], () => select(LABEL_VIEW + l))))
+      .children(Object.entries(this.preferences.views ?? {}).map(([id, view]) => h_flex().gap(4).items_center()
+        .child(div().flex_1().min_w(0).child(choice(`view-${id}`, id, active === id,
+          [...view.labels.map(l => pill(t, `view-${id}-l-${l}`, `#${l}`)), ...view.machines.map(m => pill(t, `view-${id}-m-${m}`, `@${m}`))],
+          () => select(id))))
+        .child(link(`edit-view-${id}`, "Edit", (_e, cx) => {
           this.viewName.set_value(id); this.viewLabels.set_value(view.labels.join(", "));
           this.viewMachines.set_value(view.machines.join(", ")); cx.notify();
         }))
-        .child(div().id(`delete-view-${id}`).cursor_pointer().child("Delete").on_click((_e, cx) => cx.spawn(cx => this.saveView(cx, true, id))))))
-      .child(div().text_size(11).text_color(t.dim).child("Save a view · any label AND any machine"))
-      .child(Input.new(this.viewName).h(30).px(6).bg(t.background))
-      .child(Input.new(this.viewLabels).h(30).px(6).bg(t.background))
-      .child(Input.new(this.viewMachines).h(30).px(6).bg(t.background))
-      .child(div().id("save-view").cursor_pointer().child(this.saving ? "Saving…" : "Save view")
-        .on_click((_e, cx) => cx.spawn(cx => this.saveView(cx))))
+        .child(link(`delete-view-${id}`, "Delete", (_e, cx) => cx.spawn(cx => this.saveView(cx, true, id))))))
+      .child(heading("Save a view · any chosen label and any chosen machine"))
+      .child(Input.new(this.viewName).h(30).px(8).rounded(6).border_1().border_color(t.input).bg(t.background))
+      .child(div().text_size(11).text_color(t.dim).child("Labels"))
+      .child(toggles("label", labels, chosenLabels, this.viewLabels))
+      .child(div().text_size(11).text_color(t.dim).child("Machines"))
+      .child(toggles("machine", machines, chosenMachines, this.viewMachines))
+      .child(h_flex().pt(4).child(div().id("save-view").px(12).py(5).rounded(6).bg(t.raised).cursor_pointer()
+        .child(this.saving ? "Saving…" : "Save view").on_click((_e, cx) => cx.spawn(cx => this.saveView(cx)))))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)));
   }
 
@@ -849,7 +934,9 @@ export default class Agents extends View {
   }
 
   viewFilter() {
-    return this.preferences?.views?.[localStorage.getItem("active-view")] ?? { labels: [], machines: [] };
+    const active = activeView();
+    if (active.startsWith(LABEL_VIEW)) return { labels: [active.slice(LABEL_VIEW.length)], machines: [] };
+    return this.preferences?.views?.[active] ?? { labels: [], machines: [] };
   }
 
   matchesView(project, machine) {
@@ -960,6 +1047,14 @@ export default class Agents extends View {
         .child(div().flex_none().text_size(12).text_color(t.dim).child("⠿"))
         .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(display))
         .when(Boolean(git), el => el.child(div().flex_none().text_size(11.5).text_color(git === "✓" ? C.git_clean : C.git_dirty).child(git)))
+        // Label pills: a click filters the sidebar to that label, a second click shows all again.
+        .children((this.preferences?.projects?.[project]?.labels ?? []).slice(0, 2).map(l => {
+          const on = activeView() === LABEL_VIEW + l;
+          return pill(t, `plabel-${gid}-${l}`, l, { on, tooltip: on ? "Show all projects" : `Show only ${l} projects`,
+            action: () => setActiveView(on ? "all" : LABEL_VIEW + l) });
+        }))
+        .when((this.preferences?.projects?.[project]?.labels ?? []).length > 2, el => el.child(pill(t, `plabel-${gid}-more`,
+          `+${this.preferences.projects[project].labels.length - 2}`, { tooltip: this.preferences.projects[project].labels.join(", ") })))
         .child(div().flex_1())
         // One summary badge per project (decisions, waiting, notes), coloured by the most urgent;
         // details live in the project window and the status line (vega-0h4c.50).
@@ -1134,7 +1229,8 @@ export default class Agents extends View {
       .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
 
     this.rowLabel = a => detail.get(a.address) ?? label(a);
-    this.activeView = localStorage.getItem("active-view") ?? "all";
+    this.activeView = activeView();
+    if (shared(VIEW_KEY) && localStorage.getItem("active-view") !== this.activeView) localStorage.setItem("active-view", this.activeView);
     const rows = collapsed ? list.map(railRow) : this.projectTree(t, all, list, shown, now);
 
     return v_flex()
@@ -1161,9 +1257,10 @@ export default class Agents extends View {
                 .text_size(11)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "vega-sidebar", kind: "popup", width: 400, height: 400, props: { viewMenu: true } }))
+                .on_click(() => openOverlay({ mod: "vega-sidebar", kind: "popup", width: 420, height: 480, props: { viewMenu: true } }))
                 .tooltip("Filter by labels and machines")
-                .child(this.preferences?.views?.[this.activeView] ? this.activeView : "All"),
+                .child(`${this.activeView.startsWith(LABEL_VIEW) ? `#${this.activeView.slice(LABEL_VIEW.length)}`
+                  : this.preferences?.views?.[this.activeView] ? this.activeView : "All"} ▾`),
             ),
         ),
       )

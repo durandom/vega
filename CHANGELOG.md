@@ -10,6 +10,11 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 - feature: the herdr-app project window has an Asks tab: open `vega notify` asks of the project
   from every host, with Ack, Resolve and Go to pane. The Overview asks tile opens it
   (vega-0h4c.50.3). Apply with `vega config apply herdr-app`.
+- feature: project labels as pills: the Config tab adds labels by Enter and removes them by
+  their pill, offering labels other projects use; sidebar project headers show their labels,
+  and a click filters the sidebar to that label. The filter popup lists All, each label and the
+  saved views, and builds a view from label and machine toggles. Fixes inputs in the project
+  window losing focus on click and the view choice never reaching the sidebar.
 
 ## 151 · 2026-11-09
 

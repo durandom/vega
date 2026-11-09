@@ -297,4 +297,12 @@ context, the project window holds details and actions.
 - **Sidebar**: one summary badge per project (decisions + waiting + notes; blocked colour when
   a decision or a waiting agent is in it). A click opens the most urgent view: Decisions, the
   waiting pane, else Notes. Agent rows keep per-agent signals only (mail, waiting, git).
+- **Labels and views**: the Config tab edits a project's labels as pills (Enter adds, the
+  pill's ✕ removes, both save at once through `vega project config`). Sidebar project headers
+  show up to two label pills; a click sets the ad-hoc view `label:<name>`, a second click goes
+  back to All. The active view lives in shared state `vega.view`, because `localStorage` is per
+  mod copy and the filter popup is another copy; the sidebar mirrors it into its own
+  `localStorage` (key `active-view`) to keep it across restarts. Saving a view shows it.
+- **Inputs in the project window** sit in `inputBox`, which stops the left press: the window
+  refocuses its own handle on every press (for Esc) and would take the focus from the input.
 - Colours come from theme tokens only (working, blocked, done, idle), for light and dark.

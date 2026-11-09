@@ -567,11 +567,17 @@ test('project Config overlay loads once, saves argv including label removal, and
   popup.mod.init({},popup.cx);await popup.flush();
   let text=texts(popup.render());assert(text.includes('Config'));assert(!text.includes('Rename'));
   assert.equal(popup.mod.nameInput.value(),'Name');assert.equal(popup.calls.filter(c=>c[0]==='exec'&&c[2]?.[0]==='project').length,1);
-  popup.mod.nameInput.set_value('');popup.mod.labelsInput.set_value('work, private, private');
+  popup.mod.nameInput.set_value('');
   popup.api.exec=async(bin,args)=>{popup.calls.push(['exec',bin,args]);return {code:1,stderr:'Read only'};};
-  elements(popup.render()).find(n=>n.idValue==='save-project').handlers.on_click({},popup.cx);await popup.flush();
+  // Removing a label pill saves at once; a failure keeps the edited labels on screen.
+  elements(popup.render()).find(n=>n.idValue==='label-old').handlers.on_click({},popup.cx);await popup.flush();
   assert(texts(popup.render()).some(s=>s.includes('Read only')));
-  assert.equal(popup.mod.labelsInput.value(),'work, private, private');
+  assert.deepEqual([...popup.mod.labels],['work']);
+  assert.deepEqual(Array.from(popup.calls.filter(c=>c[0]==='exec'&&c[2]?.[0]==='project').at(-1)[2]),['project','config',project,'--name','','--label','work','--unlabel','old','--json']);
+  // Enter in the add input splits commas, skips duplicates and clears the input.
+  popup.mod.labelsInput.set_value('private, work, private');
+  popup.mod.labelsInput.handlers.submit({},popup.cx);await popup.flush();
+  assert.equal(popup.mod.labelsInput.value(),'');
   assert.deepEqual(Array.from(popup.calls.filter(c=>c[0]==='exec'&&c[2]?.[0]==='project').at(-1)[2]),['project','config',project,'--name','','--label','work','--label','private','--unlabel','old','--json']);
   popup.api.exec=async()=>({code:0,stdout:JSON.stringify({projects:{[project]:{name:'',labels:['work','private']}}})});
   await popup.mod.saveProject(popup.cx);assert(texts(popup.render()).includes('Saved'));
@@ -621,7 +627,8 @@ test('view popup selects, saves and deletes CLI-owned views without persisting c
   await h.mod.saveView(h.cx,true,'Work');
   assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2]),['project','view','Work','--delete','--json']);
   elements(h.render()).find(n=>n.idValue==='view-Work').handlers.on_click({},h.cx);
-  assert.equal(h.storage.get('active-view'),'Work');assert.equal(h.state.size,0);
+  assert.equal(h.state.get('vega.view'),'Work','the selection reaches the sidebar copy through shared state');
+  assert.deepEqual([...h.state.keys()],['vega.view'],'no project config in shared state');
   const source=fs.readFileSync(new URL('../config/herdr-app/mods/vega-sidebar/main.js',import.meta.url),'utf8');
   assert(!source.includes('sortMenu'));assert(!source.includes('Grouped by space'));assert(!source.includes('Sort agents'));
 });
@@ -667,11 +674,11 @@ test('deleting the selected view restores the All header and unfiltered projects
   let prefs={projects:{[project]:{name:'Project A',labels:['work']}},views:{Focus:{labels:['work'],machines:['puck']}}};
   h.api.exec=async(bin)=>({code:0,stdout:bin==='vega'?JSON.stringify(prefs):''});
   h.storage.set('active-view','Focus');h.mod.init({},h.cx);await h.flush();
-  let tree=h.render();assert(texts(tree).includes('Focus'));
+  let tree=h.render();assert(texts(tree).includes('Focus ▾'));
   assert(!elements(tree).some(n=>n.idValue==='space-scratch'));
   prefs={...prefs,views:{}};await h.mod.refreshPreferences(h.cx);
   tree=h.render();const selector=elements(tree).find(n=>n.idValue==='ag-views');
-  assert.deepEqual(texts(selector),['All']);
+  assert.deepEqual(texts(selector),['All ▾']);
   assert(elements(tree).some(n=>n.idValue==='space-scratch'));
   assert(elements(tree).some(n=>n.idValue===`uac-${project}`));
 });
@@ -720,4 +727,32 @@ test('Asks tab lists project asks from vega notify, acks and resolves by argv, s
   elements(w.render()).find(n=>n.idValue==='ask-resolve-puck=17').handlers.on_click({},w.cx);await w.flush();
   assert(w.calls.some(c=>c[0]==='exec'&&JSON.stringify(c[2])===JSON.stringify(['notify','resolve','puck=17'])));
   assert(texts(w.render()).includes('No open asks'));
+});
+
+test('label pills filter the sidebar ad hoc; the view editor toggles known labels and machines',async()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  const prefs={projects:{[project]:{name:'A',labels:['work','ops','x']}},views:{}};
+  h.api.exec=async(bin)=>({code:0,stdout:bin==='vega'?JSON.stringify(prefs):''});
+  h.mod.init({},h.cx);await h.flush();
+  let nodes=elements(h.render());
+  assert(nodes.some(n=>n.idValue===`plabel-uac-${project}-work`));assert(nodes.some(n=>n.idValue===`plabel-uac-${project}-more`));
+  nodes.find(n=>n.idValue===`plabel-uac-${project}-ops`).handlers.on_click({},h.cx);
+  assert.equal(h.state.get('vega.view'),'label:ops');
+  nodes=elements(h.render());assert.equal(h.storage.get('active-view'),'label:ops','sidebar keeps the view across restarts');
+  assert(!nodes.some(n=>n.idValue==='space-scratch'),'label filter hides unlabelled spaces');
+  assert.deepEqual(texts(nodes.find(n=>n.idValue==='ag-views')),['#ops ▾']);
+  nodes.find(n=>n.idValue===`plabel-uac-${project}-ops`).handlers.on_click({},h.cx);
+  assert.equal(h.state.get('vega.view'),'all','second click shows all');
+  const m=load('vega-sidebar');m.setProps({viewMenu:true,overlay:'views'});m.api.terminals=h.api.terminals;
+  m.api.exec=async(bin,args)=>{m.calls.push(['exec',bin,[...args]]);return {code:0,stdout:JSON.stringify(prefs)};};
+  m.mod.init({},m.cx);await m.flush();
+  nodes=elements(m.render());
+  nodes.find(n=>n.idValue==='pick-label-work').handlers.on_click({},m.cx);
+  nodes.find(n=>n.idValue==='pick-machine-puck').handlers.on_click({},m.cx);
+  assert.equal(m.mod.viewLabels.value(),'work');assert.equal(m.mod.viewMachines.value(),'puck');
+  m.mod.viewName.set_value('Work');await m.mod.saveView(m.cx);
+  assert.deepEqual(m.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2],['project','view','Work','--label','work','--machine','puck','--json']);
+  assert.equal(m.state.get('vega.view'),'Work','a saved view is shown at once');
+  elements(m.render()).find(n=>n.idValue==='view-label-ops').handlers.on_click({},m.cx);
+  assert.equal(m.state.get('vega.view'),'label:ops');
 });
