@@ -351,9 +351,14 @@ pub fn run(parent: Option<&str>) -> Result<(), Failure> {
             "registry: snapshot; only hosts with a beat younger than 90s; stale hosts unknown"
         );
     } else {
-        println!(
-            "registry: unknown (unavailable); project membership and remote ownership unknown"
-        );
+        match &registry {
+            Err(e) if e == vega_registry::INBOX_ONLY_OFF => {
+                println!("registry: off ({e}); project membership and remote ownership unknown")
+            }
+            _ => println!(
+                "registry: unknown (unavailable); project membership and remote ownership unknown"
+            ),
+        }
         println!("registry_questions: unknown (registry unavailable)");
         println!("uac_parks: unknown (project membership unavailable)");
         println!("ci: unknown (project membership unavailable)");

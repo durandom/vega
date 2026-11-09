@@ -73,6 +73,24 @@ fn unavailable_sources_are_explicit_and_home_does_not_create_wait_state() {
     assert!(text.contains("explicit_waits_local: unknown"));
     assert!(text.contains("ready_count: 0"));
     assert!(!state.join("vega/orchestration/waits.sqlite3").exists());
+    // An inbox-only host skips the read and says why.
+    let out = Command::new(env!("CARGO_BIN_EXE_vega-orchestration"))
+        .current_dir(dir.path())
+        .env("XDG_STATE_HOME", &state)
+        .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
+        .env("VEGA_POST_HOST", "puck")
+        .env("VEGA_POST_INBOX_ONLY", "puck")
+        .env(
+            "PATH",
+            format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap()),
+        )
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("registry: off (inbox-only host: local agents only)"),
+        "{text}"
+    );
 }
 
 #[test]
