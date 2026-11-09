@@ -1,6 +1,9 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, home, theme, watchFolder, shared, setShared, openOverlay, notify, nextCommand, run, spaces, agents } from "herdr";
+import { exec, home, theme, watchFolder, shared, setShared, openOverlay, notify, nextCommand, run, spaces, agents, terminals, focused } from "herdr";
+
+// The capacity provider behind an agent kind (vega lanista lanes: pi runs zai).
+const PROVIDER = { "claude-code": "claude", claude: "claude", codex: "codex", pi: "zai" };
 
 // Assumes the same user and XDG_STATE_HOME as vegad; this reads the mod's environment,
 // not the app config home. Both processes must share that state directory.
@@ -88,6 +91,101 @@ export default class Vega extends View {
     cx.spawn(async () => {
       for (;;) { if (await nextCommand() === "inbox") this.open(); }
     });
+    // Context segments follow the focused terminal's project, as VS Code's status bar does.
+    cx.timer.every(1500, (cx) => {
+      const ctx = this.context();
+      if (ctx.project !== this.ctx?.project || ctx.uac?.address !== this.ctx?.uac?.address) {
+        this.ctx = ctx; this.ctxData = null; cx.notify();
+        cx.spawn(async (cx) => { await this.readContext(cx); });
+      }
+    });
+    cx.timer.every(15000, (cx) => { cx.spawn(async (cx) => { await this.readContext(cx); }); });
+  }
+
+  // The focused terminal's project and that project's live UAC (same machine first).
+  context() {
+    const all = terminals().filter(x => x.state === "live");
+    const f = focused();
+    const term = all.find(x => x.address === f?.terminal);
+    const project = term?.labels?.["vega.project-id"] ?? null;
+    const machine = term?.address?.includes("/") ? term.address.split("/")[0] : "";
+    const uacs = all.filter(x => x.labels?.["vega.role"] === "uac" && x.labels?.["vega.project-id"] === project);
+    const uac = uacs.find(x => (x.address.includes("/") ? x.address.split("/")[0] : "") === machine) ?? uacs[0] ?? null;
+    const kind = (term?.labels?.["vega.harness"] || term?.program?.key || term?.agent || "").toLowerCase();
+    return { project, term, uac, kind };
+  }
+
+  // vega's --json views for the context project; local checkouts only (remote ones show badges).
+  async readContext(cx) {
+    const ctx = this.ctx;
+    if (!ctx?.project || this.readingContext) return;
+    this.readingContext = true;
+    const local = ctx.uac && !ctx.uac.address.includes("/");
+    const cwd = ctx.uac?.cwd;
+    const json = async (program, args) => {
+      try {
+        const r = await exec(program, args, { cwd, timeout: 10000 });
+        return r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) : null;
+      } catch (_) { return null; }
+    };
+    const [asks, ci, capacity, sync, beads] = await Promise.all([
+      local ? json("vega", ["notify", "list", "--project", ctx.project, "--json"]) : null,
+      local ? json("vega", ["ci", "--json"]) : null,
+      json("vega", ["capacity", "--json"]),
+      json("vega", ["bd", "status", "--json"]),
+      local ? json("bd", ["status", "--json"]) : null]);
+    this.readingContext = false;
+    if (this.ctx?.project !== ctx.project) return; // focus moved meanwhile
+    const data = {
+      asks: asks?.asks?.length ?? null,
+      ci: ci?.watches ?? null,
+      capacity: capacity?.windows?.filter(w => w.binding) ?? [],
+      sync: sync?.projects?.find(p => p.project === ctx.project)?.state ?? null,
+      beads: beads?.summary ?? null,
+    };
+    const sig = JSON.stringify(data);
+    if (sig !== this.ctxSig) { this.ctxSig = sig; this.ctxData = data; cx.notify(); }
+  }
+
+  openProject(tab) {
+    const ctx = this.ctx;
+    if (!ctx?.project) return;
+    openOverlay({ kind: "window", key: `vega-project-${ctx.project}`, width: 640, height: 0.7,
+      mod: "vega-sidebar", props: { projectConfig: ctx.project, uac: ctx.uac?.address ?? null, tab } });
+  }
+
+  contextSegments(t) {
+    const ctx = this.ctx;
+    if (!ctx?.project) return [];
+    const machine = ctx.uac?.address?.includes("/") ? ctx.uac.address.split("/")[0] : "";
+    const badge = (shared("vega.badges") ?? []).find(r => r.project === ctx.project && (r.machine || "") === machine) ?? {};
+    const d = this.ctxData ?? {};
+    const seg = (id, tab, children, tip) => h_flex().id(`ctx-${id}`).gap(6).items_center().px(4).rounded(4).cursor_pointer()
+      .tooltip(tip)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); this.openProject(tab); })
+      .children(children);
+    const count = (icon, n, color) => div().text_color(n > 0 ? color : t.dim).child(`${icon} ${n ?? "–"}`);
+    const name = ctx.uac?.labels?.["vega.project"] || ctx.project.split("/").pop();
+    const out = [
+      div().w(1).h(14).bg(t.border),
+      seg("needs", (badge.decisions ?? 0) > 0 ? "decisions" : "overview", [
+        div().text_color(t.foreground).child(name),
+        count("⚖", badge.decisions ?? 0, t.blocked), count("⚠", d.asks ?? 0, t.blocked), count("✉", badge.notes ?? 0, t.foreground)],
+        "Decisions · asks · notes: open the project window"),
+    ];
+    if (d.beads) out.push(seg("beads", "board", [count("◐", d.beads.in_progress_issues ?? 0, t.working), count("○", d.beads.ready_issues ?? 0, t.done)], "Beads in progress · ready: open the board"));
+    if (d.ci) {
+      const bad = d.ci.some(w => /red|fail/.test(w.verdict ?? w.state ?? ""));
+      const run_ = d.ci.some(w => !/green|pass|success|red|fail/.test(w.verdict ?? w.state ?? ""));
+      out.push(seg("ci", "overview", [div().text_color(bad ? t.blocked : run_ ? t.working : t.dim).child(`CI ${d.ci.length ? (bad ? "✗" : run_ ? "…" : "✓") : "–"}`)], "CI watches"));
+    }
+    const provider = PROVIDER[ctx.kind] ?? null;
+    const w = provider && d.capacity?.find(w => w.provider === provider);
+    if (w) out.push(seg("capacity", "overview", [div().text_color(w.left_percent < 20 && !w.override ? t.blocked : t.muted)
+      .child(`${provider} ${Math.round(w.left_percent)} %${w.override ? " ⚑" : ""}`)], `Capacity of the focused agent's provider (${w.window})`));
+    if (d.sync) out.push(seg("sync", "overview", [div().text_color(d.sync === "ok" ? t.dim : t.blocked).child(`beads ${d.sync === "ok" ? "✓" : d.sync}`)], "Beads sync (vega bd status)"));
+    return out;
   }
 
   open() {
@@ -199,6 +297,7 @@ export default class Vega extends View {
       .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
+      .children(this.contextSegments(t))
       // A failed badge read or remote vegad start (a machine unreachable, a reader error) shows at the right end.
       .when(Boolean(shown), el => el.child(div().flex_1()).child(div().id("vega-error").truncate().text_color(t.blocked).tooltip(shown).child(`vega: ${shown}`)));
   }
