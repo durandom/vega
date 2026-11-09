@@ -231,3 +231,58 @@ esac
     assert!(String::from_utf8_lossy(&out.stdout).contains("already_cleared"));
     assert_eq!(vega_herdr::waits::Store::read(&file).unwrap()[0], settled);
 }
+
+#[test]
+fn remote_update_on_an_inbox_only_host_skips_the_registry_wait() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use vega_herdr::waits::{Actor, Change, Endpoint, Request};
+    let dir = tempfile::tempdir().unwrap();
+    let ep = Endpoint {
+        host: "worker".into(),
+        pane: "w1:p1".into(),
+        name: "child".into(),
+    };
+    let req = Request {
+        version: 1,
+        actor: Actor {
+            endpoint: ep.clone(),
+            session: "session".into(),
+        },
+        change: Change::Waiting {
+            coordinator: ep,
+            on: "Slayer".into(),
+            reason: "decision".into(),
+            bead: None,
+            thread: None,
+        },
+    };
+    // A broker that accepts and never answers: a registry read would wait out its timeout.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("nats://{}", silent.local_addr().unwrap());
+    let run = |inbox_only: bool| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_vega-orchestration"));
+        c.args(["remote-update", "--from", "worker"])
+            .env("XDG_STATE_HOME", dir.path())
+            .env("VEGA_POST_HOST", "puck")
+            .env("VEGA_NATS_URL", &url)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        c.env(
+            "VEGA_POST_INBOX_ONLY",
+            if inbox_only { "puck" } else { "none" },
+        );
+        let start = std::time::Instant::now();
+        let mut child = c.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&req).unwrap())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).contains("wait_identity"));
+        start.elapsed()
+    };
+    assert!(run(true) < std::time::Duration::from_secs(2));
+}
