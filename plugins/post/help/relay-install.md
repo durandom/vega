@@ -7,7 +7,7 @@ Pins broker, host, herdr socket and Dolt env in ~/.local/state/vega/vegad.env; t
 remote start reads it, so the host pin applies there.
 Always pins the resolved VEGA_POST_HOST, preserving an existing vegad.env host unless
 explicitly overridden. When a broker is configured, warns if the registry cannot verify
-that host (first install and unavailable registry included). Check this warning before
+that host (first install and unavailable registry included; an inbox-only host skips the check by design). Check this warning before
 continuing to use the relay. If the hostname differs from the registry host (for example
 io-wsl versus io), install with VEGA_POST_HOST=io; hc machine names must equal that host.
 Toolbox installations make herdr's hook run the starter via toolbox run in the installing container.

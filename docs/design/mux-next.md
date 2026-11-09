@@ -46,7 +46,7 @@ The hc path also merges `hc ls` candidates and focuses local or remote hc agents
 `herdr-app do agent.focus`; see [hc migration, slice 4](hc-migration.md) for the backend routing.
 
 1. This host: its ledger file, panes herdr still lists. Other hosts: the registry (fresh hosts only);
-   without it, this host only, said on stderr.
+   without it, this host only, said on stderr (an inbox-only host skips the read by design and says nothing).
 2. Pick the waiting agent with the oldest `since` whose status is in `--status`.
 3. Local: `pane.focus` over the socket (as `vega open`). vegad sees `pane.focused` and drops it.
 4. Another host: map the host to its herdr machine (label or ssh target equal to the host token),
