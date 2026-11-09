@@ -92,7 +92,10 @@ Jobs, all in one process:
    `tN` or `machine/tN`), a draft holds while its text changes (for drafts the screen cannot read,
    Codex, multi-line pi and pastes: while the screen changes) and goes after 60 s unchanged
    (`HC_DRAFT_QUIET`), an empty box at once; no stash or restore, as `hc send` submits. `hc read` is
-   plain text, so a Claude suggestion costs one 60 s wait. See hc-migration.md.
+   plain text, so a Claude suggestion costs one 60 s wait. Unlike the rules above, an hc screen with
+   no known input box, or one that cannot be read, releases the pointer at once (the 20 s quiet rule
+   does not apply), and an unreadable draft sends no notification after 5 minutes (the hold ends
+   after 60 s). See hc-migration.md.
 3. **Gather.** `vega post ask <targets...> --fields task,branch,bead,blockers` sends one question
    with a correlation id. vegad wakes the asker once: when all answered, or at the deadline.
    `vega post inbox --re <id>` returns one table.

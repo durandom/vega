@@ -278,7 +278,8 @@ itself: it reads the screen (`terminal.read`, local `tN` or `machine/tN`), parse
 `delivery::draft` and holds while the draft text changes (the whole screen for drafts it cannot read: Codex, multi-line pi,
 pastes); unchanged for `HC_DRAFT_QUIET` (60 s) or
 an empty box lets it go. No stash, clear or restore (`hc send` submits). `hc read` is plain text, so
-Claude's dim suggestion reads as a draft and delays a pointer once by 60 s. Switch off: set
+Claude's dim suggestion reads as a draft and delays a pointer once by 60 s. A screen with no known
+input box, or an unreadable one, releases the pointer at once; no 5-minute notification exists. Switch off: set
 `HC_DRAFT_HOLD` to `false` in `plugins/post/src/main.rs` once cores carry 3ba03e6.
 
 Cross-host post mail accepts `t7 --host <registry-host>` or a qualified hc address

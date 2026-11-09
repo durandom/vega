@@ -41,7 +41,7 @@ Codex and pi and holds the pointer while it has a draft; a draft left 5 minutes 
 after the pointer, or, when it cannot be typed back, keeps holding with one notification. A screen with no
 known input box holds the pointer until it has been unchanged for 20 s (one notification after 5 busy
 minutes). hc terminals differ: a draft holds only while it changes and goes 60 s after the last
-change, with no stash or restore. `vega mux send --now` pastes without the guard. See
+change, with no stash or restore; a screen with no known input box does not hold. `vega mux send --now` pastes without the guard. See
 [Draft guard](../../docs/design/vegad.md).
 
 Reply commands carry a timestamped `--re` token. Replies within 120 seconds count toward the eight-hop
