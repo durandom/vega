@@ -691,3 +691,33 @@ test('view editor explains invalid names and empty filters; Escape cancels witho
   h.render().handlers.on_key_down({keystroke:'escape'},h.cx);
   assert(h.calls.some(c=>c[0]==='close'&&c[1]==='views'));
 });
+
+test('Asks tab lists project asks from vega notify, acks and resolves by argv, shows failures and empty state',async()=>{
+  const project='github.com/team/a';
+  const w=load('vega-sidebar');w.setProps({projectConfig:project,tab:'asks',uac:'puck/t1'});
+  let asks=[{id:'puck=17',host:'puck',level:'action',project,pane:'hc:t9',line:'a: please test apply -> t9',bead:'a-1',cmd:'mise run apply',acknowledged:false}];
+  let reply={code:0,stdout:''};
+  w.api.exec=async(bin,args,opts)=>{w.calls.push(['exec',bin,[...args],opts]);
+    return args[1]==='list'?{code:0,stdout:JSON.stringify({schema:1,asks,registry_error:null})}:args[0]==='notify'?reply:{code:0,stdout:'{}'};};
+  w.mod.init({},w.cx);await w.flush();
+  const list=w.calls.find(c=>c[0]==='exec'&&c[2][1]==='list');
+  assert.deepEqual(list[2],['notify','list','--json','--project',project],'remote project asks read locally from the registry');
+  let text=texts(w.render());
+  assert(text.includes('a: please test apply -> t9'));assert(text.some(s=>s.includes('$ mise run apply')));
+  let nodes=elements(w.render());
+  nodes.find(n=>n.idValue==='ask-focus-puck=17').handlers.on_click({},w.cx);await w.flush();
+  assert(w.calls.some(c=>c[0]==='run'&&c[1]==='pane.focus'&&c[2].terminal==='t9'));
+  asks=[{...asks[0],acknowledged:true}];
+  nodes.find(n=>n.idValue==='ask-ack-puck=17').handlers.on_click({},w.cx);await w.flush();
+  assert(w.calls.some(c=>c[0]==='exec'&&c[1]==='vega'&&JSON.stringify(c[2])===JSON.stringify(['notify','ack','puck=17'])));
+  nodes=elements(w.render());
+  assert(!nodes.some(n=>n.idValue==='ask-ack-puck=17'),'acknowledged ask hides Ack');
+  assert(texts(w.render()).includes('Acknowledged.'));
+  reply={code:2,stderr:'origin update timed out\nhint'};
+  nodes.find(n=>n.idValue==='ask-resolve-puck=17').handlers.on_click({},w.cx);await w.flush();
+  assert(texts(w.render()).includes('origin update timed out'),'failure keeps the ask with the first error line');
+  reply={code:0,stdout:'ask: resolved'};asks=[];
+  elements(w.render()).find(n=>n.idValue==='ask-resolve-puck=17').handlers.on_click({},w.cx);await w.flush();
+  assert(w.calls.some(c=>c[0]==='exec'&&JSON.stringify(c[2])===JSON.stringify(['notify','resolve','puck=17'])));
+  assert(texts(w.render()).includes('No open asks'));
+});

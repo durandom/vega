@@ -283,7 +283,10 @@ context, the project window holds details and actions.
   project, keeping the tab). The window owns a focus handle so Esc closes it.
   Tabs: Overview (UAC, needs-you tiles, beads counts, sentinels with beads, CI watches,
   capacity bars), Board (in progress / ready / blocked from `bd`, expandable rows),
-  Decisions (answer via `vega uac answer`, dismiss via `bd close --reason`), Notes
+  Decisions (answer via `vega uac answer`, dismiss via `bd close --reason`), Asks
+  (`vega notify list --json --project <id>`, read locally for every project because the list
+  comes from the registry; Ack and Resolve run `vega notify ack|resolve <host>=<id>`, which
+  reach the origin host over NATS; Go to pane focuses the asking terminal), Notes
   (`vega post notes --json` for the project or the UAC pane; mark read / clear with `--upto`),
   UAC, Config. Remote projects run `bd` and `vega` through `hc exec` on their machine, as
   vega-inbox does. Reads poll every 15 s and redraw only when the data changed.

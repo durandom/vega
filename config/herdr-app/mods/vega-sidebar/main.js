@@ -77,7 +77,8 @@ const kidStatus = (k, listed) => {
 };
 // Later stages add tab descriptors and renderers here without changing the shell.
 const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab" }, { id: "board", label: "Board", render: "boardTab" },
-  { id: "decisions", label: "Decisions", render: "decisionsTab" }, { id: "notes", label: "Notes", render: "notesTab" },
+  { id: "decisions", label: "Decisions", render: "decisionsTab" },
+  { id: "asks", label: "Asks", render: "asksTab" }, { id: "notes", label: "Notes", render: "notesTab" },
   { id: "uac", label: "UAC", render: "uacTab" },
   { id: "config", label: "Config", render: "configTab" }];
 
@@ -152,10 +153,12 @@ export default class Agents extends View {
         this.focusHandle = cx.focus_handle?.();
         this.focusHandle?.focus();
         cx.spawn(cx => this.readOverview(cx));
-        cx.timer.every(15000, cx => { this.readOverview(cx); if (this.currentTab() === "board") this.readBoard(cx); this.readNotes(cx); });
+        cx.spawn(cx => this.readAsks(cx));
+        cx.timer.every(15000, cx => { this.readOverview(cx); this.readAsks(cx); if (this.currentTab() === "board") this.readBoard(cx); this.readNotes(cx); });
         cx.spawn(cx => this.readNotes(cx));
         if (props()?.follow) cx.timer.every(1000, () => this.followFocus());
         this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
+        this.askBusy = new Set(); this.askResults = new Map();
         this.expanded = new Set(); this.readyLimit = 12;
       }
       return;
@@ -300,6 +303,65 @@ export default class Agents extends View {
         .child(div().text_size(11.5).text_color(t.foreground).child((n.body ?? "").slice(0, 800)))));
   }
 
+  // Open asks (vega notify) of this project from every host. Read locally for every project:
+  // `notify list` queries the registry, and ack/resolve reach the origin host over NATS.
+  async readAsks(cx) {
+    if (this.readingAsks || !props()?.projectConfig) return;
+    this.readingAsks = true;
+    let asks;
+    try {
+      const r = await exec("vega", ["notify", "list", "--json", "--project", props().projectConfig], { timeout: 10000 });
+      const v = r.code === 0 ? jsonOf(r.stdout) : null;
+      asks = v ? { list: v.asks ?? [], error: v.registry_error ?? null } : (r.stderr || r.stdout || `vega notify failed (${r.code})`).trim();
+    } catch (e) { asks = String(e); }
+    this.readingAsks = false;
+    const sig = JSON.stringify(asks);
+    if (sig !== this.asksSig) { this.asksSig = sig; this.asks = asks; cx.notify(); }
+  }
+
+  // Ack keeps the ask open and stops escalation; resolve closes it. argv only, no shell.
+  async askAct(a, action, cx) {
+    if (this.askBusy.has(a.id)) return;
+    this.askBusy.add(a.id); this.askResults.delete(a.id); cx.notify();
+    try {
+      const r = await exec("vega", ["notify", action, a.id], { timeout: 15000 });
+      this.askResults.set(a.id, r.code === 0 ? (action === "ack" ? "Acknowledged." : "Resolved.") : (r.stderr || r.stdout || `Failed (${r.code})`).trim().split("\n")[0]);
+    } catch (e) { this.askResults.set(a.id, String(e)); }
+    finally { this.askBusy.delete(a.id); }
+    this.asksSig = null;
+    await this.readAsks(cx);
+    cx.notify();
+  }
+
+  asksTab(t) {
+    if (this.asks === undefined) return div().text_color(t.dim).child("Reading asks…");
+    if (typeof this.asks === "string") return div().text_color(t.blocked).child(this.asks.split("\n")[0].slice(0, 200));
+    const button = (id, label, action) => div().id(id).px(10).py(4).rounded(6).bg(t.raised).cursor_pointer().child(label)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => action(cx)); });
+    const levelColor = l => ({ urgent: t.blocked, action: t.ansi3 ?? t.working, info: t.accent })[l] ?? t.dim;
+    const warn = this.asks.error ? div().text_size(11).text_color(t.blocked).child(`Registry: ${this.asks.error}`.slice(0, 200)) : null;
+    if (!this.asks.list.length) return v_flex().items_center().gap(4).py(12).child(div().child("No open asks"))
+      .child(div().text_size(11).text_color(t.dim).child("Nothing in this project waits on you through vega notify."))
+      .when(Boolean(warn), el => el.child(warn));
+    return v_flex().gap(8).when(Boolean(warn), el => el.child(warn))
+      .children(this.asks.list.map(a => {
+        const busy = this.askBusy.has(a.id), result = this.askResults.get(a.id);
+        const pane = a.pane?.replace(/^hc:/, "");
+        return v_flex().id(`ask-${a.id}`).gap(6).p(10).rounded(8).bg(t.surface)
+          .child(h_flex().gap(6).items_center()
+            .child(div().w(8).h(8).rounded(4).flex_none().bg(a.acknowledged ? t.dim : levelColor(a.level)))
+            .child(div().text_size(11).text_color(t.dim).child([a.level, a.host, a.pane, a.bead, a.acknowledged ? "acknowledged" : null].filter(Boolean).join(" · "))))
+          .child(div().font_semibold().child(a.line ?? ""))
+          .when(Boolean(a.cmd), el => el.child(div().text_size(11).text_color(t.dim).child(`$ ${a.cmd}`)))
+          .child(h_flex().gap(8).items_center()
+            .when(Boolean(pane), el => el.child(button(`ask-focus-${a.id}`, "Go to pane", () => run("pane.focus", { terminal: pane }))))
+            .when(!a.acknowledged, el => el.child(button(`ask-ack-${a.id}`, busy ? "…" : "Ack", cx => this.askAct(a, "ack", cx))))
+            .child(button(`ask-resolve-${a.id}`, busy ? "…" : "Resolve", cx => this.askAct(a, "resolve", cx)))
+            .when(Boolean(result), el => el.child(div().text_size(11).text_color(t.dim).child(result))));
+      }));
+  }
+
   // Overview data the terminal labels do not carry. Beads counts come from `bd status --json`
   // in the UAC's checkout; remote projects wait for the corp-host check (vega-0h4c.50.2).
   async readOverview(cx) {
@@ -320,9 +382,8 @@ export default class Agents extends View {
         return r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) : null;
       } catch { return null; }
     };
-    const [asks, ci, capacity, facility] = await Promise.all([
-      vega(["notify", "list", "--project", props().projectConfig]), vega(["ci"]), vega(["capacity"]), vega(["uac"])]);
-    const ov = { asks: asks?.asks ?? null, watches: ci?.watches ?? null,
+    const [ci, capacity, facility] = await Promise.all([vega(["ci"]), vega(["capacity"]), vega(["uac"])]);
+    const ov = { watches: ci?.watches ?? null,
       capacity: capacity?.windows?.filter(w => w.binding) ?? null, agents: facility?.agents ?? [] };
     this.readingOverview = false;
     // Redraw only on a change: the window polls, most reads are equal.
@@ -339,7 +400,7 @@ export default class Agents extends View {
     const since = uac.status_ms ? duration(Date.now() - uac.status_ms) : "";
     const tile = (id, icon, n, label, color, action) => v_flex().id(`ov-${id}`).flex_1().p(10).gap(2).rounded(8)
       .bg(t.surface).when(Boolean(action) && n > 0, el => el.cursor_pointer()
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(() => action()))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { action(); cx.notify(); }))
       .child(h_flex().gap(6).items_center()
         .child(div().text_size(16).text_color(n > 0 ? color : t.dim).child(icon))
         .child(div().text_size(18).font_semibold().text_color(n > 0 ? t.foreground : t.dim).child(String(n ?? "–"))))
@@ -360,6 +421,7 @@ export default class Agents extends View {
       .child(div().w(70).flex_none().text_color(t.dim).child(x.agent ?? x.program?.key ?? ""))
       .child(div().w(64).flex_none().text_color(t.dim).child(x.status ?? ""));
     const ov = this.ov ?? {};
+    const asks = typeof this.asks === "object" && this.asks ? this.asks.list : null;
     const bar = w => h_flex().gap(8).items_center()
       .child(div().w(90).flex_none().text_color(t.dim).child(w.provider))
       .child(div().flex_1().h(4).rounded(2).bg(t.border)
@@ -389,14 +451,14 @@ export default class Agents extends View {
         .child(div().w(8).h(8).rounded(4).flex_none().bg(statusColor(uac.status)))
         .child(div().font_semibold().child("UAC"))
         .child(div().text_color(t.dim).child(`${uac.address} · ${uac.agent ?? ""} · ${uac.status ?? ""}${since ? ` ${since}` : ""}`)))
-      .child(section("Needs you", (totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0) + (ov.asks?.length ?? 0)))
+      .child(section("Needs you", (totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0) + (asks?.length ?? 0)))
       .child(h_flex().gap(8)
         .child(tile("decisions", "⚖", totals.decisions ?? 0, "decisions", t.blocked, inbox))
-        .child(tile("asks", "⚠", ov.asks?.length ?? 0, "asks", t.blocked))
+        .child(tile("asks", "⚠", asks?.length ?? 0, "asks", t.blocked, () => { this.projectTab = "asks"; }))
         .child(tile("waiting", "✋", totals.waiting ?? 0, "waiting on you", t.blocked, waiting))
         .child(tile("notes", "✉", totals.notes ?? 0, "notes", t.accent, notes)))
-      .when(Boolean(ov.asks?.length), el => el.child(v_flex().gap(2).children(ov.asks.slice(0, 5).map((a, i) =>
-        div().id(`ov-ask-${i}`).px(8).text_size(11.5).text_color(t.foreground).child(`⚠ ${a.text ?? a.what ?? a.message ?? JSON.stringify(a).slice(0, 100)}`)))))
+      .when(Boolean(asks?.length), el => el.child(v_flex().gap(2).children(asks.slice(0, 5).map((a, i) =>
+        div().id(`ov-ask-${i}`).px(8).text_size(11.5).text_color(t.foreground).child(`⚠ ${a.line ?? ""}`)))))
       .child(section("Beads", b ? (b.in_progress_issues ?? 0) + (b.ready_issues ?? 0) + (b.blocked_issues ?? 0) : "–"))
       .child(beadsBody)
       .child(section("Sentinels", kids.length))

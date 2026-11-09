@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 152 · 2026-11-09
+
+- feature: the herdr-app project window has an Asks tab: open `vega notify` asks of the project
+  from every host, with Ack, Resolve and Go to pane. The Overview asks tile opens it
+  (vega-0h4c.50.3). Apply with `vega config apply herdr-app`.
+
 ## 151 · 2026-11-09
 
 - feature: herdr-app project window. Right-click, the settings icon or the summary badge on a
