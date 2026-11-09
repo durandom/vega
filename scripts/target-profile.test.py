@@ -5,16 +5,22 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import re
 import tempfile
-import tomllib
 import unittest
+
+
+def dev_profile(text):
+    """String keys of Cargo.toml's [profile.dev] (no tomllib: macOS ships Python 3.9)."""
+    section = re.search(r"^\[profile\.dev\]\n(.*?)(?=^\[|\Z)", text, re.M | re.S).group(1)
+    return dict(re.findall(r'^([\w-]+)\s*=\s*"([^"]*)"', section, re.M))
 
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS split-debuginfo retention")
 class ProfileTests(unittest.TestCase):
     def test_incremental_builds_preserve_panics_without_retaining_objects(self):
         root = Path(__file__).resolve().parent.parent
-        profile = tomllib.loads((root / "Cargo.toml").read_text())["profile"]["dev"]
+        profile = dev_profile((root / "Cargo.toml").read_text())
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
             source = directory / "retention_probe.rs"
