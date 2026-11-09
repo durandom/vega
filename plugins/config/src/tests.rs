@@ -854,7 +854,7 @@ fn fake_app(d: &Path) -> OsString {
         // inline-md: allow (fake app executable, not help text)
         r#"
 case "$1" in
-  --version) echo 'herdr-app 0.1.13';;
+  --version) echo 'herdr-app 0.1.14';;
   check)
     test -f "$2/main.js" && test -f "$2/mod.json" || exit 1
     test "$2" != "$HERDR_APP_HOME/mods/vega" || exit 1
@@ -1118,7 +1118,10 @@ fn app_layout_drift_and_unit_dependency_order_are_visible() {
     )
     .unwrap();
     let p = plan(&ctx, Unit::HerdrAppLayouts).unwrap();
-    assert!(p.notes.iter().any(|n| n.contains("installed 0.1.13")));
+    assert!(p
+        .notes
+        .iter()
+        .any(|n| n.contains("main clone: app 0.1.14, installed 0.1.14")));
     fs::write(
         herdr_app::home(&ctx.env).join("installed.json"),
         r#"{"layout:main":{"json":"changed"}}"#,
