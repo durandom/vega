@@ -27,18 +27,24 @@ remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last
 5. **The vega herdr-app mod starts vegad (Slayer, 2026-11-06).** herdr-app has no startup hooks; a mod has
    `init()` and `exec()`, so the vega mod runs the idempotent `vega-post relay start` when it loads, as the
    `vega.vegad` herdr plugin's `[[startup]]` hook does today. Amendment vega-0h4c.25:
-   `relay install` also installs a login starter on macOS and Linux for hosts without
-   either UI. It calls the same detached, idempotent starter; vegad retains its lock
+   `relay install` also installed a login starter on macOS and Linux (superseded by
+   vega-0h4c.42 below). It called the same detached, idempotent starter; vegad retains its lock
    and self-exec lifecycle. No hc core job is installed or changed. See
-   [vegad](vegad.md) "Lifecycle". Amendment vega-0h4c.33: the login starter is
-   primary; the mod is a fallback starter only for the default real home. It starts
+   [vegad](vegad.md) "Lifecycle". Amendment vega-0h4c.33: the mod starts
    vegad only when `HERDR_APP_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are
    unset or resolve to `~/.config/herdr-app`, `~/.config` and `~/.local/state`.
    Scratch apps with private app/config/state homes never start vegad. The herdr
    TUI startup hook is unchanged.
    Core ownership decision (Slayer, 2026-11-07): `hc machine`/SSH keeps starting
-   remote cores, including on reconnect. Vega installs only vegad's login job;
-   the operator removes the experimental `dev.vega.hc-core` job on ganymede.
+   remote cores, including on reconnect. The operator removes the experimental
+   `dev.vega.hc-core` job on ganymede.
+   Amendment (Slayer, 2026-11-09, vega-0h4c.42): no login jobs. The login starter of
+   vega-0h4c.25 is dropped (puck, a corp Mac without GUI login, cannot load one); like the hc
+   core, vegad startup belongs to the app host. The vega mod runs `vega-post relay start` locally
+   (guarded as above) and, through `hc exec --on <machine>`, on every connected hc machine: at
+   start, when a machine turns connected, then every five minutes (a failed start retries after
+   one minute and shows in the status line after three failures). `relay install` writes no login
+   job and removes one left by an earlier install.
    Amended (Slayer, 2026-11-06, vega-0h4c.13): slice 0 found that a mod no layout shows never runs
    `init()`. The vega mod is therefore a small, always visible vega status element. The Slayer chose
    a **vega-owned clone** of main: `config/herdr-app/layouts/vega.json`, unit `herdr-app.layouts`.

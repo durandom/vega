@@ -421,7 +421,7 @@ test('relay starts only in the real default app and state homes',()=>{
     fs.writeFileSync(bin,'#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_START_LOG"\n',{mode:0o755});
     const env={...process.env,HOME:dir,TEST_START_LOG:log};
     for(const key of ['HERDR_APP_HOME','XDG_CONFIG_HOME','XDG_STATE_HOME']) delete env[key];
-    const run=extra=>execFileSync('python3',['-c',vm.runInContext('startRelay',h.api),bin],{env:{...env,...extra}});
+    const run=extra=>execFileSync('python3',['-c',vm.runInContext('startRelay',h.api),bin,'relay','start'],{env:{...env,...extra}});
     for(const extra of [
       {HERDR_APP_HOME:path.join(dir,'scratch-app')},
       {XDG_STATE_HOME:path.join(dir,'scratch-state')},
@@ -445,4 +445,60 @@ test('timed-out machine list uses the last inventory and still reads connected r
     assert.equal(result.machines[0].name,'ganymede');
     assert.equal(result.rows[0].machine,'ganymede');
   } finally {f.close();}
+});
+
+// The remote starter runs through a fake hc whose exec arguments are checked against the
+// vendored hc schema; its argv really executes, so the shell snippet and $HOME are exercised.
+test('remote vegad start goes through hc exec, only in real homes, and runs relay start there',()=>{
+  const h=load('vega'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'vega-remote-'));
+  try {
+    const schema=JSON.parse(fs.readFileSync(new URL('../crates/vega-herdr/schema/hc-0.1.18.openrpc.json',import.meta.url),'utf8'));
+    const names=schema.methods.find(m=>m.name==='machine.exec').params.map(p=>p.name);
+    fs.mkdirSync(path.join(dir,'.local/bin'),{recursive:true});
+    fs.writeFileSync(path.join(dir,'.local/bin/vega-post'),'#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_START_LOG"\n',{mode:0o755});
+    fs.writeFileSync(path.join(dir,'hc'),`#!/usr/bin/env python3
+import sys,json,base64,subprocess
+a=sys.argv[1:]; assert a[0]=='exec'
+flags={'--json':'json','--on':'on','--timeout':'timeout'}
+params=json.loads(${JSON.stringify(JSON.stringify(names))})
+i=1
+while a[i]!='--':
+ assert a[i] in flags and flags[a[i]] in ['json']+params, a[i]
+ i+=2 if a[i]!='--json' else 1
+p=subprocess.run(a[i+1:],capture_output=True)
+print(json.dumps({'stdout':base64.b64encode(p.stdout).decode(),'stderr':base64.b64encode(p.stderr).decode(),'code':p.returncode}))
+`,{mode:0o755});
+    const log=path.join(dir,'started');
+    const env={...process.env,HOME:dir,PATH:dir+':'+process.env.PATH,TEST_START_LOG:log};
+    for(const key of ['HERDR_APP_HOME','XDG_CONFIG_HOME','XDG_STATE_HOME']) delete env[key];
+    const args=['hc','exec','--json','--on','ganymede','--timeout','20','--','sh','-c',vm.runInContext('remoteStart',h.api)];
+    const run=extra=>JSON.parse(execFileSync('python3',['-c',vm.runInContext('startRelay',h.api),...args],{env:{...env,...extra},encoding:'utf8'}));
+    assert.deepEqual(run({XDG_STATE_HOME:path.join(dir,'scratch')}),{skipped:true});
+    assert(!fs.existsSync(log),'a scratch app never starts a remote vegad');
+    const outer=run({}),inner=JSON.parse(outer.stdout);
+    assert.equal(outer.code,0);assert.equal(inner.code,0);
+    assert.equal(fs.readFileSync(log,'utf8').trim(),'relay start');
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('vega mod starts vegad on connected machines now, then slowly; failures show after three',async()=>{
+  const h=load('vega');let now=1e12,fail=false;
+  h.api.Date={now:()=>now};
+  const starts=()=>h.calls.filter(c=>c[0]==='exec'&&c[2].includes('--on')).map(c=>c[2][c[2].indexOf('--on')+1]);
+  h.api.exec=async(...a)=>{h.calls.push(['exec',...a]);
+    return {code:0,stdout:JSON.stringify(fail?{code:0,stdout:JSON.stringify({code:1})}:{code:0,stdout:JSON.stringify({code:0})})};};
+  h.mod.started=new Map();h.mod.machines=[{name:'ganymede',state:'connected'},{name:'off',state:'disconnected'}];
+  await h.mod.startRemotes(h.cx);
+  assert.deepEqual(starts(),['ganymede'],'connected machines only');
+  const call=h.calls.find(c=>c[0]==='exec');
+  assert.deepEqual(Array.from(call[2].slice(2)),['hc','exec','--json','--on','ganymede','--timeout','20','--','sh','-c','exec "$HOME/.local/bin/vega-post" relay start']);
+  await h.mod.startRemotes(h.cx);assert.equal(starts().length,1,'not every refresh');
+  now+=300001;await h.mod.startRemotes(h.cx);assert.equal(starts().length,2,'slow period');
+  h.mod.machines=[{name:'ganymede',state:'disconnected'}];await h.mod.startRemotes(h.cx);
+  h.mod.machines=[{name:'ganymede',state:'connected'}];await h.mod.startRemotes(h.cx);
+  assert.equal(starts().length,3,'a machine turning connected starts at once');
+  fail=true;now+=300001;
+  for(let i=0;i<3;i++){await h.mod.startRemotes(h.cx);assert.equal(h.mod.startError,i<2?null:'hc ganymede vegad start failed');now+=60001;}
+  assert(texts(h.render()).includes('vega: hc ganymede vegad start failed'));
+  fail=false;await h.mod.startRemotes(h.cx);assert.equal(h.mod.startError,null);
 });

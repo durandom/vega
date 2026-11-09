@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 141 · 2026-11-09
+
+- migration: vegad has no login job any more (vega-0h4c.42). `vega post relay install` writes
+  none and removes `vega.vegad-start` (macOS LaunchAgent) or `vega-vegad-start.service` (Linux
+  user unit) from an earlier install; rerun it on each host, or deploy and let the next install
+  drop it. The herdr-app vega mod now starts vegad on its host and, through `hc exec`, on every
+  connected hc machine (at start, when a machine connects, then every five minutes), honouring
+  that host's `vegad.env` pin. `vega config infra` flags a leftover login job as `vegad-start`.
+
 ## 140 · 2026-11-09
 
 - feature: puck (corp work Mac) joins deimos in the built-in inbox-only host list: its mail goes to

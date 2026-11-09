@@ -151,9 +151,10 @@ pub fn mode(seen: Option<u32>, newest: u32) -> Mode {
     }
 }
 
-/// Whether the login starter or the legacy herdr startup hook is installed.
+/// Whether `relay install` ran: its pinned `vegad.env` (every install writes it) or the legacy
+/// herdr startup hook exists. There is no login job (vega-0h4c.42).
 pub fn vegad_installed(env: &Env) -> bool {
-    if vega_config::infra::vegad_login_path(env).is_file() {
+    if env.state.join("vega/vegad.env").is_file() {
         return true;
     }
     std::env::var_os("XDG_DATA_HOME")
@@ -172,9 +173,9 @@ pub fn vegad_line(installed: bool, broker: bool) -> String {
                  relay, registry, beads sync and ci verdict mail stay off";
     match (installed, broker) {
         (false, false) => format!(
-            "vegad: not installed; run vega post relay install (once per host, login starts it; {local})"
+            "vegad: not installed; run vega post relay install (once per host; herdr-app or herdr starts it; {local})"
         ),
-        (false, true) => "vegad: not installed; run vega post relay install (once per host, login starts it)".into(),
+        (false, true) => "vegad: not installed; run vega post relay install (once per host; herdr-app or herdr starts it)".into(),
         (true, false) => format!("vegad: installed; {local}"),
         (true, true) => "vegad: installed".into(),
     }

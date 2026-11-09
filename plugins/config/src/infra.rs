@@ -55,7 +55,7 @@ pub const COMPONENTS: [Component; 25] = [
     c("git", Required, "clone, upgrade, worktrees (>= 2.54: the wt-guard hook)", "install git with the OS package manager"),
     c("vega", Required, "every vega <plugin> call", "mise run install-cli in the vega checkout; put ~/.local/bin on PATH"),
     c("agent", Required, "the coding agents vega runs and configures", "install Claude Code, Codex or pi and start it once"),
-    c("vegad-start", Optional, "vegad at login without herdr-app or the TUI", "vega post relay install; runtime status: vega post relay status"),
+    c("vegad-start", Optional, "no old vegad login job (herdr-app and the TUI start vegad)", "vega post relay install removes it; runtime status: vega post relay status"),
     c("hc", Optional, "hc terminals, agent labels and the herdr-app backend", "install herdr-core (hc): https://github.com/herdrdev/herdr-core"),
     c("herdr-app", Optional, "vega-sidebar sidebar and vega-inbox decisions; apply the herdr-app config group", "install herdr-app, then vega config apply herdr-app"),
     c("python3", Optional, "herdr-app vega badge file reader and layout maintenance", "install Python 3 with the OS package manager"),
@@ -396,7 +396,7 @@ fn moshi_row(p: &Probe) -> (bool, String) {
     }
 }
 
-/// Login starter installed by `vega post relay install`; shared with onboarding.
+/// The old login job of vega-0h4c.25 (no longer installed; `relay install` removes it).
 pub fn vegad_login_path(env: &Env) -> PathBuf {
     if cfg!(target_os = "macos") {
         env.home.join("Library/LaunchAgents/vega.vegad-start.plist")
@@ -411,15 +411,12 @@ pub fn check(p: &Probe, ctx: &Ctx) -> Vec<Row> {
         .iter()
         .map(|comp| {
             let (ok, state) = match comp.name {
+                // vega-0h4c.42: no login job any more; one left by an earlier install is a problem.
                 "vegad-start" => {
-                    let path = vegad_login_path(&p.env);
-                    if path.is_file() {
-                        (
-                            true,
-                            "installed (login job; runtime: vega post relay status)".into(),
-                        )
+                    if vegad_login_path(&p.env).is_file() {
+                        (false, "old login job installed (vega post relay install removes it)".into())
                     } else {
-                        (false, "not installed".into())
+                        (true, "no login job (herdr-app starts vegad; runtime: vega post relay status)".into())
                     }
                 }
                 "git" => git(p),
@@ -508,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn login_job_is_reported_without_a_terminal_backend() {
+    fn old_login_job_is_reported_as_a_leftover() {
         let (_d, p, ctx) = setup(&[]);
         let path = if cfg!(target_os = "macos") {
             p.env
@@ -517,10 +514,10 @@ mod tests {
         } else {
             p.env.config.join("systemd/user/vega-vegad-start.service")
         };
-        assert!(!row(&check(&p, &ctx), "vegad-start").ok);
+        assert!(row(&check(&p, &ctx), "vegad-start").ok);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, "login job").unwrap();
-        assert!(row(&check(&p, &ctx), "vegad-start").ok);
+        assert!(!row(&check(&p, &ctx), "vegad-start").ok);
     }
 
     fn row<'a>(rows: &'a [Row], name: &str) -> &'a Row {
@@ -586,7 +583,7 @@ mod tests {
     fn bare_home_misses_everything_with_a_next_step() {
         let (_d, p, ctx) = setup(&[]);
         let rows = check(&p, &ctx);
-        assert_eq!(summary(&rows), "required 0/5, optional 1/20");
+        assert_eq!(summary(&rows), "required 0/5, optional 2/20");
         // chezmoi absent is fine: nothing manages vega's targets.
         assert!(row(&rows, "chezmoi").ok);
         for r in rows.iter().filter(|r| !r.ok) {

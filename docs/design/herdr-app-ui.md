@@ -39,8 +39,8 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
    `workspace-status` and keeps its background work (badge collection, guarded vegad start, inbox auto-open); the
    former `vega · vegad running · ⚖ N` line is gone.
 
-The login starter installed by `vega post relay install` owns vegad startup. The
-`vega` mod also calls the idempotent `relay start` as a fallback, only when
+The `vega` mod owns vegad startup (vega-0h4c.42): it runs the idempotent `relay start` locally and, via `hc exec`, on connected hc machines. The
+local start runs only when
 `HERDR_APP_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are unset or resolve to
 `~/.config/herdr-app`, `~/.config` and `~/.local/state` respectively. Scratch apps
 with a private app/config/state home never start a daemon. Scratch probes must

@@ -46,4 +46,4 @@ environment overrides win. A tailnet alone does not configure either service.
 Janitor embeddings similarly need `VEGA_JANITOR_EMBED_ENDPOINT` or
 `vega/janitor-embed.url`. Preserve host endpoints when upgrading.
 
-`vegad-start` login setup: `vega post relay install`.
+`vegad-start` flags an old login job; `vega post relay install` removes it.

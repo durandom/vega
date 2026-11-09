@@ -30,7 +30,7 @@ crontab or launchd plist: invisible to the UAC, no failure mail, no catch-up aft
   occurs twice (fall back) fires at the first occurrence.
 - Catch-up: a tick every 30 s computes the latest slot ≤ now. If it is newer than the task's `last_slot`, it
   fires once; a week asleep gives one firing, the most recent slot. Nothing fires for slots before the task
-  existed (or before its first approval). After a reboot nothing fires until the login job starts vegad at user login.
+  existed (or before its first approval). After a reboot nothing fires until vegad starts again (the herdr-app mod or the herdr hook starts it).
 - No cron expressions or `every = "6h"` in v1: no consumer needs them; both would be additive keys.
 
 ## Reminders

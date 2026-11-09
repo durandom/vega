@@ -19,7 +19,7 @@ read failures show a short status-line error only after three consecutive failur
 per source, without hiding local or other hosts' cards. Failed sources keep their
 last good cards until the original 60-second expiry; a failed `hc machine ls`
 falls back to the last cached machine inventory.
-`infra` reports the optional `vegad-start` login job (`vega post relay install`);
+`infra` flags a leftover `vegad-start` login job (`vega post relay install` removes it);
 runtime daemon state remains in `vega post relay status`.
 
 Commands: `vega config`, `diff`, `apply`, `print`, `init`, `infra`.

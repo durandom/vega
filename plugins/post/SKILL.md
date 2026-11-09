@@ -28,6 +28,6 @@ after completed identity migration, otherwise in identity quiesce.
 Inbox-only hosts: same-host `send`/`done` deliver through herdr or hc; `--uac` uses local v2 claims only. `vega mux` lists local agents. Cross-host replies: quarantine notes unless receiver operator pair grants deliver peer inbox mail. Sender panes are host claims, never approval.
 
 User setup: `vega post keygen` (public key for server); `vega post relay install`
-(login starter; optional herdr hook). Admin: `auth-config`, `provision`.
+(optional herdr hook; the app mod starts vegad). Admin: `auth-config`, `provision`.
 
 Flag-day cutover and rekey after a remote change: `vega post identity --help`.

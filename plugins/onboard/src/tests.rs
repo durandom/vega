@@ -189,7 +189,7 @@ fn vegad_is_recommended_also_without_a_broker() {
     let none = vegad_line(false, false);
     assert!(none.contains("run vega post relay install"), "{none}");
     assert!(none.contains("local mode"), "{none}");
-    assert!(none.contains("login starts it"), "{none}");
+    assert!(none.contains("herdr-app or herdr starts it"), "{none}");
     assert!(!vegad_line(false, true).contains("local mode"));
     assert_eq!(vegad_line(true, true), "vegad: installed");
     assert!(vegad_line(true, false).contains("local mode"));
@@ -198,10 +198,10 @@ fn vegad_is_recommended_also_without_a_broker() {
     // XDG_DATA_HOME unset in tests that run vega_onboard; the default dir.
     if std::env::var_os("XDG_DATA_HOME").is_none() {
         assert!(!vegad_installed(&env));
-        // A remote-only host has a login job and no herdr plugin manifest.
-        let login = vega_config::infra::vegad_login_path(&env);
+        // An app-only host has the pinned env and no herdr plugin manifest.
+        let login = env.state.join("vega/vegad.env");
         fs::create_dir_all(login.parent().unwrap()).unwrap();
-        fs::write(&login, "login job").unwrap();
+        fs::write(&login, "VEGA_POST_HOST=x\n").unwrap();
         assert!(vegad_installed(&env));
         fs::remove_file(login).unwrap();
         assert!(!vegad_installed(&env));

@@ -110,11 +110,12 @@ Vega never edits `shared.json` or layout click state. The app has no standalone 
 currently selected vega layout are also verified through the app; rejection restores the old file
 and prior layout selection. An inactive layout update is checked when next selected by the app.
 
-The login starter installed by `vega post relay install` owns vegad startup. As a fallback,
+The mod owns vegad startup (vega-0h4c.42; no login job). On this host
 the mod's `init()` runs a Python 3 guard and invokes `~/.local/bin/vega-post relay start` only
 when `HERDR_APP_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are unset or resolve to
 `~/.config/herdr-app`, `~/.config` and `~/.local/state`. Scratch copies with private homes never
-start vegad. The idempotent command detaches vegad; a startup failure cannot break the element.
+start vegad. The same guard lets the mod run `relay start` through `hc exec --on <machine>` on every
+connected hc machine (at start, on connect, every five minutes). The idempotent command detaches vegad; a startup failure cannot break the element.
 The row polls `relay status --json` every 15 seconds in the background and shows the shipped
 workspace status line with badge-read errors after three consecutive failures.
 It reads badge snapshots with Python 3 and watches their XDG state folder

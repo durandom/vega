@@ -142,31 +142,27 @@ The socket client uses socket2 for a portable connect deadline on Unix sockets.
 ## Lifecycle (vega-lhc.54)
 
 vegad needs starting, not supervising. herdr, the real-home herdr-app and the board can start it;
-it upgrades itself in place. Amendment vega-0h4c.25: hosts used remotely need an
-independent login starter, even with neither UI open. `relay install` now writes
-`~/Library/LaunchAgents/vega.vegad-start.plist` (macOS GUI login domain) or
-`$XDG_CONFIG_HOME/systemd/user/vega-vegad-start.service` (Linux user manager).
-Both run `vega-post relay start` once. launchd uses RunAtLoad and
-AbandonProcessGroup; systemd uses Type=oneshot, RemainAfterExit and KillMode=process
-so completion of the starter leaves the detached daemon alive. Neither restarts a
-stopped daemon. The existing lock arbitrates simultaneous UI/login starts.
-`relay stop` remains stopped until another explicit start, UI start or login.
-No hc core jobs are installed or changed.
+it upgrades itself in place. No login job starts it (amendment vega-0h4c.42; the LaunchAgent and
+systemd unit of vega-0h4c.25 are gone, and a corp Mac without GUI login could not load one). The
+app host owns startup, like the hc core: the herdr-app vega mod runs `vega-post relay start`
+locally (real default homes only) and, through `hc exec --on <machine>`, on every connected hc
+machine: at start, when a machine turns connected, then every five minutes. The starter runs
+`sh -c 'exec "$HOME/.local/bin/vega-post" relay start'` there, so that host's `vegad.env` pin
+(for example `VEGA_POST_HOST=io` on WSL `io-wsl`) applies: `relay start` loads `vegad.env` before
+it takes the lock. A failed start retries after one minute; the status line shows
+`hc <machine> vegad start failed` after three failures in a row, and nothing blocks the UI.
+The lock arbitrates simultaneous starts. `relay stop` on a machine holds at most five minutes
+while the app host runs; on the app host itself it holds until the next app start, herdr hook or
+board start.
 
-The login job records the installing user's HOME, XDG directories and PATH without
-agent shims. Broker/host/socket settings remain in `vegad.env`. Toolbox installs
-enter the original container with `toolbox run`; installation must have access to
-the host user systemd bus. Failed activation is a command failure, with the written
-unit retained for repair. Reinstall repairs changed jobs; an unchanged loaded
-launchd job is not unloaded. `relay status --json` reports `login_service` separately
-from `running`; `vega config infra` reports the installed `vegad-start` file, not
-proof that the daemon or user service manager is running.
+`relay install` pins `vegad.env`, links the herdr TUI hook and starts vegad. It writes no login
+job and removes `vega.vegad-start.plist` / `vega-vegad-start.service` left by an earlier install
+(`relay uninstall` removes them too). `relay status` shows `login_service` only while such an old
+job exists; `vega config infra` reports it as the `vegad-start` problem row.
 
-Login is the contract, not boot before login. Linux boot without login requires the
-operator to configure lingering separately; macOS requires a GUI login session.
-After merge, the operator must install and verify startup after login on macOS and
-Linux (including toolbox), with neither UI open. These live checks cannot be done
-from the implementation worktree without changing the user's services.
+A host with no app (no herdr-app, no TUI) and no hc machine link has no starter: run
+`vega post relay start` by hand. Live check after landing: no login job on proteus, ganymede and
+io; puck gets `relay install` and its vegad starts from the app host.
 
 **What herdr does with a plugin's children** (herdr 0.9.3 source and a live probe, 2026-10-10):
 startup hooks, actions and event hooks are plain child processes of the server (no process group,

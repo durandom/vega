@@ -44,7 +44,7 @@ hc/herdr-app and the legacy herdr TUI are alternative terminal interfaces.
 | `vega` | required | `vega` on PATH | every `vega <plugin>` call | `mise run install-cli`; put `~/.local/bin` on PATH |
 | `agent` | required | one of `~/.claude`, `~/.codex`, `~/.pi/agent` | the coding agents vega runs and configures | install Claude Code, Codex or pi and start it once |
 | `hc` | optional | `hc` on PATH | hc terminals, agent labels and the herdr-app backend | https://github.com/herdrdev/herdr-core |
-| `vegad-start` | optional | login job file installed | vegad at login without either UI | `vega post relay install`; `vega post relay status` for runtime state |
+| `vegad-start` | optional | no old login job file (problem if present) | no vegad login job; herdr-app and the TUI start vegad | `vega post relay install` removes it; `vega post relay status` for runtime state |
 | `herdr-app` | optional | `herdr-app` on PATH | vega-sidebar sidebar and vega-inbox decisions | install herdr-app, then `vega config apply herdr-app` |
 | `python3` | optional | `python3` on PATH | herdr-app badge reader and layout maintenance | the OS package manager |
 | `herdr` | optional | `herdr` on PATH (or `HERDR_BIN_PATH`) | legacy TUI backend: board and agents in panes | https://github.com/herdrdev/herdr |
@@ -91,14 +91,13 @@ experimental `dev.vega.hc-core` job on ganymede separately.
 
 ### Remote-only hosts
 
-After upgrading, run `vega post relay install` once on each host, from the logged-in
-user session. It installs the macOS launchd or Linux systemd user login starter,
-preserves the herdr TUI hook when available, and needs no herdr-app window.
-`vega config infra` reports `vegad-start`; `vega post relay status` reports whether
-the daemon actually runs. Log out/in and verify it with neither UI open. Linux
-before-login startup needs operator-configured lingering; the macOS job needs GUI
-login. For toolbox installs, verify the host user systemd bus is accessible and the
-container still exists. Do not run installers from sentinel worktrees.
+Run `vega post relay install` once on each host. It pins `vegad.env`, links the herdr TUI
+hook when herdr is installed and starts vegad. It installs no login job (vega-0h4c.42) and
+removes one from an earlier version. The app host's herdr-app vega mod starts vegad on itself
+and, via `hc exec`, on every connected hc machine, so a remote-only host (a corp Mac without
+GUI login) needs only `relay install` and a link from the app host. `vega config infra`
+reports an old login job as the `vegad-start` problem; `vega post relay status` reports
+whether the daemon actually runs. Do not run installers from sentinel worktrees.
 
 When the OS hostname differs from the registry host, explicitly pin the registry
 identity at install: `VEGA_POST_HOST=io vega post relay install` on WSL named

@@ -51,23 +51,35 @@ local['machines']=machines
 local['errors']=errors
 print(json.dumps(local))`;
 
-// Scratch apps must never create a detached daemon with a private state home.
-// The login starter remains the primary owner; real-home UI startup is a fallback.
-const startRelay = `import os,pathlib,subprocess,sys
+// Scratch apps must never create a detached daemon with a private state home, locally or on a
+// machine. The app host owns vegad startup; no login job exists (vega-0h4c.42). The command
+// (vega-post, or hc exec) runs only in the real default homes; one JSON line is printed.
+const startRelay = `import os,pathlib,subprocess,sys,json
 home=pathlib.Path.home()
 def default(name,path):
  value=os.environ.get(name)
  return not value or pathlib.Path(value).expanduser().resolve()==path.resolve()
 if default('HERDR_APP_HOME',home/'.config/herdr-app') and default('XDG_CONFIG_HOME',home/'.config') and default('XDG_STATE_HOME',home/'.local/state'):
- subprocess.run([sys.argv[1],'relay','start'],check=False)`;
+ try:
+  p=subprocess.run(sys.argv[1:],capture_output=True,text=True,timeout=30)
+  print(json.dumps({'code':p.returncode,'stdout':p.stdout,'stderr':p.stderr}))
+ except (OSError,subprocess.TimeoutExpired) as e: print(json.dumps({'code':-1,'stderr':str(e)}))
+else: print(json.dumps({'skipped':True}))`;
+
+// Idempotent starter on a machine. argv runs without a shell, so sh resolves the remote home;
+// relay start reads that host's vegad.env, so a host pin (io-wsl registered as io) applies.
+const remoteStart = 'exec "$HOME/.local/bin/vega-post" relay start';
+const START_OK_MS = 300000, START_RETRY_MS = 60000;
 
 export default class Vega extends View {
   init(_props, cx) {
     this.state = "checking";
     this.refreshing = false;
+    this.started = new Map(); // machine -> {next: ms, fails}
+    this.starting = false;
     this.seen = new Set(shared("vega.seen-decisions") ?? []);
     cx.spawn(async (cx) => {
-      try { await exec("python3", ["-c", startRelay, `${home()}/.local/bin/vega-post`]); } catch (_) {}
+      try { await exec("python3", ["-c", startRelay, `${home()}/.local/bin/vega-post`, "relay", "start"]); } catch (_) {}
       await this.refresh(cx);
     });
     cx.timer.every(15000, (cx) => {
@@ -144,6 +156,33 @@ export default class Vega extends View {
     finally { this.refreshing = false; }
     this.state = state;
     cx.notify();
+    this.startRemotes(cx);
+  }
+
+  // Starts vegad on every connected hc machine: when it turns connected, then every few
+  // minutes (a failure retries after a minute). A failure shows after three in a row.
+  async startRemotes(cx) {
+    if (this.starting) return;
+    this.starting = true;
+    this.started ??= new Map();
+    try {
+      const live = (this.machines ?? []).filter(m => m.state === "connected").map(m => m.name);
+      for (const name of [...this.started.keys()]) if (!live.includes(name)) this.started.delete(name);
+      const due = live.filter(name => (this.started.get(name)?.next ?? 0) <= Date.now());
+      await Promise.all(due.map(async name => {
+        let ok = false;
+        try {
+          const r = await exec("python3", ["-c", startRelay, "hc", "exec", "--json", "--on", name, "--timeout", "20", "--", "sh", "-c", remoteStart]);
+          const outer = r.code === 0 ? JSON.parse(r.stdout) : {code: -1};
+          ok = Boolean(outer.skipped) || (outer.code === 0 && JSON.parse(outer.stdout).code === 0);
+        } catch (_) {}
+        const fails = ok ? 0 : (this.started.get(name)?.fails ?? 0) + 1;
+        this.started.set(name, {next: Date.now() + (ok ? START_OK_MS : START_RETRY_MS), fails});
+      }));
+      const bad = [...this.started].filter(([, v]) => v.fails >= 3).map(([name]) => `hc ${name} vegad start failed`);
+      this.startError = bad.join("; ") || null;
+      cx.notify();
+    } finally { this.starting = false; }
   }
 
   // The shipped status line (workspace-status) without the palette hint; vega's own
@@ -152,6 +191,7 @@ export default class Vega extends View {
     const t = theme();
     const space = spaces().find(s => s.active);
     const list = agents();
+    const shown = [this.error, this.startError].filter(Boolean).join("; ");
     const needs = list.filter(a => a.status === "blocked").length;
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
     return h_flex().size_full().px(14).gap(16).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
@@ -160,6 +200,6 @@ export default class Vega extends View {
       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
       // A failed badge read (a machine unreachable, a reader error) shows at the right end.
-      .when(Boolean(this.error), el => el.child(div().flex_1()).child(div().id("vega-error").truncate().text_color(t.blocked).tooltip(this.error).child(`vega: ${this.error}`)));
+      .when(Boolean(shown), el => el.child(div().flex_1()).child(div().id("vega-error").truncate().text_color(t.blocked).tooltip(shown).child(`vega: ${shown}`)));
   }
 }
