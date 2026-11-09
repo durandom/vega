@@ -9,14 +9,14 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
 
 1. **`vega-sidebar` replaces the shipped `agents` mod** in the vega layout (`config/herdr-app/layouts/vega.json`).
    It starts as `herdr-app do mod.clone '{"name":"agents","as":"vega-sidebar"}'` and keeps what the original
-   does: sub-agent tree from `terminals().parent`, priority sort, "Needs you", click to focus. vega adds:
+   does: sub-agent tree from `terminals().parent`, "Needs you", click to focus. Stage 1 removes priority sorting. vega adds:
    the UAC project tree across machines (the default view, replacing the TUI "machines" tree; decision 3),
    the UAC badge, the harness glyph, mail count, hand (waiting), scale (decisions) and git state.
 2. **Every vega icon is clickable on its own** (`on_click` with `cx.stop_propagation()`): mail opens that
    agent's inbox, hand focuses the agent's tab, scale opens the decision in `vega-inbox`. In the TUI sidebar
    these icons were not clickable.
 3. **`vega-sidebar` is the only sidebar list (Slayer, 2026-11-07, revises "spaces mod stays").** The layout
-   drops the shipped `spaces` list and the Settings / Add machine footer. The default view "UAC / spaces":
+   drops the shipped `spaces` list and the Settings / Add machine footer. The manually ordered project tree:
    one group per project with a UAC on any machine, in an order the Slayer drags (kept in the mod's
    localStorage); under it the UAC first, its sentinels as tree branches, then the project's other agents on
    any machine. Below, "Spaces": every space without a UAC, a click selects it. Rows follow the TUI symbols
@@ -49,14 +49,74 @@ The herdr TUI startup hook is unchanged.
 
 ## Space rename (vega-0h4c.48)
 
-Right-clicking a space row in the default UAC / spaces view opens a small
-`kind: "popup"` overlay, following the sort menu pattern. Rename replaces the
+Right-clicking a non-UAC space row opens a small
+`kind: "popup"` overlay. Rename replaces the
 menu item with an input prefilled with that space's name. Only the explicit
 Rename click focuses that input; input state is created in the event handler,
 never during render. Enter submits a nonempty trimmed name through
 `run("space.rename", {id, name})` and closes the popup. The original space ID is
 kept intact, including a remote machine prefix such as `puck/sp…`. Escape closes
 the popup without submitting, and a right-click does not select the space.
+
+## Project Config overlay and views (stage 1, vega-0h4c.49)
+
+The epic vega-0h4c.50 keeps project preferences in vega, independent of herdr-app.
+`vega-project`, a second binary of the existing config plugin package, owns
+`$XDG_CONFIG_HOME/vega/projects.toml` (normally `~/.config/vega/projects.toml`).
+It follows the theme preferences pattern: TOML edits preserve comments and unknown keys,
+missing files mean empty preferences, malformed data fails without a write, and atomic
+replacement preserves file mode and symlinks. An advisory lock serializes writers.
+Preferences are personal to the app host, outside the registry and project repository;
+syncing the file is a future option if the app runs on several hosts.
+
+```toml
+[projects."github.com/team/repo"]
+name = "My project" # empty means use the UAC's vega.project label
+labels = ["work"]
+
+[views.Work]
+labels = ["work"]
+machines = ["puck"]
+```
+
+`vega project config <project-id> [--name <name>] [--label <label>]...
+[--unlabel <label>]... [--json]` reads or edits one entry. Keys are the full normalized
+remote from `vega.project-id`, never a terminal ID or short repository name.
+Label additions/removals are idempotent; removal wins if both are requested.
+`vega project config --json` returns `{projects: {...}, views: {...}}` in one exec.
+An individual read returns `{projects: {<id>: {name, labels}}}`; absent entries have
+empty defaults, and a read never creates the file.
+
+Right-clicking a project header or its UAC row opens a popup with a descriptor-driven
+tab bar. Stage 1 exposes only Config (display name, comma-separated labels, Save).
+Later stages add UAC, Board, Decisions and Notifications descriptors and renderers.
+Inputs load once on opening, never autofocus, and remain editable on save errors.
+Save uses argv via `exec("vega", ["project", "config", ...])` on the app host, including
+for remote UACs. Escape closes. Non-UAC Spaces rows retain Rename.
+The display name overrides the header's terminal project label; clearing it restores
+the label. Full IDs keep same-named repositories separate; old short-name manual order
+migrates only when unambiguous.
+
+The header's All/view selector replaces the sort menu. Only manual project drag order
+remains; Priority and Grouped by space modes are removed. Dragging within a filtered
+view preserves hidden projects' saved positions. Unmoved projects start in stable ID order.
+Views live in the same TOML file, through `vega project view <name>
+[--label <label>]... [--machine <machine>]... [--json]`; filter flags replace both dimensions.
+`--delete` removes a saved view. The popup selects, edits, saves and deletes views.
+The built-in `all` view is reserved and matches everything; a deleted selection falls
+back to All. Only the active view name and existing drag order are localStorage UI state;
+config and view definitions are never persisted in the mod's shared/local state.
+A single CLI read loads both tables at startup and every five seconds; readers retain
+their last good snapshot and show errors. Reopening an overlay reads fresh preferences.
+
+Within one dimension, selected labels/machines are alternatives (OR); across dimensions,
+both must match (AND). An empty dimension is unrestricted. Machine keys are hc names;
+`local` denotes the app host. Machine filters select the UAC's machine for a project group,
+keeping its sentinels and associated spaces together across machines. Those rows inherit
+their UAC's labels, including children linked only by parent. Unassociated spaces use
+their own machine and have no labels: All shows them, a label-filtered view hides them,
+and a machine-only view shows those on a selected machine. Filtering also applies to
+the collapsed rail and keyboard navigation.
 
 ## Data path
 
@@ -131,8 +191,9 @@ remote UAC, and a remote waiting card focuses its terminal.
 
 ## Live-tour polish (vega-0h4c.24)
 
-Machine/project groups use short repository names; routing still uses
-`vega.project-id`. A listed child appears only in its visible ancestor's tree,
+Project groups use full `vega.project-id` keys, with display names or short project
+labels in headers. Legacy short labels join a UAC only when unambiguous.
+A listed child appears only in its visible ancestor's tree,
 including children with panes in another space. A child whose ancestor is absent
 remains a top-level row. Project totals omit zero values.
 This tree rule also applies to pinned children: they stay under their visible

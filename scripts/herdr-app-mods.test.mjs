@@ -14,7 +14,7 @@ function load(name, {allowFocus=false}={}) {
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
       if(k==='id'||k==='tooltip')return v=>{o[k+'Value']=v;return proxy;};
-      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down')o.mouseButton=a[0];return proxy;};
+      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down'){o.mouseButton=a[0];o.handlers[`${k}:${a[0]}`]=a.at(-1);}return proxy;};
       return ()=>proxy;
     }});return proxy;
   }
@@ -246,19 +246,19 @@ test('UAC projects hold their agents across machines in dragged order; other spa
   let ids=nodes.map(n=>n.idValue).filter(i=>typeof i==='string');
   const at=i=>ids.indexOf(i);
   assert.equal(ids.filter(i=>i.startsWith('uac-')).length,2,'one group per UAC project');
-  assert(at('uac-lanista')<at('ag-ganymede/t2')&&at('ag-ganymede/t2')<at('ag-t5')&&at('ag-t5')<at('uac-vega'),'UAC first, then the project\'s agents on other machines');
+  assert(at('uac-github.com/team/lanista')<at('ag-ganymede/t2')&&at('ag-ganymede/t2')<at('ag-t5')&&at('ag-t5')<at('uac-github.com/team/vega'),'UAC first, then the project\'s agents on other machines');
   assert(at('sub-ganymede/t3')>at('ag-ganymede/t2'),'sentinel is a branch of its UAC');
   assert(text.includes('feat/x')&&!text.some(s=>s.includes('⚙')),'sentinel name without the cog');
   assert(text.includes('♃₃')&&text.includes('♆₈'),'machine symbol on every row');
-  assert(text.includes('Spaces')&&at('space-sp3')>at('uac-vega'),'a space without a UAC follows under Spaces');
+  assert(text.includes('Spaces')&&at('space-sp3')>at('uac-github.com/team/vega'),'a space without a UAC follows under Spaces');
   assert(!ids.includes('space-sp1'),'no folder rows inside a UAC project');
   assert(text.includes('✉ 2'));assert(!text.includes('✉ 9'),'totals come from the UAC\'s machine');
   // Drag vega above lanista; the order is kept.
   const press=(id,ev)=>elements(h.render()).find(n=>n.idValue===id).handlers[ev]({},h.cx);
-  press('uac-vega','on_mouse_down');press('uac-lanista','on_mouse_move');press('uac-lanista','on_mouse_up');
+  press('uac-github.com/team/vega','on_mouse_down');press('uac-github.com/team/lanista','on_mouse_move');press('uac-github.com/team/lanista','on_mouse_up');
   ids=elements(h.render()).map(n=>n.idValue).filter(i=>typeof i==='string');
-  assert(ids.indexOf('uac-vega')<ids.indexOf('uac-lanista'),'dragged project moves up');
-  assert.deepEqual(JSON.parse(h.storage.get('project-order')),['vega','lanista']);
+  assert(ids.indexOf('uac-github.com/team/vega')<ids.indexOf('uac-github.com/team/lanista'),'dragged project moves up');
+  assert.deepEqual(JSON.parse(h.storage.get('project-order')),['github.com/team/vega','github.com/team/lanista']);
   const click=elements(h.render()).find(n=>n.idValue==='space-sp3');click.handlers.on_click({},h.cx);
   assert(h.calls.some(c=>c[0]==='run'&&c[1]==='space.select'&&c[2].id==='sp3'),'a space row selects that space');
 });
@@ -538,4 +538,89 @@ test('vega mod starts vegad on connected machines now, then slowly; failures sho
   for(let i=0;i<3;i++){await h.mod.startRemotes(h.cx);assert.equal(h.mod.startError,i<2?null:'hc ganymede vegad start failed');now+=60001;}
   assert(texts(h.render()).includes('vega: hc ganymede vegad start failed'));
   fail=false;await h.mod.startRemotes(h.cx);assert.equal(h.mod.startError,null);
+});
+
+function projectFixture(h) {
+  const project='github.com/team/a';
+  h.api.terminals=()=>[
+    {address:'puck/t1',state:'live',labels:{'vega.role':'uac','vega.project-id':project,'vega.project':'a','herdr.space':'uac'}},
+    {address:'t2',state:'live',parent:'puck/t1',labels:{'herdr.space':'sentinel'}},
+    {address:'t3',state:'live',labels:{'vega.project-id':project,'herdr.space':'other'}},
+    {address:'t4',state:'live',labels:{'herdr.space':'scratch'}},
+  ];
+  h.api.spaces=()=>['puck/uac','sentinel','other','scratch'].map(id=>({id,name:id,machine:id.startsWith('puck/')?'puck':null,tabs:[]}));
+  h.api.agents=()=>[['puck/t1','puck/uac'],['t2','sentinel'],['t3','other'],['t4','scratch']].map(([address,space])=>({address,space,pane:address,tab:'tb',status:'idle',program:{}}));
+  return project;
+}
+
+test('project Config overlay loads once, saves argv including label removal, and keeps failures editable',async()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  h.mod.init({},h.cx);
+  const header=elements(h.render()).find(n=>n.idValue===`uac-${project}`);
+  header.handlers['on_mouse_down:right']({},h.cx);
+  assert(!h.calls.some(c=>c[0]==='run'&&c[1]==='space.rename'));
+  const spec=h.calls.find(c=>c[0]==='open')[1];assert.equal(spec.props.projectConfig,project);
+  assert.equal(spec.kind,'popup');
+  const popup=load('vega-sidebar');popup.setProps({...spec.props,overlay:'config'});
+  popup.api.exec=async(bin,args)=>{popup.calls.push(['exec',bin,args]);return {code:0,stdout:JSON.stringify({projects:{[project]:{name:'Name',labels:['work','old']}},views:{}})};};
+  popup.mod.init({},popup.cx);await popup.flush();
+  let text=texts(popup.render());assert(text.includes('Config'));assert(!text.includes('Rename'));
+  assert.equal(popup.mod.nameInput.value(),'Name');assert.equal(popup.calls.filter(c=>c[0]==='exec').length,1);
+  popup.mod.nameInput.set_value('');popup.mod.labelsInput.set_value('work, private, private');
+  popup.api.exec=async(bin,args)=>{popup.calls.push(['exec',bin,args]);return {code:1,stderr:'Read only'};};
+  elements(popup.render()).find(n=>n.idValue==='save-project').handlers.on_click({},popup.cx);await popup.flush();
+  assert(texts(popup.render()).some(s=>s.includes('Read only')));
+  assert.equal(popup.mod.labelsInput.value(),'work, private, private');
+  assert.deepEqual(Array.from(popup.calls.filter(c=>c[0]==='exec').at(-1)[2]),['project','config',project,'--name','','--label','work','--label','private','--unlabel','old','--json']);
+  popup.api.exec=async()=>({code:0,stdout:JSON.stringify({projects:{[project]:{name:'',labels:['work','private']}}})});
+  await popup.mod.saveProject(popup.cx);assert(texts(popup.render()).includes('Saved'));
+  popup.render().handlers.on_key_down({keystroke:'escape'},popup.cx);
+  assert(popup.calls.some(c=>c[0]==='close'&&c[1]==='config'));
+});
+
+test('names use full IDs, filters keep the UAC tree together and All restores unlabelled spaces',async()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  const prefs={projects:{[project]:{name:'Display A',labels:['work']}},views:{Work:{labels:['work'],machines:['puck']},Other:{labels:['private'],machines:[]},Local:{labels:[],machines:['local']}}};
+  h.api.exec=async(bin)=>({code:0,stdout:bin==='vega'?JSON.stringify(prefs):''});
+  h.mod.init({},h.cx);await h.flush();
+  assert(texts(h.render()).includes('Display A'));
+  h.storage.set('active-view','Work');let nodes=elements(h.render());
+  assert(nodes.some(n=>n.idValue==='sub-t2'));assert(nodes.some(n=>n.idValue==='ag-t3'));
+  assert(!nodes.some(n=>n.idValue==='space-scratch'));
+  assert.equal(JSON.stringify(h.calls.filter(c=>c[0]==='order').at(-1)[1]),JSON.stringify(['puck/t1','t2','t3']));
+  h.storage.set('active-view','Other');assert(!elements(h.render()).some(n=>typeof n.idValue==='string'&&n.idValue.startsWith('uac-')));
+  h.storage.set('active-view','Local');nodes=elements(h.render());
+  assert(!nodes.some(n=>typeof n.idValue==='string'&&n.idValue.startsWith('uac-')));assert(nodes.some(n=>n.idValue==='space-scratch'));
+  h.storage.set('active-view','all');assert(elements(h.render()).some(n=>n.idValue==='space-scratch'));
+  prefs.projects[project].name='';await h.mod.refreshPreferences(h.cx);assert(texts(h.render()).includes('a'));
+  h.api.exec=async()=>({code:1,stderr:'Unavailable'});await h.mod.refreshPreferences(h.cx);
+  assert.equal(h.mod.preferences.projects[project].labels[0],'work','failed refresh preserves last good data');
+});
+
+test('same-named repositories have separate config targets and legacy labels cannot join ambiguously',()=>{
+  const h=load('vega-sidebar'),id='github.com/team/a',other='gitlab.com/other/a';
+  projectFixture(h);const terminals=h.api.terminals();
+  h.api.terminals=()=>[...terminals,{address:'t5',state:'live',labels:{'vega.role':'uac','vega.project-id':other,'vega.project':'a'}},{address:'t6',state:'live',labels:{'vega.project':'a'}}];
+  h.mod.init({},h.cx);h.mod.preferences={projects:{[id]:{name:'One'},[other]:{name:'Two'}},views:{}};
+  const text=texts(h.render());assert(text.includes('One'));assert(text.includes('Two'));
+  const grouping=h.mod.projectGroups(h.api.terminals());assert.equal(grouping.projectOfAgent({address:'t6'}),null);
+});
+
+test('view popup selects, saves and deletes CLI-owned views without persisting config in shared state',async()=>{
+  const h=load('vega-sidebar');h.setProps({viewMenu:true,overlay:'views'});
+  let preferences={projects:{},views:{Work:{labels:['work'],machines:['puck']}}};
+  h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,args]);return {code:0,stdout:JSON.stringify(preferences)};};
+  h.mod.init({},h.cx);await h.flush();
+  elements(h.render()).find(n=>n.idValue==='edit-view-Work').handlers.on_click({},h.cx);
+  assert.equal(h.mod.viewMachines.value(),'puck');
+  h.mod.viewName.set_value('Focus');h.mod.viewMachines.set_value('puck, local');
+  await h.mod.saveView(h.cx);
+  const saved=h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1);
+  assert.deepEqual(Array.from(saved[2]),['project','view','Focus','--label','work','--machine','puck','--machine','local','--json']);
+  await h.mod.saveView(h.cx,true,'Work');
+  assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2]),['project','view','Work','--delete','--json']);
+  elements(h.render()).find(n=>n.idValue==='view-Work').handlers.on_click({},h.cx);
+  assert.equal(h.storage.get('active-view'),'Work');assert.equal(h.state.size,0);
+  const source=fs.readFileSync(new URL('../config/herdr-app/mods/vega-sidebar/main.js',import.meta.url),'utf8');
+  assert(!source.includes('sortMenu'));assert(!source.includes('Grouped by space'));assert(!source.includes('Sort agents'));
 });

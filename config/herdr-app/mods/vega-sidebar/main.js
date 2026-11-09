@@ -1,7 +1,6 @@
-// Agents in grouped or priority views; parents take their most urgent sub-agent's place.
-// A viewed done agent stays in Done until left.
+// Manually ordered projects and spaces; project preferences belong to vega.
 
-import { View, div, image, svg } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home } from "herdr";
 
@@ -70,22 +69,16 @@ function title(tab, l) {
   const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
   return (tab.name === prog || !tab.named) && telling ? live : tab.name;
 }
-const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
 const kidStatus = (k, listed) => {
   const s = listed.get(k.address) ?? k.status;
   return s === "error" ? "blocked" : s === "done" ? "idle" : s;
 };
-const SORTS = [
-  // The first is the default: UAC projects across machines, then spaces (projectTree).
-  { id: "project", label: "UAC / spaces", icon: "layers" },
-  { id: "priority", label: "Priority", icon: "clock" },
-  { id: "grouped", label: "Grouped by space", icon: "layers" },
-];
-const sortOf = () => SORTS.find((s) => s.id === shared("vega-sidebar.view")) ?? SORTS[0];
-const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
-const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
+// Later stages add tab descriptors and renderers here without changing the shell.
+const PROJECT_TABS = [{ id: "config", label: "Config", render: "configTab" }];
+const values = input => [...new Set(input.split(",").map(s => s.trim()).filter(Boolean))];
+const machineOf = address => address?.includes("/") ? address.split("/")[0] : "local";
 
 function duration(ms) {
   const m = Math.floor(ms / 60000);
@@ -93,12 +86,6 @@ function duration(ms) {
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
-}
-
-// The agent's icon from the app's program table: a one-color glyph or a picture.
-function icon(p, size, color) {
-  if (!p?.icon) return null;
-  return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
 }
 
 export default class Agents extends View {
@@ -122,7 +109,32 @@ export default class Agents extends View {
       });
       return;
     }
-    if (props()?.sortMenu || props()?.spaceMenu) return;
+    if (props()?.projectConfig || props()?.viewMenu) {
+      this.preferences = { projects: {}, views: {} };
+      this.loading = true;
+      if (props()?.viewMenu) {
+        this.viewName = InputState.new({ placeholder: "View name" });
+        this.viewLabels = InputState.new({ placeholder: "Labels, comma separated" });
+        this.viewMachines = InputState.new({ placeholder: "Machines, comma separated (local for this host)" });
+      }
+      cx.spawn(async cx => {
+        await this.refreshPreferences(cx);
+        const config = this.preferences.projects?.[props()?.projectConfig];
+        if (props()?.projectConfig && !this.configError) {
+          this.nameInput = InputState.new({ value: config?.name ?? "", placeholder: "Default project name" });
+          this.labelsInput = InputState.new({ value: (config?.labels ?? []).join(", "), placeholder: "work, private" });
+          this.originalLabels = config?.labels ?? [];
+        }
+        this.loading = false;
+        cx.notify();
+      });
+      return;
+    }
+    if (props()?.spaceMenu) return;
+    this.preferences = { projects: {}, views: {} };
+    this.activeView = localStorage.getItem("active-view") ?? "all";
+    cx.spawn(cx => this.refreshPreferences(cx));
+    cx.timer.every(5000, cx => this.refreshPreferences(cx));
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
@@ -180,44 +192,111 @@ export default class Agents extends View {
     return this.changed[a.address]?.at ?? 0;
   }
 
-  // Looking at a done agent makes it idle; it stays with Done until you leave
-  // it rather than drop away under you. Any other change moves it at once.
-  hold(list) {
-    const cur = list.find((a) => a.focused);
-    const same = cur && cur.address === this.held?.address;
-    // Arriving, or any change but done turning idle, sets what it was.
-    if (!same || cur.status !== "idle") this.held = cur ? { address: cur.address, rank: RANK[cur.status] ?? 0 } : null;
+  async refreshPreferences(cx) {
+    if (this.readingPreferences) return;
+    this.readingPreferences = true;
+    try {
+      const r = await exec("vega", ["project", "config", "--json"]);
+      if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Project config unavailable");
+      const data = JSON.parse(r.stdout);
+      if (!data.projects || !data.views) throw new Error("Invalid project config response");
+      this.preferences = data;
+      this.configError = null;
+    } catch (e) { this.configError = String(e); }
+    finally { this.readingPreferences = false; cx.notify(); }
   }
 
-  rank(a) {
-    const sawDone = a.address === this.held?.address && this.held.rank === RANK.done && a.status === "idle";
-    return sawDone ? RANK.done : RANK[a.status] ?? 0;
+  openProject(project, cx) {
+    cx.stop_propagation();
+    if (!project) return;
+    openOverlay({ mod: "vega-sidebar", kind: "popup", width: 440, height: 330,
+      props: { projectConfig: project } });
   }
 
-  sortMenu(t) {
-    const on = sortOf().id;
-    return v_flex()
-      .w_full()
-      .p(5)
-      .bg(t.popover)
-      .text_size(12.8)
-      .child(div().px(8).pt(4).pb(6).text_size(11).text_color(t.dim).child("Sort agents"))
-      .children(SORTS.map((s) => h_flex()
-        .id(`sort-${s.id}`)
-        .h(31)
-        .px(8)
-        .gap(9)
-        .rounded(7)
-        .items_center()
-        .text_color(t.foreground)
-        .hover((el) => el.bg(t.hover))
-        .on_click(() => {
-          setShared("vega-sidebar.view", s.id);
-          closeOverlay(props().overlay);
-        })
-        .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
-        .child(div().flex_1().child(s.label))
-        .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
+  async saveProject(cx) {
+    if (this.saving || !this.nameInput) return;
+    this.saving = true; this.configError = null; cx.notify();
+    const labels = values(this.labelsInput.value());
+    const args = ["project", "config", props().projectConfig, "--name", this.nameInput.value().trim()];
+    for (const label of labels) args.push("--label", label);
+    for (const label of this.originalLabels) if (!labels.includes(label)) args.push("--unlabel", label);
+    args.push("--json");
+    try {
+      const r = await exec("vega", args);
+      if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Save failed");
+      const saved = JSON.parse(r.stdout).projects[props().projectConfig];
+      this.originalLabels = saved.labels;
+      this.saved = true;
+    } catch (e) { this.configError = String(e); }
+    finally { this.saving = false; cx.notify(); }
+  }
+
+  configTab(t) {
+    const field = (label, input) => v_flex().gap(5)
+      .child(div().text_size(11).text_color(t.dim).child(label))
+      .child(Input.new(input).h(32).px(8).rounded(6).border_1().border_color(t.input).bg(t.background));
+    return v_flex().gap(12)
+      .child(field("Display name (empty uses project name)", this.nameInput))
+      .child(field("Labels (comma separated)", this.labelsInput))
+      .child(div().id("save-project").h(30).px(8).rounded(6).cursor_pointer().bg(t.raised)
+        .on_click((_e, cx) => cx.spawn(cx => this.saveProject(cx)))
+        .child(this.saving ? "Saving…" : "Save"))
+      .when(Boolean(this.saved), el => el.child("Saved"));
+  }
+
+  projectOverlay(t) {
+    const tab = PROJECT_TABS.find(tab => tab.id === this.projectTab) ?? PROJECT_TABS[0];
+    return v_flex().size_full().p(12).gap(12).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
+      .child(h_flex().gap(12).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
+        .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
+        .on_click((_e, cx) => { this.projectTab = item.id; cx.notify(); }).child(item.label))))
+      .child(div().text_size(11).text_color(t.dim).child(props().projectConfig))
+      .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)))
+      .child(this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable"));
+  }
+
+  async saveView(cx, remove = false, id = this.viewName.value().trim()) {
+    if (this.saving || !id || id === "all") return;
+    this.saving = true; this.configError = null; cx.notify();
+    const args = ["project", "view", id];
+    if (remove) args.push("--delete");
+    else {
+      const labels = values(this.viewLabels.value()), machines = values(this.viewMachines.value());
+      if (!labels.length && !machines.length) {
+        this.configError = "Choose at least one label or machine; All already shows everything.";
+        this.saving = false; cx.notify(); return;
+      }
+      for (const label of labels) args.push("--label", label);
+      for (const machine of machines) args.push("--machine", machine);
+    }
+    args.push("--json");
+    try {
+      const r = await exec("vega", args);
+      if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Save view failed");
+      await this.refreshPreferences(cx);
+    } catch (e) { this.configError = String(e); }
+    finally { this.saving = false; cx.notify(); }
+  }
+
+  viewMenu(t) {
+    const select = (id) => { localStorage.setItem("active-view", id); closeOverlay(props().overlay); };
+    return v_flex().size_full().overflow_y_scrollbar().p(12).gap(9).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .child(div().id("view-all").cursor_pointer().child("All").on_click(() => select("all")))
+      .children(Object.entries(this.preferences.views ?? {}).map(([id, view]) => h_flex().gap(8)
+        .child(div().id(`view-${id}`).flex_1().cursor_pointer().child(id).on_click(() => select(id)))
+        .child(div().id(`edit-view-${id}`).cursor_pointer().child("Edit").on_click((_e, cx) => {
+          this.viewName.set_value(id); this.viewLabels.set_value(view.labels.join(", "));
+          this.viewMachines.set_value(view.machines.join(", ")); cx.notify();
+        }))
+        .child(div().id(`delete-view-${id}`).cursor_pointer().child("Delete").on_click((_e, cx) => cx.spawn(cx => this.saveView(cx, true, id))))))
+      .child(div().text_size(11).text_color(t.dim).child("Save a view · any label AND any machine"))
+      .child(Input.new(this.viewName).h(30).px(6).bg(t.background))
+      .child(Input.new(this.viewLabels).h(30).px(6).bg(t.background))
+      .child(Input.new(this.viewMachines).h(30).px(6).bg(t.background))
+      .child(div().id("save-view").cursor_pointer().child(this.saving ? "Saving…" : "Save view")
+        .on_click((_e, cx) => cx.spawn(cx => this.saveView(cx))))
+      .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)));
   }
 
   openSpaceMenu(space, cx) {
@@ -271,33 +350,6 @@ export default class Agents extends View {
     });
   }
 
-  subRow(t, s, shown, compact) {
-    const k = s.t;
-    const st = kidStatus(k, this.listed);
-    const pic = icon(k.program, 14, t.foreground);
-    const on = k.address === shown;
-    return h_flex()
-      .id(`sub-${k.address}`)
-      .pl(39)
-      .pr(8)
-      .rounded(8)
-      .h(26)
-      .flex_none()
-      .gap(0)
-      .items_center()
-      .text_size(12.5)
-      .when(on, (el) => el.bg(t.raised))
-      .hover((s) => s.bg(t.hover))
-      .on_click(() => this.peek(k.address))
-      .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(17).mr(4).flex_none()
-        .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
-        .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
-      .when(Boolean(pic), el => el.child(div().mr(8).child(pic)))
-      .child(div().flex_1().truncate().text_color(on ? t.foreground : t.muted).child(k.name || k.template || k.program?.name || k.address))
-      .child(this.vegaIcons(k.address, t))
-      .child(this.status(t, { status: st }, compact));
-  }
-
   // compact: a ! for blocked where a header already says "Needs you".
   status(t, a, compact = false) {
     const color = t[a.status] ?? t.dim;
@@ -317,29 +369,81 @@ export default class Agents extends View {
     return slash < 0 ? id : `${term.address.slice(0, slash)}/${id}`;
   }
 
+  // Full IDs keep same-named repositories separate. Legacy short labels may
+  // join only a unique UAC; new terminals always carry vega.project-id.
+  projectGroups(all) {
+    const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
+    const live = all.filter(x => x.state === "live");
+    const byAddress = new Map(live.map(x => [x.address, x]));
+    const labelsOf = address => byAddress.get(address)?.labels ?? {};
+    const uacs = new Map();
+    for (const x of live) {
+      const l = x.labels ?? {}, id = l["vega.project-id"] || l["vega.project"];
+      if (l["vega.role"] === "uac" && id) uacs.set(id, x);
+    }
+    const resolve = l => {
+      if (l["vega.project-id"]) return uacs.has(l["vega.project-id"]) ? l["vega.project-id"] : null;
+      const legacy = l["vega.project"];
+      if (!legacy) return null;
+      if (uacs.has(legacy)) return legacy;
+      const matches = [...uacs.keys()].filter(id => short(id) === legacy);
+      return matches.length === 1 ? matches[0] : null;
+    };
+    const projectOfSpace = new Map();
+    // UAC space wins over a sentinel's stale label in the same space.
+    for (const x of [...uacs.values(), ...live]) {
+      const sp = this.spaceOfTerminal(x), p = resolve(x.labels ?? {});
+      if (sp && p && !projectOfSpace.has(sp)) projectOfSpace.set(sp, p);
+    }
+    const projectOfAgent = a => {
+      let terminal = byAddress.get(a.address), seen = new Set();
+      while (terminal && !seen.has(terminal.address)) {
+        seen.add(terminal.address);
+        const p = resolve(terminal.labels ?? {}) || projectOfSpace.get(this.spaceOfTerminal(terminal));
+        if (p) return p;
+        terminal = byAddress.get(terminal.parent);
+      }
+      return projectOfSpace.get(a.space) ?? null;
+    };
+    for (const x of live) {
+      const sp = this.spaceOfTerminal(x), p = projectOfAgent(x);
+      if (sp && p && !projectOfSpace.has(sp)) projectOfSpace.set(sp, p);
+    }
+    return { live, labelsOf, uacs, projectOfSpace, projectOfAgent };
+  }
+
+  viewFilter() {
+    return this.preferences?.views?.[localStorage.getItem("active-view")] ?? { labels: [], machines: [] };
+  }
+
+  matchesView(project, machine) {
+    const view = this.viewFilter();
+    const labels = this.preferences?.projects?.[project]?.labels ?? [];
+    return (!view.labels.length || view.labels.some(label => labels.includes(label))) &&
+      (!view.machines.length || view.machines.includes(machine));
+  }
+
+  orderedProjects(uacs) {
+    const saved = this.order ?? [];
+    const orderIndex = id => {
+      const exact = saved.indexOf(id);
+      if (exact >= 0) return exact;
+      // Migrate the old short-name order only for an unambiguous project.
+      const short = id.split("/").at(-1);
+      return [...uacs.keys()].filter(p => p.split("/").at(-1) === short).length === 1 ? saved.indexOf(short) : -1;
+    };
+    return [...uacs.keys()].sort((a, b) => {
+      const i = orderIndex(a), j = orderIndex(b);
+      return (i < 0 ? Infinity : i) - (j < 0 ? Infinity : j) || a.localeCompare(b);
+    });
+  }
+
   // UAC projects in the Slayer's order: one group per project with a UAC on any machine, holding
   // that project's agents on every machine (UAC first, its sentinels as branches). Then the
   // spaces without a UAC. Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
   projectTree(t, all, list, shown, now) {
-    const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
-    const live = all.filter(x => x.state === "live");
-    const labelsOf = address => this.vegaTerminals.get(address)?.labels ?? {};
-    const uacs = new Map();
-    for (const x of live) if (x.labels?.["vega.role"] === "uac" && x.labels?.["vega.project"]) uacs.set(short(x.labels["vega.project"]), x);
-    const projectOfSpace = new Map();
-    for (const x of live) {
-      const sp = this.spaceOfTerminal(x), p = short(x.labels?.["vega.project"]);
-      if (sp && p && uacs.has(p) && !projectOfSpace.has(sp)) projectOfSpace.set(sp, p);
-    }
-    const projectOfAgent = a => {
-      const p = short(labelsOf(a.address)["vega.project"]);
-      return uacs.has(p) ? p : projectOfSpace.get(a.space) ?? null;
-    };
-    const saved = this.order ?? [];
-    const projects = [...uacs.keys()].sort((a, b) => {
-      const i = saved.indexOf(a), j = saved.indexOf(b);
-      return (i < 0 ? Infinity : i) - (j < 0 ? Infinity : j) || a.localeCompare(b);
-    });
+    const { live, labelsOf, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
+    const projects = this.orderedProjects(uacs);
     const C = this.colors();
     const kindOf = (k) => {
       const key = (labelsOf(k.address)["vega.harness"] || k.program?.key || k.app || "").toLowerCase();
@@ -368,6 +472,7 @@ export default class Agents extends View {
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
         .on_click(() => depth ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
+        .when(uac, el => el.on_mouse_down("right", (_e, cx) => this.openProject(l["vega.project-id"], cx)))
         .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
           .when(x === "└" || x === "├", el => el.border_b(1.5).rounded_bl(6))))
@@ -395,12 +500,14 @@ export default class Agents extends View {
       const uac = uacs.get(p);
       const ul = uac.labels ?? {};
       const project = ul["vega.project-id"];
+      if (!this.matchesView(project, machineOf(uac.address))) continue;
+      const display = this.preferences?.projects?.[project]?.name || ul["vega.project"]?.split("/").at(-1) || p.split("/").at(-1);
       const totals = this.vegaTotals(uac.address, project) ?? {};
       const members = list.filter(a => projectOfAgent(a) === p)
         .sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
       const open = !this.folded.has(gid);
       const git = ul["vega.git"];
-      out.push(h_flex().id(gid).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
+      out.push(h_flex().id(gid).on_mouse_down("right", (_e, cx) => this.openProject(project, cx)).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
         .when(this.dragFrom === p && this.dragOver !== p, el => el.opacity(0.5))
         .when(Boolean(this.dragFrom) && this.dragOver === p && this.dragFrom !== p, el => el.border_t(2).border_color(t.accent))
         .on_mouse_down("left", () => { this.dragFrom = p; this.dragOver = p; })
@@ -413,7 +520,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(div().flex_none().text_size(12).text_color(t.dim).child("⠿"))
-        .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(p))
+        .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(display))
         .when(Boolean(git), el => el.child(div().flex_none().text_size(11.5).text_color(git === "✓" ? C.git_clean : C.git_dirty).child(git)))
         .child(div().flex_1())
         .when(totals.notes >= 1, el => el.child(badge("notes", "✉", totals.notes, () => openOverlay({ mod: "vega-sidebar", kind: "window", key: `vega-notes-${project}`, width: 700, height: 500, props: { mail: uac.address, notes: true } }), gid)))
@@ -423,7 +530,7 @@ export default class Agents extends View {
       if (open) for (const a of members) out.push(...withTree(a));
     }
     const all_spaces = spaces();
-    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id));
+    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && this.matchesView(null, s.machine || "local"));
     if (rest.length) {
       out.push(div().px(6).pt(12).pb(2).text_size(11).font_medium().text_color(t.dim).child("Spaces"));
       for (const sp of rest) {
@@ -441,7 +548,7 @@ export default class Agents extends View {
     }
     // Agents whose space this window doesn't know yet still show.
     const known = new Set(all_spaces.map(s => s.id));
-    for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a))) out.push(...withTree(a));
+    for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a) && this.matchesView(null, machineOf(a.address)))) out.push(...withTree(a));
     return out;
   }
 
@@ -452,7 +559,7 @@ export default class Agents extends View {
 
   // Drag one project above another; the order stays across restarts.
   move(projects, from, to) {
-    const order = projects.filter(p => p !== from);
+    const order = [...new Set([...(this.order ?? []), ...projects])].filter(p => p !== from);
     order.splice(order.indexOf(to), 0, from);
     this.order = order;
     try { localStorage.setItem("project-order", JSON.stringify(order)); } catch (_) {}
@@ -506,10 +613,11 @@ export default class Agents extends View {
           .child(div().text_size(11).text_color(t.muted).child(`${m.from || m.host || ""} · ${m.time || ""} · ${m.read === false || m.unread ? "Unread" : "Read"}`))
           .when(Boolean(m.title), el => el.child(div().font_semibold().child(m.title)))
           .child(div().child(m.text ?? m.body ?? ""))) : [div().child("No mail.")]) : [div().child(this.mail)]));
-    if (props()?.sortMenu) return this.sortMenu(t);
+    if (props()?.projectConfig) return this.projectOverlay(t);
+    if (props()?.viewMenu) return this.viewMenu(t);
     if (props()?.spaceMenu) return this.spaceMenu(t);
     const collapsed = narrow();
-    const sort = sortOf();
+
     let list = agents();
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
@@ -521,11 +629,6 @@ export default class Agents extends View {
     const shown = focused()?.agent;
     const now = Date.now();
     this.track(list, now);
-    this.hold(list);
-    const byPriority = sort.id === "priority";
-    const urgency = new Map(list.map((a) => [a.address, Math.max(this.rank(a), ...this.tree(all, a.address).map((s) => RANK[kidStatus(s.t, this.listed)] ?? 0))]));
-    const rankOf = (a) => urgency.get(a.address);
-    if (byPriority) list = [...list].sort((x, y) => rankOf(y) - rankOf(x) || this.since(y) - this.since(x) || y.seq - x.seq);
     // A listed child belongs to its visible ancestor's tree, even in another space.
     const listed = new Set(list.map(a => a.address));
     list = list.filter(a => {
@@ -537,43 +640,19 @@ export default class Agents extends View {
       }
       return true;
     });
-    const pinned = list.filter((a) => a.pinned);
-    const rest = list.filter((a) => !a.pinned);
-    list = [...pinned, ...rest];
+    const membership = this.projectGroups(all);
+    list = list.filter(a => {
+      const project = membership.projectOfAgent(a), uac = membership.uacs.get(project);
+      return this.matchesView(uac?.labels?.["vega.project-id"], uac ? machineOf(uac.address) : machineOf(a.address));
+    });
+    const projectOrder = this.orderedProjects(membership.uacs);
+    list.sort((a, b) => {
+      const pa = membership.projectOfAgent(a), pb = membership.projectOfAgent(b);
+      const ia = projectOrder.indexOf(pa), ib = projectOrder.indexOf(pb);
+      return (ia < 0 ? Infinity : ia) - (ib < 0 ? Infinity : ib) ||
+        (pa && pa === pb ? (membership.labelsOf(b.address)["vega.role"] === "uac") - (membership.labelsOf(a.address)["vega.role"] === "uac") : 0);
+    });
     setAgentOrder(list.flatMap(a => [a.address, ...this.tree(all, a.address).filter(s => listed.has(s.t.address)).map(s => s.t.address)]));
-
-    const withKids = (a, i) => {
-      const subs = collapsed ? [] : this.tree(all, a.address);
-      const r = row(a, i, subs);
-      if (this.folded.has(a.address)) return [r];
-      return [r, ...subs.map((s) => this.subRow(t, s, shown, byPriority))];
-    };
-
-    // The fold chevron; folded, the count too, colored by the most urgent one.
-    const fold = (a, subs) => {
-      const sts = subs.map((s) => kidStatus(s.t, this.listed));
-      const top = sts.reduce((m, s) => ((RANK[s] ?? 0) > (RANK[m] ?? 0) ? s : m), null);
-      const open = !this.folded.has(a.address);
-      return div()
-        .id(`fold-${a.address}`)
-        .h(18)
-        .px(3)
-        .gap(3)
-        .flex()
-        .items_center()
-        .rounded(4)
-        .text_size(11)
-        .text_color(open ? t.dim : (t[top] ?? t.dim))
-        .cursor_pointer()
-        .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          open ? this.folded.add(a.address) : this.folded.delete(a.address);
-          cx.notify();
-        })
-        .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
-        .when(!open, (el) => el.child(String(subs.length)));
-    };
 
     // A row reads "space \u00b7 detail": the detail is a tab someone named or the
     // agent's own title, never an automatic tab number unless two rows would
@@ -590,132 +669,16 @@ export default class Agents extends View {
       if (detail.get(a.address) == null && seen[`${a.space_name}\u0000`] > 1) detail.set(a.address, label(a));
     }
 
-    const row = (a, i, subs = []) => {
-      const pic = icon(a.program, 16, t.foreground);
-      const more = detail.get(a.address);
-      // An agent on another machine (`vps/t7`) says which.
-      const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
-      if (collapsed) {
-        return h_flex()
-          .id(`ag-${a.address}`)
-          .h(26)
-          .px(8)
-          .flex_none()
-          .items_center()
-          .gap(4)
-          .hover((s) => s.bg(t.hover))
-          .on_click(() => run("pane.focus", { pane: a.pane }))
-          .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
-          .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
-      }
-      const when = this.since(a);
-      const idle = a.status === "idle" && !a.focused;
-      const isPinned = a.pinned;
-      const pin = div()
-        .id(`pin-${a.address}`)
-        .flex_none()
-        .p(2)
-        .rounded(4)
-        .text_color(t.dim)
-        .cursor_pointer()
-        .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .tooltip(isPinned ? "Unpin" : "Pin to the top")
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          run("terminal.pin", { terminal: a.address, pinned: !isPinned });
-          // The row moves away from under the pointer, and no hover-out comes.
-          this.hovered = null;
-          cx.notify();
-        })
-        .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
-      // Under a space header the space goes without saying; an automatic tab number says nothing.
-      // Without a space header above (priority, pinned) the row names its space.
-      const full = byPriority || isPinned;
-      const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
-      // One line as in the TUI: status · u▲c · harness · name · vega tokens.
-      const vlabels = this.vegaTerminals.get(a.address)?.labels ?? {};
-      return h_flex()
-        .id(`ag-${a.address}`)
-        .px(6)
-        .h(26)
-        .flex_none()
-        .rounded(6)
-        .items_center()
-        .gap(6)
-        .when(a.focused, (el) => el.bg(t.selected))
-        .cursor_pointer()
-        .hover((s) => s.bg(t.hover))
-        .on_hover((on, cx) => {
-          if (on) this.hovered = a.address;
-          else if (this.hovered === a.address) this.hovered = null;
-          cx.notify();
-        })
-        .on_click(() => run("pane.focus", { pane: a.pane }))
-        .tooltip(more ? `${a.space_name} · ${more}` : a.space_name || label(a))
-        .child(this.status(t, a, true))
-        .when(Boolean(vlabels["vega.uac"]), el => el.child(div().id(`vega-${a.address}-uac`).flex_none().text_size(12).text_color(t.ansi1 ?? t.blocked)
-          .on_mouse_down("left", (_e,cx) => cx.stop_propagation())
-          .on_click((_e,cx) => {cx.stop_propagation(); run("agent.focus", {terminal: a.address});})
-          .child(vlabels["vega.uac"])))
-        .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
-          .when(subs.length > 0, el => el.on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
-            cx.notify();
-          })).child(pic)))
-        .child(div().min_w(0).flex_shrink_1().truncate().text_color(idle ? t.muted : t.foreground).child(name))
-        .when(full && Boolean(more), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(t.dim).child(`\u00b7 ${more}`)))
-        .child(this.vegaIcons(a.address, t))
-        .child(div().flex_1())
-        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
-        .when(subs.length > 0, el => el.child(fold(a, subs)))
-        .when(this.hovered === a.address, el => el.child(pin))
-        .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))));
-    };
+    const railRow = (a, i) => h_flex().id(`ag-${a.address}`).h(26).px(8).flex_none().items_center().gap(4)
+      .hover(el => el.bg(t.hover)).on_click(() => run("pane.focus", { pane: a.pane }))
+      .when(this.vegaTerminals.get(a.address)?.labels?.["vega.role"] === "uac", el =>
+        el.on_mouse_down("right", (_e, cx) => this.openProject(this.vegaTerminals.get(a.address).labels["vega.project-id"], cx)))
+      .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
+      .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
 
-    // Groups in list order: spaces (grouped) or priority sections. Agents of a
-    // space are next to each other in agents(), so neighbours make a group.
-    const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
-    for (const a of rest) {
-      const r = rankOf(a) || RANK.idle;
-      const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
-      if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
-      else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
-    }
-
-    // A group's header; it folds the group. Folded, it says how many and the most urgent state.
-    const header = (g) => {
-      const open = !this.folded.has(g.id);
-      const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
-      return h_flex()
-        .id(g.id)
-        .px(8)
-        .pt(8)
-        .h(30)
-        .flex_none()
-        .gap(6)
-        .items_center()
-        .text_size(11)
-        .font_medium()
-        .cursor_pointer()
-        .hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => {
-          open ? this.folded.add(g.id) : this.folded.delete(g.id);
-          cx.notify();
-        })
-        .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
-        .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
-        .child(div().flex_1())
-        .when(!open, (el) => el
-          .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
-          .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
-    };
     this.rowLabel = a => detail.get(a.address) ?? label(a);
-    const rows = collapsed
-      ? list.flatMap(withKids)
-      : sort.id === "project"
-        ? this.projectTree(t, all, list, shown, now)
-        : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
+    this.activeView = localStorage.getItem("active-view") ?? "all";
+    const rows = collapsed ? list.map(railRow) : this.projectTree(t, all, list, shown, now);
 
     return v_flex()
       .size_full()
@@ -737,16 +700,17 @@ export default class Agents extends View {
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("VEGA"))
             .child(
               div()
-                .id("ag-sort")
+                .id("ag-views")
                 .text_size(11)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "vega-sidebar", kind: "popup", width: 200, height: 170, props: { sortMenu: true } }))
-                .tooltip(`Sort agents: ${sort.label}`)
-                .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
+                .on_click(() => openOverlay({ mod: "vega-sidebar", kind: "popup", width: 400, height: 400, props: { viewMenu: true } }))
+                .tooltip("Filter by labels and machines")
+                .child(this.preferences?.views?.[this.activeView] ? this.activeView : "All"),
             ),
         ),
       )
+      .when(Boolean(this.configError) && !collapsed, el => el.child(div().px(12).text_size(11).text_color(t.blocked).child(this.configError)))
       .when(list.length === 0 && !collapsed, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )

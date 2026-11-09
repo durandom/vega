@@ -14,6 +14,10 @@ path = "src/lib.rs"
 name = "vega-config"
 path = "src/main.rs"
 
+[[bin]]
+name = "vega-project"
+path = "src/project.rs"
+
 [dependencies]
 sha2 = "0.10"
 vega-build = { path = "../../crates/vega-build" }

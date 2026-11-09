@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 148 · 2026-11-09
+
+- feature: `vega project config` stores personal display names and labels by project ID;
+  `vega project view` saves label/machine filters in `~/.config/vega/projects.toml`.
+  Right-click a sidebar project or UAC row for Config. The header switches views;
+  project ordering is manual only. Non-UAC Spaces rows retain Rename (vega-0h4c.49).
+
 ## 147 · 2026-11-09
 
 - feature: parent and peer mail reaches working agents behind the input draft guard;
