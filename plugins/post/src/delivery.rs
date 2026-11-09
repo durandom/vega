@@ -630,6 +630,34 @@ pub enum Draft {
 /// glyph (a shell prompt such as starship's `❯`).
 pub fn draft(screen: &str) -> Draft {
     let lines: Vec<&str> = screen.lines().collect();
+    let Some(input) = input_box(&lines) else {
+        return Draft::Unknown;
+    };
+    if plain(input[0], true).trim_start().starts_with(PROMPTS) {
+        prompt_draft(input)
+    } else {
+        pi_draft(input)
+    }
+}
+
+/// Only the input box, excluding transcript and footer activity. Opaque
+/// drafts cannot be restored, but changes in this region still reveal typing.
+pub fn draft_input(screen: &str) -> Option<String> {
+    let lines: Vec<&str> = screen.lines().collect();
+    input_box(&lines).map(|input| {
+        // pi's boundary rules may carry an output scroll count. The
+        // boundaries identify the input; their contents are not typing.
+        let start = usize::from(is_rule(&plain(input[0], true)));
+        let end = input.len() - usize::from(is_rule(&plain(input[input.len() - 1], true)));
+        input[start..end]
+            .iter()
+            .map(|line| plain(line, true).trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+fn input_box<'a, 'b>(lines: &'a [&'b str]) -> Option<&'a [&'b str]> {
     let rule = |i: usize| is_rule(&plain(lines[i], true));
     let rules: Vec<usize> = (0..lines.len()).filter(|&i| rule(i)).collect();
     let prompt = lines
@@ -637,21 +665,39 @@ pub fn draft(screen: &str) -> Draft {
         .rposition(|l| plain(l, true).trim_start().starts_with(PROMPTS));
     if let Some(at) = prompt {
         let glyph = plain(lines[at], true).trim_start().chars().next();
-        let claude =
-            glyph == Some('❯') && at > 0 && rule(at - 1) && rules.last().is_some_and(|&r| r > at);
-        let codex = glyph == Some('›')
-            && lines[at + 1..]
-                .iter()
-                .any(|l| codex_status(&plain(l, true)));
-        if claude || codex {
-            return prompt_draft(&lines[at..]);
+        if glyph == Some('❯') && at > 0 && rule(at - 1) {
+            if let Some(bottom) = rules.iter().copied().find(|&r| r > at) {
+                return Some(&lines[at..=bottom]);
+            }
+        }
+        if glyph == Some('›') {
+            if let Some(bottom) =
+                (at + 1..lines.len()).find(|&i| codex_status(&plain(lines[i], true)))
+            {
+                return Some(&lines[at..bottom]);
+            }
         }
     }
     match rules[..] {
-        [.., top, bottom] => pi_draft(&lines[top..=bottom]),
-        _ => Draft::Unknown,
+        [.., top, bottom] => Some(&lines[top..=bottom]),
+        _ => None,
     }
 }
+
+// Plain-text hc reads lose the dim styling. Exact known placeholders only:
+// current neutral label: live screen in vega-0h4c.52;
+// rotating hints: https://github.com/openai/codex/blob/rust-v0.100.0/codex-rs/tui/src/chatwidget.rs#L7060-L7069
+const CODEX_PLACEHOLDERS: &[&str] = &[
+    "Ask Codex to do anything",
+    "Explain this codebase",
+    "Summarize recent commits",
+    "Implement {feature}",
+    "Find and fix a bug in @filename",
+    "Write tests for @filename",
+    "Improve documentation in @filename",
+    "Run /review on my current changes",
+    "Use /skills to list available skills",
+];
 
 /// A line of Codex's footer: `  GPT-6.1-Sol medium · vega · Ready` or
 /// `  ? for shortcuts` (seen live).
@@ -705,11 +751,14 @@ fn prompt_draft(lines: &[&str]) -> Draft {
     let first = first
         .trim_start_matches(PROMPTS)
         .trim_start_matches([' ', '\u{a0}']);
-    // Codex has no rule under its box: the status lines below (`GPT-… ·`,
-    // `? for shortcuts`) are no draft. Only its prompt line counts, and a
-    // draft there is never stashed (its further lines are not knowable).
+    // Codex's input ends before its footer. Keep multiline drafts opaque,
+    // including when the first prompt line is empty. ANSI reads retain the
+    // dim distinction: never discard an undimmed user-written placeholder.
     if !claude {
-        return if first.trim().is_empty() {
+        let rest_empty = lines[1..].iter().all(|l| plain(l, false).trim().is_empty());
+        let placeholder =
+            !lines.iter().any(|l| l.contains('\x1b')) && CODEX_PLACEHOLDERS.contains(&first.trim());
+        return if rest_empty && (first.trim().is_empty() || placeholder) {
             Draft::None
         } else {
             Draft::Opaque
@@ -874,6 +923,29 @@ mod tests {
             Draft::Opaque
         );
         assert_eq!(draft("no prompt on screen"), Draft::Unknown);
+    }
+
+    #[test]
+    fn codex_plain_placeholders_are_empty_but_user_text_and_continuations_hold() {
+        let screen = |input: &str| {
+            format!("output\n› {input}\n\n  GPT-6.1-Sol medium · vega · Working\n  ← for agents · ? for shortcuts\n")
+        };
+        for hint in CODEX_PLACEHOLDERS {
+            assert_eq!(draft(&screen(hint)), Draft::None, "{hint}");
+            assert_eq!(draft(&screen(&format!("{hint} edited"))), Draft::Opaque);
+            assert_eq!(
+                draft(&screen(&format!("{hint}\n  user continuation"))),
+                Draft::Opaque
+            );
+            assert_eq!(draft(&screen(&format!("\x1b[0m{hint}"))), Draft::Opaque);
+            assert_eq!(
+                draft(&screen(&format!("\x1b[2m{hint}\x1b[0m"))),
+                Draft::None
+            );
+        }
+        assert_eq!(draft(&screen("\n  real second line")), Draft::Opaque);
+        assert_eq!(draft(&screen("An unknown placeholder")), Draft::Opaque);
+        assert_eq!(draft(&screen("")), Draft::None);
     }
 
     /// pi's screen as `pane read --format ansi` shows it (seen live, rules

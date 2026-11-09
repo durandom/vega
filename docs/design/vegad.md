@@ -89,10 +89,13 @@ Jobs, all in one process:
    prompt`.
    hc terminals (vega-0h4c.47, until cores carry herdr-core 3ba03e6; `HC_DRAFT_HOLD` in
    `plugins/post/src/main.rs`) get a lighter guard: the screen comes from `terminal.read` (local
-   `tN` or `machine/tN`), a draft holds while its text changes (for drafts the screen cannot read,
-   Codex, multi-line pi and pastes: while the screen changes) and goes after 60 s unchanged
+   `tN` or `machine/tN`), a draft holds while its input region changes (Codex: from the prompt
+   to the first status line; Claude and pi: within the input rules) and goes after 60 s unchanged
    (`HC_DRAFT_QUIET`), an empty box at once; no stash or restore, as `hc send` submits. `hc read` is
-   plain text, so a Claude suggestion costs one 60 s wait. Unlike the rules above, an hc screen with
+   plain text: known Codex placeholder hints count as empty (the sourced list is
+   `CODEX_PLACEHOLDERS` in `delivery.rs`); a Claude suggestion costs one 60 s wait. Transcript and
+   footer activity never extend the hold. Parent mail can arrive while Codex works, and the
+   relay logs once per hold instead of every draft check. Unlike the rules above, an hc screen with
    no known input box, or one that cannot be read, releases the pointer at once (the 20 s quiet rule
    does not apply), and an unreadable draft sends no notification after 5 minutes (the hold ends
    after 60 s). See hc-migration.md.

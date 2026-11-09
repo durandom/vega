@@ -565,6 +565,30 @@ fn hc_status_race_keeps_pointer_pending_and_local_delivery_uses_hc() {
 }
 
 #[test]
+fn parent_pointer_reaches_working_codex_with_a_plain_placeholder_immediately() {
+    let mut f = Fixture::new();
+    let home = f.home.path();
+    let file = home.join("hc.json");
+    let mut terminals: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    terminals["terminals"][1]["parent"] = json!("t1");
+    terminals["terminals"][1]["status"] = json!({"app":"codex", "state":"working"});
+    write(&file, &terminals);
+    fs::write(home.join("hc-screen"), "output\n› Ask Codex to do anything\n\n  GPT-6.1-Sol medium · vega.sidebar-config · sidebar-config · Working · 475K window · Context 29% used\n  ← for agents · ? for shortcuts\n").unwrap();
+    f.start();
+    f.post(&["send", "hc:t2", "steer-working-codex"], "t1");
+    // The fixture's deadline is 35 s, below the 60 s quiet hold.
+    wait(f.home.path(), "parent pointer without a draft hold", || {
+        !f.prompts("t2").is_empty()
+    });
+    assert!(!f.log().contains("pointer held: t2"), "{}", f.log());
+    assert!(!f.prompts("t2")[0]["args"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("--if")));
+    assert!(f.post(&["inbox"], "t2").contains("steer-working-codex"));
+}
+
+#[test]
 fn pointer_waits_for_a_draft_in_an_hc_input_box_and_goes_at_once_on_an_empty_one() {
     let mut f = Fixture::new();
     f.start();

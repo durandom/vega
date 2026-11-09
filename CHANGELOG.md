@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 147 · 2026-11-09
+
+- feature: parent mail reaches working Codex hc agents with an empty prompt immediately
+  (vega-0h4c.52). Known Codex placeholder hints count as empty; only changes in the input box
+  extend the 60 s draft hold. Output and footer activity no longer delay mail, and the relay
+  logs a hold once instead of logging every draft check.
+
 ## 146 · 2026-11-09
 
 - optional: `cargo-target` in `vega config infra` warns when this checkout's

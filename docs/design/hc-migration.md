@@ -275,10 +275,16 @@ hc receives no draft-clear/restore keystrokes.
 **Draft hold (vega-0h4c.47).** herdr-core 0.1.19 types into unfinished drafts. Until a release
 carries 3ba03e6 (sends wait up to 60 s since the last key), vegad holds pointers to hc terminals
 itself: it reads the screen (`terminal.read`, local `tN` or `machine/tN`), parses it with
-`delivery::draft` and holds while the draft text changes (the whole screen for drafts it cannot read: Codex, multi-line pi,
-pastes); unchanged for `HC_DRAFT_QUIET` (60 s) or
+`delivery::draft` and holds while the input region changes, including opaque Codex, multi-line pi
+and pasted drafts. Only the prompt through the first Codex status line (exclusive), or the Claude/pi
+input box, is watched; transcript and footer activity never restart the timer (vega-0h4c.52).
+Unchanged for `HC_DRAFT_QUIET` (60 s) or
 an empty box lets it go. No stash, clear or restore (`hc send` submits). `hc read` is plain text, so
-Claude's dim suggestion reads as a draft and delays a pointer once by 60 s. A screen with no known
+known Codex placeholders count as empty (`CODEX_PLACEHOLDERS` in `delivery.rs`, sourced from
+[Codex rust-v0.100.0](https://github.com/openai/codex/blob/rust-v0.100.0/codex-rs/tui/src/chatwidget.rs#L7060-L7069)
+and the supplied live neutral label). Parent mail reaches a working Codex agent with a placeholder
+immediately. Claude's dim suggestion reads as a draft and delays a pointer once by 60 s. The relay
+logs once per hold, rather than every draft check. A screen with no known
 input box, or an unreadable one, releases the pointer at once; no 5-minute notification exists. Switch off: set
 `HC_DRAFT_HOLD` to `false` in `plugins/post/src/main.rs` once cores carry 3ba03e6.
 

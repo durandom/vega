@@ -3341,9 +3341,6 @@ async fn serve(
                 if d.decide(&pane, count, floor) != Decision::Type {
                     continue;
                 }
-                log(&format!(
-                    "pointer check: {pane}, reading draft ({count} pending)"
-                ));
                 if drafts.holds(&pane) {
                     continue; // stays pending
                 }
@@ -4209,9 +4206,10 @@ impl Drafts {
     fn hc_watch(&mut self, pane: &str, shown: Option<&str>, now: Instant) -> bool {
         let text = match shown.map(delivery::draft) {
             Some(Draft::Text(t)) => t,
-            // Text the screen does not hold (Codex, multi-line pi, pastes): watch
-            // the whole screen, so typing restarts the wait.
-            Some(Draft::Opaque) => format!("{OPAQUE}{}", shown.unwrap_or_default()),
+            // Watch only the input, so transcript/footer activity cannot
+            // extend a hold on opaque Codex, multiline pi or pasted drafts.
+            Some(Draft::Opaque) => delivery::draft_input(shown.unwrap_or_default())
+                .expect("a recognized opaque draft has an input box"),
             _ => {
                 self.seen.remove(pane);
                 return false;
@@ -6724,6 +6722,84 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn hc_working_codex_accepts_parent_pointer_without_a_placeholder_hold() {
+        for pane in ["t6", "io/t6"] {
+            let mut delivery = delivery::Delivery::default();
+            delivery.status(pane, "working");
+            delivery.mail(pane, delivery::Sender::Parent);
+            assert_eq!(delivery.candidates(false), vec![pane]);
+            assert_eq!(delivery.decide(pane, 1, 0), Decision::Type);
+            let screen = "output\n› Ask Codex to do anything\n\n  GPT-6.1-Sol medium · vega.sidebar-config · sidebar-config · Working · 475K window · Context 29% used\n  ← for agents · ? for shortcuts\n";
+            assert!(!Drafts::default().hc_watch(pane, Some(screen), Instant::now()));
+        }
+    }
+
+    #[test]
+    fn hc_opaque_watch_ignores_output_and_footer_but_tracks_multiline_input() {
+        let t0 = Instant::now();
+        let at = |s| t0 + Duration::from_secs(s);
+        for (first, changed, busy) in [
+            (
+                "old output\n› draft\n  second line\n\n  GPT-6 · vega · Working",
+                "old output\n› draft\n  edited second line\n\n  GPT-6 · vega · Working",
+                "new output\n› draft\n  edited second line\n\n  GPT-6 · vega · Working 99s",
+            ),
+            (
+                "old output\n────────\nfirst\nsecond\n────────\nfooter",
+                "old output\n────────\nfirst\nedited second\n────────\nfooter",
+                "new output\n────────\nfirst\nedited second\n────────\nchanged footer",
+            ),
+            (
+                "old output\n─── ↑ 3 more ───\nfirst\nsecond\n────────\nfooter",
+                "old output\n─── ↑ 3 more ───\nfirst\nedited second\n────────\nfooter",
+                "new output\n─── ↑ 9 more ───\nfirst\nedited second\n────────\nchanged footer",
+            ),
+            (
+                "old output\n────────\n❯ [Pasted text #1]\n────────\nfooter",
+                "old output\n────────\n❯ [Pasted text #1] x\n────────\nfooter",
+                "new output\n────────\n❯ [Pasted text #1] x\n────────\nchanged footer",
+            ),
+        ] {
+            let mut d = Drafts::default();
+            assert!(d.hc_watch("t6", Some(first), t0));
+            assert!(d.hc_watch("t6", Some(changed), at(50)));
+            assert!(d.hc_watch("t6", Some(busy), at(100)));
+            assert!(!d.hc_watch("t6", Some(busy), at(110)));
+        }
+    }
+
+    #[test]
+    fn hc_draft_logs_once_per_hold() {
+        const FIXTURE: &str = "VEGA_HC_HOLD_LOG_FIXTURE";
+        if std::env::var_os(FIXTURE).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::hc_draft_logs_once_per_hold",
+                    "--nocapture",
+                ])
+                .env(FIXTURE, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(stdout.matches("pointer held: t6").count(), 2, "{stdout}");
+            assert!(
+                !stdout.contains("reading draft"),
+                "redundant per-check log removed"
+            );
+            return;
+        }
+        let t0 = Instant::now();
+        let mut d = Drafts::default();
+        for second in 0..60 {
+            assert!(d.hc_watch("t6", Some(CODEX), t0 + Duration::from_secs(second)));
+        }
+        assert!(!d.hc_watch("t6", Some(CODEX), t0 + Duration::from_secs(60)));
+        assert!(d.hc_watch("t6", Some(CODEX_MORE), t0 + Duration::from_secs(61)));
     }
 
     #[test]
