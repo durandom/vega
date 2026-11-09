@@ -48,9 +48,8 @@ pub fn run(statuses: &[String]) -> Result<(), Failure> {
                 .map(crate::backend::normalize),
         );
     }
-    let (registry, warning) = registry_waiting(vega_registry::read_blocking_cli(
-        Duration::from_secs(3),
-    ));
+    let (registry, warning) =
+        registry_waiting(vega_registry::read_blocking_cli(Duration::from_secs(3)));
     if let Some(w) = warning {
         eprintln!("{w}");
     }

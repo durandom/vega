@@ -62,5 +62,8 @@ printf '{"jsonrpc":"2.0","id":1,"result":%s}' "$TEST_FLEET"
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&inbox_only.stdout);
-    assert!(text.contains("registry_unavailable") && text.contains("run it on an owner host"), "{text}");
+    assert!(
+        text.contains("registry_unavailable") && text.contains("run it on an owner host"),
+        "{text}"
+    );
 }
