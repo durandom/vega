@@ -1082,6 +1082,8 @@ mod tests {
             INBOX_ONLY_OFF
         );
         assert!(t.elapsed() < Duration::from_secs(1));
+        std::env::remove_var("VEGA_POST_HOST");
+        std::env::remove_var("VEGA_POST_INBOX_ONLY");
     }
 
     #[test]

@@ -29,7 +29,13 @@ fn store() -> Result<Store, Failure> {
 fn gather(store: &Store) -> (Vec<Note>, Option<String>) {
     let own = vega_registry::token(&vega_herdr::state::post_host());
     let mut notes = store.list();
-    let off = match vega_registry::read_notes_blocking(READ_TIMEOUT) {
+    // An inbox-only host cannot read the registry by design: skip the wait.
+    let read = if vega_herdr::state::is_inbox_only(&vega_herdr::state::post_host()) {
+        Err(vega_registry::INBOX_ONLY_OFF.to_string())
+    } else {
+        vega_registry::read_notes_blocking(READ_TIMEOUT)
+    };
+    let off = match read {
         Ok(remote) => {
             notes.extend(remote.into_iter().filter(|n| n.host != own));
             None

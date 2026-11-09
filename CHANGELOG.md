@@ -9,7 +9,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: an inbox-only host (deimos, puck) no longer waits 4 s and reports a registry timeout:
   `vega uac` prints `registry: off (inbox-only host: local agents only)`, and `vega mux next`,
-  `vega notify`, `vega orchestration`, `vega config infra --fleet` and the wait commands skip the read too. `vega post relay install`
+  `vega notify`, `vega post notes`, `vega orchestration`, `vega config infra --fleet` and the wait commands skip the read too. `vega post relay install`
   on such a host no longer warns that the host is not verified, and the old-login-job warning
   names its next step (vega-0h4c.44).
 

@@ -221,3 +221,20 @@ fn missing_phone_configuration_warns_without_rejecting_the_ask() {
         .contains("channel ntfy is named in levels but has no [channels.ntfy] configuration"));
     assert_eq!(note(dir.path())["kind"], "ask");
 }
+
+#[test]
+fn inbox_only_host_skips_the_registry_read() {
+    let d = tempfile::tempdir().unwrap();
+    let mut c = command(d.path(), "puck");
+    let out = c
+        .env("VEGA_POST_INBOX_ONLY", "puck")
+        .arg("list")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("registry: off (inbox-only host: local agents only)"),
+        "{text}"
+    );
+    assert!(!text.contains("this host's asks only"), "{text}");
+}
