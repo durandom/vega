@@ -430,10 +430,12 @@ impl View {
 
     /// hc names are registry hosts, never aliases. A stale beat still proves
     /// the host exists; freshness remains the delivery/liveness check's job.
+    /// An inbox-only host cannot publish a beat by design (no registry write),
+    /// so it counts as known without one; direction rules live elsewhere.
     pub fn check_hc_machine(&self, machine: &str) -> Result<(), vega_herdr::Failure> {
         if machine != token(machine)
             || machine != vega_herdr::state::host_token(machine)
-            || self.beat_at(machine).is_none()
+            || (self.beat_at(machine).is_none() && !vega_herdr::state::is_inbox_only(machine))
         {
             return Err(vega_herdr::Failure::new("machine_host_unknown",
                 format!("hc machine {machine} has no matching registry host"),
@@ -991,6 +993,23 @@ mod tests {
         assert_ne!(agent_key("host", "io.a/t7"), agent_key("host", "io_a/t7"));
         assert!(!pane_token("io/t7").contains('/'));
         assert_eq!(token("t7"), "t7");
+    }
+
+    #[test]
+    fn inbox_only_hc_machine_is_known_without_a_beat() {
+        let mut view = View::default();
+        view.entries
+            .insert(beat_key("io"), serde_json::json!({"at":1}));
+        // Parallel-safe: the list is read from the env, so use the default hosts.
+        if std::env::var_os("VEGA_POST_INBOX_ONLY").is_none() {
+            assert!(view.check_hc_machine("puck").is_ok());
+            assert!(view.check_hc_machine("deimos").is_ok());
+        }
+        assert!(view.check_hc_machine("io").is_ok());
+        assert_eq!(
+            view.check_hc_machine("ghost").unwrap_err().code,
+            "machine_host_unknown"
+        );
     }
 
     #[test]

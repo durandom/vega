@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 142 · 2026-11-09
+
+- feature: an inbox-only hc machine (puck) is a known registry host without a beat, so adopt, mux
+  send and post send to `puck/tN` no longer fail with `machine_host_unknown` and
+  `vega config infra --fleet` stops flagging it (vega-0h4c.45). `vega uac grant`/`revoke` also take
+  hc terminal IDs: `vega uac grant puck:t1 proteus:t6p --expires 7d` on the receiving host.
+
 ## 141 · 2026-11-09
 
 - migration: vegad has no login job any more (vega-0h4c.42). `vega post relay install` writes

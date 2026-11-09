@@ -281,6 +281,9 @@ An hc machine name must equal its vega registry host. `machine/t7` and
 `hc:machine/t7` resolve directly to host `machine`, pane `t7`; no remote identity
 query, alias mapping, SSH target matching, or hostname guessing is used. Post
 checks that the host has a registry beat before enqueueing, including tool sends.
+An inbox-only host (state.rs list: deimos, puck) never publishes a beat by design, so it counts
+as a known registry host without one (reachability then warns "mailed anyway"); the
+direction rules are unchanged, and `vega config infra --fleet` no longer flags it.
 Unknown hosts fail with `machine_host_unknown`; unavailable registry checks fail
 with `registry_unavailable`. A stale beat still identifies an existing host and
 retains the normal reachability warning policy. A conflicting explicit `--host`

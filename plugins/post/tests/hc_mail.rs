@@ -705,6 +705,19 @@ fn machine_qualified_mail_crosses_hosts_and_reads_the_remote_inbox() {
     assert!(receiver
         .post(&["inbox"], "t2")
         .contains("cross-host convention"));
+    // puck is inbox-only: it never beats, yet its hc terminals are addressable.
+    let out = sender
+        .command(
+            &["send", "puck/t2", "to the inbox-only machine"],
+            Some("t1"),
+        )
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    // The fixture has no puck inbox stream, so delivery stops there, after
+    // the machine check passed.
+    assert!(!text.contains("machine_host"), "{text}");
+    assert!(text.contains("no_inbox"), "{text}");
     for args in [
         vec!["send", "unknown/t2", "must not send"],
         vec![

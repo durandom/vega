@@ -83,4 +83,14 @@ mod tests {
         assert!(mismatches(&[json!({})], &view).is_err());
         assert!(mismatches(&[], &view).unwrap().is_empty());
     }
+
+    #[test]
+    fn inbox_only_machine_without_a_beat_is_not_a_mismatch() {
+        let machines = vec![json!({"name":"puck"}), json!({"name":"ghost"})];
+        let gaps = mismatches(&machines, &View::default()).unwrap();
+        if std::env::var_os("VEGA_POST_INBOX_ONLY").is_none() {
+            assert_eq!(gaps.len(), 1);
+            assert_eq!(gaps[0].0, "ghost");
+        }
+    }
 }

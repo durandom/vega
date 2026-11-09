@@ -388,7 +388,10 @@ operator pair grant to reach an agent; otherwise they become human notices:
   and the `vega uac` home view list live, expired and revoked pairs with Unix timestamps.
   Grants live in `$XDG_STATE_HOME/vega/mail-grants` (default `~/.local/state/vega/mail-grants`),
   one atomic JSON file per pair, read for each request: no restart. Use vegad's HOME and
-  XDG_STATE_HOME. Regrant replaces the pair's prior record; revocation retains a timestamp.
+  XDG_STATE_HOME. A pair may name hc terminals instead of herdr panes: `vega uac grant
+  puck:t1 proteus:t6p --expires 7d` lets the hc UAC on puck mail its parent (the quarantine
+  matcher compares the literal sender pane claim and target pane, so `tN` works like `w:p`).
+  Regrant replaces the pair's prior record; revocation retains a timestamp.
   A matching sender host + claimed sender pane + target host/pane with an unexpired,
   unrevoked grant delivers peer inbox mail; every other request keeps the quarantine note.
   The receiver republishes under its own host identity into its existing inbox archive and

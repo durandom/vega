@@ -318,6 +318,23 @@ mod grant_tests {
         let (to, _, _) =
             prepare("vega.quarantine.proteus.w3V:p1C.deimos", &letter_headers).unwrap();
         assert_eq!(to, "vega.inbox.proteus.w3V:p1C.proteus");
+        // hc terminals: puck/t1 mails its parent proteus/t6p, only that pair.
+        grants::save(&Grant {
+            sender: Peer::parse("puck:t1").unwrap(),
+            target: Peer::parse("proteus:t6p").unwrap(),
+            created: grants::now(),
+            expires: grants::now() + 600,
+            revoked: None,
+        })
+        .unwrap();
+        let mut hc = headers.clone();
+        hc.insert(crate::h::FROM_PANE, "t1");
+        let (to, clean, _) = prepare("vega.quarantine.proteus.t6p.puck", &hc).unwrap();
+        assert_eq!(to, "vega.inbox.proteus.t6p.proteus");
+        assert_eq!(clean.get(GRANTED_HOST).unwrap().as_str(), "puck");
+        assert!(prepare("vega.quarantine.proteus.t7.puck", &hc).is_none());
+        hc.insert(crate::h::FROM_PANE, "t2");
+        assert!(prepare("vega.quarantine.proteus.t6p.puck", &hc).is_none());
     }
 
     fn broker_round_trip(headers: &async_nats::HeaderMap) {

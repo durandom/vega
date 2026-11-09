@@ -19,9 +19,9 @@ impl Peer {
                 && s.bytes()
                     .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
         };
-        if !token(host) || !crate::pane::is_pane_id(pane) {
+        if !token(host) || !(crate::pane::is_pane_id(pane) || crate::pane::is_hc_id(pane)) {
             return Err(
-                "expected literal <host>:w<id>:p<id> with alphanumeric pane IDs (no wildcards)"
+                "expected literal <host>:w<id>:p<id> (herdr pane) or <host>:t<N> (hc terminal) with alphanumeric IDs (no wildcards)"
                     .into(),
             );
         }

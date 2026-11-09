@@ -97,3 +97,36 @@ fn grant_and_revoke_accept_alphanumeric_pane_ids() {
             .success()
     );
 }
+
+#[test]
+fn grant_and_revoke_accept_hc_terminal_ids() {
+    let root = tempfile::tempdir().unwrap();
+    let call = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_vega-uac"))
+            .args(args)
+            .env("HOME", root.path())
+            .env_remove("XDG_STATE_HOME")
+            .env("VEGA_POST_HOST", "proteus")
+            .env("VEGA_POST_INBOX_ONLY", "deimos,puck")
+            .output()
+            .unwrap()
+    };
+    let grant = call(&["grant", "puck:t1", "proteus:t6p", "--expires", "7d"]);
+    assert!(
+        grant.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grant.stdout)
+    );
+    let listing = String::from_utf8_lossy(&call(&["grants"]).stdout).to_string();
+    assert!(listing.contains("puck:t1,proteus:t6p,live"), "{listing}");
+    // Wildcards, names and a non-inbox-only sender stay refused.
+    for bad in [
+        ["grant", "puck:t*", "proteus:t6p", "--expires", "1h"],
+        ["grant", "puck:t1", "proteus:main", "--expires", "1h"],
+        ["grant", "proteus:t1", "proteus:t6p", "--expires", "1h"],
+    ] {
+        assert_eq!(call(&bad).status.code(), Some(2), "{bad:?}");
+    }
+    assert!(call(&["revoke", "puck:t1", "proteus:t6p"]).status.success());
+    assert!(String::from_utf8_lossy(&call(&["grants"]).stdout).contains("revoked"));
+}
