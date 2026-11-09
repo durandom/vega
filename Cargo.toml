@@ -9,10 +9,12 @@ opt-level = 3
 lto = false
 strip = true
 
-# Line tables keep backtraces readable; full debuginfo made target/debug 36 GB
-# and slowed every test link. Dependencies carry none.
+# Line tables keep backtraces readable; packed avoids macOS retaining thousands
+# of loose .o files per test build (vega-htsq). Test inherits dev; dependencies
+# carry no debug info. Measurements and sweep policy: docs/design/build-cache.md.
 [profile.dev]
 debug = "line-tables-only"
+split-debuginfo = "packed"
 
 [profile.dev.package."*"]
 debug = false

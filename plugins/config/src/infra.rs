@@ -49,12 +49,13 @@ const fn c(
 use Level::{Optional, Required};
 
 /// Required first; the order of the views.
-pub const COMPONENTS: [Component; 25] = [
+pub const COMPONENTS: [Component; 26] = [
     c("mise", Required, "mise run install-cli, mise run check", "install mise: https://mise.jdx.dev/installing-mise.html"),
     c("cargo", Required, "building vega (toolchain pinned in rust-toolchain.toml)", "install rustup: https://rustup.rs"),
     c("git", Required, "clone, upgrade, worktrees (>= 2.54: the wt-guard hook)", "install git with the OS package manager"),
     c("vega", Required, "every vega <plugin> call", "mise run install-cli in the vega checkout; put ~/.local/bin on PATH"),
     c("agent", Required, "the coding agents vega runs and configures", "install Claude Code, Codex or pi and start it once"),
+    c("cargo-target", Optional, "bounded local Cargo deps directory", "run mise run target-sweep in the vega checkout after builds finish; see docs/design/build-cache.md"),
     c("vegad-start", Optional, "no old vegad login job (herdr-app and the TUI start vegad)", "vega post relay install removes it; runtime status: vega post relay status"),
     c("hc", Optional, "hc terminals, agent labels and the herdr-app backend", "install herdr-core (hc): https://github.com/herdrdev/herdr-core"),
     c("herdr-app", Optional, "vega-sidebar sidebar and vega-inbox decisions; apply the herdr-app config group", "install herdr-app, then vega config apply herdr-app"),
@@ -86,6 +87,8 @@ pub struct Probe {
     pub vars: BTreeMap<String, String>,
     /// The macOS app's CLI, which is not on PATH.
     pub tailscale_app: PathBuf,
+    /// Target selected for this invocation; only its debug/deps entries are counted.
+    pub cargo_target: Option<PathBuf>,
 }
 
 const VARS: [&str; 5] = [
@@ -113,6 +116,14 @@ impl Probe {
             })
             .collect();
         Probe {
+            cargo_target: std::env::var_os("CARGO_TARGET_DIR")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    let cwd = std::env::current_dir().ok()?;
+                    cwd.ancestors()
+                        .find(|p| p.join("Cargo.toml").is_file())
+                        .map(|p| p.join("target"))
+                }),
             env,
             path,
             vars,
@@ -166,6 +177,39 @@ impl Row {
         } else {
             self.component.get
         }
+    }
+}
+
+/// Stop at threshold + 1: a pathological directory must not make infra enumerate it all.
+fn cargo_target(target: Option<&Path>, threshold: usize) -> (bool, String) {
+    let Some(target) = target else {
+        return (true, "no checkout target configured".into());
+    };
+    let deps = target.join("debug/deps");
+    let entries = match std::fs::read_dir(&deps) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return (true, "not built".into());
+        }
+        Err(e) => return (false, format!("{}: {e}", deps.display())),
+    };
+    let mut count = 0;
+    for entry in entries.take(threshold + 1) {
+        if let Err(e) = entry {
+            return (false, format!("{}: {e}", deps.display()));
+        }
+        count += 1;
+    }
+    if count > threshold {
+        (
+            false,
+            format!(
+                "warning: {} exceeds {threshold} entries (scan capped)",
+                deps.display()
+            ),
+        )
+    } else {
+        (true, format!("ok: {count}/{threshold} deps entries"))
     }
 }
 
@@ -419,6 +463,7 @@ pub fn check(p: &Probe, ctx: &Ctx) -> Vec<Row> {
                         (true, "no login job (herdr-app starts vegad; runtime: vega post relay status)".into())
                     }
                 }
+                "cargo-target" => cargo_target(p.cargo_target.as_deref(), 50_000),
                 "git" => git(p),
                 "dcg" => dcg(p),
                 "herdr" => match p.var("HERDR_BIN_PATH") {
@@ -491,6 +536,7 @@ mod tests {
             path: vec![bin],
             vars: BTreeMap::new(),
             tailscale_app: d.path().join("no-tailscale-app"),
+            cargo_target: None,
         };
         let ctx = Ctx {
             env,
@@ -502,6 +548,23 @@ mod tests {
             claude: d.path().join("no-claude").into_os_string(),
         };
         (d, probe, ctx)
+    }
+
+    #[test]
+    fn deps_warning_checks_boundary_and_missing_target() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(cargo_target(None, 2).0);
+        assert!(cargo_target(Some(d.path()), 2).0);
+        let deps = d.path().join("debug/deps");
+        fs::create_dir_all(&deps).unwrap();
+        for name in ["a", "b"] {
+            fs::write(deps.join(name), "").unwrap();
+        }
+        assert!(cargo_target(Some(d.path()), 2).0);
+        fs::write(deps.join("c"), "").unwrap();
+        let (ok, state) = cargo_target(Some(d.path()), 2);
+        assert!(!ok);
+        assert!(state.contains("exceeds 2 entries"), "{state}");
     }
 
     #[test]
@@ -583,7 +646,7 @@ mod tests {
     fn bare_home_misses_everything_with_a_next_step() {
         let (_d, p, ctx) = setup(&[]);
         let rows = check(&p, &ctx);
-        assert_eq!(summary(&rows), "required 0/5, optional 2/20");
+        assert_eq!(summary(&rows), "required 0/5, optional 3/21");
         // chezmoi absent is fine: nothing manages vega's targets.
         assert!(row(&rows, "chezmoi").ok);
         for r in rows.iter().filter(|r| !r.ok) {

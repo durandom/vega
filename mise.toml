@@ -35,9 +35,17 @@ run = [
   "sh scripts/install-vscode-ext.test.sh",
   "sh scripts/check-stamp.test.sh",
   "sh scripts/install-cli.test.sh",
+  "python3 scripts/target-cache.test.py",
+  "python3 scripts/target-profile.test.py",
+  # Cargo commands have exited. The sweep also takes Cargo's nonblocking lock.
+  "python3 scripts/target-cache.py",
   # Last: `mise run install` skips the check for this clean tree.
   "sh scripts/check-stamp.sh write",
 ]
+
+[tasks.target-sweep]
+description = "Evict seven-day-old local Cargo cache families (bounded; skips live builds)"
+run = "python3 scripts/target-cache.py"
 
 [tasks.install-cli]
 description = "Install the portable CLI part (vega, mux, deploy, lanista, shims, git hooks, skill link); also run by vega deploy"

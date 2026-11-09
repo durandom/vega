@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 146 · 2026-11-09
+
+- optional: `cargo-target` in `vega config infra` warns when this checkout's
+  `target/debug/deps` exceeds 50,000 entries, with a capped scan and a pointer
+  to `mise run target-sweep`. Dev/test builds pack debug info to stop macOS
+  retaining loose objects while keeping backtrace source lines. Checks now
+  evict seven-day-old deps/incremental cache families under Cargo's lock, with
+  per-run scan/deletion limits. See [build-cache.md](docs/design/build-cache.md)
+  for measurements and recovery (vega-htsq).
+
 ## 145 · 2026-11-09
 
 - feature: right-click a space in the vega sidebar and choose Rename to edit its name.

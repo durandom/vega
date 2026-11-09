@@ -340,3 +340,9 @@ call counts (`$XDG_STATE_HOME/vega/calls/<tool>/<pane>`).
 
 - Where do shims and plugins live and how are they installed (one repo, one installer)?
 - Guideline generation: render rules from this file directly, or move the **Rule** paragraphs into a `principles.yaml` as single source of truth (AXI's approach) and generate this document's index from it?
+
+## Cargo build-cache bounds
+
+Builds use checkout-local targets and a bounded post-check sweep. See
+[build-cache.md](build-cache.md) for macOS object retention, the deps-entry
+warning, cache ownership and measurements (vega-htsq).

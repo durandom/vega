@@ -122,6 +122,7 @@ impl Fixture {
         let home = self.d.path().join("home");
         fs::create_dir_all(&home).unwrap();
         Probe {
+            cargo_target: None,
             env: Env::at(&home),
             path: vec![self.bin()],
             vars: BTreeMap::new(),

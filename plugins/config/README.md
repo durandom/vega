@@ -24,6 +24,10 @@ runtime daemon state remains in `vega post relay status`.
 
 Commands: `vega config`, `diff`, `apply`, `print`, `init`, `infra`.
 
+`infra` also warns above 50,000 entries in this checkout's `target/debug/deps`;
+its directory scan stops at 50,001. `mise run target-sweep` performs bounded
+maintenance between builds; see [build-cache.md](../../docs/design/build-cache.md).
+
 `vega config infra --fleet` adds an explicit network check: every hc machine name
 must exist as a vega registry host. Mismatches exit 1 and suggest
 `hc machine rename <old> <host>`; no machine is changed. Empty fleets are reported

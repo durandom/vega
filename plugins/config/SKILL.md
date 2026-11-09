@@ -6,7 +6,7 @@ description: Shows, diffs and applies the coding agents', herdr's and dcg's conf
 # vega config: agent, herdr and dcg config from one source
 
 With herdr-app running, `vega config apply herdr-app` checks all Vega mods and selects its layout
-on first apply. Later choices stay yours; status reports clone drift.
+on first apply. Choices stay yours; status reports clone drift.
 
 ```
 vega config                  # per unit: target, ownership, state; local sources
@@ -27,12 +27,12 @@ vega config infra            # the infra vega needs: required/optional, state, n
   change. `claude.settings` keys are seeded: a local switch (e.g. outputStyle) stays until the
   source value changes.
 - `claude.hooks` installs/enables `vega-hooks@vega-local` through Claude's CLI in user scope.
-  Verified installation precedes legacy hook removal. Restart running Claude sessions.
+  Verified installation precedes legacy hook removal. Restart Claude sessions.
 - `managed (chezmoi)`: the dotfiles still own the target; apply leaves it until they drop it.
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
 - Apply retains 256 redacted results in `$XDG_STATE_HOME/vega/config-evidence.json`:
   phases, targets, operations and presence, never values.
-- `infra` checks required/optional components locally; `vega onboard` guides setup.
+- `infra` warns above 50k deps entries; `mise run target-sweep` between builds.
   `infra --fleet` additionally checks hc names against registry hosts (network);
   mismatches exit 1 with `hc machine rename <old> <host>`. It never renames machines.
 - Apply the `herdr-app` group together: checked status, agents and inbox mods precede
