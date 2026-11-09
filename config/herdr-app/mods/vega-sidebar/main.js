@@ -209,8 +209,16 @@ export default class Agents extends View {
   openProject(project, cx) {
     cx.stop_propagation();
     if (!project) return;
-    openOverlay({ mod: "vega-sidebar", kind: "popup", width: 440, height: 330,
-      props: { projectConfig: project } });
+    // Spike (vega-0h4c.50): one draggable window per project, its tabs beside the UAC's terminal.
+    const uac = terminals().find(x => x.state === "live" && x.labels?.["vega.role"] === "uac"
+      && x.labels?.["vega.project-id"] === project);
+    const panel = { id: "project-panel", type: "block", size: { weight: 2 },
+      content: { mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null } } };
+    const layout = uac
+      ? { id: "project-root", type: "row", gap: 8, padding: 8, children: [panel,
+          { id: "project-uac", type: "block", size: { weight: 3 }, content: { terminal: uac.address } }] }
+      : { id: "project-root", type: "row", padding: 8, children: [panel] };
+    openOverlay({ kind: "window", key: `vega-project-${project}`, width: 0.8, height: 0.8, layout });
   }
 
   async saveProject(cx) {
@@ -250,7 +258,11 @@ export default class Agents extends View {
       .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
       .child(h_flex().gap(12).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
         .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
-        .on_click((_e, cx) => { this.projectTab = item.id; cx.notify(); }).child(item.label))))
+        .on_click((_e, cx) => { this.projectTab = item.id; cx.notify(); }).child(item.label)))
+        .child(div().flex_1())
+        .child(div().id("close-project").px(8).py(5).rounded(6).cursor_pointer()
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click(() => closeOverlay(props().overlay)).child("Close")))
       .child(div().text_size(11).text_color(t.dim).child(props().projectConfig))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)))
       .child(this.loading ? div().child("Loading…") : this.nameInput ? this[tab.render](t) : div().child("Config unavailable"));
