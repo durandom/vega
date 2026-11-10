@@ -1041,7 +1041,6 @@ mod tests {
         // Parallel-safe: the list is read from the env, so use the default hosts.
         if std::env::var_os("VEGA_POST_INBOX_ONLY").is_none() {
             assert!(view.check_hc_machine("puck").is_ok());
-            assert!(view.check_hc_machine("deimos").is_ok());
         }
         assert!(view.check_hc_machine("io").is_ok());
         assert_eq!(

@@ -429,7 +429,7 @@ fn project_pins_cross_hosts_under_rendered_grants() {
             key: gkey,
         },
         Entry {
-            host: "deimos".into(),
+            host: "puck".into(),
             key: dkey,
         },
     ];
@@ -437,14 +437,14 @@ fn project_pins_cross_hosts_under_rendered_grants() {
     let k = pins::key("proteus", project, "agents", "codex", "budget");
     let uk = vega_registry::uac_key("proteus", project);
     let reads = vec![
-        auth::parse_registry_read(&format!("deimos={k}")).unwrap(),
-        auth::parse_registry_read(&format!("deimos={uk}")).unwrap(),
+        auth::parse_registry_read(&format!("puck={k}")).unwrap(),
+        auth::parse_registry_read(&format!("puck={uk}")).unwrap(),
     ];
     let authz = auth::render(
         &entries,
         Some(&admin),
         &["registry".into()],
-        &["deimos".into()],
+        &["puck".into()],
         None,
         &[],
         &[],
@@ -468,7 +468,7 @@ fn project_pins_cross_hosts_under_rendered_grants() {
                 .unwrap();
             let p = connect(&url, &pseed, "_INBOX_proteus").await;
             let g = connect(&url, &gseed, "_INBOX_ganymede").await;
-            let d = connect(&url, &dseed, "_INBOX_deimos").await;
+            let d = connect(&url, &dseed, "_INBOX_puck").await;
             // Cutover uses only an owner's snapshotted keys. Foreign legacy
             // keys survive this owner's apply; replay uses the same backup.
             let legacy = "proteus.lanista.old";
@@ -548,12 +548,12 @@ fn project_pins_cross_hosts_under_rendered_grants() {
             assert!(vega_registry::get_one(&g, &k).await.unwrap().is_some());
             // An inbox-only host reads precisely its granted key, without stream info.
             let hosts = ["proteus".to_string()];
-            let view = pins::access_with(&d, "deimos", record.clone(), None, Some(&hosts), 10)
+            let view = pins::access_with(&d, "puck", record.clone(), None, Some(&hosts), 10)
                 .await
                 .unwrap();
             assert_eq!(resolve(&view, 10).unwrap().1, "test-model");
             assert!(
-                pins::access_with(&d, "deimos", record.clone(), None, None, 10)
+                pins::access_with(&d, "puck", record.clone(), None, None, 10)
                     .await
                     .unwrap().entries.is_empty()
             );
