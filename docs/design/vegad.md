@@ -59,7 +59,9 @@ Jobs, all in one process:
    holds the pointer. `--now` is for urgent messages ("stop"). Claude and Codex queue typed input
    as a follow-up, so steering reaches an agent during a long turn. Never while
    `blocked` (a dialog: a stray Enter can approve; herdr also rejects it) or `unknown`, and the
-   draft guard stays in front. Such a pointer stands for the rest of that turn: no second line
+   draft guard stays in front. Exception (vega-lhc.257): a pane the backend lists without a
+   status for 5 min (hc lost or never had the agent's status) gets the pointer when its input box
+   reads as empty; no input box or any text in it keeps the pointer waiting. Such a pointer stands for the rest of that turn: no second line
    until the inbox is read or a new turn starts. Lost pointers (vega-lhc.73): a turn that ends on
    a provider abort (below) may drop input typed into it (pi does), so the abort clears the
    pointer and unread mail is pending again. After an exhausted quota vegad types no pointer for

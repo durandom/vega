@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 156 · 2026-11-10
+
+- feature: mail no longer waits forever for a pane whose status hc never reported (a Claude
+  pane listed as `-`): after 5 min vegad types the pointer when the pane's input box is empty
+  (vega-lhc.257). Update with `vega deploy apply <host>`.
+
 ## 155 · 2026-11-10
 
 - feature: a host without a vega UAC no longer counts notes without a project on every

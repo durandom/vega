@@ -3341,6 +3341,17 @@ async fn serve(
                 if d.decide(&pane, count, floor) != Decision::Type {
                     continue;
                 }
+                // No status from the backend for STALE (vega-lhc.257): only into an
+                // input box read as empty; no box or any text keeps it pending.
+                if d.unknown_long(&pane)
+                    && !d.is_urgent(&pane)
+                    && !matches!(
+                        screen(&pane).as_deref().map(delivery::draft),
+                        Some(Draft::None)
+                    )
+                {
+                    continue;
+                }
                 if drafts.holds(&pane) {
                     continue; // stays pending
                 }

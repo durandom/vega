@@ -10,7 +10,12 @@
 //! - Mail from the recipient's parent (its task channel) is also typed
 //!   while the agent is `working`: Claude and Codex queue typed input as a
 //!   follow-up, so the agent acts on it in its current turn. Never while
-//!   `blocked` (a dialog) or `unknown`.
+//!   `blocked` (a dialog).
+//! - A pane the backend lists without a status (`unknown`) waits STALE:
+//!   hc lost or never had the agent's status (a Claude pane whose hooks
+//!   never reported sat 30-60 min with mail, vega-lhc.257). After that the
+//!   relay types the pointer only into an input box it reads as empty.
+//!   A pane the backend does not list at all still waits.
 //! - Urgent mail (`send --now`) is typed at once, whatever the status.
 //! - A turn that ends on a provider abort (quota.rs) may drop a pointer
 //!   typed into it (pi does): the pointer no longer stands, and mail not
@@ -83,6 +88,8 @@ pub struct Delivery {
     origins: HashMap<String, Vec<Option<Origin>>>,
     /// Closed panes with unread mail, for the relay to bounce.
     bounces: Vec<Bounce>,
+    /// Pane -> since when the backend lists it without a status.
+    unknown_since: HashMap<String, Instant>,
 }
 
 /// Who sent a mail: the bounce goes back there.
@@ -236,6 +243,13 @@ impl Delivery {
             // Working or blocked: the agent took its turn; a new line may follow.
             self.pointed.remove(pane);
         }
+        if status == "unknown" {
+            self.unknown_since
+                .entry(pane.to_string())
+                .or_insert_with(Instant::now);
+        } else {
+            self.unknown_since.remove(pane);
+        }
         let old = self.status.insert(pane.to_string(), status.to_string());
         let changed = old.as_deref() != Some(status);
         if changed {
@@ -297,6 +311,7 @@ impl Delivery {
     /// Returns whether the pane had mail state to drop.
     pub fn gone(&mut self, pane: &str) -> bool {
         self.status.remove(pane);
+        self.unknown_since.remove(pane);
         self.urgent.remove(pane);
         self.queued.remove(pane);
         self.typed_at.remove(pane);
@@ -339,6 +354,21 @@ impl Delivery {
         self.urgent.contains(pane)
             || self.queued.contains(pane)
             || self.status_of(pane) == "working"
+            || self.unknown_long(pane)
+    }
+
+    /// Listed without a status for STALE: the pointer may go into an empty
+    /// input box (the relay checks the screen).
+    pub fn unknown_long(&self, pane: &str) -> bool {
+        self.status_of(pane) == "unknown"
+            && self
+                .unknown_since
+                .get(pane)
+                .is_some_and(|t| t.elapsed() >= STALE)
+    }
+
+    pub fn is_urgent(&self, pane: &str) -> bool {
+        self.urgent.contains(pane)
     }
 
     /// Panes worth a broker call now: urgent ones; pending idle, done or
@@ -359,7 +389,8 @@ impl Delivery {
                 if !self.pending.contains(*p) {
                     return !ignore_status && is_free(status) && !held && self.stale(p, now);
                 }
-                let free = ignore_status || is_free(status) || status == "working";
+                let free =
+                    ignore_status || is_free(status) || status == "working" || self.unknown_long(p);
                 free && !held
                     && self
                         .pointed
@@ -1038,6 +1069,26 @@ mod tests {
         restored.status("w1:p1", "working");
         assert_eq!(restored.candidates(false), vec!["w1:p1"]);
         assert!(restored.may_queue("w1:p1"));
+    }
+
+    #[test]
+    fn a_long_unknown_status_lets_the_pointer_go() {
+        let mut d = d("unknown");
+        d.mail("w1:p1", Sender::Other);
+        assert!(d.candidates(false).is_empty(), "fresh unknown waits");
+        assert!(!d.unknown_long("w1:p1"));
+        let past = Instant::now().checked_sub(STALE).unwrap();
+        d.unknown_since.insert("w1:p1".into(), past);
+        assert!(d.unknown_long("w1:p1"));
+        assert_eq!(d.candidates(false), vec!["w1:p1"]);
+        assert!(d.may_queue("w1:p1"));
+        // A status again ends it; unknown restarts the clock.
+        d.status("w1:p1", "blocked");
+        assert!(d.candidates(false).is_empty());
+        d.status("w1:p1", "unknown");
+        assert!(!d.unknown_long("w1:p1"), "the clock restarts");
+        d.gone("w1:p1");
+        assert!(!d.unknown_since.contains_key("w1:p1"));
     }
 
     #[test]
