@@ -27,7 +27,8 @@
 
         {"provider": "codex", "engine": "codex", "pin": "gpt-6-astra", "role": "frontier", "tier": "flagship"},
         {"provider": "codex", "engine": "codex", "pin": "gpt-6.1-sol", "role": "workhorse", "tier": "balanced"},
-        {"provider": "codex", "engine": "codex", "pin": "gpt-6-luna", "role": "thrifty", "tier": "budget"}
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6-luna", "role": "thrifty", "tier": "budget"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6.1-terra", "role": "thrifty"}
       ]
     }
   }

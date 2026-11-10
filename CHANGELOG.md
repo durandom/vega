@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 169 · 2026-11-10
+
+- optional: codex `gpt-6.1-terra` is in the seats allowlist without a global tier. Hosts may pin it,
+  e.g. `vega lanista pin codex --tier budget --host puck --set gpt-6.1-terra`. Run `vega lanista install`
+  (or deploy) on the setting host first.
+
 ## 168 · 2026-11-10
 
 - feature: private hosts can configure shared model defaults with
