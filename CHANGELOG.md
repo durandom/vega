@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 163 · 2026-11-10
+
+- feature: the keychain unlock window explains the lock and shows the exact command, retries a
+  failed unlock, and stays open after the unlock until you close it (the title turns green).
+
 ## 162 · 2026-11-10
 
 - feature: the status line shows one keychain lock, the focused terminal's machine's, instead of

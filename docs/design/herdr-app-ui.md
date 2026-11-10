@@ -20,15 +20,16 @@ unlabelled hc terminal on that host (`hc run --bg --no-parent --no-notify`, `--o
 it is never adopted into a tab. An existing live dedicated terminal is reused when reopening.
 The window layout contains a draggable title bar with Close, and that terminal exactly once.
 The title bar is a `vega` copy with `keychainTitle` props and no background pollers. The window
-does not take focus automatically. Closing it leaves the waiting terminal available to reopen;
-the next unlocked observation closes the window and kills only its dedicated terminal.
+does not take focus automatically. The title bar shows the lock in its state colour, the host
+and the state with its `since` time. The window stays until the Slayer closes it (Slayer
+2026-11-10): an unlock only turns the title green; Close closes the window and kills only its
+dedicated terminal.
 
-The terminal prints `Press Enter to unlock the login keychain on <host>`, waits for Enter, then
-runs `security unlock-keychain "$HOME/Library/Keychains/login.keychain-db"`. Echo is disabled
-before that command and restored on exit; security prompts on the tty. The password is never
-in argv (no `-p`), files, logs, mail, notes, agent send/keys, or visible output. Agents never
-press Enter, type a password, or run unlock/lock themselves. Failed launches show a short toast
-and the red lock offers retry. A probe that becomes unlocked during launch suppresses the window.
+The terminal explains the lock (host, why agents fail, the exact command
+`security unlock-keychain ~/Library/Keychains/login.keychain-db` it runs on that host, that the
+password is typed only there, without echo, never in argv), waits for Enter, then runs it with
+echo off, retries on a failure after the next Enter, and on success says so and waits for the
+window to be closed.
 
 Development stays in the worktree: run `herdr-app check config/herdr-app/mods/vega` and
 `node --test scripts/herdr-app-mods.test.mjs`. For a live tour use an isolated `HERDR_APP_HOME`

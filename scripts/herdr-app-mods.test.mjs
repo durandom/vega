@@ -795,7 +795,7 @@ test('a match-any view shows projects with a chosen label or on a chosen machine
   assert(!nodes.some(n=>n.idValue===`uac-${project}`),'all: label and machine both needed');
 });
 
-test('keychain popup opens once globally per lock, click reopens only its own terminal, unlocked closes',async()=>{
+test('keychain popup opens once globally per lock, click reopens only its own terminal, stays until closed',async()=>{
   const h=load('vega'), now=Date.now()/1000;
   const row={host:'puck',state:'locked',since:now-10,at:now};
   h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);return {code:0,stdout:'{"address":"puck/t42"}'};};
@@ -808,8 +808,10 @@ test('keychain popup opens once globally per lock, click reopens only its own te
   assert.deepEqual(start[2].slice(0,8),['run','--json','--bg','--no-parent','--no-notify','--on','puck','--']);
   assert(!start[2].includes('--label'),'unlock terminal is never adopted into a tab');
   const script=start[2][start[2].indexOf('-c')+1];
-  assert(script.indexOf('read -r')<script.indexOf('security unlock-keychain'));
-  assert(script.includes('stty -echo || exit'));
+  assert(script.indexOf('read -r')<script.indexOf('stty -echo; security unlock-keychain'),'Enter before the unlock runs');
+  assert(script.includes('stty -echo; security unlock-keychain'));
+  assert(script.includes('Command (runs on'),'shows the concrete command');
+  assert(script.trimEnd().endsWith('IFS= read -r enter'),'the terminal stays after the unlock');
   assert(!script.includes('unlock-keychain -p'));
   assert.equal(opens[0][1].layout.children[1].content.terminal,'puck/t42');
   assert.equal(opens[0][1].kind,'window');
@@ -822,9 +824,18 @@ test('keychain popup opens once globally per lock, click reopens only its own te
   red.handlers.on_click({},h.cx);await h.flush();
   assert.equal(h.calls.filter(c=>c[0]==='open').length,2,'click reopens a dismissed popup');
   assert.equal(h.calls.filter(c=>c[0]==='exec'&&c[2][0]==='run').length,1,'reuse existing dedicated terminal');
+  const before=h.calls.length;
   h.mod.applyKeychains([{...row,state:'unlocked',since:now}],now,h.cx);await h.flush();
-  assert(h.calls.some(c=>c[0]==='close'));
-  assert(h.calls.some(c=>c[0]==='exec'&&c[2][0]==='kill'&&c[2][1]==='puck/t42'));
+  assert(!h.calls.slice(before).some(c=>c[0]==='close'),'an unlock keeps the window for the Slayer to close');
+  assert(!h.calls.some(c=>c[0]==='exec'&&c[2][0]==='kill'));
+  const title=load('vega');title.state.set('vega.keychains',h.state.get('vega.keychains'));
+  title.state.set('vega.keychain-popups',h.state.get('vega.keychain-popups'));
+  title.mod.init({keychainTitle:'puck',overlay:'kc'},title.cx);
+  assert(texts(title.render()).some(x=>x.startsWith('unlocked')),'title shows the new state');
+  elements(title.render()).find(e=>e.idValue==='keychain-close').handlers.on_click({},title.cx);await title.flush();
+  assert(title.calls.some(c=>c[0]==='close'));
+  assert(title.calls.some(c=>c[0]==='exec'&&c[2][0]==='kill'&&c[2][1]==='puck/t42'),'closing kills only its terminal');
+  for(const k of ['vega.keychain-popups']) h.state.set(k,title.state.get(k));
   assert(!h.calls.some(c=>c[0]==='exec'&&['send','keys','read'].includes(c[2][0])));
   h.mod.applyKeychains([{...row,since:now+1}],now,h.cx);await h.flush();
   assert.equal(h.calls.filter(c=>c[0]==='open').length,3,'new since is a new lock');
