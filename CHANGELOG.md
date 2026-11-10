@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 171 · 2026-11-10
+
+- optional: the herdr-app vega status line and project Overview read beads, asks and CI in the
+  project's registry checkout instead of the UAC terminal's shell folder, which could show another
+  repo's counts. Apply the updated vega and vega-sidebar mods (`vega config apply herdr-app`).
+
 ## 170 · 2026-11-10
 
 - feature: the herdr-app project/config window has a Models tab for registry defaults and all

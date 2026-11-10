@@ -266,7 +266,9 @@ export default class Vega extends View {
     if (!ctx?.project || this.readingContext) return;
     this.readingContext = true;
     const local = ctx.uac && !ctx.uac.address.includes("/");
-    const cwd = ctx.uac?.cwd;
+    // The registry checkout, not the terminal's cwd: that is the login shell's folder, which
+    // drifts (a UAC started from another repo read that repo's beads).
+    const cwd = (shared("vega.badges") ?? []).find(r => r.project === ctx.project && !r.machine)?.checkout ?? ctx.uac?.cwd;
     const json = async (program, args) => {
       try {
         const r = await exec(program, args, { cwd, timeout: 10000 });

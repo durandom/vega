@@ -507,16 +507,18 @@ export default class Agents extends View {
     if (!uac || this.readingOverview) return;
     if (uac.address.includes("/")) { this.beads = "remote"; cx.notify(); return; }
     this.readingOverview = true;
+    // The registry checkout first: the terminal's cwd is its login shell's folder and drifts.
+    const cwd = this.badgeRow().checkout;
     let beads;
     try {
-      const r = await exec("bd", ["status", "--json"], { cwd: uac.cwd, timeout: 10000 });
+      const r = await exec("bd", ["status", "--json"], { cwd, timeout: 10000 });
       // Tolerate log lines before the JSON object.
       beads = r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))).summary : (r.stderr || "bd failed").trim();
     } catch (e) { beads = String(e); }
     // vega's --json views (vega-0h4c.50.4), run in the UAC's checkout so they pick its project.
     const vega = async args => {
       try {
-        const r = await exec("vega", [...args, "--json"], { cwd: uac.cwd, timeout: 10000 });
+        const r = await exec("vega", [...args, "--json"], { cwd, timeout: 10000 });
         return r.code === 0 ? JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) : null;
       } catch { return null; }
     };

@@ -973,3 +973,18 @@ test('Models tab reads host cells including inbox-only hosts and independent def
   readError=null;rows=[];h.api.exec=async()=>({code:0,stdout:JSON.stringify({rows})});await h.mod.readModels(h.cx);
   assert(texts(h.render()).includes('No known hosts'));
 });
+
+test('context and overview read beads in the registry checkout, not the drifted terminal cwd',async()=>{
+  const uac={address:'t6p',state:'live',cwd:'/other/repo',labels:{'vega.role':'uac','vega.project-id':'project-a'}};
+  const h=load('vega');h.state.set('vega.badges',[{...row(),checkout:'/repo'}]);
+  h.mod.ctx={project:'project-a',uac,term:uac,kind:''};
+  await h.mod.readContext(h.cx);
+  const bd=h.calls.find(c=>c[0]==='exec'&&c[1]==='bd');assert.equal(bd[3].cwd,'/repo');
+  h.state.set('vega.badges',[]);h.calls.length=0;await h.mod.readContext(h.cx);
+  assert.equal(h.calls.find(c=>c[0]==='exec'&&c[1]==='bd')[3].cwd,'/other/repo','without a badge row the terminal cwd remains');
+  const s=load('vega-sidebar');s.api.terminals=()=>[uac];s.setProps({uac:'t6p',projectConfig:'project-a'});
+  s.state.set('vega.badges',[{...row(),checkout:'/repo'}]);
+  await s.mod.readOverview(s.cx);
+  for(const c of s.calls.filter(c=>c[0]==='exec'))assert.equal(c[3].cwd,'/repo');
+  assert(s.calls.some(c=>c[0]==='exec'&&c[1]==='bd'));
+});
