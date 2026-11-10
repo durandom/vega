@@ -3581,10 +3581,32 @@ fn type_theme(live: &mut theme::Live, drafts: &Drafts) {
             theme::Action::Send => {
                 live.pending.remove(&pane);
                 match notify_queued(&pane, &line, working) {
-                    Ok(()) => log(&format!("theme: typed {line} into {pane}")),
+                    Ok(()) => {
+                        log(&format!("theme: typed {line} into {pane}"));
+                        if working {
+                            submit_slash_menu(&pane, &line);
+                        }
+                    }
                     Err(f) => log(&format!("theme: {pane}: {} {}", f.code, f.message)),
                 }
             }
+        }
+    }
+}
+
+/// In a working Claude pane the Enter after a typed slash command only picks
+/// from its completion menu: the line stays in the input box (seen live
+/// 2026-11-10). One more Enter runs it, and only when the box holds exactly
+/// that line, so it never submits anything else.
+fn submit_slash_menu(pane: &str, line: &str) {
+    if !terminals::is_hc(pane) {
+        return;
+    }
+    let left = screen(pane).map(|s| delivery::draft(&s));
+    if left == Some(Draft::Text(line.to_string())) {
+        match vega_herdr::hc::hc_local(&["keys", terminals::bare(pane), "enter"]) {
+            Ok(_) => log(&format!("theme: {pane}: Enter after the completion menu")),
+            Err(f) => log(&format!("theme: {pane}: {} {}", f.code, f.message)),
         }
     }
 }

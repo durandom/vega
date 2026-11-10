@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 158 · 2026-11-10
+
+- feature: the theme switch in a working Claude pane now runs: the Enter after the typed
+  `/config theme=<mode>` only closed Claude's completion menu, so vegad presses Enter once more
+  when the input box still holds exactly that line.
+
 ## 157 · 2026-11-10
 
 - feature: a light/dark switch reaches busy Claude panes at once: vegad types `/config theme=<mode>`

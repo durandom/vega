@@ -1072,6 +1072,14 @@ mod tests {
     }
 
     #[test]
+    fn a_slash_command_left_by_the_completion_menu_reads_as_that_text() {
+        // hc's plain read of a working Claude pane after `hc send` (2026-11-10).
+        let rule = "─".repeat(40);
+        let screen = format!("  ❯ theme=dark\n    theme=dark-ansi\n{rule}\n❯\u{a0}/config theme=dark\n{rule}\n  🧠 Opus");
+        assert_eq!(draft(&screen), Draft::Text("/config theme=dark".into()));
+    }
+
+    #[test]
     fn a_long_unknown_status_lets_the_pointer_go() {
         let mut d = d("unknown");
         d.mail("w1:p1", Sender::Other);
