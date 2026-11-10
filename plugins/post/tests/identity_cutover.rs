@@ -154,7 +154,7 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
     fs::write(
         &conf,
         format!(
-            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n",
+            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 1TB }}\n",
             home.join("js").display()
         ),
     )
@@ -773,7 +773,7 @@ fn rekey_journals_a_new_generation_replays_and_rolls_back() {
     fs::write(
         &conf,
         format!(
-            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n",
+            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 1TB }}\n",
             home.join("js").display()
         ),
     )

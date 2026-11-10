@@ -56,7 +56,7 @@ fn cli_reads_and_exports_full_filtered_jsonl_with_viewer_only() {
         .unwrap()
         .port();
     let config = dir.path().join("nats.conf");
-    std::fs::write(&config, format!("listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\nauthorization {{ users: [{{nkey: {}}}, {{nkey: {}, permissions: {{publish: [\"$JS.API.STREAM.INFO.VEGA_HISTORY\", \"$JS.API.STREAM.MSG.GET.VEGA_HISTORY\"], subscribe: [\"_INBOX_viewer.>\"]}}}}] }}", dir.path().join("js").display(), admin.public_key(), viewer.public_key())).unwrap();
+    std::fs::write(&config, format!("listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 1TB }}\nauthorization {{ users: [{{nkey: {}}}, {{nkey: {}, permissions: {{publish: [\"$JS.API.STREAM.INFO.VEGA_HISTORY\", \"$JS.API.STREAM.MSG.GET.VEGA_HISTORY\"], subscribe: [\"_INBOX_viewer.>\"]}}}}] }}", dir.path().join("js").display(), admin.public_key(), viewer.public_key())).unwrap();
     let _server = Server(
         Command::new("nats-server")
             .arg("-c")
