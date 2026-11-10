@@ -345,14 +345,25 @@ pub fn relay_running() -> bool {
 /// `local (<why>)` in `post-relay-<host>.broker`. Then `vega post` mail
 /// cannot reach anyone, and `vega mux send` pastes at once.
 pub fn relay_local() -> bool {
-    let Some(state) = state_file_on("x", None, "x:x")
-        .and_then(|f| f.parent().and_then(|p| p.parent()).map(Path::to_path_buf))
-    else {
-        return false;
-    };
-    relay_running()
-        && std::fs::read_to_string(state.join(format!("post-relay-{}.broker", post_host())))
-            .is_ok_and(|s| s.starts_with("local"))
+    relay_broker().is_some_and(|s| s.starts_with("local"))
+}
+
+/// Whether this host's vegad waits for the identity cutover: it records
+/// `identity quiesced (<why>)` in `post-relay-<host>.broker`. Project workers
+/// (bd and git sync) and registry publication are off until startup succeeds
+/// (docs/design/project-registry-cutover.md).
+pub fn relay_quiesced() -> bool {
+    relay_broker().is_some_and(|s| s.starts_with("identity quiesced"))
+}
+
+/// The broker state the running relay recorded; None when no relay runs.
+fn relay_broker() -> Option<String> {
+    let state = state_file_on("x", None, "x:x")
+        .and_then(|f| f.parent().and_then(|p| p.parent()).map(Path::to_path_buf))?;
+    if !relay_running() {
+        return None;
+    }
+    std::fs::read_to_string(state.join(format!("post-relay-{}.broker", post_host()))).ok()
 }
 
 /// The parent recorded for `pane`, if the record was written for the agent

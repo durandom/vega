@@ -221,6 +221,30 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    newer work. A host with rekey generations (vega-lhc.14.7) rolls those back
    first (`vega post identity rekey rollback`); flag-day rollback refuses until then.
 
+## Hosts with v2 records before approval
+
+A host that ran the cutover build before `approved.json` existed may hold v2
+files (`uac/v2`, `lanes/v2`, `uac-status/v2`, `badges/v2`) next to the legacy
+files of the same projects (issue #6). Its vegad stays quiesced: `vega post
+relay status` prints `off: project workers (bd and git sync ...)` and `vega bd
+status` / `vega uac status` show every project as `quiesced`. Mappings and
+preview merge the two record sets, so the ordinary runbook above applies
+unchanged:
+
+- **Claims** merge when legacy and v2 name the same pane and host. The v2
+  claim's fields win (it is newer); aliases and locations combine; the earliest
+  claim time is kept. A different pane or host still blocks: reconcile ownership
+  before preview.
+- **Lanes** concatenate: legacy records, then the v2 records not already present.
+- **uac-status and badges** keep the v2 record (derived caches, newer).
+- A v2 claim without a legacy file is the migrated local claim for its legacy
+  registry claim and is published with the projection.
+
+Recovery: never move legacy or v2 files aside; preview needs both, and rollback
+restores both byte for byte. If files were moved, put them back first (on
+gamer-0: `~/cutover/legacy-{uac,lanes}-backup`), then run Preview, Deploy and
+Verify as above.
+
 ## Late host rejoin
 
 A host that was offline on the flag day (io on 2026-10-22) is not in

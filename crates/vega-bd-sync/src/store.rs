@@ -242,6 +242,16 @@ pub(crate) fn location_problem(
     }
 }
 
+/// [`row`] as status commands print it: while vegad is identity quiesced
+/// nothing syncs, so every project's state reads `quiesced`.
+pub fn status_row(p: &Project, s: &State, now: i64) -> ([String; 7], Option<String>) {
+    let (mut cells, problem) = row(p, s, now);
+    if vega_herdr::state::relay_quiesced() {
+        cells[6] = "quiesced".into();
+    }
+    (cells, problem)
+}
+
 /// The cells of [`COLUMNS`] (unquoted), and the problem to show below the
 /// table: the stop reason, or the transient error.
 pub fn row(p: &Project, s: &State, now: i64) -> ([String; 7], Option<String>) {

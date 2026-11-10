@@ -249,7 +249,7 @@ restored`. Then, and on a push failure other than the two above:
 
 `vega bd status` (and `vega bd`): grouped by project ID, one row per local clone:
 `project,location,database,ahead,behind,last_sync,state`
-(`ok`, `pending` before the first sync, `error`, `stopped`), the problems, and doctor findings.
+(`ok`, `pending` before the first sync, `error`, `stopped`, `quiesced` while vegad waits for the identity cutover and no project syncs), the problems, and doctor findings.
 `vega uac status` prints the same table as `beads_sync`. Counts are vegad's last ones. Both also
 show vegad's git sync of the same projects ([git-sync.md](git-sync.md)).
 

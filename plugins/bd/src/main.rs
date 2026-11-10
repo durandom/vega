@@ -734,7 +734,9 @@ fn register(t: &Target, data: &Path) -> Result<(), Failure> {
 }
 
 fn sync_line() -> &'static str {
-    if vega_herdr::state::relay_local() {
+    if vega_herdr::state::relay_quiesced() {
+        "sync: off (vegad identity quiesced: project workers and sync stop until the identity cutover completes; vega post relay status)"
+    } else if vega_herdr::state::relay_local() {
         "sync: off (vegad in local mode, no broker); beads stay local until it reaches one"
     } else if vega_herdr::state::relay_running() {
         "sync: vegad running (pull every 60s, push after local writes)"
@@ -789,9 +791,10 @@ fn status() -> Result<(), Failure> {
     }
     let mut problems = Vec::new();
     let mut findings = Vec::new();
+    let quiesced = vega_herdr::state::relay_quiesced();
     for p in &projects {
         let s = store::state(&p.key, &p.common);
-        let (cells, problem) = store::row(p, &s, now);
+        let (cells, problem) = store::status_row(p, &s, now);
         println!(
             "  {}",
             cells.iter().map(|c| cell(c)).collect::<Vec<_>>().join(",")
@@ -834,6 +837,11 @@ fn status() -> Result<(), Failure> {
     {
         help.push(
             "vega bd resume --project <location>   # use the location column after resolving the conflict",
+        );
+    }
+    if quiesced {
+        help.push(
+            "vega post relay status   # identity quiesced; recovery: docs/design/project-registry-cutover.md",
         );
     }
     if !help.is_empty() {

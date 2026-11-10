@@ -1094,7 +1094,12 @@ pub fn status(as_json: bool) -> Result<(), Failure> {
         println!("mode: {}", s("mode"));
         let broker = s("broker");
         println!("broker: {broker}");
-        if broker.starts_with("local") {
+        if broker.starts_with("identity quiesced") {
+            println!(
+                "off: project workers (bd and git sync for {} projects) and registry publication until identity startup succeeds",
+                vega_bd_sync::store::projects().len()
+            );
+        } else if broker.starts_with("local") {
             println!(
                 "off: {} (vegad probes for a broker every minute)",
                 crate::LOCAL_OFF

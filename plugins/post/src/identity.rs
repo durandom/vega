@@ -321,9 +321,37 @@ pub(super) fn local_plans(
     Ok((writes, remove))
 }
 
+/// Registry UAC publication from migrated local state: planned claim writes
+/// plus v2 claims a newer binary wrote before `approved.json` existed.
+fn claim_publication(
+    host: &str,
+    writes: &Snapshot,
+    original: &Snapshot,
+) -> Result<BTreeMap<String, Value>, String> {
+    let mut publication = BTreeMap::new();
+    let kept = original.iter().filter(|(p, _)| !writes.contains_key(*p));
+    for (path, bytes) in writes.iter().chain(kept) {
+        if path.starts_with("uac/v2") {
+            let v: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+            let id = v["project"].as_str().ok_or("missing project")?;
+            publication.insert(
+                vega_registry::uac_key(host, id),
+                vega_registry::uac_entry(host, &v)?,
+            );
+        }
+    }
+    Ok(publication)
+}
+
 /// Compose the pure local and registry plans before journaling. Registry-only
 /// aliases and the earliest published claim time must survive reconciliation.
-fn retain_registry_claims(writes: &mut Snapshot, registry: &RegistryPlan) -> Result<(), String> {
+/// A claim may already exist only as a v2 file (written by a newer binary
+/// before `approved.json`); it is then the migrated local claim.
+fn retain_registry_claims(
+    writes: &mut Snapshot,
+    original: &Snapshot,
+    registry: &RegistryPlan,
+) -> Result<(), String> {
     for (key, claim) in &registry.projection {
         if key.split('.').nth(1) != Some("uac") {
             continue;
@@ -333,7 +361,7 @@ fn retain_registry_claims(writes: &mut Snapshot, registry: &RegistryPlan) -> Res
             "{}.json",
             vega_herdr::project::encode_component(project)
         ));
-        let bytes = writes.get(&path).ok_or(
+        let bytes = writes.get(&path).or_else(|| original.get(&path)).ok_or(
             "owned registry claim has no migrated local claim; reconcile ownership before preview",
         )?;
         let mut local: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
@@ -631,17 +659,7 @@ fn run_inner(action: Action) -> Result<(), String> {
                     .iter()
                     .map(|m| (m.old_key.clone(), m.project.clone()))
                     .collect();
-                let mut publication = BTreeMap::new();
-                for (path, bytes) in &writes {
-                    if path.starts_with("uac/v2") {
-                        let v: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-                        let id = v["project"].as_str().ok_or("missing project")?;
-                        publication.insert(
-                            vega_registry::uac_key(&host, id),
-                            vega_registry::uac_entry(&host, &v)?,
-                        );
-                    }
-                }
+                let publication = claim_publication(&host, &writes, &original)?;
                 let plan = RegistryPlan::prepare(&host, &entries, &ids, publication)?;
                 let owned = entries
                     .into_iter()
@@ -649,7 +667,7 @@ fn run_inner(action: Action) -> Result<(), String> {
                     .collect();
                 Ok::<_, String>((plan, owned))
             })?;
-            retain_registry_claims(&mut writes, &registry)?;
+            retain_registry_claims(&mut writes, &original, &registry)?;
             let p = HostPlan {
                 schema: 2,
                 host,
@@ -1106,7 +1124,7 @@ fn prepare_startup_files(root: &Path, approved: &HostPlan, host: &str) -> Result
     if !root.join(JOURNAL).exists() {
         verify_locations(approved)?;
         let (mut writes, remove) = local_plans(&approved.original, &approved.mappings, host)?;
-        retain_registry_claims(&mut writes, &approved.registry)?;
+        retain_registry_claims(&mut writes, &approved.original, &approved.registry)?;
         if writes != approved.writes || remove != approved.remove {
             return Err("local plan does not match pure projection".into());
         }
@@ -1495,6 +1513,43 @@ mod tests {
         assert_eq!(snapshot(root).unwrap(), p.original);
         assert!(root.join(JOURNAL).exists());
         assert!(!root.join(MARKER).exists());
+    }
+
+    /// Issue #6: v2 local records written before `approved.json`, with or
+    /// without the legacy file, still yield a plan for the legacy registry claim.
+    #[test]
+    fn preview_accepts_v2_claims_written_before_approval() {
+        let host = "gamer-0";
+        let m: Mapping = serde_json::from_value(json!({"old_key":"~/repo/.git", "project":"github.com/team/repo", "location":{"common_dir":"/repo/.git","checkout":"/repo"}})).unwrap();
+        let v2 = Path::new("uac/v2").join(format!(
+            "{}.json",
+            vega_herdr::project::encode_component(m.project.as_str())
+        ));
+        let legacy = (
+            PathBuf::from("uac/local_~_repo_.git"),
+            serde_json::to_vec(
+                &json!({"project":m.old_key,"host":host,"pane":"p1","at":7,"tracker":"task"}),
+            )
+            .unwrap(),
+        );
+        let current = serde_json::to_vec(&json!({"schema":2,"project":m.project,"host":host,"pane":"p1","at":9,"tracker":"task-2","common_dir":"/repo/.git","checkout":"/repo","folder_name":"repo","locations":[{"common_dir":"/repo/.git","checkout":"/repo"}]})).unwrap();
+        let entries = BTreeMap::from([(
+            format!("{host}.uac.old"),
+            json!({"project":m.old_key,"host":host,"pane":"p1","at":5}),
+        )]);
+        let ids = BTreeMap::from([(m.old_key.clone(), m.project.clone())]);
+        let both = Snapshot::from([legacy, (v2.clone(), current.clone())]);
+        let only_v2 = Snapshot::from([(v2.clone(), current)]);
+        for original in [both, only_v2] {
+            let mappings = std::slice::from_ref(&m);
+            let (mut writes, _) = local_plans(&original, mappings, host).unwrap();
+            let publication = claim_publication(host, &writes, &original).unwrap();
+            let registry = RegistryPlan::prepare(host, &entries, &ids, publication).unwrap();
+            retain_registry_claims(&mut writes, &original, &registry).unwrap();
+            let claim: Value = serde_json::from_slice(&writes[&v2]).unwrap();
+            assert_eq!(claim["at"], 5, "the earliest registry claim time survives");
+            assert_eq!(claim["tracker"], "task-2");
+        }
     }
 
     #[test]

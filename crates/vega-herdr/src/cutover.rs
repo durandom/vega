@@ -54,9 +54,11 @@ fn destination(kind: &str, id: &ProjectId) -> PathBuf {
         .join(format!("{}.json", encode_component(id.as_str())))
 }
 
-fn put(plan: &mut Plan, snapshot: &Snapshot, path: PathBuf, v: &Value) -> Result<(), String> {
+/// Two legacy keys of one ID must agree. A v2 record that a newer binary wrote
+/// before the cutover was approved is handled by the caller (`adopt_v2`).
+fn put(plan: &mut Plan, path: PathBuf, v: &Value) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(v).map_err(|_| "cannot encode local projection")?;
-    if let Some(prior) = plan.writes.get(&path).or_else(|| snapshot.get(&path)) {
+    if let Some(prior) = plan.writes.get(&path) {
         if value(prior)? != *v {
             return Err(format!(
                 "conflicting local project records at {}",
@@ -120,6 +122,47 @@ fn merge_claim(prior: &Value, next: &mut Value) -> Result<(), String> {
     next["common_dir"] = prior["common_dir"].clone();
     next["checkout"] = prior["checkout"].clone();
     Ok(())
+}
+
+/// Merge a v2 claim a newer binary wrote before `approved.json` existed with
+/// the claim migrated from legacy files. Same pane and host are required; the
+/// v2 claim is current, so its fields win. Aliases and locations combine and
+/// the claim keeps the earliest start.
+fn adopt_v2(existing: &Value, migrated: &Value) -> Result<Value, String> {
+    if existing["pane"] != migrated["pane"] || existing["host"] != migrated["host"] {
+        return Err("conflicting local UAC ownership between legacy and v2 claims".into());
+    }
+    let mut next = existing.clone();
+    for (key, val) in migrated.as_object().ok_or("invalid UAC claim")? {
+        if next[key].is_null() {
+            next[key] = val.clone();
+        }
+    }
+    let mut aliases = BTreeSet::new();
+    let mut locations = BTreeSet::<RepoLocation>::new();
+    for v in [existing, migrated] {
+        for field in ["folder_name", "origin_name"] {
+            if let Some(alias) = v[field].as_str() {
+                aliases.insert(alias.to_owned());
+            }
+        }
+        if let Some(list) = v["aliases"].as_array() {
+            aliases.extend(list.iter().filter_map(|a| a.as_str().map(str::to_owned)));
+        }
+        if let Some(list) = v["locations"].as_array() {
+            for location in list {
+                locations.insert(
+                    serde_json::from_value(location.clone()).map_err(|_| "invalid UAC location")?,
+                );
+            }
+        }
+    }
+    next["aliases"] = json!(aliases);
+    next["locations"] = json!(locations);
+    let a = existing["at"].as_i64().ok_or("claim missing timestamp")?;
+    let b = migrated["at"].as_i64().ok_or("claim missing timestamp")?;
+    next["at"] = a.min(b).into();
+    Ok(next)
 }
 
 /// `mappings` must come from this owner's local resolver while quiesced. Files
@@ -254,16 +297,44 @@ pub fn prepare_with_aliases(
                     if !v["at"].is_i64() {
                         return Err("project snapshot missing timestamp".into());
                     }
-                    put(&mut plan, snapshot, dest, &v)?;
+                    // uac-status and badges are derived caches: a v2 record
+                    // written before approval is newer and stays unchanged.
+                    if let Some(existing) = snapshot.get(&dest) {
+                        v = value(existing)?;
+                        if !v.is_object() || v["project"] != json!(m.project) {
+                            return Err(format!("invalid v2 record at {}", dest.display()));
+                        }
+                    }
+                    put(&mut plan, dest, &v)?;
                 }
             }
             plan.remove.insert(source);
         }
     }
-    for (path, claim) in claims {
-        put(&mut plan, snapshot, path, &claim)?;
+    for (path, mut claim) in claims {
+        if let Some(existing) = snapshot.get(&path) {
+            claim = adopt_v2(&value(existing)?, &claim)?;
+        }
+        put(&mut plan, path, &claim)?;
     }
-    for (path, records) in lanes {
+    for (path, mut records) in lanes {
+        // A v2 lane written before approval continues the legacy history:
+        // append its records after the (older) legacy ones, dropping repeats.
+        if let Some(existing) = snapshot.get(&path) {
+            let text = std::str::from_utf8(existing).map_err(|_| "invalid lane encoding")?;
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                let v = value(line.as_bytes())?;
+                if !v["actor"].is_string() || !v["since"].is_i64() {
+                    return Err("invalid lane record".into());
+                }
+                if records.iter().any(|r| r["project"] != v["project"]) {
+                    return Err(format!("v2 lane/project mismatch at {}", path.display()));
+                }
+                if !records.contains(&v) {
+                    records.push(v);
+                }
+            }
+        }
         // Keep every actor/pane record and its original since; the reader
         // computes the earliest start per actor across merged clone lanes.
         let mut text = String::new();
@@ -271,11 +342,7 @@ pub fn prepare_with_aliases(
             text.push_str(&v.to_string());
             text.push('\n');
         }
-        let bytes = text.into_bytes();
-        if snapshot.get(&path).is_some_and(|prior| prior != &bytes) {
-            return Err("conflicting v2 lanes".into());
-        }
-        plan.writes.insert(path, bytes);
+        plan.writes.insert(path, text.into_bytes());
     }
     for (path, bytes) in snapshot {
         let parts: Vec<_> = path.components().collect();
@@ -739,6 +806,78 @@ mod tests {
         assert!(
             prepare_with_aliases(&snapshot, &[m], "registry-alias", &["foreign-host"]).is_err()
         );
+    }
+    /// Issue #6: a newer binary wrote v2 records before `approved.json`; the
+    /// legacy files of the same projects still exist.
+    #[test]
+    fn v2_records_written_before_approval_merge_with_legacy_ones() {
+        let m = mapping("~/a/.git", "/a/.git", "/a");
+        let id = m.project.as_str().to_owned();
+        let mut snapshot = Snapshot::new();
+        claim(&mut snapshot, &m, "p1", 20);
+        snapshot.insert(
+            legacy("lanes", &m.old_key),
+            b"{\"actor\":\"host/old\",\"since\":10,\"pane\":\"p1\"}\n".to_vec(),
+        );
+        add(
+            &mut snapshot,
+            legacy("uac-status", &m.old_key),
+            json!({"at":20}),
+        );
+        let v2_claim = json!({"schema":2,"project":id,"pane":"p1","host":"host","at":30,
+            "tracker":"task-2","common_dir":"/a/.git","checkout":"/a","folder_name":"a",
+            "locations":[{"common_dir":"/a/.git","checkout":"/a"}]});
+        add(
+            &mut snapshot,
+            destination("uac", &m.project),
+            v2_claim.clone(),
+        );
+        let newer = json!({"schema":2,"project":id,"actor":"host/new","since":40,"pane":"p1"});
+        snapshot.insert(
+            destination("lanes", &m.project),
+            format!("{newer}\n").into_bytes(),
+        );
+        add(
+            &mut snapshot,
+            destination("uac-status", &m.project),
+            json!({"schema":2,"project":id,"at":50}),
+        );
+
+        let plan = prepare(&snapshot, std::slice::from_ref(&m), "host").unwrap();
+        let claim = value(&plan.writes[&destination("uac", &m.project)]).unwrap();
+        assert_eq!(claim["tracker"], "task-2", "the current v2 claim wins");
+        assert_eq!(claim["at"], 20, "the earliest start survives");
+        assert_eq!(claim["aliases"], json!(["a", "repo"]));
+        let lanes = std::str::from_utf8(&plan.writes[&destination("lanes", &m.project)]).unwrap();
+        let actors: Vec<_> = lanes
+            .lines()
+            .map(|l| value(l.as_bytes()).unwrap()["actor"].clone())
+            .collect();
+        assert_eq!(
+            actors,
+            ["host/old", "host/new"],
+            "disjoint histories concatenate"
+        );
+        assert_eq!(
+            value(&plan.writes[&destination("uac-status", &m.project)]).unwrap()["at"],
+            50,
+            "the newer v2 cache stays"
+        );
+        for kind in ["uac", "lanes", "uac-status"] {
+            assert!(plan.remove.contains(&legacy(kind, &m.old_key)));
+        }
+        // Replaying on applied targets (legacy sources still present) is stable.
+        let mut applied = snapshot.clone();
+        applied.extend(plan.writes.clone());
+        let again = prepare(&applied, std::slice::from_ref(&m), "host").unwrap();
+        assert_eq!(again.writes, plan.writes);
+
+        let mut other = v2_claim;
+        other["pane"] = "p9".into();
+        add(&mut snapshot, destination("uac", &m.project), other);
+        assert!(prepare(&snapshot, std::slice::from_ref(&m), "host")
+            .unwrap_err()
+            .contains("between legacy and v2"));
     }
     #[test]
     fn one_common_directory_can_retain_several_local_checkouts() {
