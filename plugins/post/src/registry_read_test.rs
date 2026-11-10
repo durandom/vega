@@ -104,6 +104,70 @@ pub async fn denied(c: &async_nats::Client, subject: &str, payload: &str) -> boo
         .is_err()
 }
 
+/// Observe the broker's actual ACL rejection instead of waiting for every
+/// denied request to time out. Positive requests retain a generous deadline.
+struct PermissionProbe {
+    client: async_nats::Client,
+    errors: tokio::sync::mpsc::UnboundedReceiver<String>,
+    reply: String,
+}
+
+impl PermissionProbe {
+    async fn connect(url: &str, seed: &str, inbox: &str) -> Self {
+        let (errors, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let client = async_nats::ConnectOptions::with_nkey(seed.into())
+            .custom_inbox_prefix(inbox)
+            .request_timeout(Some(Duration::from_secs(5)))
+            .event_callback(move |event| {
+                let errors = errors.clone();
+                async move {
+                    if let async_nats::Event::ServerError(error) = event {
+                        let _ = errors.send(error.to_string());
+                    }
+                }
+            })
+            .connect(url)
+            .await
+            .unwrap();
+        Self {
+            client,
+            errors: receiver,
+            reply: format!("{inbox}.permission-probe"),
+        }
+    }
+
+    async fn rejected(&mut self, action: &str, subject: &str) {
+        let error = tokio::time::timeout(Duration::from_secs(5), self.errors.recv())
+            .await
+            .expect("broker did not report the expected permission violation")
+            .expect("permission event channel closed");
+        assert!(
+            error.contains("Permissions Violation")
+                && error.contains(action)
+                && error.contains(&format!("\"{subject}\"")),
+            "{action} {subject}: {error}"
+        );
+    }
+
+    async fn publish_denied(
+        &mut self,
+        subject: &str,
+        headers: async_nats::HeaderMap,
+        payload: &str,
+    ) {
+        self.client
+            .publish_with_reply_and_headers(
+                subject.to_string(),
+                self.reply.clone(),
+                headers,
+                payload.to_string().into(),
+            )
+            .await
+            .unwrap();
+        self.rejected("Publish", subject).await;
+    }
+}
+
 #[test]
 fn registry_read_is_one_key_read_only() {
     let dir = tempfile::tempdir().unwrap();
@@ -831,15 +895,27 @@ fn keychain_command_relays_status_without_registry_rights() {
             kv.put("proteus.beat", json!({"at":1}).to_string().into())
                 .await
                 .unwrap();
-            let p = connect(&url, &puck_seed, "_INBOX_puck").await;
+            let mut probe = PermissionProbe::connect(&url, &puck_seed, "_INBOX_puck").await;
+            let p = probe.client.clone();
             let mut sub = r.subscribe("vega.cmd.proteus.>").await.unwrap();
-            r.flush().await.unwrap();
             let server = r.clone();
             let worker = tokio::spawn(async move {
                 while let Some(req) = sub.next().await {
                     crate::cmd::respond(&server, "proteus", &req).await;
                 }
             });
+            // flush() only writes socket bytes. A request on the same
+            // connection as SUB is ordered after it at the broker, and its
+            // answer proves both registration and the worker are ready
+            // before puck sends on a different connection. No retry/sleep.
+            let ready = r
+                .request("vega.cmd.proteus.shell.proteus", "{}".into())
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&ready.payload).unwrap()["code"],
+                "denied"
+            );
             let at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -896,6 +972,23 @@ fn keychain_command_relays_status_without_registry_rights() {
                 kv.entry(key).await.unwrap().unwrap().operation,
                 jetstream::kv::Operation::Put
             );
+            // Inspect stored headers directly instead of waiting for a
+            // forwarded TTL to expire. This keeps header stripping covered
+            // even when the permission probes complete in milliseconds.
+            let stored = r
+                .request(vega_registry::direct_get_subject(key), "".into())
+                .await
+                .unwrap();
+            for header in ["Nats-Rollup", "KV-Operation", "Nats-TTL"] {
+                assert!(
+                    stored
+                        .headers
+                        .as_ref()
+                        .and_then(|h| h.get(header))
+                        .is_none(),
+                    "forwarded {header}"
+                );
+            }
             // A hostile reply subject must not exploit allow_responses to
             // turn the acknowledgement into a write to an unrelated key.
             let revision = kv.entry(key).await.unwrap().unwrap().revision;
@@ -959,7 +1052,9 @@ fn keychain_command_relays_status_without_registry_rights() {
                 "vega.cmd.ganymede.keychain.puck",
                 "vega.cmd.proteus.keychain.proteus",
             ] {
-                assert!(denied(&p, command, &value.to_string()).await, "{command}");
+                probe
+                    .publish_denied(command, Default::default(), &value.to_string())
+                    .await;
             }
             // Existing exact reads remain intact; no new reads or stream info.
             assert_eq!(
@@ -967,7 +1062,13 @@ fn keychain_command_relays_status_without_registry_rights() {
                 Some(theme.clone())
             );
             for k in [key, "proteus.beat"] {
-                assert!(vega_registry::get_one(&p, k).await.is_err());
+                probe
+                    .publish_denied(
+                        &vega_registry::direct_get_subject(k),
+                        Default::default(),
+                        "",
+                    )
+                    .await;
             }
             for api in [
                 "$JS.API.STREAM.INFO.KV_VEGA_REGISTRY",
@@ -978,12 +1079,8 @@ fn keychain_command_relays_status_without_registry_rights() {
                 "$JS.API.CONSUMER.CREATE.KV_VEGA_REGISTRY",
                 "$JS.API.CONSUMER.CREATE.KV_VEGA_REGISTRY.w.$KV.VEGA_REGISTRY.>",
             ] {
-                assert!(denied(&p, api, "{}").await, "{api}");
+                probe.publish_denied(api, Default::default(), "{}").await;
             }
-            assert!(jetstream::new(p.clone())
-                .get_key_value(vega_registry::BUCKET)
-                .await
-                .is_err());
             // All mutation forms, including stream-wide rollup headers, are
             // denied even on the sender's own status subject.
             for key in [
@@ -996,7 +1093,9 @@ fn keychain_command_relays_status_without_registry_rights() {
                 "proteus.beat",
             ] {
                 let subject = format!("$KV.VEGA_REGISTRY.{key}");
-                assert!(denied(&p, &subject, "{}").await, "put {key}");
+                probe
+                    .publish_denied(&subject, Default::default(), "{}")
+                    .await;
                 for operation in ["DEL", "PURGE", "ROLLUP-ALL"] {
                     let mut headers = async_nats::HeaderMap::new();
                     if operation == "ROLLUP-ALL" {
@@ -1007,27 +1106,12 @@ fn keychain_command_relays_status_without_registry_rights() {
                     if operation == "PURGE" {
                         headers.insert("Nats-Rollup", "sub");
                     }
-                    assert!(
-                        p.request_with_headers(subject.clone(), headers, "".into())
-                            .await
-                            .is_err(),
-                        "{operation} {key}"
-                    );
+                    probe.publish_denied(&subject, headers, "").await;
                 }
             }
             // No plain watch subscription either.
-            let mut watch = p.subscribe("$KV.VEGA_REGISTRY.>").await.unwrap();
-            p.flush().await.unwrap();
-            kv.put("proteus.theme", theme.to_string().into())
-                .await
-                .unwrap();
-            assert!(
-                tokio::time::timeout(Duration::from_millis(500), watch.next())
-                    .await
-                    .ok()
-                    .flatten()
-                    .is_none()
-            );
+            let _watch = p.subscribe("$KV.VEGA_REGISTRY.>").await.unwrap();
+            probe.rejected("Subscription", "$KV.VEGA_REGISTRY.>").await;
             assert_eq!(
                 vega_registry::get_one(&r, "proteus.theme").await.unwrap(),
                 Some(theme)
