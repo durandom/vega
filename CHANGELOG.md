@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 174 · 2026-11-10
+
+- optional: the sidebar's Active filter now also hides finished sentinels: a sub-agent's done
+  shows as a grey ring and counts as idle. Apply the updated vega-sidebar mod
+  (`vega config apply herdr-app`).
+
 ## 173 · 2026-11-10
 
 - migration: `vega board`, `vega open` and the herdr TUI config unit are removed.

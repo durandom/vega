@@ -1364,9 +1364,12 @@ export default class Agents extends View {
     });
     if (shared(INACTIVE_KEY) != null) localStorage.setItem("hide-inactive", String(filtering));
     // Count only this view's sessions, before folds; UACs may remain as context.
+    const kids = new Set(list.flatMap(a => this.tree(all, a.address).map(s => s.t.address)));
     const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)]).map(a => [a.address, a]));
+    // The status the row shows: a sub-agent's done reads as idle (kidStatus), so it hides too.
+    const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : (this.listed.get(a.address) ?? a.status);
     this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
-      a.address === shown || ["working", "blocked", "done", "error"].includes(this.listed.get(a.address) ?? a.status)
+      a.address === shown || ["working", "blocked", "done", "error"].includes(rowStatus(a))
     ).map(a => a.address)) : null;
     if (filtering) for (const uac of membership.uacs.values()) {
       if (this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);

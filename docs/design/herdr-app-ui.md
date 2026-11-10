@@ -323,7 +323,9 @@ provider credit units must not be rendered as USD (vega-lweq).
 ## Inactive sidebar sessions (vega-0h4c.63)
 
 The **Active** toggle beside the view selector hides idle (grey ring) and unknown/no-status
-sessions. Working, blocked and done sessions stay: done is unread completion news. The
+sessions. Working, blocked and done sessions stay: done is unread completion news. A sub-agent's
+done shows as an idle ring (`kidStatus`: it reports to its parent, whose done is the news), so it
+hides like idle; the filter judges the status the row shows. The
 focused terminal's agent also stays, even when idle. This filter applies within the selected
 label/machine view, and does not change that view.
 

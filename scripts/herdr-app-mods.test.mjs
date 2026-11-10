@@ -554,7 +554,7 @@ function projectFixture(h) {
   return project;
 }
 
-test('inactive filter retains UAC context, active descendants and unread done; hides idle and unknown rows and empty groups',()=>{
+test('inactive filter retains UAC context and active descendants; hides idle, sub-agent done and unknown rows and empty groups',()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);
   const all=h.api.terminals();
   all.push(
@@ -573,9 +573,10 @@ test('inactive filter retains UAC context, active descendants and unread done; h
   h.mod.init({},h.cx);
   elements(h.render()).find(n=>n.idValue==='ag-hide-inactive').handlers.on_click({},h.cx);
   const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
-  for(const id of [`uac-${project}`,'ag-puck/t1','sub-t2','sub-t6','sub-t8']) assert(ids.includes(id),id);
-  for(const id of ['ag-t3','ag-t4','sub-t5','sub-t7','sub-t9','uac-idle-project','ag-t10','sub-t11','space-scratch']) assert(!ids.includes(id),id);
-  assert(texts(tree).includes('6 idle hidden'),'counts sessions once, including unknown, excluding retained UAC and exited child');
+  for(const id of [`uac-${project}`,'ag-puck/t1','sub-t2','sub-t6']) assert(ids.includes(id),id);
+  // A sub-agent's done shows as an idle ring (kidStatus): it hides like idle.
+  for(const id of ['sub-t8','ag-t3','ag-t4','sub-t5','sub-t7','sub-t9','uac-idle-project','ag-t10','sub-t11','space-scratch']) assert(!ids.includes(id),id);
+  assert(texts(tree).includes('7 idle hidden'),'counts sessions once, including unknown, excluding retained UAC and exited child');
   assert.equal(h.state.get('vega.hide-inactive'),true);
   assert.equal(h.storage.get('hide-inactive'),'true');
   assert(h.calls.some(c=>c[0]==='stop'),'toggle stops row propagation');
@@ -604,13 +605,13 @@ test('focused idle terminal and its UAC stay visible; activity toggle persists t
 
 test('inactive filter combines with label and machine views and hides fully idle projects',()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
-  const agents=h.api.agents();agents[1].status='done';agents[3].status='working';h.api.agents=()=>agents;
+  const agents=h.api.agents();agents[1].status='working';agents[3].status='working';h.api.agents=()=>agents;
   h.mod.preferences={projects:{[project]:{labels:['work']}},views:{Remote:{labels:[],machines:['puck']}}};
   h.state.set('vega.hide-inactive',true);
   for(const view of ['label:work','Remote']) {
     h.state.set('vega.view',view);
     const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
-    assert(ids.includes(`uac-${project}`));assert(ids.includes('sub-t2'),'done retained');
+    assert(ids.includes(`uac-${project}`));assert(ids.includes('sub-t2'),'working sentinel retained');
     assert(!ids.includes('space-scratch'),'view still applies to active scratch agent');
     assert(texts(tree).includes('1 idle hidden'),'count excludes sessions outside the view');
   }
