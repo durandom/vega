@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 176 · 2026-11-10
+
+- optional: the sidebar shows done (blue) only while unread, like the tab bar (turn past
+  `herdr.seen`); seen sessions read as idle and the Active filter hides them. Apply the updated
+  vega-sidebar mod (`vega config apply herdr-app`).
+
 ## 175 · 2026-11-10
 
 - feature: sidebar sub-agents now show unread done as a blue dot like tabs and remain in Active

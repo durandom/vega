@@ -1129,3 +1129,24 @@ test('context and overview read beads in the registry checkout, not the drifted 
   for(const c of s.calls.filter(c=>c[0]==='exec'))assert.equal(c[3].cwd,'/repo');
   assert(s.calls.some(c=>c[0]==='exec'&&c[1]==='bd'));
 });
+
+test('done is blue and kept by the Active filter only while unread (turn past herdr.seen), like the tab bar',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  const all=h.api.terminals();
+  all.push(
+    {address:'t5',state:'live',parent:'puck/t1',status:'done',turn:3,labels:{'herdr.seen':'3'}},
+    {address:'t6',state:'live',parent:'puck/t1',status:'done',turn:4,labels:{'herdr.seen':'3'}},
+    {address:'t8',state:'live',parent:'puck/t1',status:'done',turn:2},
+  );
+  h.api.terminals=()=>all;
+  h.mod.init({},h.cx);h.state.set('vega.hide-inactive',true);
+  const ids=elements(h.render()).map(n=>n.idValue);
+  for(const id of ['sub-t6','sub-t8']) assert(ids.includes(id),`${id}: unread done stays`);
+  assert(!ids.includes('sub-t5'),'seen done hides like idle');
+  // A top-level agent whose done was seen reads as idle too.
+  all.find(t=>t.address==='t3').turn=5;all.find(t=>t.address==='t3').labels['herdr.seen']='5';
+  const agents=h.api.agents();agents[2].status='done';h.api.agents=()=>agents;
+  assert(!elements(h.render()).map(n=>n.idValue).includes('ag-t3'),'seen top-level done hides');
+  all.find(t=>t.address==='t3').turn=6;
+  assert(elements(h.render()).map(n=>n.idValue).includes('ag-t3'),'new turn makes it unread again');
+});

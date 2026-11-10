@@ -69,10 +69,12 @@ function title(tab, l) {
   const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
   return (tab.name === prog || !tab.named) && telling ? live : tab.name;
 }
-// A sub-agent without a pane isn't in agents(): its raw word, error counting as
-// blocked. Done stays unread completion news (blue), just like the tab bar.
+// A sub-agent without a pane isn't in agents(): its raw word, error counting as blocked.
+// Done is unread news (blue) only while the terminal's turn is past what the Slayer saw (label
+// herdr.seen, kept by herdr-app); the tab bar shows it the same way. Seen, it reads as idle.
+const seenDone = (term, s) => s === "done" && term?.turn != null && Number(term.labels?.["herdr.seen"]) >= term.turn ? "idle" : s;
 const kidStatus = (k, listed) => {
-  const s = listed.get(k.address) ?? k.status;
+  const s = seenDone(k, listed.get(k.address) ?? k.status);
   return s === "error" ? "blocked" : s;
 };
 // Later stages add tab descriptors and renderers here without changing the shell.
@@ -1146,7 +1148,7 @@ export default class Agents extends View {
       const l = labelsOf(a.address);
       const uac = l["vega.role"] === "uac";
       const [glyph, color] = kindOf(a);
-      const st = depth ? { status: kidStatus(a, this.listed) } : a;
+      const st = depth ? { status: kidStatus(a, this.listed) } : { ...a, status: this.topStatus(a) };
       const when = depth ? 0 : this.since(a);
       const name = uac ? "" : depth
         ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
@@ -1269,6 +1271,11 @@ export default class Agents extends View {
     return out;
   }
 
+  // A top-level row's status: its agent report, done only while unread (seenDone).
+  topStatus(a) {
+    return seenDone(this.vegaTerminals?.get(a.address), this.listed.get(a.address) ?? a.status);
+  }
+
   hasVisibleTree(all, a) {
     return !this.visibleSessions || this.visibleSessions.has(a.address)
       || this.tree(all, a.address).some(s => this.visibleSessions.has(s.t.address));
@@ -1385,7 +1392,7 @@ export default class Agents extends View {
     const kids = new Set(list.flatMap(a => this.tree(all, a.address).map(s => s.t.address)));
     const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)]).map(a => [a.address, a]));
     // Judge the status the row shows, including unread done sub-agents.
-    const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : (this.listed.get(a.address) ?? a.status);
+    const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : this.topStatus(a);
     this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
       a.address === shown || ["working", "blocked", "done", "error"].includes(rowStatus(a))
     ).map(a => a.address)) : null;
@@ -1426,7 +1433,7 @@ export default class Agents extends View {
         el.on_mouse_down("right", (_e, cx) => this.openProject(this.vegaTerminals.get(a.address).labels["vega.project-id"], cx)))
       .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
       .child(h_flex().w(14).flex_none().items_center().justify_center()
-        .child(this.status(t, { status: this.listed.get(a.address) ?? a.status }, true)));
+        .child(this.status(t, { status: this.topStatus(a) }, true)));
 
     this.rowLabel = a => detail.get(a.address) ?? label(a);
     this.activeView = activeView();

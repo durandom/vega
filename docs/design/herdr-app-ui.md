@@ -326,7 +326,9 @@ provider credit units must not be rendered as USD (vega-lweq).
 The **Active** toggle beside the view selector hides idle (grey ring) and unknown/no-status
 sessions. Working, blocked and done sessions stay: done is unread completion news, including
 sub-agents. `kidStatus` preserves done as a blue dot like the tabs and maps error to blocked.
-Done sub-agents stay visible until the Slayer looks at them and they become idle. The
+Done counts as unread only while the terminal's `turn` is past its `herdr.seen` label (what
+herdr-app's tab bar uses); a seen done reads as idle (`seenDone`), for top-level rows and
+sub-agents alike, in the glyph and in the filter. The
 focused terminal's agent also stays, even when idle. This filter applies within the selected
 label/machine view, and does not change that view.
 
