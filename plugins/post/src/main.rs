@@ -62,6 +62,8 @@ mod sidebar;
 mod supervise;
 mod terminals;
 mod theme;
+#[cfg(test)]
+mod tool_mail_test;
 mod uber;
 mod uber_ask;
 mod uber_brief;
@@ -3278,10 +3280,10 @@ async fn serve(
                     &mut decisions,
                     &mut hygiene,
                 );
-                // Published with the CI mail on the next tick.
+                // Routed with the CI mail (locally on inbox-only hosts).
                 ci_unsent.extend(due);
                 slow("metadata", t);
-                if up {
+                if up && !st::is_inbox_only(&host) {
                     // Open Uber asks: withdraw on bead close, resend on a new epoch.
                     let t = Instant::now();
                     let run = uber_ask::round(&js, &host, registry.view.as_ref());
@@ -3295,6 +3297,12 @@ async fn serve(
                     ));
                 }
                 meta_next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
+            }
+            // Inbox-only hosts cannot publish to their own inboxes. Retry
+            // local tool mail every pass, independently of broker availability
+            // and CI_RETRY, so a freed pane or cleared draft can receive it.
+            if st::is_inbox_only(&host) {
+                ci_unsent = deliver_local(ci_unsent, &d, &mut drafts);
             }
             for line in sup.hook_disagreements(vega_herdr::notes::now_ms()) {
                 log(&line);
@@ -3530,7 +3538,7 @@ async fn serve(
                     ci::Event::Mail(pane, text) => {
                         ci_unsent.push((ci::AGENT.to_string(), pane, text));
                         if up && Instant::now() >= ci_retry_at {
-                            ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
+                            ci_unsent = deliver_tool_mail(&js, &host, ci_unsent, &d, &mut drafts).await;
                             ci_retry_at = Instant::now() + CI_RETRY;
                         }
                     }
@@ -3541,7 +3549,7 @@ async fn serve(
                     bdsync::Event::Mail(pane, text) => {
                         ci_unsent.push((bdsync::AGENT.to_string(), pane, text));
                         if up && Instant::now() >= ci_retry_at {
-                            ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
+                            ci_unsent = deliver_tool_mail(&js, &host, ci_unsent, &d, &mut drafts).await;
                             ci_retry_at = Instant::now() + CI_RETRY;
                         }
                     }
@@ -3551,7 +3559,7 @@ async fn serve(
                     upstream::Event::Mail(pane, text) => {
                         ci_unsent.push((upstream::AGENT.to_string(), pane, text));
                         if up && Instant::now() >= ci_retry_at {
-                            ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
+                            ci_unsent = deliver_tool_mail(&js, &host, ci_unsent, &d, &mut drafts).await;
                             ci_retry_at = Instant::now() + CI_RETRY;
                         }
                     }
@@ -3566,7 +3574,7 @@ async fn serve(
                 }
                 _ = tick.tick() => {
                     if up && !ci_unsent.is_empty() && Instant::now() >= ci_retry_at {
-                        ci_unsent = publish_tool_mail(&js, &host, ci_unsent).await;
+                        ci_unsent = deliver_tool_mail(&js, &host, ci_unsent, &d, &mut drafts).await;
                         ci_retry_at = Instant::now() + CI_RETRY;
                     }
                 }
@@ -3636,6 +3644,23 @@ fn submit_slash_menu(pane: &str, line: &str) {
 /// A broker that refused CI mail is retried this often, so a broker outage
 /// does not stall the relay loop on every tick.
 const CI_RETRY: Duration = Duration::from_secs(30);
+
+/// Broker mode's tool mail uses local delivery on inbox-only hosts, which
+/// have no right to publish to their own inbox subjects. All producers share
+/// this route, including mail carried from local mode or an earlier binary.
+async fn deliver_tool_mail(
+    js: &jetstream::Context,
+    host: &str,
+    mails: Vec<ToolMail>,
+    d: &Delivery,
+    drafts: &mut Drafts,
+) -> Vec<ToolMail> {
+    if st::is_inbox_only(host) {
+        deliver_local(mails, d, drafts)
+    } else {
+        publish_tool_mail(js, host, mails).await
+    }
+}
 
 /// Publishes tool mails (CI watch, ci.rs; beads sync, bdsync.rs) into this
 /// host's inboxes, without a sender pane: nobody to reply to. The relay's own

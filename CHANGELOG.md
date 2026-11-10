@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 177 · 2026-11-10
+
+- feature: inbox-only hosts deliver relay tool mail (hygiene, CI, beads sync and upgrade
+  proposals) directly to free local panes, holding drafts as in local mode. This avoids denied
+  broker publishes and endless retries; Uber asks and digests are skipped on these hosts.
+
 ## 176 · 2026-11-10
 
 - optional: the sidebar shows done (blue) only while unread, like the tab bar (turn past

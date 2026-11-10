@@ -353,7 +353,7 @@ identity and stay off.
   when the agent is `idle`/`done`, behind the draft guard. A closed pane drops its mail.
 - A probe connects off the loop, bounded by 10 s, with backoff: after 2 s, then doubling up to every 60 s.
   Once a broker answers, vegad switches to the broker loop and hands it the delivery and supervision state
-  plus undelivered tool mail (published as mail then).
+  plus undelivered tool mail (published as mail then, or delivered locally on inbox-only hosts).
 - A configured broker that is unreachable is noted for the human (below).
 - `--once` still needs a broker.
 
@@ -423,6 +423,11 @@ operator pair grant to reach an agent; otherwise they become human notices:
   access, pair grant or inbox archive is involved. `--uac` resolves open local v2 UAC claims,
   including IDs, aliases and `.`; remote UAC enumeration and `--uber` remain unavailable.
   `vega mux` lists local agents. `--now` also uses this direct local path.
+- Relay tool mail: hygiene, CI, beads sync and upstream upgrade proposals use `deliver_local`
+  even while connected to the broker. They never publish to this host's inbox: the body is typed
+  as one line (capped at 1200 characters) when the pane is free, behind local mode's draft guard. Failed
+  delivery waits for another pass; `bad_pane` is dropped. Pending mail survives broker/local
+  transitions and self-exec. Uber asks and digest generation are skipped without registry rights.
 - Cross-host send: `vega post send --host <other-host> <pane>` and cross-host `done` make a core NATS
   request to `vega.quarantine.<to>.<pane>.<self>` (at most 4 KiB). The target's vegad writes a note
   (kind `quarantine`, title `deimos (quarantine) to <pane>: ...`, toast plus `vega post notes` and the
