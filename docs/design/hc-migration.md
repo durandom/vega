@@ -1,20 +1,21 @@
 # Migration from the herdr TUI to hc and herdr-app
 
-Status: draft for the Slayer (vega-0h4c.2, epic vega-0h4c). The call-site inventory behind it is
+Status: migration record (vega-0h4c.2, epic vega-0h4c). The call-site inventory behind it is
 [hc-migration-inventory](hc-migration-inventory.md).
 
 ## Goal
 
 vega stops driving the herdr TUI and runs on herdr-core (`hc`: terminals, agents, labels, send/read/wait,
-remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The last TUI state is tagged in git
-(vega-0h4c); vega config keeps owning all config (herdr-app units: vega-0h4c.1, [config](config.md)).
+remote machines) and herdr-app (the GUI on hc, `~/.config/herdr-app/`). The state before UI/config
+retirement is tagged `herdr-tui-final`. The legacy backend remains for active puck panes;
+its config is host-managed. Vega owns agent and herdr-app config ([config](config.md)).
 
 ## Decisions
 
 1. **Design B: vega gives up what hc does natively.** Starting agents, readiness and the first message,
    unique names, parent/children, read/send/keys/kill, cross-machine addressing and the status event stream
    are hc's. vega keeps what sits above the terminal: the UAC role and lineage ledger, `vega post` mail,
-   board, gate, dialog classification, capacity and model choice.
+   inbox, gate, dialog classification, capacity and model choice.
 2. **Parallel operation during a short transition.** Both worlds run on one machine until every host has
    moved. Every slice is additive: the TUI path stays untouched until the last slice.
 3. **The backend follows the agent concerned.** For "who am I" the caller's world decides; for a target the
@@ -108,8 +109,8 @@ fills the registry from `herdr agent list` only, so an hc agent can neither be f
 | No harness session id (gate verdict, reopen, transcript) | The agent's own env (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), recorded in vega state at first contact |
 | No env flag on `hc run` (API has `env`) | mux uses `terminal.run` over `hc connect`, with separate env and direct harness argv |
 | No sidebar tokens, toasts, focus events | A vega herdr-app mod: renders `vega.*` labels, shows toasts and `$upgrade` from an hc doc, writes focus into an hc doc for `human.rs`/`waiting.rs` |
-| No startup hook for vegad | The vega mod guards `vega-post relay start` in `init()` to default real homes (decision 5); the TUI plugin stays a no-op-if-running starter until the TUI goes |
-| No plugin panes or actions (board, open) | board as a terminal via `herdr-app do pane.split --argv`, open as a mod |
+| No startup hook for vegad | The vega mod guards `vega-post relay start` in `init()` to default real homes (decision 5); the legacy startup hook stays for active herdr hosts |
+| Retired dashboard and path menu | Removed by decision vega-0h4c.11; the herdr-app inbox/sidebar are the supported UI |
 | `hc send` always presses Enter | Draft restore around a mail pointer is dropped for hc; `hc send --if idle` replaces the stash |
 | Children end with their parent by default | `--outlive-parent` on every vega spawn (decision 4) |
 
@@ -147,19 +148,20 @@ dirs for a real core (never the user's core).
    qualified mail addresses; the machine-name/registry-host convention below now resolves them.
    hc explicit split/workspace placement is tracked in vega-0h4c.20; tab and wt-created
    spaces are implemented. Guides and README descriptions change with this slice.
-5. **UAC and the UI.** UAC commands over both backends, the vega herdr-app mod, board and open, config
+5. **UAC and the UI.** UAC commands over both backends, the vega herdr-app mod and inbox/sidebar, config
    doctor rows for `hc`/`herdr-app`, skills and help texts. Split: 5a `vega uac` over hc plus quieter
    attention (vega-0h4c.23, GitHub #8); 5b the UI, see [herdr-app UI](herdr-app-ui.md).
-6. **Retire the TUI** (vega-0h4c.4): once no TUI agent runs on any host, delete the herdr backend, the
-   `herdr` config unit, the herdr plugins, `shims/herdr` and `link-herdr.sh`.
+6. **Retire the TUI UI/config** (vega-0h4c.4): dashboard and path-menu plugin crates,
+   manifests, link/install steps and the `herdr` config unit are removed. The mux
+   herdr backend, shared crate, shim and legacy vegad hook stay for active panes on puck.
 
 Hosts move after slice 4 on proteus (vega-0h4c.3): ganymede, deimos, io, puck. Running TUI agents do not move live;
 each restarts in herdr-app from a handoff with resume.
 
-## Open questions for the Slayer
+## UI retirement decision
 
-1. **board and open.** Still needed under herdr-app, or replaced by herdr-app's own panes and mods? To be
-   looked at separately.
+Decision vega-0h4c.11 is closed: drop the old dashboard and path-menu commands.
+The old UI is preserved in `herdr-tui-final`, not ported as hc terminal tabs.
 
 ## Unknowns to settle in slice 0
 

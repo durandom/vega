@@ -532,7 +532,7 @@ fn log_once_recovers_and_mail_contains_rights_and_bounded_untrusted_text() {
     assert!(text.contains("Example Service (PTEST01)"));
     assert!(text.contains(&i.html_url));
     assert!(text
-        .contains("Resolve, escalate or reassign only after the Slayer approves a board decision"));
+        .contains("Resolve, escalate or reassign only after the Slayer approves a decision bead"));
     assert!(text.contains("Board fallback: unmapped"));
     assert!(!text.contains('\u{001b}'));
     assert!(text.len() < 1800);

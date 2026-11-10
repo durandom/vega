@@ -1,7 +1,7 @@
 # vega config
 
-Owns the config of the coding agents, herdr and dcg: CLAUDE.md, AGENTS.md, output styles, Claude settings keys, agent
-hooks, global skills and herdr's config.toml. Each file is rendered from the repo default in `config/` or a local
+Owns the config of the coding agents, herdr-app and dcg: CLAUDE.md, AGENTS.md, output styles, Claude settings keys, agent
+hooks, global skills and herdr-app config. Each file is rendered from the repo default in `config/` or a local
 override in `~/.config/vega/config/`, so one source drives every host. Shared files are key-merged: only vega's
 keys change.
 

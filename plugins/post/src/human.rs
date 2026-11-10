@@ -2,7 +2,7 @@
 //! (docs/design/uber-uac.md §2, vega-lhc.209.12). herdr 0.9.5 reports no
 //! keystrokes; the cheapest signal is `pane.focused` (any client, no
 //! source field). vega's own focus calls are human commands (`vega mux
-//! next`, `vega board`, `vega open --focus`) and `vega mux` spawns with
+//! next`) and `vega mux` spawns with
 //! `--no-focus`. A focus right after a pane closed may be herdr moving
 //! the focus on, so it does not count.
 //!

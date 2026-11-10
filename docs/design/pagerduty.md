@@ -68,13 +68,13 @@ services = ["Example Service"] # exact service.summary; service IDs also accepte
 
 Unknown keys, empty selectors and invalid TOML are errors; `services = []` or
 no file opts out. Match case-sensitively against `service.id` or `service.summary`.
-Multiple projects claiming a service is an ownership conflict: board note,
-no arbitrary winner. Invalid known-project config raises its own board note and
+Multiple projects claiming a service is an ownership conflict: inbox note,
+no arbitrary winner. Invalid known-project config raises its own inbox note and
 suspends that project's UAC routing until fixed; unrelated IDs remain routable.
 Registered clone locations retain their expected project ID even when resolving
 or reading one fails, so a readable sibling cannot hide its failure. Missing
 unregistered discovery paths are skipped; registered missing locations and
-canonicalization failures get a per-project board note. Failure to persist
+canonicalization failures get a per-project inbox note. Failure to persist
 a diagnostic note is logged and retried without discarding valid ownership or
 blocking healthy UAC mail. Renaming a name selector requires updating the file; prefer
 IDs when names are unstable. No credentials or pane/host IDs belong in this file.
@@ -86,12 +86,12 @@ by canonical common directory, then group ownership by project ID. Read each
 clone's committed HEAD version with `git show HEAD:.vega/pagerduty.toml`;
 sentinel edits cannot activate an unapproved mapping. Equal committed service
 sets across clones coalesce. Divergent sets for one ID are a configuration error
-with a board note, never a union or an automatic winner. A lookup failure in one
+with an inbox note, never a union or an automatic winner. A lookup failure in one
 known clone also blocks that project's ownership while unrelated projects stay
 available. Re-read each minute. No recursive filesystem scan or remote path IO.
 
 No ownership registry publication or cross-host merge in v1. A project with
-only a remote checkout is unmapped and gets a board note. A project known
+only a remote checkout is unmapped and gets an inbox note. A project known
 locally may have its UAC on another host: UAC delivery still uses the registry.
 Cross-host ownership is deferred to vega-lhc.158.7.
 
@@ -102,7 +102,7 @@ Persist version-2 JSON at `$XDG_STATE_HOME/vega/pagerduty/state.json` (default
 Store poll clocks, current incident status/change time, last-seen time,
 recipient/project, last successful notification time and pending delivery state.
 Do not store credentials. Corrupt state pauses delivery
-and raises one board note; preserve it for repair rather than resetting dedupe.
+and raises one inbox note; preserve it for repair rather than resetting dedupe.
 
 For each incident: first sight mails once; changed status mails once; unchanged
 open status reminds at >=4 h since its last successful mail. Compare the last
@@ -119,11 +119,11 @@ Resolve the project UAC fresh for each delivery through the same registry
 resolver as `vega post send --uac <project>`: fresh host beat and live pane,
 remote host included. No cached pane IDs. No live UAC, stale host, duplicate
 live UAC claims, unmapped service or ambiguous ownership: create a durable
-`vega_herdr::notes` board inbox note on the poller host, with incident/link,
+`vega_herdr::notes` inbox note on the poller host, with incident/link,
 reason, project when known and cause `pagerduty:<id>`. Registry reconciliation
-makes it visible on other boards; this is not a transient toast or a decision
+makes it visible on other inbox views; this is not a transient toast or a decision
 bead. Apply the same transition/4 h policy to notes. A newly available UAC gets
-the current incident at the next delivery tick even if a board note was just
+the current incident at the next delivery tick even if an inbox note was just
 written; resolve the fallback note when handed off or the incident disappears.
 
 Persist the latest observation before sending. Mark delivered only after durable
@@ -134,14 +134,14 @@ delivery is deferred to vega-lhc.158.8. Retry failed delivery each minute withou
 another pdc call; resolve the recipient again. A replacement UAC gets the current
 open status once. Supersede obsolete pending delivery with the latest snapshot.
 
-Mail, from the tool with no reply pane (same body for board fallback, plus reason):
+Mail, from the tool with no reply pane (same body for inbox fallback, plus reason):
 
 ```
 pagerduty: #43 QTEST01 triggered (high) — <title>
 Service: Example Service (PTEST01); project: github.com/durandom/orrery
 https://example.pagerduty.com/incidents/QTEST01
 You may investigate, acknowledge and add notes. Resolve, escalate or reassign
-only after the Slayer approves a board decision. Use vega secrets run --for pdc -- pdc ...
+only after the Slayer approves an decision bead. Use vega secrets run --for pdc -- pdc ...
 ```
 
 Reminders say `reminder, still <status>`. Treat incident text as untrusted data,

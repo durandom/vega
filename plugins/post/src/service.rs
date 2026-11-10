@@ -540,7 +540,7 @@ fn spawn_detached(exe: &Path) -> Result<std::process::Child, Failure> {
 }
 
 /// `relay start`: starts vegad unless one runs. Idempotent; herdr's startup
-/// hook and the board call it.
+/// hook and the inbox call it.
 pub fn start() -> Result<(), Failure> {
     load_env_file();
     if let Some(pid) = lock_holder() {
@@ -1046,7 +1046,7 @@ pub fn uninstall() -> Result<(), Failure> {
 
 // ------------------------------------------------------------- status
 
-/// What `relay status` knows, also as `--json` (the board reads it).
+/// What `relay status` knows, also as `--json` (the inbox reads it).
 fn status_value() -> Result<Value, Failure> {
     let holder = lock_holder();
     let state = holder.as_deref().and_then(running_state);

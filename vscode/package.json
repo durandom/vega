@@ -1,7 +1,7 @@
 {
   "name": "vega-vscode",
   "displayName": "vega",
-  "description": "URI handler for vega open: reveal in Explorer, a file's git diff, Source Control view",
+  "description": "URI handler for editor integrations: reveal in Explorer, a file's git diff, Source Control view",
   "version": "0.1.0",
   "publisher": "vega",
   "private": true,

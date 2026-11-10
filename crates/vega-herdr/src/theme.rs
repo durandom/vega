@@ -1,6 +1,6 @@
 //! The user's theme, `~/.config/vega/theme.toml` (`$XDG_CONFIG_HOME/vega`).
 //! This module reads its `[symbols]` section: the symbols of the UAC pane's
-//! label (vegad) and of `vega board`. Other sections belong to `vega theme`.
+//! label (vegad) and of the inbox. Other sections belong to `vega theme`.
 //!
 //! ```toml
 //! [symbols]
@@ -220,7 +220,7 @@ pub fn agent_topic(kind: &str) -> &'static Topic {
 }
 
 /// The topics `[symbols.colors]` may colour, with their default colours:
-/// the UAC label's symbols, which herdr's sidebar tokens and the board's
+/// the UAC label's symbols, which herdr's sidebar tokens and the inbox's
 /// badges draw, and the agent kinds of the sidebar's `$kind` token. Each
 /// default keeps a contrast of at least 3:1 on the Catppuccin Latte and
 /// Macchiato base and mantle backgrounds.

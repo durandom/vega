@@ -2,7 +2,7 @@
 //! vega-lhc.209.4). This host's ask files are the truth
 //! (`vega_registry::uber_asks`); each round vegad
 //! - withdraws an open ask whose bead closed (answered through the bead, the
-//!   board or the pane): `uber.withdraw` to the claim it was sent to;
+//!   inbox or the pane): `uber.withdraw` to the claim it was sent to;
 //! - resends an open ask to a new live claim (New epoch): `uber.ask` again,
 //!   then records the new claim, so only its answer counts from then on.
 //!

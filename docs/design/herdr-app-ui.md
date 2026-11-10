@@ -2,8 +2,7 @@
 
 Slice 5b of the [hc migration](hc-migration.md) (vega-0h4c.10): what vega shows in herdr-app and how the
 Slayer acts on it. Decided with the Slayer on 2026-11-07. Background: the herdr TUI sidebar (machines tree,
-priority-sorted agents list, vega tokens from `report-metadata`) and the `vega board` Inbox
-([board-ui](board-ui.md)).
+priority-sorted agents list, vega tokens from `report-metadata`) and the former dashboard Inbox (preserved at `herdr-tui-final`).
 
 ## Login keychain windows (vega-oiwq)
 
@@ -137,7 +136,7 @@ Right-clicking a project header or its UAC row opens a popup with a descriptor-d
 tab bar. Stage 1 exposes only Config (display name, comma-separated labels, Save).
 This requires the full `vega.project-id` label; legacy UACs without that label remain
 visible but cannot open Config until vegad supplies their stable identity.
-Later stages add UAC, Board, Decisions and Notifications descriptors and renderers.
+Later stages add UAC, Inbox, Decisions and Notifications descriptors and renderers.
 Inputs load once on opening, never autofocus, and remain editable on save errors.
 Save uses argv via `exec("vega", ["project", "config", ...])` on the app host, including
 for remote UACs. Escape closes. Non-UAC Spaces rows retain Rename.
@@ -177,11 +176,11 @@ the collapsed rail and keyboard navigation.
   `watchFolder()`.
 - **Answers:** `exec()` of the vega CLI, JSON where a command needs to return data.
 
-## vega board
+## Retired TUI UI
 
-The board Inbox moves to `vega-inbox`; the herdr plugin (dock, popup, `prefix+u`) goes with the TUI. The
-bead tabs (List, Table, Kanban) stay a TUI that runs as an hc tab when needed. `vega open` is still open
-(vega-0h4c.11).
+The dashboard and path menu were dropped by decision vega-0h4c.11. Their plugin
+crates and TUI config are removed; the inbox, sidebar and project window are the
+supported UI. The old implementation is preserved at `herdr-tui-final`.
 
 ## Limits of herdr-app mods
 
@@ -356,7 +355,7 @@ context, the project window holds details and actions.
   `vega-project-follow`; each second the window reopens in place on the focused terminal's
   project, keeping the tab). The window owns a focus handle so Esc closes it.
   Tabs: Overview (UAC, needs-you tiles, beads counts, sentinels with beads, CI watches,
-  capacity bars), Board (in progress / ready / blocked from `bd`, expandable rows),
+  capacity bars), Inbox (in progress / ready / blocked from `bd`, expandable rows),
   Decisions (answer via `vega uac answer`, dismiss via `bd close --reason`), Asks
   (`vega notify list --json --project <id>`, read locally for every project because the list
   comes from the registry; Ack and Resolve run `vega notify ack|resolve <host>=<id>`, which
@@ -380,7 +379,7 @@ context, the project window holds details and actions.
   mod copy and the filter popup is another copy; the sidebar mirrors it into its own
   `localStorage` (key `active-view`) to keep it across restarts. Saving a view shows it.
 - **Waiting on you**: the Overview lists the badge row's `waiting_panes` under the tiles with
-  Go (focus) and, for `silent` and `asking`, Dismiss; the vega inbox offers the same Dismiss.
+  Go (focus) and, for `silent` and `asking`, Dismiss; the vegan inbox offers the same Dismiss.
   Dismiss runs `vega mux dismiss <pane>` on the badge row's machine (the parent's vegad host,
   through `hc exec` when remote, pane unqualified to `hc:<pane>`). A live dialog (`input`) and an
   open ask (`unanswered`) are not dismissable (vega-0h4c.56).

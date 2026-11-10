@@ -1,6 +1,6 @@
 //! A herdr pane id in a selection (`w1:p2`, `io:w1:p2`, `w1:p2 on io`), the
-//! machine it lives on, and jumping to it. Shared by vega-open and the
-//! board.
+//! machine it lives on, and jumping to it. Used by
+//! mux navigation and shared terminal addressing.
 //!
 //! herdr focuses a pane by id only on its own server (`pane.focus`). The
 //! client switches machines only on user input (sidebar, notification), so a
@@ -282,7 +282,7 @@ fn focus_local(pane: &str) -> Result<(), String> {
     let path = socket_path().ok_or("no herdr socket (HOME unset)")?;
     let mut conn = crate::socket::Client::connect(&path, HERDR_TIMEOUT)
         .map_err(|e| format!("connect {}: {e}", path.display()))?;
-    let req = json!({"id": "vega-open", "method": "pane.focus", "params": {"pane_id": pane}});
+    let req = json!({"id": "vega-focus", "method": "pane.focus", "params": {"pane_id": pane}});
     conn.write(&req, HERDR_TIMEOUT)
         .map_err(|e| format!("write: {e}"))?;
     let v = conn.read(HERDR_TIMEOUT).map_err(|e| format!("read: {e}"))?;

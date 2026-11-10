@@ -4,7 +4,7 @@
 //! `vega.inbox.*`, so the broker enforces the split. The send is core NATS
 //! request/reply, no stream: the target host's vegad serves
 //! `vega.quarantine.<host>.>`, writes a note for the human (`vega post notes`,
-//! the board's `N`, a herdr toast) and answers `stored`. Nothing is typed
+//! the inbox's `N`, a herdr toast) and answers `stored`. Nothing is typed
 //! into a pane and no agent inbox sees it. No vegad there: `no_responder`,
 //! nothing is stored, the sender is told to try later.
 
@@ -13,7 +13,7 @@ use vega_herdr::Failure;
 
 /// Largest body a quarantined reply may carry.
 pub const MAX_BODY: usize = 4096;
-/// Note kind; the board and `vega post notes` show it.
+/// Note kind; the inbox and `vega post notes` show it.
 pub const KIND: &str = "quarantine";
 
 pub fn subject(to: &str, pane: &str, from: &str) -> String {

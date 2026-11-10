@@ -223,7 +223,7 @@ exit 1: `merge conflicts in issues require operator resolution; merge aborted an
 restored`. Then, and on a push failure other than the two above:
 
 1. vegad marks the project `stopped` and syncs nothing for it.
-2. Attention: a herdr notification (the board's list) and, if the project's UAC is registered on
+2. Attention: a herdr notification (the inbox's list) and, if the project's UAC is registered on
    this host, mail from `tool vega-bd` with the fix.
 3. `vega bd status` and `vega uac status` show the state and the reason.
 4. The UAC resolves, verified on a throwaway project:

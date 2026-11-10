@@ -166,7 +166,7 @@ What herdr 0.9.3 offers and what we use:
 |---|---|
 | `events.subscribe` (socket, NDJSON stream) | Yes: `pane.agent_status_changed`, `pane.closed`, `pane.exited`, `pane.created`. One stream per vegad. On `events_lost`, resubscribe and resync with `session.snapshot`. |
 | `pane.report_metadata` (`tokens`, `ttl_ms`, `source`) | Yes: a mail-count token per agent pane for the sidebar. Needs a sidebar row template that shows the token; verify. |
-| `notification.show` | Yes, through `vega_herdr::notes::notify`: the toast plus a note for the board list (Notifications). Draft and lost-draft notices today. |
+| `notification.show` | Yes, through `vega_herdr::notes::notify`: the toast plus a note for the inbox list (Notifications). Draft and lost-draft notices today. |
 | `agent.prompt` / `pane.send_text` | Yes, the one way to reach the agent: the pointer line. |
 | plugin `[[startup]]` | Yes: `relay start` starts vegad detached if it does not run, then exits. The hook stays one-shot; vegad is not its child (see Lifecycle). |
 | plugin `[[events]] on = ...` | No: it spawns a process per event; the stream in vegad is cheaper and keeps state. |
@@ -191,7 +191,7 @@ The socket client uses socket2 for a portable connect deadline on Unix sockets.
 
 ## Lifecycle (vega-lhc.54)
 
-vegad needs starting, not supervising. herdr, the real-home herdr-app and the board can start it;
+vegad needs starting, not supervising. herdr and the real-home herdr-app can start it;
 it upgrades itself in place. No login job starts it (amendment vega-0h4c.42; the LaunchAgent and
 systemd unit of vega-0h4c.25 are gone, and a corp Mac without GUI login could not load one). The
 app host owns startup, like the hc core: the herdr-app vega mod runs `vega-post relay start`
@@ -202,8 +202,7 @@ machine: at start, when a machine turns connected, then every five minutes. The 
 it takes the lock. A failed start retries after one minute; the status line shows
 `hc <machine> vegad start failed` after three failures in a row, and nothing blocks the UI.
 The lock arbitrates simultaneous starts. `relay stop` on a machine holds at most five minutes
-while the app host runs; on the app host itself it holds until the next app start, herdr hook or
-board start.
+while the app host runs; on the app host itself it holds until the next app start, herdr hook or explicit relay start.
 
 `relay install` pins `vegad.env`, links the herdr TUI hook and starts vegad. It writes no login
 job and removes `vega.vegad-start.plist` / `vega-vegad-start.service` left by an earlier install
@@ -233,8 +232,6 @@ plugin pane is no host either: a PTY, closed by the user, gone after a server re
   must stop any app/core explicitly started for a probe. There is no login job.
 - herdr: plugin `vega.vegad` (written and linked by `relay install`) runs `vega-post relay start`
   as its `[[startup]]` hook, at every server start and again on every live handoff.
-- The board: it shows vegad's state (running, pid, version, binary current or stale) and `V`
-  starts it.
 - By hand: `vega post relay start`.
 - Not as a side effect of other commands: a `vega post send` that starts a daemon hides where it
   runs and with which env. `vega mux send` already falls back to a direct paste.
@@ -279,8 +276,8 @@ still-installed unit see the same process. The new image reads the handoff only 
 own and it is younger than 60 s, then deletes it. Connections (NATS, herdr) are made fresh, with a
 mail rescan as at any start. Agent statuses come back with the first snapshot; the wake memory is
 already on disk. If exec fails (a broken binary), vegad logs it and keeps running the old image
-until the file changes again; a binary that execs but then crashes leaves no vegad, which the board
-shows as stopped (`V` starts it). `cargo install` replaces by rename (new inode); an in-place copy
+until the file changes again; a binary that execs but then crashes leaves no vegad, which `vega post relay status`
+shows as stopped (`vega post relay start` starts it). `cargo install` replaces by rename (new inode); an in-place copy
 changes size or mtime. On macOS the first launch of a new file takes a few seconds (seen: 5 s).
 
 **Migration.** `relay install` (the user runs it once per host): stops and removes the launchd
@@ -429,7 +426,7 @@ operator pair grant to reach an agent; otherwise they become human notices:
 - Cross-host send: `vega post send --host <other-host> <pane>` and cross-host `done` make a core NATS
   request to `vega.quarantine.<to>.<pane>.<self>` (at most 4 KiB). The target's vegad writes a note
   (kind `quarantine`, title `deimos (quarantine) to <pane>: ...`, toast plus `vega post notes` and the
-  board) and answers `stored`. Without a live pair grant it never enters delivery or an ask's
+  inbox) and answers `stored`. Without a live pair grant it never enters delivery or an ask's
   fan-in. No vegad there: `no_responder`, nothing stored. `ask` from such a host is refused.
 - Operator pair grant (vega-lhc.237): on the **receiving** vegad host run
   `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`. Expiry is mandatory
@@ -695,7 +692,7 @@ machines ganymede saved) for "proteus is offline". Who is reachable is vega post
   When a pane closes, vegad asks the broker how many of its mails are unread and confirms herdr no
   longer lists it (a restarting herdr may report every pane gone), then mails each sender of the
   unread ones once, as `tool vega-post` without a reply path, with the same hint. Mail from the user
-  without a pane (the board) becomes a note on this host; tool mail is not bounced. In local mode
+  without a pane (the inbox) becomes a note on this host; tool mail is not bounced. In local mode
   (no broker) bounces wait for the broker (Broker outage, above).
 - **By role**: `vega post send --uac <project> "<text>"` reads beats, agents and UAC registrations
   of every host (one read) and mails the one live UAC: a registration on a fresh host whose pane its
@@ -732,7 +729,7 @@ neither is available. These are relay observations, not broker counts: expired
 metadata cannot prove an empty inbox. Use `vega post log --pane <pane>` on the
 owning host to inspect broker read status without acknowledging mail.
 herdr renders `$name` tokens
-only where the sidebar rows name them. Snippet for `~/.config/herdr/config.toml` (rendered from `herdr/config.toml` by `vega config`, [config.md](config.md)):
+only where the sidebar rows name them. Snippet for `~/.config/herdr/config.toml` (host-managed on legacy herdr hosts; vega no longer renders this file):
 
 ```toml
 [ui.sidebar.agents]
@@ -815,7 +812,7 @@ Request handling remains on the existing dispatch path pending a separate extrac
 ## Notifications
 
 herdr keeps one toast and no history, so vega keeps its own (vega-pqr). The model is macOS: the
-herdr toast is the banner, `vega board`'s Inbox (`N`) the list, the UAC pane's name the badge.
+herdr toast is the banner, the herdr-app inbox's Inbox (`N`) the list, the UAC pane's name the badge.
 
 - Writer: `vega_herdr::notes::notify` shows the toast and writes a note to this host's store
   (`$XDG_STATE_HOME/vega/notes/<id>.json`, id = Unix ms; 7 days, at most 200, except open asks). vegad uses it for
@@ -826,7 +823,7 @@ herdr toast is the banner, `vega board`'s Inbox (`N`) the list, the UAC pane's n
   `vega post notes` reads the same way.
 - Read state: per viewing host, a watermark per source host (last id read, last id cleared) in
   `notes/seen.json`, published as `<viewer>.notes.seen.<source>`. `vega post notes read|clear`
-  moves it; the board runs `read` for what it showed when the list opens, `clear` on `c`.
+  moves it; the herdr-app inbox invokes these commands for read/clear actions.
 - Badge: vegad counts this host's unread notes plus the other hosts' unread ones (the registry read
   fetches only the bodies of notes above the viewer's watermark) and shows them as the email badge on
   the UAC pane (see Badges). vegad redraws at once when the notes directory changes, so opening the
@@ -852,7 +849,7 @@ The UAC pane's sidebar name (`--display-agent`) is `<atom> UAC` plus a badge per
 this order, one space after every symbol, e.g. `\u{F0768} UAC \u{F01EE} 1 \u{F05D1} 2 \u{F256} 3`. The
 symbols come from `[symbols]` in `~/.config/vega/theme.toml` ([theme-symbols.md](theme-symbols.md):
 set `nerd` by default or `emoji`, `☢️ UAC 🔔 1 🗳️ 2 ✋ 3`, plus per-topic overrides).
-`vega_herdr::theme` reads them, `vega_herdr::badges` formats the label; the board uses both. vegad
+`vega_herdr::theme` reads them, `vega_herdr::badges` formats the label; the inbox consumes the saved badge data. vegad
 re-reads the file on every label refresh and logs its mistakes once per change. With the label it
 reports the sidebar tokens `$uac`, `$notes`, `$decisions` and `$waiting` (a zero badge cleared), which
 a herdr `[ui.sidebar.agents]` row colours from `[symbols.colors]` ([theme-symbols.md](theme-symbols.md),
@@ -862,7 +859,7 @@ Colours and herdr sidebar tokens).
 |---|---|---|---|
 | UAC marker | md atom U+F0768 | ☢️ U+2622 U+FE0F | - |
 | notes | md email U+F01EE | 🔔 U+1F514 | unread, unresolved notes of every host for the project; host-level ones on the vega UAC (Notifications) |
-| decisions | md scale_balance U+F05D1 | 🗳️ U+1F5F3 U+FE0F | open `slayer-decision` children of the project's one open `uac-tracker` epic, as `vega board`'s decisions view counts them |
+| decisions | md scale_balance U+F05D1 | 🗳️ U+1F5F3 U+FE0F | open `slayer-decision` children of the project's one open `uac-tracker` epic, as the herdr-app inbox's decisions view counts them |
 | waiting | fa hand_paper_o U+F256 | ✋ U+270B | this host's headed sentinels of the project whose attention is asking, silent or input: the rows `vega uac` marks `for the user` |
 
 - Decisions: one `bd list --label-any uac-tracker,slayer-decision --json` per project, with the bd and
@@ -871,9 +868,7 @@ Colours and herdr sidebar tokens).
   last count.
 - Waiting: local panes only (vegad knows remote panes' mode and attention only through their host).
 - vegad saves each project's counts to `$XDG_STATE_HOME/vega/badges/v2/<hex(ProjectId)>.json` every 15 s;
-  `vega board` reads them for its top bar (stale after 60 s: no badges while vegad is down).
-- Without a UAC pane on the host, the open board panes (terminal title `vega-board-*`) get
-  `vega board` plus the badges of their project.
+  the herdr-app inbox reads them for its top bar (stale after 60 s: no badges while vegad is down).
 
 ## CI watch
 
@@ -886,7 +881,7 @@ sentinel. See [ci-watch.md](ci-watch.md).
 A separate thread on the configured polling host (default proteus) runs pdc every 15 min.
 It reads committed service mappings from locally known projects, resolves their UACs through
 the registry on any host, and sends incident/status mail plus four-hour reminders. Unmapped
-services, duplicate ownership or no live UAC produce durable board inbox notes. Failures log
+services, duplicate ownership or no live UAC produce durable inbox notes. Failures log
 once without stopping vegad; state survives restarts and delivery is at-least-once. See
 [pagerduty.md](pagerduty.md) for host selection, config and agent rights.
 

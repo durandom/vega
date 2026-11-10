@@ -33,7 +33,7 @@ pub fn consumer(host: &str) -> String {
 
 /// Sender of the mail vegad writes the UAC.
 pub const AGENT: &str = "tool vega-uber";
-/// Note kind of a refused answer; the board and `vega post notes` show it.
+/// Note kind of a refused answer; the inbox and `vega post notes` show it.
 pub const NOTE_KIND: &str = "uber-refused";
 
 /// Whether mail of this `Vega-Kind` is vegad's, not the pane's.

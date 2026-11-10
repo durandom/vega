@@ -46,18 +46,6 @@ enum Cmd {
     Auto,
     /// Apply the due mode to every tool again (idempotent)
     Apply,
-    /// Moved: alias for `vega config diff|print|apply herdr`
-    #[command(
-        after_help = "Moved to `vega config` (unit herdr). This alias runs:\n  vega theme herdr            -> vega config diff herdr\n  vega theme herdr --print    -> vega config print herdr\n  vega theme herdr --apply    -> vega config apply herdr"
-    )]
-    Herdr {
-        /// Print the rendered file to stdout
-        #[arg(long, conflicts_with = "apply")]
-        print: bool,
-        /// Check, write and reload
-        #[arg(long)]
-        apply: bool,
-    },
 }
 
 fn main() -> ExitCode {
@@ -92,17 +80,6 @@ fn main() -> ExitCode {
         print!("{SKILL}");
         return ExitCode::SUCCESS;
     }
-    // Moved to `vega config` (vega-lhc.107); kept as a thin alias.
-    if let Some(Cmd::Herdr { print, apply }) = cli.cmd {
-        let action = if print {
-            "print"
-        } else if apply {
-            "apply"
-        } else {
-            "diff"
-        };
-        return vega_plugin::run_plugin("config", &[action, "herdr"]);
-    }
     let result = Env::from_env()
         .ok_or_else(|| Failure::new("no_home", "HOME is not set", "run it as a user with a home"))
         .and_then(|env| match cli.cmd {
@@ -111,7 +88,6 @@ fn main() -> ExitCode {
             Some(Cmd::Light) => set(&env, Pref::Fixed(Mode::Light)),
             Some(Cmd::Auto) => set(&env, Pref::Auto),
             Some(Cmd::Apply) => apply(&env),
-            Some(Cmd::Herdr { .. }) => unreachable!("handled above"),
         });
     match result {
         Ok(()) => ExitCode::SUCCESS,

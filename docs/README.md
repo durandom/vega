@@ -46,9 +46,8 @@ the current reference. Some describe proposals, research or one-time cutovers; c
 | [gate.md](design/gate.md) | LLM review before an agent's push |
 | [live-review.md](design/live-review.md) | Agent and owner review a running web app together |
 | [live-review-research.md](design/live-review-research.md) | Research behind live review (agent-browser) |
-| [board-ui.md](design/board-ui.md) | Layout of `vega board` |
-| [herdr-attention-ui.md](design/herdr-attention-ui.md) | Study: an attention popup in herdr (proposal) |
-| [config.md](design/config.md) | vega owns agent, herdr and dcg config; service endpoints |
+| [herdr-attention-ui.md](design/herdr-attention-ui.md) | Retired TUI attention proposal; current UI pointers |
+| [config.md](design/config.md) | vega owns agent, herdr-app and dcg config; service endpoints |
 | [onboarding.md](design/onboarding.md) | The infra model, `vega onboard`, the changelog |
 | [upgrade.md](design/upgrade.md) | vegad notices a newer vega; `vega upgrade` installs it |
 | [secrets.md](design/secrets.md) | Per-host age secrets, injected per tool |
@@ -58,7 +57,7 @@ the current reference. Some describe proposals, research or one-time cutovers; c
 | [notify.md](design/notify.md) | `vega notify`: escalating operator signal when a UAC waits on the Slayer |
 | [janitor.md](design/janitor.md) | A map of every git checkout on a machine |
 | [theme.md](design/theme.md) | One dark/light mode for every TUI |
-| [theme-symbols.md](design/theme-symbols.md) | Symbols of the UAC pane label and the board |
+| [theme-symbols.md](design/theme-symbols.md) | Symbols of the UAC pane label and inbox |
 | [skills-management.md](design/skills-management.md) | Research and options for managing skills |
 | [agentcraft-research.md](design/agentcraft-research.md) | Research: AgentCraft, not used as a building block |
 | [going-public.md](design/going-public.md) | The audit before publishing this repository |

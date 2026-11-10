@@ -193,8 +193,7 @@ pub enum Step {
 pub fn whole_file(u: Unit) -> bool {
     matches!(
         u,
-        Unit::Herdr
-            | Unit::ClaudeMd
+        Unit::ClaudeMd
             | Unit::CodexMd
             | Unit::PiMd
             | Unit::ClaudeStyles

@@ -70,9 +70,7 @@ fn successive_applies_retain_redacted_write_evidence() {
 
 #[test]
 fn corrupt_history_fails_cli_for_written_and_rejected_units() {
-    use std::os::unix::fs::PermissionsExt;
-
-    for unit in ["claude.settings", "herdr"] {
+    for unit in ["claude.settings", "herdr-app.keys"] {
         let d = tempfile::tempdir().unwrap();
         let home = d.path().join("home");
         let config = d.path().join("config");
@@ -80,15 +78,9 @@ fn corrupt_history_fails_cli_for_written_and_rejected_units() {
         let bin = d.path().join("bin");
         fs::create_dir_all(home.join(".claude")).unwrap();
         fs::create_dir_all(&bin).unwrap();
-        fs::create_dir_all(config.join("vega/config/herdr")).unwrap();
-        fs::write(config.join("vega/config/herdr/config.toml"), "BAD = 1\n").unwrap();
-        let herdr = bin.join("herdr");
-        fs::write(
-            &herdr,
-            "#!/bin/sh\necho 'config: issues found'\necho 'bad key BAD'\nexit 1\n",
-        )
-        .unwrap();
-        fs::set_permissions(&herdr, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::create_dir_all(config.join("herdr-app")).unwrap();
+        fs::create_dir_all(config.join("vega/config/herdr-app")).unwrap();
+        fs::write(config.join("vega/config/herdr-app/keys.json"), "[]").unwrap();
         let history = state.join("vega/config-evidence.json");
         fs::create_dir_all(history.parent().unwrap()).unwrap();
         fs::write(&history, "corrupt history").unwrap();
@@ -111,7 +103,7 @@ fn corrupt_history_fails_cli_for_written_and_rejected_units() {
             "{text}"
         );
         assert_eq!(fs::read_to_string(history).unwrap(), "corrupt history");
-        if unit == "herdr" {
+        if unit == "herdr-app.keys" {
             // Retention failure promotes Rejected to Failed; it is reported in
             // the failed result row rather than silently counted as a rejection.
             assert!(
@@ -119,7 +111,7 @@ fn corrupt_history_fails_cli_for_written_and_rejected_units() {
                 "{text}"
             );
             assert!(!text.contains("issues["), "{text}");
-            assert!(!config.join("herdr/config.toml").exists());
+            assert!(!config.join("herdr-app/keys.json").exists());
         } else {
             assert!(
                 text.contains("failed: written; evidence not retained"),

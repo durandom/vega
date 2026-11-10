@@ -106,7 +106,7 @@ ci: PR #42 (o/r) head 1a2b3c4: red, failed: test (ubuntu), lint; 3 pending. vega
 ci: PR #42 (o/r) merged; watch ended
 ```
 
-The mail has no sender pane (like mail from the vega board): there is nobody to reply to.
+The mail has no sender pane (like mail from a user shell): there is nobody to reply to.
 
 ## Signals: rebase and zombie runs
 

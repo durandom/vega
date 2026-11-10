@@ -62,7 +62,7 @@ Settle sentinels: land, more work, or release (`vega mux close <pane>`, then `wt
 ## PagerDuty rights
 
 Agents may investigate, acknowledge and add notes. Resolve/escalate/reassign require
-a Slayer-approved board decision. [Design](pagerduty.md).
+a Slayer-approved decision bead. [Design](pagerduty.md).
 
 ## Hard limits
 

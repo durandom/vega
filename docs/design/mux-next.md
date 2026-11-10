@@ -48,7 +48,7 @@ The hc path also merges `hc ls` candidates and focuses local or remote hc agents
 1. This host: its ledger file, panes herdr still lists. Other hosts: the registry (fresh hosts only);
    without it, this host only, said on stderr (an inbox-only host skips the read by design and says nothing).
 2. Pick the waiting agent with the oldest `since` whose status is in `--status`.
-3. Local: `pane.focus` over the socket (as `vega open`). vegad sees `pane.focused` and drops it.
+3. Local: `pane.focus` over the socket (as the retired path menu). vegad sees `pane.focused` and drops it.
 4. Another host: map the host to its herdr machine (label or ssh target equal to the host token),
    `herdr --machine M agent focus P` (focuses it there; that host's vegad drops it), and show a toast
    on the local client: `next: <name> on <host>, switch with prefix+w`. The client cannot be switched
@@ -60,9 +60,9 @@ a hint; exit 0 when nothing waits.
 
 ## Keys
 
-Vega leaves prefix+d and prefix+shift+d to herdr's defaults: prefix+d is unbound and
+Legacy herdr leaves prefix+d and prefix+shift+d to herdr's defaults: prefix+d is unbound and
 prefix+shift+d is `close_workspace` (verified with `herdr --default-config`). Neither has a
-vega override in config/herdr/config.toml.
+vega-owned TUI config; remaining herdr keybindings are host-managed.
 
 The Slayer prefers herdr's goto overlay (prefix+g, then d), which lists done agents across
 machines and switches the client to the selected machine and pane. `vega mux next` cannot

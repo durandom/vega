@@ -72,7 +72,7 @@ pub fn mflag() -> String {
 }
 
 /// A pane id as the user should see it: `io:w1:p2` on another machine, bare
-/// on this one. `vega open` jumps to either form when it is selected.
+/// on this one. Focus helpers accept either form.
 pub fn qualify(machine: Option<&str>, pane: &str) -> String {
     match machine {
         Some(m) => format!("{m}:{pane}"),

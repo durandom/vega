@@ -5,6 +5,17 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 173 · 2026-11-10
+
+- migration: `vega board`, `vega open` and the herdr TUI config unit are removed.
+  Install/deploy removes stale command binaries and links from `~/.local/bin` and
+  the agent shim directory. On hosts that used the plugins, run `herdr plugin unlink vega.board`
+  and `herdr plugin unlink vega.open`, then remove their keybindings from the host-owned
+  `~/.config/herdr/config.toml`. Remove obsolete local `~/.config/vega/config/herdr/`
+  overrides and leftover plugin-local `bin/` files. Keep the live herdr config while
+  legacy panes still use it; mux's herdr backend and herdr-app mods remain supported.
+  The prior state is tagged `herdr-tui-final` (dbd11a8); the last commit with them is a652b82.
+
 ## 172 · 2026-11-10
 
 - feature: the herdr-app sidebar has an Active toggle beside the view selector. It hides idle

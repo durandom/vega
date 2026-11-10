@@ -298,9 +298,7 @@ fn layout_resolves_local_clones_and_forks_before_id_membership() {
         std::fs::create_dir(&path).unwrap();
         git(&path, &["init", "-q"]);
         git(&path, &["remote", "add", "origin", url]);
-        panes.push(
-            json!({"pane_id":name,"workspace_id":name,"cwd":path,"terminal_title":"vega-board"}),
-        );
+        panes.push(json!({"pane_id":name,"workspace_id":name,"cwd":path,"terminal_title":"shell"}));
         workspaces.push(json!({"workspace_id":name,"worktree":{"repo_key":path.join(".git"),"checkout_path":path}}));
     }
     let layout = crate::Layout {
@@ -316,6 +314,4 @@ fn layout_resolves_local_clones_and_forks_before_id_membership() {
         layout.project_workspaces("github.com/team/repo"),
         vec!["a", "b"]
     );
-    let boards = layout.boards(&["github.com/team/repo".into()]);
-    assert_eq!(boards[2].1.as_deref(), Some("github.com/other/fork"));
 }

@@ -61,7 +61,7 @@ vega post reminders cancel <id>
 - At least once: vegad writes the slot as `pending`, publishes with `Nats-Msg-Id = <id>/<slot>` (JetStream
   drops the duplicate of a retried publish), then moves it to `last_slot`. A publish that fails stays pending
   and retries each tick. A one-shot reminder is deleted once its slot is `last_slot`.
-- Undeliverable at firing (the name or UAC does not resolve, the pane closed): one board note naming the
+- Undeliverable at firing (the name or UAC does not resolve, the pane closed): one inbox note naming the
   reminder; a one-shot ends, a recurring one stays for its next slot.
 - Who may: any agent on the host, no approval (no code runs, P7: the box is the boundary). Inbox-only hosts
   (deimos) cannot create reminders. Limits: text ≤ 2 KiB, at most 100 active reminders per host
@@ -135,7 +135,7 @@ uses the same runner and lock and never touches `last_slot`. Jobs of different p
 nothing older than 30 days, pruned on each run. vegad's own log gets one line per start and end.
 
 **Results by mail.** Through `vega post` as `tool vega-schedule` to the project's live UAC, resolved through the
-registry on any host (as PagerDuty does); in local mode only a UAC pane on this host; no UAC: a board note.
+registry on any host (as PagerDuty does); in local mode only a UAC pane on this host; no UAC: an inbox note.
 `notify = failure` (default) mails `failed` (exit ≠ 0), `timeout`, `lost`, `spawn error` and the skips above
 (never `skipped (running)`), and one `recovered` line on the next success after a failure. `always` also mails
 each success, `never` nothing. Body: job, host, slot, outcome, exit code, duration, the last 20 lines of output
@@ -188,7 +188,7 @@ running.
 8. **`vega schedule` CLI** (vega-lhc.204.6): home, show, approve, revoke, run, log, `--skill`. Needs 2.
 9. **brainz rollout** (vega-lhc.204.7): brainz commits its scripts and jobs, the Slayer approves on proteus,
    one real run each; CHANGELOG and vegad.md. Needs 7, 8.
-10. Later, on a consumer's request: KV mirror for a cross-host list, `cron`/`every`, a board column.
+10. Later, on a consumer's request: KV mirror for a cross-host list, `cron`/`every`, an inbox column.
 
 ## Open questions
 

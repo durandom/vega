@@ -18,10 +18,8 @@ vega theme apply        # apply the due mode again (idempotent)
 - Adapters change only their own key and skip tools that are not set up.
   `native` means the tool follows the terminal by itself (pi with a `light/dark` pair,
   herdr with `auto_switch`).
-- herdr's `~/.config/herdr/config.toml` (sidebar, theme, keys, toasts) is rendered by
-  `vega config` (unit `herdr`, see `vega skills config`), with colours, host labels and
-  the sentinel icon from `[symbols]` in theme.toml. `vega theme herdr [--print|--apply]`
-  is an alias for `vega config diff|print|apply herdr`.
+- Legacy herdr theme status is read-only; hosts still using that backend manage
+  `~/.config/herdr/config.toml` themselves (native `auto_switch` is supported).
 - Per-tool names and switches live in `~/.config/vega/theme.toml`
   (`[tools.codex] light = ..., dark = ...`, `enabled = false`, `live_claude = false`).
 - A headless host (no readable appearance, or `headless = true`) follows the mode the

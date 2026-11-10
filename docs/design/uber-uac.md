@@ -9,7 +9,7 @@ the brief and the digest wake (§3, vega-lhc.209.8).
 ## Problem and decision
 
 Each project has one UAC ([uac-role.md](uac-role.md)). The Slayer has to visit each UAC's pane or
-`vega board` to answer decisions; from the phone they can't. Decision vega-lhc.209: one **Uber-UAC**
+the herdr-app inbox to answer decisions; from the phone they can't. Decision vega-lhc.209: one **Uber-UAC**
 over all projects and hosts, driven from Claude Code on the phone. **Uber-UAC == Slayer**: its answers count
 like the Slayer's own typing, L4 approvals included. **It decides nothing**: it passes on only what the
 Slayer wrote. Without Slayer input it produces no answer and no approval.
@@ -80,7 +80,7 @@ serialize on `$XDG_STATE_HOME/vega/uber/claim.lock`; contention returns retryabl
   `vega uber` (home): claim, open asks, last brief.
 - `vega uber claim` needs the broker: without it there is no estate-wide view, so it refuses with `no_broker`.
 - **Absent** (no live claim, broker down, local mode, or a claim that is not engaged): `vega uber ask` returns
-  `uber_absent` and the UAC behaves exactly as today: a `slayer-decision` bead, the board, its own pane.
+  `uber_absent` and the UAC behaves exactly as today: a `slayer-decision` bead, the inbox, its own pane.
   Nothing queues for an Uber that does not exist or that the Slayer is not talking to.
 - **Engaged window** (vega-lhc.209.12): normally the Slayer is at the laptop and talks to the project UACs, so
   the Uber must not spam. It is active only while the Slayer talks to it. There is no login or logout, only
@@ -92,8 +92,8 @@ serialize on `$XDG_STATE_HOME/vega/uber/claim.lock`; contention returns retryabl
   - **End**, whichever comes first: (a) 2 h without a Slayer capture; (b) human input in a herdr client on
     any host after the last capture. herdr 0.9.5 reports no keystrokes, so the signal is `pane.focused` (any
     client, no source field): each host's vegad writes the time to `uber/human.json` and its beat carries it
-    as `human_at`. vega's own focus calls are human commands (`vega mux next`, `vega board`,
-    `vega open --focus`), and `vega mux` spawns with `--no-focus`. A focus within 3 s after a pane closed is
+    as `human_at`. vega's own focus calls are human commands (`vega mux next` and
+    the herdr-app inbox), and `vega mux` spawns with `--no-focus`. A focus within 3 s after a pane closed is
     ignored, since herdr may move the focus on (whether it does: unknown). Limit: typing into the pane that
     already has the focus gives no event, so then only (a) ends the window. A prompt in a UAC pane that
     vegad or mux did not type is not used: a background task notice also turns a pane `working`.
@@ -152,7 +152,7 @@ typed into a pane ([vegad.md](vegad.md) Security).
   open ask whose bead closed and resends an open ask whose claim is no longer the live one (New epoch, §2),
   only while the live claim is engaged (§2).
   Closed asks stay 30 days, so a late answer is refused as answered. The UAC then parks the
-  waiting sentinel (`vega uac park`) as today. It does not wait in its pane. The bead, the board and the pane
+  waiting sentinel (`vega uac park`) as today. It does not wait in its pane. The bead, the inbox and the pane
   still work: an answer given there closes the bead, and vegad then sends `uber.withdraw`.
 - **Levels**: the UAC assesses reversibility, blast radius, commitment and visibility. All of them low
   (L0-L2): the UAC decides, and only the brief's FYI mentions it. Any of them high: **L3** (the Slayer

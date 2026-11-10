@@ -1,8 +1,8 @@
 //! The Slayer's badges: unread notes, open decisions and panes waiting on
 //! the Slayer, drawn with the theme's symbols (crate::theme: Nerd Font
 //! glyphs, emoji or the user's own). vegad counts them per project, labels
-//! the UAC pane (`<atom> UAC <email> 1 ...`) and saves them here; `vega
-//! board` reads the saved counts for its top bar, so label and board come
+//! the UAC pane (`<atom> UAC <email> 1 ...`) and saves them here. The inbox
+//! reads the saved counts, so label and inbox come
 //! from one place (docs/design/vegad.md, Badges).
 
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ pub const DECISION_LABEL: &str = "slayer-decision";
 pub const STALE_SECS: i64 = 60;
 
 /// A headed pane waiting on the Slayer, as vegad labels it: what the
-/// board's Inbox lists (docs/design/board-ui.md).
+/// inbox lists (docs/design/herdr-app-ui.md).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Waiting {
     pub pane: String,
@@ -56,7 +56,7 @@ impl Badges {
     }
 
     /// The non-zero badges as in `text`, one per topic, so a caller can place
-    /// each one (the board makes them clickable).
+    /// each one (the inbox makes them clickable).
     pub fn parts(&self, s: &Symbols) -> Vec<(&'static Topic, String)> {
         [
             (&NOTES, self.notes),
@@ -123,7 +123,7 @@ pub struct Decision {
 
 /// Open decisions from `bd list --label uac-tracker,slayer-decision` with
 /// `--label-any` (open beads only): the open `slayer-decision` children of
-/// the one open `uac-tracker` epic, as `vega board`'s decisions view counts
+/// the one open `uac-tracker` epic, as the inbox counts
 /// them. `None` without exactly one tracker or for output that is no list.
 pub fn decision_count(json: &str) -> Option<usize> {
     decisions(json).map(|d| d.len())
@@ -228,14 +228,14 @@ pub fn save_decisions(
         .and_then(|_| std::fs::rename(&tmp, &f).ok());
 }
 
-/// The board: project `key`'s counts, `None` when vegad has not saved them
+/// The inbox: project `key`'s counts, `None` when vegad has not saved them
 /// within STALE_SECS of `now`.
 pub fn load(key: &str, now: i64) -> Option<(Badges, Vec<Waiting>)> {
     load_at(key, Some(now))
 }
 
 /// Last saved v2 counts, regardless of age. Daemon failures retain these;
-/// ordinary board reads still use `load` and its freshness window.
+/// ordinary inbox reads still use `load` and its freshness window.
 pub fn retained(key: &str) -> Option<(Badges, Vec<Waiting>)> {
     load_at(key, None)
 }
@@ -302,10 +302,10 @@ mod tests {
             b(1, 2, 3).uac_label(&nerd),
             "\u{F0768} UAC \u{F01EE} 1 \u{F05D1} 2 \u{F256} 3"
         );
-        assert_eq!(b(0, 0, 0).after("vega board", &nerd), "vega board");
+        assert_eq!(b(0, 0, 0).after("vega UAC", &nerd), "vega UAC");
         assert_eq!(
-            b(4, 0, 1).after("vega board", &nerd),
-            "vega board \u{F01EE} 4 \u{F256} 1"
+            b(4, 0, 1).after("vega UAC", &nerd),
+            "vega UAC \u{F01EE} 4 \u{F256} 1"
         );
         // The renderer adds the space after every symbol, emoji too.
         assert_eq!(b(0, 0, 0).uac_label(&emoji), "\u{2622}\u{FE0F} UAC");

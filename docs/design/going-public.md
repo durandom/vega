@@ -64,7 +64,7 @@ Manual checks (history, `git log --all -p -S/-G`):
 
 | ID | Where | Finding | Recommendation |
 | --- | --- | --- | --- |
-| L0 | `LICENSE` | Apache-2.0 at the root since ccfc8a4; `plugins/board` keeps MIT (`plugins/board/LICENSE`, derived from herdr-beads) | **Acceptable public.** All 35 crates set `license` in their `Cargo.toml`. |
+| L0 | `LICENSE` | Apache-2.0 at the root since ccfc8a4; the retired dashboard is preserved at `herdr-tui-final` | **Acceptable public.** All 35 crates set `license` in their `Cargo.toml`. |
 | L1 | `vscode/package.json` | License now `Apache-2.0` | **Done.** Consistent with the root license. |
 | L2 | `docs/skill_best_practices.md` | Former copied Anthropic page is now an upstream link | **Done.** No verbatim page remains in the tree. |
 | L3 | AXI/Beads skill directories and `config/claude/output-styles/caveman-*.md` | MIT skill sources/licenses recorded; replacement styles written for this repository under Apache-2.0 | **Done.** Skill headers name their source and adjacent license. Old caveman provenance was unverified, so that wording was replaced rather than attributed speculatively. |

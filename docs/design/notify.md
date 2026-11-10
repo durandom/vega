@@ -11,12 +11,12 @@ Work stalls because a UAC waits on the Slayer (a go, a test on a device, a login
 only text at the end of a pane reply. 2026-10-28: the spellkave UAC (ganymede w5S:p1) waited ~7.5 h for a go
 on orrery step 4.1, and egress 9443 has blocked PR #4573 since 12:03; the orrery UAC (w43:p1) waited 1-2 h on
 a multinode apply and again on a classifier block that needed `! <cmd>`. The Slayer learns by looking at the
-pane. Decision beads have a board; inline asks have nothing.
+pane. Decision beads have an inbox; inline asks have nothing.
 
 ## Rules
 
 - One open **ask** per blocking question; it fires on raise, escalates once, reminds once, then stays quiet
-  on the board until resolved.
+  in the inbox until resolved.
 - `vega notify` only tells. It answers nothing, has no reply path into a pane and no approve action. Agent
   permission gates stay in the pane (uac-role.md hard limits); a phone tap never types.
 - No ask for FYI, progress, peer mail or acks. Those stay in the pane or mail.
@@ -47,7 +47,7 @@ vega notify test <channel>       # one test message through a channel
 ## State, dedupe and resolve
 
 An ask is a note ([vegad.md](vegad.md), Notifications) with `kind: ask`, `level`, `key`, `cmd`, `bead` and
-`cause: ask:<key>`. That reuses the store, the registry reconcile (`<host>.note.<id>`), the board Inbox and
+`cause: ask:<key>`. That reuses the store, the registry reconcile (`<host>.note.<id>`), the inbox and
 the UAC badge. The origin host owns the ask; its vegad sets `resolved`.
 
 Resolve, whichever comes first:
@@ -76,8 +76,8 @@ land in .226.3-.4. No channel is silently treated as delivered.
 - A same-level re-raise replaces line, command, bead and target metadata, retaining ID/clock and ack;
   a higher level does the same and records the new level for delivery; a lower level changes nothing.
   Dedupe is origin-local: two hosts can have the same key, with independent qualified IDs.
-- Open asks are exempt from note retention limits: they stay on the board until resolved. Resolved
-  asks follow ordinary note pruning. Read/clear watermarks do not hide open asks from the board
+- Open asks are exempt from note retention limits: they stay in the inbox until resolved. Resolved
+  asks follow ordinary note pruning. Read/clear watermarks do not hide open asks from the inbox
   or `vega notify list` (reading can still clear the unread badge).
 - Origin vegad resolves pane/bead closure on the metadata clock, including local-only mode. Unknown
   pane status or a failed bead query keeps the ask open. Bead queries use a verified owner-local
@@ -225,7 +225,7 @@ every host reads the same values.
 | action | toast + macos | after 15 m: phone, also when the Slayer sits at the seat | 1 h after raise, phone |
 | urgent | toast + macos + phone | none | 15 m after raise, phone |
 
-- After the reminder: nothing more; the ask stays on the board and in `vega notify`. Ack stops both steps.
+- After the reminder: nothing more; the ask stays in the inbox and in `vega notify`. Ack stops both steps.
 - **Quiet hours** hold every phone send until they end, then send the escalation once (not the backlog of
   reminders). Exception: a PagerDuty high-urgency incident (`--source pagerduty`, `urgency: high`) pages
   during quiet hours.

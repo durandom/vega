@@ -25,4 +25,28 @@ if [ "$got" != "$repo" ]; then
 	echo "install-cli.test: cargo ran in $got, want $repo" >&2
 	exit 1
 fi
+# Retired dispatch entries disappear, including dangling links; unrelated
+# commands and host-owned legacy config survive. Cleanup is idempotent.
+for dir in "$tmp/home/.local/bin" "$tmp/home/.local/share/vega/shims/bin"; do
+    mkdir -p "$dir"
+    touch "$dir/vega-mux"
+    for plugin in board open; do
+        case $plugin in
+            board) touch "$dir/vega-$plugin" ;;
+            open) ln -s /missing/retired "$dir/vega-$plugin" ;;
+        esac
+    done
+done
+mkdir -p "$tmp/home/.config/herdr"
+printf 'host-owned\n' >"$tmp/home/.config/herdr/config.toml"
+HOME="$tmp/home" sh "$repo/scripts/cleanup-retired-tui.sh"
+HOME="$tmp/home" sh "$repo/scripts/cleanup-retired-tui.sh"
+for dir in "$tmp/home/.local/bin" "$tmp/home/.local/share/vega/shims/bin"; do
+    for plugin in board open; do
+        test ! -e "$dir/vega-$plugin"
+        test ! -L "$dir/vega-$plugin"
+    done
+    test -f "$dir/vega-mux"
+done
+test "$(cat "$tmp/home/.config/herdr/config.toml")" = host-owned
 echo "install-cli.test: ok"

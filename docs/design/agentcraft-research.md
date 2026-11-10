@@ -48,7 +48,7 @@ warnings, hook-driven status events, a phone approval channel) and build them in
 | Approvals | For agents it spawned, the PermissionRequest/ExitPlanMode hook **blocks** and polls `~/.agentcraft/approval-responses/` every 100 ms until the UI answers; external sessions pass through. The hook logs the full hook input to `~/.agentcraft/permission-request-debug.log` | npm `plugin/hooks/agentcraft-permission-request.sh` |
 | Spawning | Own heroes run the provider CLI in node-pty; OpenCode via `opencode run --format json`; Codex with `CODEX_HOME=~/.agentcraft/codex-home`; Agent Teams set `CLAUDE_CODE_SPAWN_BACKEND=tmux` and poll `~/.claude/teams/` every 15 s | [opencode](https://www.getagentcraft.com/docs/integrations/opencode), [codex](https://www.getagentcraft.com/docs/integrations/codex), [agent teams](https://www.getagentcraft.com/docs/features/agent-teams) |
 | Planning | Campaigns: a planner agent splits a spec into dependency-aware tasks in worktrees, collects verification evidence, then "Approve & Merge" / "Create PR". Two MCP servers ship (`agentcraft-campaign`, `agentcraft-verify`) | [campaigns](https://www.getagentcraft.com/docs/features/campaigns), npm `plugin/mcp/` |
-| Multi-machine | Alliance Hall: each dev runs a local server; a Cloudflare Durable Object relays hero state, missions and file activity; Notice Board; soft "file intent" warnings when two heroes touch one file | [hall](https://www.getagentcraft.com/docs/features/hall) |
+| Multi-machine | Alliance Hall: each dev runs a local server; a Cloudflare Durable Object relays hero state, missions and file activity; Notice Inbox; soft "file intent" warnings when two heroes touch one file | [hall](https://www.getagentcraft.com/docs/features/hall) |
 | Remote / mobile | cloudflared tunnel URL with per-session token, TTL 15 min–8 h; PWA with push and quick-reply; Telegram/Discord DMs can prompt, approve plans and grant permissions (pairing code) | [remote access](https://www.getagentcraft.com/docs/features/remote-access), [channels](https://www.getagentcraft.com/docs/features/channels) |
 | Other | Loops (1 min–1 h), Docker/Apple containers, PTY terminal, file explorer, git stash/branch UI, skills.sh installer, achievements, music, race skins | [docs](https://www.getagentcraft.com/docs) |
 
@@ -73,10 +73,10 @@ ip-api.com over plain HTTP. The docs' "open-source" also contradicts the licence
 | --- | --- | --- | --- |
 | Where agents run | Own node-pty terminals in a browser HUD; tmux for Agent Teams | herdr panes, any terminal; `vega mux spawn/adopt` | Same job, different host; vega keeps the user's terminal |
 | Status / supervision | Hook events → hero states (idle, working, awaiting input, permission glow) | vegad watches herdr agent status; `silent`/`quota`/`asking`; wakes the parent ([vegad.md](vegad.md)) | Equivalent; AgentCraft's per-tool hook events are finer (file read/edit, subagent spawn) |
-| Agent-to-agent messaging | None between agents; human → agent via UI, DMs, Notice Board; Agent Teams inbox is Claude's | `vega mux send`, `vega post` mail with correlation ids, delivery when free ([vega-mux-mvp.md](vega-mux-mvp.md)) | **vega only** |
+| Agent-to-agent messaging | None between agents; human → agent via UI, DMs, Notice Inbox; Agent Teams inbox is Claude's | `vega mux send`, `vega post` mail with correlation ids, delivery when free ([vega-mux-mvp.md](vega-mux-mvp.md)) | **vega only** |
 | Coordinator | Campaign planner agent; human approves plan and merge in the UI | UAC role, sentinels, `slayer-decision` beads ([uac-role.md](uac-role.md)) | Similar intent; vega's is agent-driven, AgentCraft's UI-driven |
 | Task store | `task-queue.json`, `plan-memory/` (local JSON) | beads on Dolt, replicated across hosts ([beads-sync.md](beads-sync.md)) | vega's is durable, shared, CLI-queryable |
-| Dashboard | 3D RTS map, side panel, PWA | `vega board` TUI with Inbox (decisions, waiting panes) ([board-ui.md](board-ui.md)) | Same need; AgentCraft is richer visually, vega is terminal-native |
+| Dashboard | 3D RTS map, side panel, PWA | herdr-app inbox, sidebar and project window ([herdr-app-ui.md](herdr-app-ui.md)) | Similar attention and navigation needs |
 | Approvals | Blocks Claude/Codex permission requests until UI/phone/DM approves | UAC never approves gates; the user answers in the pane ([uac-role.md](uac-role.md) Hard limits) | Deliberately different; AgentCraft's is a remote-approval feature |
 | Multi-machine | Hall via a hosted Cloudflare Worker, account needed | NATS on titan, per-host vegad, tailnet, no vendor | Same need; vega self-hosted |
 | Mobile / remote | Tunnel + PWA + Telegram/Discord | none (herdr client over tailnet) | **AgentCraft only** |
@@ -91,10 +91,10 @@ ip-api.com over plain HTTP. The docs' "open-source" also contradicts the licence
 
 | Idea | Why | Lands in |
 | --- | --- | --- |
-| **File-intent warnings**: soft warning when two agents on the same repo touch one file | Sentinels in different worktrees still collide at merge; vegad could flag overlap early | vegad reconcile + `vega uac status` / board Inbox `N` row ([vegad.md](vegad.md), [board-ui.md](board-ui.md)); input from `git diff --name-only` per worktree, no hooks needed |
+| **File-intent warnings**: soft warning when two agents on the same repo touch one file | Sentinels in different worktrees still collide at merge; vegad could flag overlap early | vegad reconcile and the herdr-app inbox ([vegad.md](vegad.md)); input from `git diff --name-only` per worktree, no hooks needed |
 | **Hook-driven fine status** (subagent spawned, plan waiting, AskUserQuestion) | herdr says only `blocked`; vega classifies dialogs by screen text ([pane-control.md](pane-control.md) D1) | Optional Claude/Codex hook that runs `vega post` to vegad; must stay optional (vegad.md non-goal: harness plugins as the main path) |
 | **Phone approval / reply channel** (PWA push, Telegram) | The Slayer away from the desk cannot answer `slayer-decision` beads | `vega uac answer` over a push channel (e.g. ntfy) from vegad; read-only plus answers, never permission gates |
-| Mission summaries (3-word / 1-sentence per finished task) | Cheap scannable history | `vega post done` one-liners already do this; reuse in board, nothing new |
+| Mission summaries (3-word / 1-sentence per finished task) | Cheap scannable history | `vega post done` one-liners already do this; reuse in the inbox, nothing new |
 | Per-agent containers | Safer `--dangerously-skip-permissions` sentinels | `vega mux spawn --kind … --container`; separate bead if wanted |
 
 ## 4. Use or interoperate?

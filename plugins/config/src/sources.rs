@@ -14,8 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 28] = [
-    default!("herdr/config.toml"),
+pub const DEFAULTS: [(&str, &str); 27] = [
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
     default!("instructions/reasoning.md"),
@@ -46,7 +45,6 @@ pub const DEFAULTS: [(&str, &str); 28] = [
     default!("herdr-app/themes/catppuccin-mocha.json"),
 ];
 
-pub const HERDR: &str = DEFAULTS[0].1;
 pub const STYLES_DIR: &str = "claude/output-styles";
 
 /// Claude's and pi's instruction parts.
@@ -214,7 +212,6 @@ mod tests {
     fn every_repo_source_is_embedded() {
         let embedded: BTreeSet<String> = DEFAULTS.iter().map(|(r, _)| r.to_string()).collect();
         for dir in [
-            "herdr",
             "instructions",
             "claude/output-styles",
             "agentsview",

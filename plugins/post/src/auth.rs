@@ -190,7 +190,7 @@ pub fn parse_grant(s: &str) -> Result<(String, String), Failure> {
         Failure::new(
             "usage",
             format!("--cmd-grant {s}: {why}"),
-            "use host=vega.cmd.<to>.<kind>.<host>, e.g. deimos=vega.cmd.proteus.open.deimos",
+            "use host=vega.cmd.<to>.<kind>.<host>, e.g. deimos=vega.cmd.proteus.notify.deimos",
         )
     };
     let (host, subject) = s.split_once('=').ok_or_else(|| bad("no ="))?;
@@ -675,12 +675,12 @@ mod tests {
             &[],
             &["deimos".into()],
             None,
-            &[("deimos".into(), "vega.cmd.proteus.open.deimos".into())],
+            &[("deimos".into(), "vega.cmd.proteus.notify.deimos".into())],
             &[],
             &[],
             None,
         );
-        assert!(granted.contains("\"vega.cmd.proteus.open.deimos\""));
+        assert!(granted.contains("\"vega.cmd.proteus.notify.deimos\""));
         assert!(!granted.contains("vega.inbox.*.*.deimos"));
         assert!(granted.contains("granted commands only"));
         // Quarantine: the inbox-only host publishes only its own quarantine

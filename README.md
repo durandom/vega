@@ -19,8 +19,6 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | [`post`](plugins/post/) | Agent mail over a NATS JetStream broker; `vegad`, the per-host daemon |
 | [`uac`](plugins/uac/) | Coordinator mode: the role guide and the home view of the agents a session runs |
 | [`uber`](plugins/uber/) | The Uber-UAC: the Slayer's one channel to every UAC (estate-wide claim) |
-| [`board`](plugins/board/) | The UAC's open decisions and the repo's beads in a herdr pane |
-| [`open`](plugins/open/) | Open a selected path in an editor, or jump to a herdr pane (herdr plugin) |
 | [`review`](plugins/review/) | Live review in the owner's headed browser; notes arrive as mail |
 | [`gate`](plugins/gate/) | LLM review before agent pushes; records a pass for each change |
 | [`ci`](plugins/ci/) | GitHub CI watch; the verdict arrives by mail |
@@ -110,5 +108,4 @@ Design notes live in [docs/design/](docs/design/); the repo layout is in
 
 ## License
 
-Apache License 2.0, see [LICENSE](LICENSE). `plugins/board` is derived from herdr-beads and stays under the MIT
-License in [plugins/board/LICENSE](plugins/board/LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).

@@ -25,13 +25,13 @@ journal, audited host plans and rollback are implemented by .14.6 in
 | `crates/vega-registry/src/lib.rs:80,139,182,206` | Lossy `<host>.uac.<project>` token; agent `repo_key`; UAC publication and local origin-name lookup treating key as git dir. |
 | `plugins/post/src/reach.rs:78,89,104,122,144`; `plugins/post/src/main.rs:1217,1319,1324` | `--uac` exact path/folder/origin_name matching and `.`; gone-pane routing. vega-lhc.162 adds origin_name, not remote identity. |
 | `plugins/lanista/src/main.rs:549`; `crates/vega-registry/src/pins.rs:33,49,129,145` | Project pins use path identity, already with reversible hex key encoding; cross-host latest/clear matching. |
-| `plugins/post/src/pagerduty.rs:386,406,425,441,471,600` | Discover local paths, read committed ownership, group services and route incidents/board notes by path. |
+| `plugins/post/src/pagerduty.rs:386,406,425,441,471,600` | Discover local paths, read committed ownership, group services and route incidents/inbox notes by path. |
 | `crates/vega-bd-sync/src/store.rs:56,131,135,141,158,176`; `plugins/bd/src/main.rs:245,728,849,918` | Provisioned project key, safe filenames for projects/state/backup, init/status/resume selectors. |
 | `shims/bd/src/main.rs:85,179` | Independent common-dir key computation; project/git-state lookup for sync hints and the Dolt push/pull guard. |
 | `plugins/post/src/gitsync.rs:19`; `plugins/uac/src/main.rs:1160` | Pass path-shaped UAC claims to `git::repos` for local Git sync/status. |
 | `crates/vega-bd-sync/src/git.rs:41,53,125` | Key interpreted as local common dir, deduplicated repositories, git-sync state filename. |
-| `plugins/post/src/bdsync.rs:78,98`; `plugins/post/src/main.rs:3659,3673,3698,3901,3914,3933,4182` | Sync notifications/UAC delivery, vega home-project detection, decision cache, pane/workspace membership, badges and board placement. |
-| `crates/vega-herdr/src/badges.rs:169`; `crates/vega-herdr/src/notes.rs:40,87`; `plugins/board/src/badges.rs:44` | Badge filenames, note project equality and board's independent common-dir key implementation. |
+| `plugins/post/src/bdsync.rs:78,98`; `plugins/post/src/main.rs:3659,3673,3698,3901,3914,3933,4182` | Sync notifications/UAC delivery, vega home-project detection, decision cache, pane/workspace membership, badges and inbox placement. |
+| `crates/vega-herdr/src/badges.rs:169`; `crates/vega-herdr/src/notes.rs:40,87` | Badge filenames, note project equality. |
 | `plugins/mux/src/main.rs:968,1336,1485` | Spawn/resume record lanes through path project identity; bd actor remains local. |
 | `plugins/onboard/src/upgrade.rs:351`; `plugins/post/src/hygiene.rs:281` | Upgrade UAC selection and hygiene display assume a key is a path. |
 | `plugins/post/src/auth.rs:212,301` | Inbox-only grants permit exact registry keys; new key spelling needs explicit grants. |
@@ -105,7 +105,7 @@ aliases before counting candidates; collisions list full IDs and host/pane.
 
 PagerDuty reads ownership from local locations, then groups by ID. Equal service
 sets across clones coalesce; divergent committed claims for the same ID are a
-configuration error with a board note, not a union. bd-sync keeps each local
+configuration error with an inbox note, not a union. bd-sync keeps each local
 clone's data, stop/resume and Git sync state independent: key records by
 `(ProjectId, canonical common_dir)` on that host. Project status groups those
 records; resume requires a location when several match. Never merge Dolt stores
@@ -309,7 +309,7 @@ revision lands to release the build chain below.
    the whole cutover is complete; these intermediate builds never land on main
    or run on unmigrated hosts.
 3. **vega-lhc.14.5:** bd/git-sync per-location storage and bd shim guard/hints, PagerDuty,
-   lanes/mux, board/notes/badges,
+   lanes/mux, inbox/notes/badges,
    upgrade/hygiene consumers and their migrations.
 4. **vega-lhc.14.6:** coordinated startup migration, cutover audit/rollback, integration fixtures and guide updates:
    lanista-catalog.md, pagerduty.md, vegad.md, git-sync.md and beads-sync.md in

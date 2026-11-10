@@ -1,4 +1,4 @@
-//! `vega config`: vega owns the coding agents', herdr's and dcg's config
+//! `vega config`: vega owns the coding agents', herdr-app's and dcg's config
 //! (docs/design/config.md, vega-lhc.107).
 //!
 //! A [`Unit`] is one target file (or a few of one kind) with one ownership
@@ -10,7 +10,6 @@
 mod claude_plugin;
 pub mod evidence;
 pub mod fleet;
-pub mod herdr;
 pub mod herdr_app;
 pub mod infra;
 pub mod merge;
@@ -34,7 +33,6 @@ use sources::{Origin, Source};
 pub struct Ctx {
     pub env: Env,
     pub chezmoi: OsString,
-    pub herdr: OsString,
     /// The `herdr-app` that lists its commands.
     pub herdr_app: OsString,
     /// The `vega-mux` the hooks run.
@@ -46,14 +44,13 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// This user's context: the installed sibling binaries, chezmoi and herdr from PATH.
+    /// This user's context: the installed sibling binaries, chezmoi and herdr-app from PATH.
     pub fn from_env() -> Option<Ctx> {
         let env = Env::from_env()?;
         Some(Ctx {
             mux: installed(&env.home, "vega-mux"),
             skills: installed(&env.home, "vega-skills").into_os_string(),
             chezmoi: OsString::from("chezmoi"),
-            herdr: OsString::from("herdr"),
             herdr_app: OsString::from("herdr-app"),
             claude: installed(&env.home, "claude").into_os_string(),
             env,
@@ -73,7 +70,6 @@ fn installed(home: &Path, name: &str) -> PathBuf {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
-    Herdr,
     DcgConfig,
     DcgPacks,
     ClaudeMd,
@@ -96,8 +92,7 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub const ALL: [Unit; 20] = [
-        Unit::Herdr,
+    pub const ALL: [Unit; 19] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -124,7 +119,6 @@ impl Unit {
 
     pub fn name(self) -> &'static str {
         match self {
-            Unit::Herdr => "herdr",
             Unit::DcgConfig => "dcg.config",
             Unit::DcgPacks => "dcg.packs",
             Unit::ClaudeMd => "claude.md",
@@ -150,7 +144,6 @@ impl Unit {
     /// The target, for display.
     pub fn target(self) -> &'static str {
         match self {
-            Unit::Herdr => "~/.config/herdr/config.toml",
             Unit::DcgConfig => "~/.config/dcg/config.toml",
             Unit::DcgPacks => "~/.config/dcg/packs/",
             Unit::ClaudeMd => "~/.claude/CLAUDE.md",
@@ -175,7 +168,6 @@ impl Unit {
 
     pub fn ownership(self) -> &'static str {
         match self {
-            Unit::Herdr => "whole file, herdr keys kept",
             Unit::ClaudeMd | Unit::CodexMd | Unit::PiMd | Unit::Agentsview => "whole file",
             Unit::DcgConfig | Unit::HerdrAppKeys | Unit::HerdrAppLayouts => "whole file",
             Unit::HerdrAppMods | Unit::HerdrAppSidebar | Unit::HerdrAppInbox => "whole folder",
@@ -464,28 +456,6 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
                 plan.sources.push(src);
             }
             Ok(plan)
-        }
-        Unit::Herdr => {
-            let path = herdr::path(env);
-            let src = sources::get(env, "herdr/config.toml")?;
-            let (live, link) = read_live(&path)?;
-            let r = herdr::render(&src.text, &herdr::symbols(env), live.as_deref())?;
-            Ok(Plan {
-                notes: r
-                    .kept
-                    .iter()
-                    .map(|(k, v)| format!("kept: {k} = {v} (herdr owns it)"))
-                    .collect(),
-                files: vec![FilePlan {
-                    path,
-                    live,
-                    link,
-                    text: r.text,
-                    follow: false,
-                }],
-                sources: vec![src],
-                ..Plan::default()
-            })
         }
         Unit::ClaudeMd => instructions(env, ".claude", "CLAUDE.md", &sources::CLAUDE_PARTS),
         Unit::CodexMd => instructions(env, ".codex", "AGENTS.md", &sources::CODEX_PARTS),
@@ -780,7 +750,7 @@ pub enum Outcome {
     /// chezmoi manages these targets: nothing written.
     Managed(Vec<PathBuf>),
     Skipped(String),
-    /// `herdr config check` rejected the rendered config: its issues.
+    /// Validation rejected the rendered config: its issues.
     Rejected(Vec<String>),
     Failed(String),
 }
@@ -911,14 +881,6 @@ fn apply_inner(
             Err(e) => Outcome::Failed(e),
         };
     }
-    if unit == Unit::Herdr {
-        match herdr::check(&changed[0].path, &changed[0].text, &ctx.herdr) {
-            Err(e) => return Outcome::Failed(e),
-            Ok(herdr::Check::NoHerdr) => return Outcome::Skipped("herdr not installed".into()),
-            Ok(herdr::Check::Rejected(lines)) => return Outcome::Rejected(lines),
-            Ok(herdr::Check::Ok) => {}
-        }
-    }
     let problems = match unit {
         Unit::HerdrAppKeys => match herdr_app::commands(&ctx.herdr_app) {
             Err(e) => return Outcome::Failed(e),
@@ -967,12 +929,6 @@ fn apply_inner(
     }
     if let Err(e) = record() {
         return Outcome::Failed(e);
-    }
-    if unit == Unit::Herdr {
-        done.push(match herdr::reload(&ctx.herdr) {
-            Ok(()) => "reload ok".into(),
-            Err(e) => format!("reload: {e} (herdr reads the file on its next start)"),
-        });
     }
     Outcome::Written(done)
 }

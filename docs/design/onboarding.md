@@ -47,11 +47,11 @@ hc/herdr-app and the legacy herdr TUI are alternative terminal interfaces.
 | `vegad-start` | optional | no old login job file (problem if present) | no vegad login job; herdr-app and the TUI start vegad | `vega post relay install` removes it; `vega post relay status` for runtime state |
 | `herdr-app` | optional | `herdr-app` on PATH | vega-sidebar sidebar and vega-inbox decisions | install herdr-app, then `vega config apply herdr-app` |
 | `python3` | optional | `python3` on PATH | herdr-app badge reader and layout maintenance | the OS package manager |
-| `herdr` | optional | `herdr` on PATH (or `HERDR_BIN_PATH`) | legacy TUI backend: board and agents in panes | https://github.com/herdrdev/herdr |
+| `herdr` | optional | `herdr` on PATH (or `HERDR_BIN_PATH`) | legacy backend: agents in panes | https://github.com/herdrdev/herdr |
 | `chezmoi` | optional | absent, or managing none of vega's config targets | `vega config apply` writes every unit | drop vega's targets from the dotfiles (config.md, cut-over) |
 | `wt` | optional | `wt` on PATH | `vega mux spawn --worktree` with worktrunk (else herdr worktrees) | install worktrunk |
 | `dcg` | optional, recommended | executable on PATH plus valid `PreToolUse` command hooks in present Claude `settings.json` and Codex `hooks.json` | destructive command protection before shell execution | [dcg installation](https://github.com/Dicklesworthstone/destructive_command_guard#installation); register hooks with its installer, then `dcg doctor`; Claude repair: `dcg install` |
-| `bd` | optional | `bd` on PATH | beads: `vega board`, UAC decisions, the bd shim | https://github.com/gastownhall/beads |
+| `bd` | optional | `bd` on PATH | beads: the herdr-app inbox, UAC decisions, the bd shim | https://github.com/gastownhall/beads |
 | `gh` | optional | `gh` on PATH | `vega ci` for GitHub, the gh shim, `janitor --mine` | https://cli.github.com |
 | `tea` | optional | `tea` on PATH | `vega ci` for Gitea/Forgejo | https://gitea.com/gitea/tea |
 | `nats` | optional | `VEGA_NATS_URL` or `~/.config/vega/nats.url` set | `vega post`, vegad (`relay`): cross-host mail, `ci watch` verdicts, beads sync, theme follow, `review` notes | own broker: `mise run nats`, URL into `~/.config/vega/nats.url`; estate: set `VEGA_NATS_URL` or `~/.config/vega/nats.url`, ask the Slayer for a key, `vega post keygen` |
@@ -174,7 +174,7 @@ file the user already has:
 - `claude.hooks` installs/enables the user-scoped hook plugin through the Claude CLI, then migrates
   legacy vega commands out of settings after verification. Without the CLI it skips with an install
   hint. See [config.md](config.md#claude-hook-plugin-vega-lhc243).
-- Whole-file units (`herdr`, `claude.md`, `codex.md`, `pi.md`, `claude.styles`, `agentsview`,
+- Whole-file units (`claude.md`, `codex.md`, `pi.md`, `claude.styles`, `agentsview`,
   `dcg.config`, `dcg.packs`) apply only where
   the target is missing; an existing target that differs is `kept`, with `vega config diff <unit>` and
   `vega config apply <unit>` as the next step.

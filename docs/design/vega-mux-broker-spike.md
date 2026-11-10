@@ -520,7 +520,7 @@ Layers, weakest to strongest:
    Older binaries cannot parse timestamped tokens: upgrade sending hosts before copying new commands.
    Thread and timestamp are self-asserted: this stops accidental ping-pong, not a determined agent.
 3. **Pointer coalescing.** The relay types at most one pointer per pane per 10 s, with the current count, and none if the inbox is already empty. A flood of messages costs the receiver one turn per window, not one per message.
-4. **Server limits (not done).** `max_msgs_per_subject` on the inbox stream with `discard: new` caps unread mail per pane-and-sender: a looping sender gets publish errors. A per-sender rate limit belongs in the filter stage above.
+4. **Server limits (not done).** `max_msgs_per_subject` in the inbox stream with `discard: new` caps unread mail per pane-and-sender: a looping sender gets publish errors. A per-sender rate limit belongs in the filter stage above.
 
 ## Auth: nkeys per machine
 

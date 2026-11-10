@@ -48,9 +48,9 @@ its settings.json must already exist.
 | gh-dash | `~/.config/gh-dash/config.yml` `theme.colors` ← `theme-<mode>.yml` (yq) | recognized by `text.primary` | no |
 | herdr | `~/.config/herdr/config.toml` `[theme]` | `light_name` / `dark_name` | yes: `auto_switch = true` |
 
-herdr's config is rendered by `vega config` (unit `herdr`) from `herdr/config.toml` ([config.md](config.md)) ([theme-symbols.md](theme-symbols.md)
-"herdr's config"): the adapter is read-only and reports drift with the fix.
-vega's own board keeps its fixed Catppuccin Macchiato palette (follow-up).
+Legacy herdr config is host-managed; the adapter is read-only and reports drift
+with the native `auto_switch` setting as the fix. The TUI config unit was retired
+in vega-0h4c.4. Herdr-app themes are managed by [config.md](config.md).
 
 Pi’s default catppuccin-latte/catppuccin-mocha pair requires `pi-community-themes` to be installed.
 If those themes are missing, install that package or set `[tools.pi] light/dark` to installed themes

@@ -198,12 +198,7 @@ fn home(ctx: &Ctx) -> Result<ExitCode, Failure> {
     let managed = managed(ctx)?;
     println!("config[{}]{{unit,apply}}:", Unit::ALL.len());
     for u in Unit::ALL {
-        // The plan cannot tell; apply would skip it.
-        let text = if u == Unit::Herdr && !rows.iter().any(|r| r.name() == "herdr" && r.ok) {
-            "skipped: herdr not installed".into()
-        } else {
-            plan_cell(ctx, u, &managed)
-        };
+        let text = plan_cell(ctx, u, &managed);
         println!("  {},{}", u.name(), cell(&text));
     }
     let broker = probe.broker().is_some();

@@ -1,4 +1,0 @@
-# Output of the [[build]] step in herdr-plugin.toml (cargo install --root .)
-/bin/
-/.crates.toml
-/.crates2.json

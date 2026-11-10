@@ -15,10 +15,10 @@ all-host audit. Deploy it as a coordinated flag-day cutover using the
   `record_if_uac` uses the ID UAC API, including across local clones, and reports
   identity/configuration failures to its CLI caller. bd actors remain local.
 - Badges use `badges/v2/<hex(ProjectId)>.json` and validate schema and ID.
-  The board uses the shared resolver. Notes carry schema 2 and project IDs;
+  The inbox uses the shared resolver. Notes carry schema 2 and project IDs;
   their pane-keyed/source-host IDs, causes and watermarks do not change.
 - vegad resolves its owner-local herdr snapshot before joining membership by
-  ID. It never reads a remote registry path. Pane/workspace joins, board
+  ID. It never reads a remote registry path. Pane/workspace joins, inbox
   placement, home-project detection and hygiene displays use IDs. Failed
   local resolution skips that project and logs a diagnostic once per change.
 - Decisions execute in the claimed local checkout. Cache entries use ID and
@@ -26,7 +26,7 @@ all-host audit. Deploy it as a coordinated flag-day cutover using the
   its normal refresh interval. A sibling clone never wins by registry order.
   Resolution failures retain the cached decisions. After a daemon restart,
   failures retain and refresh the last saved decision count even beyond the
-  board's normal freshness window, rather than publishing an unknown zero.
+  inbox's normal freshness window, rather than publishing an unknown zero.
 - v2 UAC claims retain primary `common_dir` and `checkout`, plus a `locations`
   list after migration or claim updates. `project_uac_locations` projects all
   owner-local locations with their expected ID. Git sync checks that ID before
@@ -35,7 +35,7 @@ all-host audit. Deploy it as a coordinated flag-day cutover using the
   projection is also backed only by these v2 records.
 - PagerDuty reads committed ownership from local locations and groups by ID.
   Equal service sets coalesce. Divergent sets for one ID are an error with a
-  board diagnostic, never a union or a guessed winner. A registered clone's
+  inbox diagnostic, never a union or a guessed winner. A registered clone's
   read or resolution failure blocks its expected
   ID while unrelated projects remain routable. Routing receives IDs
   directly. Its state version is 2; delivery receipts retain their original

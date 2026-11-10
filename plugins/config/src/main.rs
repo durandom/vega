@@ -43,7 +43,7 @@ enum Cmd {
     },
     /// Write the units (default: all); a unit chezmoi manages is left alone
     #[command(
-        after_help = "Results: written, unchanged, managed (chezmoi owns a target: nothing written), skipped (tool not set up here), rejected (herdr config check), failed. Exit 1 on rejected or failed.\nThe last line is `summary: written N, unchanged N, managed N, skipped N, failed N`.\n\nExamples:\n  vega config apply\n  vega config apply herdr\n  vega config apply hooks"
+        after_help = "Results: written, unchanged, managed (chezmoi owns a target: nothing written), skipped (tool not set up here), rejected (invalid config), failed. Exit 1 on rejected or failed.\nThe last line is `summary: written N, unchanged N, managed N, skipped N, failed N`.\n\nExamples:\n  vega config apply\n  vega config apply herdr-app\n  vega config apply hooks"
     )]
     Apply {
         /// Units or groups (default: all)

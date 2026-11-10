@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const { parseRequest } = require('./routes');
 
 test('routes known actions to an absolute path', () => {
-  assert.deepEqual(parseRequest('/reveal/Users/me/repo/plugins/open'), {
+  assert.deepEqual(parseRequest('/reveal/Users/me/repo/plugins/mux'), {
     action: 'reveal',
-    fsPath: '/Users/me/repo/plugins/open',
+    fsPath: '/Users/me/repo/plugins/mux',
   });
   assert.deepEqual(parseRequest('/diff/tmp/a b+c%.rs'), {
     action: 'diff',

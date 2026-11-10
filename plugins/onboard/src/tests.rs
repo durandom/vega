@@ -93,7 +93,6 @@ fn ctx(home: &Path) -> Ctx {
     Ctx {
         env: Env::at(home),
         chezmoi: home.join("no-chezmoi").into_os_string(),
-        herdr: home.join("no-herdr").into_os_string(),
         herdr_app: home.join("no-herdr-app").into_os_string(),
         mux: PathBuf::from("/opt/vega/bin/vega-mux"),
         skills: home.join("no-skills").into_os_string(),

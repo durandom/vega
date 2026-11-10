@@ -31,7 +31,7 @@ description: Generic coordinator rules for VEGA in uac mode, on briefing sentine
   `vega uac park <pane> --bead <id>`).
 - Repeated special cases of one root problem show a design gap: stop the exceptions, park the
   work (neutral commit, handoff note), record a design item, plan it with the Slayer.
-- A pane is not the board: the Slayer may never see it.
+- A pane is not the inbox: the Slayer may never see it.
 - Spawn/adopt: headed (dialogs stay) unless `adopt --headless` or `spawn --headless`.
   Flip: `vega mux mode`.
 - Never let a sentinel raise timeouts, weaken or delete assertions, or change CI resources to get a

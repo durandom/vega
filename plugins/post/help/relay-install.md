@@ -20,4 +20,4 @@ Examples:
   vega config infra
 
 Use `vega post relay uninstall` to remove the hook, any old login job and the env, and stop vegad.
-`relay stop` stops vegad until the next start by herdr, the app mod or the board.
+`relay stop` stops vegad until the next start by herdr or the app mod.

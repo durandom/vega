@@ -1,9 +1,9 @@
-# vega config: vega owns agent, herdr and dcg config
+# vega config: vega owns agent, herdr-app and dcg config
 
 Status: accepted
 Date: 2026-10-15
 Bead: vega-lhc.107 (Slayer decision 2026-10-14)
-Parent: [repo-layout.md](repo-layout.md); builds on [theme-symbols.md](theme-symbols.md) "herdr's config",
+Parent: [repo-layout.md](repo-layout.md); builds on [theme-symbols.md](theme-symbols.md),
 [skills-management.md](skills-management.md)
 
 ## Context
@@ -11,7 +11,7 @@ Parent: [repo-layout.md](repo-layout.md); builds on [theme-symbols.md](theme-sym
 The coding agents' config came from three places: chezmoi (instructions, output styles, two skills, a
 `run_onchange` script that merges portable keys into Claude's `settings.json`), `scripts/install-cli.sh`
 (the shim activation in Claude's and pi's settings), and vega plugins (`vega mux hook install`,
-`vega theme herdr`, `vega skills lib sync`). Two writers for one file drift: on proteus, chezmoi still
+`vega skills lib sync`). Two writers for one file drift: on proteus, chezmoi still
 manages `~/.claude/skills/git-assisted-by/SKILL.md` while `vega skills lib sync` replaced the directory
 with a link (`chezmoi status`: `MM`). The decision: all coding-agent config leaves chezmoi and is
 written by one vega plugin, `vega config`, from sources in this repo. `vega deploy` applies it on every
@@ -25,7 +25,6 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 
 | Unit | Target | Ownership | Source |
 |---|---|---|---|
-| `herdr` | `~/.config/herdr/config.toml` | whole file; herdr-owned keys keep their live value | `herdr/config.toml` + `[symbols]` of `~/.config/vega/theme.toml` |
 | `dcg.config` | `$XDG_CONFIG_HOME/dcg/config.toml` | whole file | `dcg/config.toml` |
 | `dcg.packs` | `$XDG_CONFIG_HOME/dcg/packs/<name>.yaml` (also `.yml`) | whole file each; other live packs untouched | `dcg/packs/` |
 | `claude.md` | `~/.claude/CLAUDE.md` | whole file | `instructions/*.md`, parts per agent |
@@ -51,7 +50,7 @@ Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks cod
 ### herdr-app (vega-0h4c.1)
 
 herdr-app (the GPUI window over herdr-core) replaces the herdr TUI (epic vega-0h4c; the tag
-`herdr-tui-final` marks the last TUI-only state). Its home `~/.config/herdr-app/` is files the app
+`herdr-tui-final` preserves the state before UI/config retirement). Its home `~/.config/herdr-app/` is files the app
 reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units skip.
 
 - `keys.json` is the whole keymap: once edited, the app no longer upgrades its defaults, so the
@@ -61,7 +60,7 @@ reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units
   name an app command (`herdr-app commands`, works without a window), `send:`, `terminal` or a
   folder in `mods/`: the app accepts an unknown name silently and only toasts when it is pressed.
   TUI keys without an app command (last pane, break pane, copy mode, resize mode, plugin actions)
-  are not bound; vega open, the board and worktrunk follow with the hc migration (vega-0h4c.2).
+  are not bound; the dashboard and path menu were retired (vega-0h4c.11).
 - `settings.json` takes seeded keys (`theme` as `{light, dark}`, `sounds`), recorded per unit in
   the same state file as `claude.settings`; the font and other Settings-screen choices stay the user's.
 - `themes/catppuccin-{latte,mocha}.json`: Catppuccin with the TUI's overrides as theme `colors`
@@ -180,7 +179,6 @@ tests verify apply, backups, local overrides, idempotence and chezmoi refusal in
 
 | Writer | What | How it survives |
 |---|---|---|
-| herdr | `[ui] agent_panel_sort` (UI toggle) | `HERDR_OWNED`: the live value replaces the template's |
 | Claude Code | everything else in `settings.json` (plugins, permissions, statusLine, survey state, other hooks) | key-merge |
 | codex | other hooks in `hooks.json`; `config.toml` (trust, hook approvals) | key-merge; `config.toml` is not a unit (folder trust stays in `vega mux spawn`, crates/vega-herdr/src/launch.rs) |
 | pi | `settings.json` except the prefix line; an existing prefix stays after vega's line | key-merge |
@@ -273,10 +271,9 @@ chezmoi nothing is managed. Two exceptions, because chezmoi cannot see them or v
 None of the sources are templates per host. What differs comes from the host's own state:
 
 - `herdr-app.*`: none; skipped where `~/.config/herdr-app` does not exist.
-- `herdr`: colours, host labels and the sentinel icon from the host's `theme.toml` (as before).
 - `agentsview`: only where `agentsview skills install` generated the skill (proteus, ganymede today).
 - Key-merge units: the rest of each file is the host's own.
-- A unit whose tool is missing is skipped: `herdr` without herdr; the claude, codex and pi units
+- A unit whose tool is missing is skipped: the claude, codex and pi units
   without `~/.claude`, `~/.codex` or `~/.pi/agent`; `pi.prefix` without `~/.pi/agent/settings.json`.
   The dcg units remain available before dcg is installed, so onboarding can seed their defaults.
 
@@ -323,7 +320,6 @@ flowing in with new vega versions.
 
 ```
 config/                         # repo defaults; ~/.config/vega/config/ overrides per file
-  herdr/config.toml             # moved from herdr/config.toml
   instructions/<part>.md
   claude/output-styles/<name>.md
   claude/settings.json          # seeded keys
@@ -349,8 +345,6 @@ vega config infra              # the infra vega needs: required/optional, state,
 
 Exit 1 when a unit fails or is rejected; `managed` and `skipped` are not failures. Moved commands:
 
-- `vega theme herdr [--print|--apply]` → thin alias for `vega config diff|print|apply herdr`.
-  `vega theme` keeps the runtime mode switching.
 - `vega mux hook install [--codex]` → thin alias for `vega config apply hooks`. `vega mux hook
   ask-parent` (the hook itself) stays in mux.
 - `scripts/install-cli.sh` no longer edits settings files; it runs `vega config apply hooks`.
@@ -360,10 +354,10 @@ Personal units (`instructions`, `claude.styles`, `claude.settings`, `agentsview`
 manage them; `vega onboard apply` seeds defaults while preserving differing files and user settings.
 `mise run install` and `scripts/install-cli.sh` never apply them: another user of this repo who installs
 vega must not get the Slayer's `CLAUDE.md` replacing their own. `install-cli.sh` stays hooks-only
-(`vega config apply hooks`). `herdr` and `skills` also stay out of that installer and remain available
+(`vega config apply hooks`). `skills` also stays out of that installer and remains available
 to deploy, onboarding and explicit config apply.
 - `vega deploy apply` copies the local overrides (column `overrides`: file count) and runs
-  `vega config apply` instead of `vega skills lib sync` and `vega theme herdr --apply`; its `config`
+  `vega config apply` instead of `vega skills lib sync`; its `config`
   column is the apply's `summary:` line. Neither fails the deploy.
 
 ## Cut-over per host

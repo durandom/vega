@@ -239,7 +239,7 @@ enum Cmd {
     },
     /// List the notifications vega showed the human (all hosts), newest first
     #[command(
-        after_help = "vegad keeps each toast it shows (drafts it held or could not restore) as a note: this host's store\n($XDG_STATE_HOME/vega/notes, 7 days, at most 200; open asks exempt), published to the registry as <host>.note.<id>.\nEach UAC pane shows its project's unread count as \u{1f514}<n> (notes without a project, such as quarantine and\ndrafts, on the vega UAC); `vega board` lists them (N) and marks them read. A note with a cause (bd-sync:<DB>)\nresolves by itself when the cause clears (the project syncs again): read everywhere, still listed.\nread / clear move this host's watermarks per source host; without --upto, to the newest note.\nOpen asks stay visible after clear; use vega notify resolve.\n\nExamples:\n  vega post notes\n  vega post notes read\n  vega post notes clear --upto proteus=1791000000000\n  vega post notes --json --all"
+        after_help = "vegad keeps each toast it shows (drafts it held or could not restore) as a note: this host's store\n($XDG_STATE_HOME/vega/notes, 7 days, at most 200; open asks exempt), published to the registry as <host>.note.<id>.\nEach UAC pane shows its project's unread count as \u{1f514}<n> (notes without a project, such as quarantine and\ndrafts, on the vega UAC); `vega post notes` lists them and `notes read` marks them read. A note with a cause (bd-sync:<DB>)\nresolves by itself when the cause clears (the project syncs again): read everywhere, still listed.\nread / clear move this host's watermarks per source host; without --upto, to the newest note.\nOpen asks stay visible after clear; use vega notify resolve.\n\nExamples:\n  vega post notes\n  vega post notes read\n  vega post notes clear --upto proteus=1791000000000\n  vega post notes --json --all"
     )]
     Notes {
         /// read: mark read (the badge clears); clear: also hide from the list
@@ -248,7 +248,7 @@ enum Cmd {
         /// With read or clear: only up to this note per host, <host>=<id>; repeat
         #[arg(long, value_name = "HOST=ID", requires = "action")]
         upto: Vec<String>,
-        /// One JSON object per line (for the board)
+        /// One JSON object per line (for UI consumers)
         #[arg(long, conflicts_with = "action")]
         json: bool,
         /// Also list cleared notes
@@ -335,7 +335,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum RelayAction {
-    /// Start vegad detached unless a relay runs (idempotent; the app mod, herdr hook and board call it)
+    /// Start vegad detached unless a relay runs (idempotent; the app mod, herdr hook call it)
     #[command(
         after_help = "vegad runs in its own session, outlives herdr and logs to ~/.local/state/vega/post-relay-<host>.log.\nEnv: this shell's without pane variables and agent shims, plus ~/.local/state/vega/vegad.env (`relay install`).\nA host with a launchd/systemd unit from before (not migrated): the unit is kickstarted instead.\n\nExamples:\n  vega post relay start"
     )]
@@ -351,7 +351,7 @@ enum RelayAction {
     Uninstall,
     /// Show whether vegad runs: pid, version, binary current or stale, delivery mode, last log lines
     Status {
-        /// One JSON object (the board reads it)
+        /// One JSON object (UI consumers read it)
         #[arg(long)]
         json: bool,
     },
@@ -1433,14 +1433,14 @@ async fn resolve_target(
                     Failure::new(
                         "registry_unavailable",
                         format!("cannot resolve --uber: registry: {e}"),
-                        "without the registry there is no Uber-UAC; use the bead and the board",
+                        "without the registry there is no Uber-UAC; use the bead and the inbox",
                     )
                 })?;
             let c = view.live_uber().ok_or_else(|| {
                 Failure::new(
                     "uber_absent",
                     "no live Uber-UAC claim; nothing was sent",
-                    "the Slayer's session runs `vega uber claim`; until then use the bead and the board",
+                    "the Slayer's session runs `vega uber claim`; until then use the bead and the inbox",
                 )
             })?;
             return Ok((
@@ -1561,7 +1561,7 @@ fn send(
             .map(|p| collapse_home(&p.display().to_string()))
             .unwrap_or_default()
     };
-    // Outside any pane (the vega board's popup): the user, without a return
+    // Outside any pane (a user shell): the user, without a return
     // path; the message carries no sender pane, so nobody can reply by mail.
     // A tool (`--from-tool`) likewise has no pane, so it may mail its own.
     let me = match from_tool {
@@ -1783,7 +1783,7 @@ async fn receive_quarantined(
     }
 }
 
-/// vegad's side of a quarantined reply: a note for the human (toast, board,
+/// vegad's side of a quarantined reply: a note for the human (toast, inbox,
 /// `vega post notes`), nothing typed into any pane. Returns the answer.
 fn store_quarantined(req: &async_nats::Message, my_host: &str) -> Vec<u8> {
     if let Some(no) = quarantine::refuse(&req.subject, my_host, &req.payload) {
@@ -2338,7 +2338,7 @@ fn print_msg(
     } else if from_pane == "?" && hv(h::FROM_AGENT).starts_with("tool vega-") {
         println!("reply: none (sent by a vega tool, not an agent)");
     } else if from_pane == "?" && hv(h::THREAD) != "?" {
-        println!("reply: none (sent from outside a pane, e.g. the vega board)");
+        println!("reply: none (sent from outside a pane)");
     } else if from_pane == "?" || hv(h::THREAD) == "?" {
         println!("reply: none (no return path; not sent by `vega post send`)");
     } else {
@@ -3257,7 +3257,7 @@ async fn serve(
                 type_theme(&mut live_theme, &drafts);
                 slow("live theme", t);
             }
-            // A new note or a read one (the board) redraws the badge now.
+            // A new note or a read one (the inbox) redraws the badge now.
             let changed = notes_store.as_ref().and_then(|s| s.changed());
             if changed != notes_at {
                 notes_at = changed;
@@ -3772,7 +3772,7 @@ async fn bounce(
     let mut ok = true;
     for o in senders {
         if o.pane.is_empty() {
-            // The user from the board on this host: a note; tools get none.
+            // The user from the inbox on this host: a note; tools get none.
             if o.agent == "the user" && o.host == host {
                 vega_herdr::notes::notify(
                     "bounce",
@@ -4367,7 +4367,7 @@ fn settles(pane: &str, want: impl Fn(Draft) -> bool) -> bool {
 }
 
 /// A draft vegad could not put back: a herdr notification carries it, and
-/// the board's notification list keeps it.
+/// the inbox notification list keeps it.
 fn lost_draft(pane: &str, text: &str) {
     log(&format!(
         "draft restore failed: {pane}; sent as a notification"
@@ -5328,34 +5328,6 @@ impl Layout {
             .filter_map(|w| w["workspace_id"].as_str().map(String::from))
             .collect()
     }
-
-    /// The board panes (by the terminal title the board sets) and their
-    /// project among `keys`, else the project of their workspace's repo.
-    fn boards(&self, keys: &[String]) -> Vec<(String, Option<String>)> {
-        self.panes
-            .iter()
-            .filter(|p| {
-                p["terminal_title"]
-                    .as_str()
-                    .is_some_and(|t| t.starts_with("vega-board"))
-            })
-            .filter_map(|p| {
-                let id = p["pane_id"].as_str()?;
-                let key = keys
-                    .iter()
-                    .find(|k| self.in_project(k, id))
-                    .cloned()
-                    .or_else(|| {
-                        self.workspaces
-                            .iter()
-                            .find(|w| w["workspace_id"] == p["workspace_id"])
-                            .and_then(|w| w["project"].as_str())
-                            .map(str::to_owned)
-                    });
-                Some((id.to_string(), key))
-            })
-            .collect()
-    }
 }
 
 /// A sentinel's sidebar name: the `sentinel` symbol, then its name.
@@ -5686,33 +5658,6 @@ fn report_metadata(
         args.extend(b.uac_tokens(sym));
     }
     phases.mark("uac badges");
-    // Without a UAC pane on this host, the open board panes carry the badges.
-    if !uacs.iter().any(|(_, p, _)| live.contains(p)) {
-        for (pane, key) in layout.boards(&uac_keys) {
-            let b = match key {
-                Some(k) => badges_of(&k).0,
-                None => vega_herdr::badges::Badges {
-                    notes: unread.len(),
-                    ..Default::default()
-                },
-            };
-            let mut args = vec![
-                "pane".to_string(),
-                "report-metadata".into(),
-                pane,
-                "--source".into(),
-                "vega:vegad".into(),
-                "--ttl-ms".into(),
-                sidebar::TTL_MS.into(),
-            ];
-            if b.is_zero() {
-                args.push("--clear-display-agent".into());
-            } else {
-                args.extend(["--display-agent".into(), b.after("vega board", sym)]);
-            }
-            cmds.push(args);
-        }
-    }
     // Each workspace holding a UAC or a local sentinel gets its `$badge`.
     let mut badges: HashMap<String, String> = HashMap::new();
     for pane in &live {
@@ -7651,16 +7596,14 @@ mod tests {
     }
 
     #[test]
-    fn layout_places_panes_and_boards_in_projects() {
+    fn layout_places_panes_in_projects() {
         use serde_json::json;
         let layout = Layout {
             panes: vec![
                 json!({"schema":2, "project":"github.com/team/vega", "pane_id": "w1:p2", "workspace_id": "w1", "cwd": "/Users/u/src/vega.fix"}),
                 json!({"schema":2, "project":"github.com/team/sk", "pane_id": "w2:p1", "workspace_id": "w2", "cwd": "/Users/u/src/sk/x"}),
-                json!({"schema":2, "project":"github.com/team/other", "pane_id": "w3:p1", "workspace_id": "w3", "cwd": "/srv/x",
-                    "terminal_title": "vega-board-other"}),
-                json!({"schema":2, "project":"github.com/team/vega", "pane_id": "w1:p3", "workspace_id": "w1", "cwd": "/Users/u/src/vega",
-                    "terminal_title": "vega-board-vega"}),
+                json!({"schema":2, "project":"github.com/team/other", "pane_id": "w3:p1", "workspace_id": "w3", "cwd": "/srv/x"}),
+                json!({"schema":2, "project":"github.com/team/vega", "pane_id": "w1:p3", "workspace_id": "w1", "cwd": "/Users/u/src/vega"}),
             ],
             workspaces: vec![
                 json!({"schema":2, "project":"github.com/team/vega", "workspace_id": "w1", "worktree": {"repo_key": "/Users/u/src/vega/.git"}}),
@@ -7676,16 +7619,6 @@ mod tests {
         // The snapshot has already resolved this pane to its project ID.
         assert!(layout.in_project("github.com/team/sk", "w2:p1"));
         assert!(!layout.in_project(vega, "w9:p9"));
-        assert_eq!(
-            layout.boards(&[vega.to_string()]),
-            vec![
-                (
-                    "w3:p1".to_string(),
-                    Some("github.com/team/other".to_string())
-                ),
-                ("w1:p3".to_string(), Some(vega.to_string())),
-            ]
-        );
     }
 
     #[test]

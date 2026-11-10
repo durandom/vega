@@ -7,9 +7,8 @@
 //! Keychain status is the in-process exception: a private receiver validates
 //! the inbox-only sender and reconstructs a header-free registry publish.
 //!
-//! The handler owns the meaning and its checks (for `open`: vega-open's
-//! remote-open maps the sender's paths to mounts and refuses anything
-//! outside its roots). The relay only routes, limits and reports.
+//! The handler owns the meaning and its checks. The relay only routes, limits
+//! and reports.
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
@@ -23,7 +22,6 @@ pub const HANDLER_TIMEOUT: Duration = Duration::from_secs(10);
 /// Allowed kinds and their handler argv; the relay appends `<from host>`.
 pub const HANDLERS: &[(&str, &[&str])] = &[
     ("notify", &["vega-notify", "remote-update", "--from"]),
-    ("open", &["vega-open", "remote-open", "--from"]),
     (
         "orchestration",
         &["vega-orchestration", "remote-update", "--from"],
@@ -220,10 +218,12 @@ mod tests {
     fn unknown_kind_big_or_bad_payload_is_denied() {
         let v: Value = serde_json::from_slice(&serve("shell", "x", b"{}")).unwrap();
         assert_eq!(v["code"], "denied");
-        let big = vec![b' '; MAX_PAYLOAD + 1];
-        let v: Value = serde_json::from_slice(&serve("open", "x", &big)).unwrap();
+        let v: Value = serde_json::from_slice(&serve("open", "x", b"{}")).unwrap();
         assert_eq!(v["code"], "denied");
-        let v: Value = serde_json::from_slice(&serve("open", "x", b"not json")).unwrap();
+        let big = vec![b' '; MAX_PAYLOAD + 1];
+        let v: Value = serde_json::from_slice(&serve("notify", "x", &big)).unwrap();
+        assert_eq!(v["code"], "denied");
+        let v: Value = serde_json::from_slice(&serve("notify", "x", b"not json")).unwrap();
         assert_eq!(v["code"], "denied");
     }
 

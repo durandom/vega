@@ -96,7 +96,7 @@ pub struct Delivery {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Origin {
     pub host: String,
-    /// Empty for the user (vega board) or a tool: no pane to mail.
+    /// Empty for the user (a user shell) or a tool: no pane to mail.
     pub pane: String,
     pub agent: String,
 }

@@ -1,7 +1,7 @@
 # Theme: symbols
 
 The `[symbols]` section of `~/.config/vega/theme.toml` (`$XDG_CONFIG_HOME/vega/theme.toml`): the symbols
-of the UAC pane's label (vegad, [vegad.md](vegad.md) Badges) and of `vega board`. Read by
+of the UAC pane's label (vegad, [vegad.md](vegad.md) Badges) and of the herdr-app inbox. Read by
 `vega_herdr::theme`, which `vega theme` reuses to list and edit them. The file's other sections
 (dark/light and the like) belong to `vega theme`; this reader ignores them.
 
@@ -26,13 +26,13 @@ example = "#2f7fd8"
 
 - A missing file or section means `set = "nerd"` without overrides.
 - The config holds bare symbols; the renderer adds one space after each (a Nerd Font glyph needs
-  the cell after it). The board measures each symbol, so an override may be any width.
+  the cell after it).
 - Mistakes are reported, the rest still applies: an unknown `set` (falls back to nerd), an unknown
   key under `[symbols]`, an unknown topic or a non-string under `[symbols.icons]`, a topic outside
   the nine colourable ones (four badges, five agent kinds; below) or a value other than strict
   `#RRGGBB` under `[symbols.colors]`, a non-string
   under `[symbols.hosts]`, a value other than strict `#RRGGBB` under `[symbols.host_colors]`, a
-  file that is no TOML. vegad logs them once per change; the board shows the first in red in its top bar.
+  file that is no TOML. vegad logs them once per change.
 - Readers re-read the file at most every 2 s; vegad on its next label refresh. No restart.
 
 ## Topics
@@ -70,7 +70,7 @@ U+EC82 and U+EC81 came with Nerd Fonts 3.4; an older font (e.g. 3.3.0) draws a b
 (Symbols Nerd Font Mono >= 3.4 as a fallback font is enough), or override the two topics under
 `[symbols.icons]` (e.g. `claude = "✳"`), or use `set = "emoji"`.
 
-Other bead types keep their letter tags (B, F, C, S, Y, M; `·` for a task). Board chrome (collapse
+Other bead types keep their letter tags (B, F, C, S, Y, M; `·` for a task). Inbox chrome (collapse
 arrows, list bullets, separators) is not themed.
 
 ## Colours and herdr sidebar tokens
@@ -88,12 +88,10 @@ topic on the UAC pane (`Badges::uac_tokens`):
 | `$waiting` | `<waiting symbol> <count>`, cleared at zero | `#d9465f` |
 
 `[symbols.colors]` overrides the colours of these four topics. The defaults keep a contrast of at
-least 3:1 on the Catppuccin Latte and Macchiato base and mantle backgrounds. `vega board` draws its
+least 3:1 on the Catppuccin Latte and Macchiato base and mantle backgrounds. The herdr-app inbox draws its
 top-bar badges in the same colours. herdr keeps at most 80 characters of a token value.
 
-vegad does not write herdr's config. Colours live in herdr's `[ui.sidebar.agents]` rows, which
-`vega config` (unit `herdr`) renders from `[symbols.colors]` (see "herdr's config" below); the snippets in this
-document show the shape. This snippet, with the default
+Legacy hosts manage their own sidebar config; the snippets show its format. This snippet, with the default
 colours, keeps herdr's default first row and replaces its second (`["agent"]`): on the UAC pane the
 plain `agent` label (it contains the `uac_text`, here `UAC`; match yours) hides and the coloured tokens show; on every other pane the
 tokens are unreported and vanish, so `agent` shows as before.
@@ -114,12 +112,11 @@ rows = [
 
 `herdr config check` accepts it (herdr 0.9.3). With a `rows_by_agent.claude` override the second row
 goes there instead, since an override replaces `rows`. Without the snippet `display_agent` shows the
-uncoloured label as before. Board panes that carry the badges when no UAC pane is live keep the
-plain label.
+uncoloured label as before.
 
 herdr colours its agent status dots from the theme palette: `yellow` working, `teal` done, `green`
 idle, `red` blocked. Catppuccin's pastel yellow and teal read alike at dot size, so
-`config/herdr/config.toml` overrides both under `[theme.custom.light]` and `[theme.custom.dark]`:
+the former TUI template overrode both under `[theme.custom.light]` and `[theme.custom.dark]`:
 done turns blue (Latte `#1e66f5`, Mocha `#89b4fa`, as on herdr's mobile view) and working a stronger
 amber (`#df8e1d`, `#ffb224`). herdr uses `teal` only for done; `yellow` also colours its
 connecting/reconnecting and update-available notices.
@@ -136,8 +133,8 @@ see [host precedence](../concepts.md)); keys match it
 case-insensitively. Each host labels its own panes: a remote pane's `$host` comes from the remote
 vegad, so every host's theme.toml should carry the same `[symbols.hosts]` table.
 
-Colours, as for the badges, live in herdr's rows: `vega config` (unit `herdr`) renders one rule per
-`[symbols.host_colors]` entry, matching its `[symbols.hosts]` label. This snippet replaces `machine` in the first row by
+Colours on legacy hosts live in their host-managed herdr rows, matching each
+`[symbols.hosts]` label. This snippet replaces `machine` in the first row by
 `$host` (one `fg` rule per host, by `equals` on the label) and
 keeps the UAC tokens row from above:
 
@@ -300,34 +297,10 @@ rows = [
 
 The colours match the agents rows; hiding `main` leaves the branch only where it differs.
 
-## herdr's config
+## Legacy herdr config
 
-vega owns `~/.config/herdr/config.toml` (vega-lhc.103, Slayer decision 2026-10-13; before, a chezmoi
-`modify_` script in the dotfiles). The source is `herdr/config.toml` ([config.md](config.md) "Sources":
-`~/.config/vega/config/herdr/config.toml` when it exists, else the repo's `config/herdr/config.toml`):
-herdr's whole config (theme, keys, toasts, sidebar) with double-brace placeholders, rendered by
-`vega_config::herdr` (plugins/config):
-
-| Placeholder | From |
-|---|---|
-| `color.uac`, `color.notes`, `color.decisions`, `color.waiting`, `color.other_agent` | `[symbols.colors]` (defaults above) |
-| `host_rules` | one `{ equals = <label>, fg = <colour> }` per `[symbols.host_colors]` host, label from `[symbols.hosts]` |
-| `kind_rules` | one `{ equals = <$kind value>, fg = <colour> }` per kind `claude`, `codex`, `copilot`, `pi` (`[symbols.colors]`); none for an empty icon |
-| `icon.sentinel` | the `sentinel` symbol (nerd cog when empty), private-use glyphs as `\U` escapes |
-| `color.host`, `color.sentinel`, `color.git_clean`, `color.git_dirty` | constants in `vega_config::herdr` (`#8a8a8a`, `#45922a`, `#45922a`, `#f07830`) |
-
-An unknown placeholder or a rendered file that is no TOML fails the render. Keys herdr writes itself
-(`HERDR_OWNED`: `[ui] agent_panel_sort`, rewritten when the sort is toggled in the UI) keep their
-live value (lowercase letters and `_` only; else the template's default, `priority`).
-
-- `vega config diff herdr`, `vega config print herdr`: the diff, the rendered file; read-only.
-- `vega config apply herdr`: refused while chezmoi manages the file (`managed`). Nothing when the file
-  matches. Else writes a candidate next to the live file and runs
-  `HERDR_CONFIG_PATH=<candidate> herdr config check`; on a rejection the old file stays and the issues
-  are listed (exit 1). On a pass: the old file goes to `config.toml.vega-bak`, the new one is written
-  atomically, then `herdr server reload-config` (a failure, e.g. no server, is reported; herdr reads the
-  file on its next start). Without herdr: `skipped`, nothing written.
-- `vega theme herdr [--print|--apply]` is an alias for these; `vega deploy apply` runs `vega config
-  apply` on each target (column `config`; never fails the deploy).
-
-Each host renders from its own theme.toml, so every host's `[symbols]` should match.
+The TUI config renderer and unit were removed in vega-0h4c.4. Hosts still running
+legacy panes manage their existing `~/.config/herdr/config.toml` themselves; the
+examples above describe that compatibility format. No vega install or deploy
+renders it. The old template is preserved at `herdr-tui-final`. Current herdr-app
+colors and mods are managed by [config.md](config.md).

@@ -83,7 +83,7 @@ The Uber-UAC is one Claude Code session over all projects and hosts, which the o
 (Remote Control). One live claim per estate (`vega uber claim`; it needs the broker). It decides nothing: it
 shows the owner the UACs' decisions and relays only what the owner answered. A UAC sends a `slayer-decision`
 bead to it with `vega uber ask` (L3: the owner picks an option; L4: only the owner may approve); without a
-live Uber (`uber_absent`) the bead, the board and the UAC's pane carry the decision as before. An answer
+live Uber (`uber_absent`) the bead, the inbox and the UAC's pane carry the decision as before. An answer
 counts only after the UAC host's vegad verified it against the open ask. A brief (`vega uber brief`)
 shows the open decisions plus each live UAC's FYI and Blocked lines, at most 25 lines. While the owner talks to
 the Uber (its engaged window), vegad wakes it once an ask has waited 4 h, at most once per 4 h.
@@ -150,8 +150,8 @@ database on the configured Dolt remote. vegad then pulls every 60 s and pushes w
 agents never run `bd dolt pull`/`push`. A true merge conflict stops that project's sync until `vega bd resume`.
 The `bd` shim sets `BEADS_ACTOR` to `<host>/<worktree dir>`, which is how lanes find their beads.
 
-- Show: `bd ready`, `vega bd status`, `vega board` (the owner's decisions and the beads in a herdr pane).
-- Design: [beads-sync.md](design/beads-sync.md), [board-ui.md](design/board-ui.md).
+- Show: `bd ready`, `vega bd status`, the herdr-app inbox (decisions, waiting agents and notes).
+- Design: [beads-sync.md](design/beads-sync.md).
 
 ## The gate: review before push
 

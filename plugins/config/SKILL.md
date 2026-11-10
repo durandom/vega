@@ -1,9 +1,9 @@
 ---
 name: vega-config
-description: Shows, diffs and applies the coding agents', herdr's and dcg's config that vega owns (instructions, output styles, settings, hooks, global skills, herdr config, dcg config and packs), rendered from repo defaults or local overrides in ~/.config/vega/config. Use when these instructions, hooks or configs drift, to change them, or to check what a deploy would write.
+description: Shows, diffs and applies the coding agents', herdr-app's and dcg's config that vega owns (instructions, output styles, settings, hooks, global skills, herdr-app config, dcg config and packs), rendered from repo defaults or local overrides in ~/.config/vega/config. Use when these instructions, hooks or configs drift, to change them, or to check what a deploy would write.
 ---
 
-# vega config: agent, herdr and dcg config from one source
+# vega config: agent, herdr-app and dcg config from one source
 
 With herdr-app running, `vega config apply herdr-app` checks all Vega mods and selects its layout
 on first apply. Choices stay yours; status reports clone drift.
@@ -21,7 +21,7 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - `dcg.config` and `dcg.packs` replace config.toml and their YAML pack targets;
   `allowlist.toml` stays user-owned. Preview: `vega config diff dcg.config dcg.packs`.
 - Sources: a file in `~/.config/vega/config/` wins over the repo default in `config/` (same
-  layout, e.g. `instructions/vega.md`, `claude/settings.json`, `herdr/config.toml`). Edit the
+  layout, e.g. `instructions/vega.md`, `claude/settings.json`, `herdr-app/keys.json`). Edit the
   source, never the target: apply replaces whole files (old copy in `<file>.vega-bak`).
 - Shared files (`settings.json`, `hooks.json`) are key-merged: only vega's keys and hook entries
   change. `claude.settings` keys are seeded: a local switch (e.g. outputStyle) stays until the

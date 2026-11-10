@@ -19,7 +19,7 @@ export CARGO_TARGET_DIR="$root/target"
 # Shims go to the agent-only dir: they must not shadow tools for humans (P3);
 # the git shim is the push gate (docs/design/gate.md), the bd shim sets a
 # per-worktree BEADS_ACTOR (docs/design/beads-sync.md).
-# VEGA_INSTALL_EXTRA adds packages (mise run install: vega-open, vega-board).
+# VEGA_INSTALL_EXTRA adds optional packages.
 bins="$HOME/.local/bin"
 shims="$HOME/.local/share/vega/shims/bin"
 pkgs="vega vega-mux vega-post vega-history vega-notify vega-deploy vega-skills
@@ -55,6 +55,7 @@ echo "install-cli: $(wc -l <"$built" | tr -d ' ') binaries installed" >&2
 if [ -e "$bins/vega-skill" ]; then
 	cargo uninstall --root "$HOME/.local" vega-skill >/dev/null 2>&1 || rm -f "$bins/vega-skill"
 fi
+sh "$root/scripts/cleanup-retired-tui.sh"
 # direnv: `use vega <tool>` in an .envrc loads that tool's secrets (docs/design/secrets.md).
 direnv_lib="${XDG_CONFIG_HOME:-$HOME/.config}/direnv/lib"
 mkdir -p "$direnv_lib"

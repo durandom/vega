@@ -476,7 +476,7 @@ echo "vega-deploy:after=$("$HOME/.local/bin/vega" --version)"
 ( set -e
 {sync}
 ) 2>/dev/null || echo "vega-deploy:overrides=failed"
-# Agent and herdr config (vega config: skills, herdr, instructions, hooks, ...);
+# Agent and herdr-app config (vega config: skills, app units, instructions, hooks);
 # units chezmoi still manages stay untouched. Never fails the deploy.
 config_ok=1
 c=$(VEGA_CONFIG_PHASE=deploy "$HOME/.local/bin/vega" config apply 2>&1) || config_ok=0

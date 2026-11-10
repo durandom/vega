@@ -1,5 +1,8 @@
 # herdr -> hc / herdr-app inventory (vega)
 
+Historical migration inventory (2026-11-06); file locations and gaps below describe
+the pre-migration snapshot. Current behavior is in [hc-migration.md](hc-migration.md).
+
 Date: 2026-11-06, host proteus. Input to [hc-migration](hc-migration.md) (vega-0h4c.2); a snapshot, not kept in sync with the code.
 Tools checked: `hc --help`, `hc <cmd> --help` (all commands), `hc --skill`, `hc schema` (API methods),
 `herdr-app --skill`, `herdr-app commands`, `herdr-app status`, `~/.config/herdr-app/AGENTS.md`, `herdr.d.ts`.
@@ -212,7 +215,7 @@ Test fakes (not inventoried as call sites): `main.rs:6308`, `main.rs:6446` (fake
 - Registry readers cannot tell which backend to call for a pane without parsing the id; add `backend: herdr|hc`
   (or store hc addresses with a prefix) before mixing.
 
-## Part C: herdr inventory: board, open, gate, review, config, small plugins, vega-herdr helpers, shims, scripts, docs
+## Part C: herdr inventory: gate, review, config, small plugins, vega-herdr helpers, shims, scripts, docs
 
 Scope: everything except mux, uac, post, orchestration, janitor, uber, and the vega-herdr dialog/state modules, which are covered elsewhere.
 Verdicts: `hc native` (vega code can go), `adapt` (keep the vega logic, swap the backend), `keep` (vega-only), `gap` (missing in hc or herdr-app).
@@ -234,7 +237,7 @@ Facts checked against hc 2026-11 help and schema, and against `herdr-app command
 | pane.rs:28-120 `peel`/`is_pane_id`/`parse` | Recognizes `w1:p2`, `io:w1:p2`, `w1:p2 on io` in selected text | other pane | hc addresses `t7`, `t1b`, `vps/t7`, names | adapt: add the hc grammar. Both grammars must coexist during the transition |
 | pane.rs:185 `machines()` (`herdr machine list --json`) | Lists the herdr machines | machine-wide | `hc machine ls --json` | adapt: the machine sets differ (`hc machine ls` is empty on this host today) |
 | pane.rs:197 `exists()` (`pane get`) | Is the pane alive | other pane | `hc get <t>` (exit 3 not_found, `state` live/finished) | hc native |
-| pane.rs:203-252 `focus`/`focus_local` (socket `pane.focus`)/`focus_remote` (`agent focus`, `pane get`+`tab focus`) | Jumps the human's view to a pane (vega open, board) | other pane, UI | `herdr-app do agent.focus --terminal t7` or `do pane.focus --terminal t7`; a remote one is `--terminal vps/t7` (AGENTS.md: remote ids are `<machine>/` prefixed) | adapt: herdr-app can focus a remote machine's terminal directly, which removes vega-8m7's "switch machine yourself" caveat (verify) |
+| pane.rs:203-252 `focus`/`focus_local` (socket `pane.focus`)/`focus_remote` (`agent focus`, `pane get`+`tab focus`) | Jumps the human's view to a pane (pane focus) | other pane, UI | `herdr-app do agent.focus --terminal t7` or `do pane.focus --terminal t7`; a remote one is `--terminal vps/t7` (AGENTS.md: remote ids are `<machine>/` prefixed) | adapt: herdr-app can focus a remote machine's terminal directly, which removes vega-8m7's "switch machine yourself" caveat (verify) |
 | prompt.rs:29-60 `confirm_taken` (`agent wait --until working`, `pane read --source visible`, `agent send-keys enter`) | Makes sure a pasted prompt was submitted (Claude staging, codex flicker) | other pane | `hc send --wait <t>` reports `not_started`. `hc send` waits for a typing pause and hc retries startup settles | hc native for the wait. Keep a narrow `hc read` + `hc keys <t> enter` fallback until it is proven that Claude never stages under hc |
 | notes.rs:324-345 `toast`, 360-390 `notify_project` (`notification show … --sound request`) | Desktop toast for the human, plus a local note store | machine-wide UI | none on the CLI. A herdr-app mod has `notify({title,body,level,timeout,action})` and `playSound` | gap: no CLI or API to post a toast. Option: a vega mod that watches an hc doc (`doc.set` name e.g. `vega-notes`, `events.subscribe` doc events) and calls `notify()`. The note store is keep |
 | badges.rs:85-110 `uac_tokens`/`count_tokens` (args for `pane report-metadata --token/--clear-token`) | UAC pane sidebar badges (notes, decisions, waiting) | own/UAC pane UI | `hc label <t> vega.uac=… vega.notes=…` plus a mod that draws labels (`terminals()` has labels); agents/workspace-status mods are shipped mods (clone them with `mod.clone`) | gap: there are no sidebar tokens; a vega mod is needed. Labels have no TTL, so vega's TTL refresh logic simplifies |
@@ -261,29 +264,11 @@ Facts checked against hc 2026-11 help and schema, and against `herdr-app command
 | push.rs:249-252 | Refuses pushes from `VEGA_GATE_ROLE=reviewer` or from a gate-clone cwd | own pane | — | keep (env only; it works as long as the env reaches the tool shells, which the `env K=V` wrapper does) |
 | lib.rs:27 `tool("herdr")` (`VEGA_GATE_HERDR`) | Test injection of a fake herdr | — | `tool("hc")` | adapt; tests/cli.rs fakes herdr (15 HERDR_ refs) |
 
-### plugins/board
+### Retired TUI plugins
 
-| file:line | what it does for vega | world | hc / herdr-app equivalent | verdict |
-|---|---|---|---|---|
-| herdr-plugin.toml (`[[panes]]` dock split + popup, `[[actions]]` toggle-dock/open-board/redeploy, `[[events]] tab.created` auto-dock), link-herdr.sh (`herdr plugin link`), mise.toml:44-54 | Installs the board as a herdr plugin | machine-wide UI | herdr-app: `herdr-app do pane.split --direction right --argv '["vega-board","--mode","dock"]'`, `do terminal.open --argv … --place right`, `do tab.new --argv`; key bindings in `keys.json`. A board as a native mod: `tab.new --mod` / `pane.split --mod` (JS, a rewrite) | gap: no plugin manifest, no plugin actions running shell scripts from keys (unknown whether `keys.json` can run an arbitrary command), no `tab.created` hook. Short term, run the TUI as a terminal via app commands |
-| scripts/lib.sh:11-150 (`pane list` find-by-title, `plugin pane open`, `pane neighbor/swap/resize`, `tab list`), open-dock.sh:13, redeploy.sh:13 (`pane close`), auto-dock.sh (HERDR_PLUGIN_EVENT_JSON, HERDR_TAB_ID, `tab focus`), open-board.sh:14 (`plugin pane open` popup) | Dock layout management | UI | `herdr-app ls` (find panes), `do pane.split`, `do pane.close --pane`, `do pane.swap`, `do layout.resize` (layout nodes only, not panes: unknown), `do tab.select`; popup ≈ `terminal.peek` or a mod `openOverlay` | gap for pane resize and popup placement; adapt for the rest |
-| main.rs:71-110 `resolve_repo_cwd` (HERDR_PANE_ID, HERDR_WORKSPACE_ID, `herdr pane list` focused pane cwd) | Scopes the board to the repo of the focused pane, since herdr starts it in the plugin dir | UI / other pane | `herdr-app status` (`agent`, `focused_pane`) + `hc get <agent>` `foreground.cwd`; or start the board with `--folder <repo>` | adapt (simpler: pass the cwd at launch) |
-| app.rs:590-610 `toggle_zoom` (`herdr pane zoom --toggle --pane HERDR_PANE_ID`) | Docked ↔ fullscreen | own pane UI | `herdr-app do pane.zoom --pane <p>`; the pane id comes from `herdr-app ls` by terminal `$HC_TERMINAL_ID` | adapt |
-| app.rs:1035-1060 auto-dock marker in HERDR_PLUGIN_CONFIG_DIR | Opt-in setting | — | `~/.config/vega/…` | keep (move off the herdr dir) |
-| jump.rs (vega_herdr::pane resolve/focus) | Jumps to a pane id clicked in the detail view | other pane UI | see pane.rs focus | adapt via the shared crate |
-| badges.rs, inbox.rs, ui/*, views/* (vega_herdr::theme, badges) | Symbols and counts | — | — | keep |
-| SKILL.md:3-8 | "in a herdr pane", `vega.board.toggle-dock` | docs | — | adapt text |
-
-### plugins/open
-
-| file:line | what it does for vega | world | hc / herdr-app equivalent | verdict |
-|---|---|---|---|---|
-| herdr-plugin.toml (`[[actions]] selection`, `[[panes]] menu` popup 72x13), link-herdr.sh, mise.toml:50-52 | A key opens a menu for the selection | UI | a herdr-app mod (popup via `openOverlay({kind:"dialog"})`, run `vega-open` through `exec()`), bound in `keys.json` | gap: no plugin actions; it needs a mod |
-| main.rs:268-290 `action` (HERDR_PLUGIN_CONTEXT_JSON: `focused_pane_cwd`, `focused_pane_id`, `selected_text`) | Collects the selection and cwd | UI | mod side: `focused()` (terminal, cwd); selection: unknown (no selection API seen in herdr.d.ts grep; `terminal.copy` + clipboard as a fallback, which the code already does) | gap (selection text) / adapt (cwd, terminal) |
-| main.rs:293-311 `open_popup` (`plugin pane open --plugin vega.open --entrypoint menu --focus --env …`) | Shows the menu TUI | UI | mod `openOverlay`, or `herdr-app do terminal.open --argv '["vega-open","menu"]' --place down` (no float, no env) | gap (no popup terminal with env via CLI) |
-| main.rs:694-705 `pane_screen` (`pane read --source visible --format text`) | Ranks candidates by the visible text | other pane | `hc read <t>` (`--lines 0` = screen) | hc native |
-| main.rs:708-720 `notify` (`notification show`) | Shows an error when the popup failed | UI | none on the CLI (mod `notify`) | gap (see notes.rs) |
-| main.rs:722 `herdr_bin` HERDR_BIN_PATH | Binary lookup | — | `hc` on PATH | adapt |
+The dashboard and path-menu plugins were deleted by vega-0h4c.4 after decision
+vega-0h4c.11. Their implementation is preserved at `herdr-tui-final`; neither is
+ported to hc. The herdr-app inbox is the current human attention surface.
 
 ### Other plugins
 
@@ -294,11 +279,9 @@ Facts checked against hc 2026-11 help and schema, and against `herdr-app command
 | notify/src/main.rs:186, 235 `me()?.pane` | Context for `vega notify` asks | own pane | `HC_TERMINAL_ID` | adapt |
 | notify/src/lib.rs:48 `notes::toast` | Toast channel | UI | none on the CLI | gap (mod) |
 | deploy/src/main.rs:153-170 (`herdr machine list --json`), 321-326, 461 | Fleet = herdr machines | machine-wide | `hc machine ls --json`; remote build via `hc exec --on m` / `hc run --on m` | adapt: the machine lists must be in sync, or deploy must read the registry. hc `machine update` copies hc only, not vega |
-| config/src/herdr.rs:1-222 (unit `herdr`: render `config/herdr/config.toml` (203 lines), `herdr config check` with HERDR_CONFIG_PATH, `herdr server reload-config`, HERDR_OWNED) + config/herdr/config.toml | Owns the TUI config: sidebar tokens/colours, keys | machine-wide | herdr-app.{keys,settings,themes} units already exist (herdr_app.rs: `herdr-app commands` to validate keys, `status` errors after a live reload) | keep until the TUI is gone, then delete. The sidebar-token colouring moves to a mod |
 | config/src/herdr_app.rs:22-160 | herdr-app units (keys/settings/themes; validates against `herdr-app commands`, reads `status` errors) | machine-wide | — | keep (already the target). Note: `HERDR_APP_HOME` is not followed (line 22) |
 | config/src/infra.rs:85-95, 403-405 (HERDR_BIN_PATH, `herdr` component row) | `vega config doctor` checks that herdr is installed | machine-wide | add `hc` and `herdr-app` rows | adapt |
 | onboard/src/lib.rs:162-176 (`~/.local/share/vega/herdr-plugin/herdr-plugin.toml` = vegad startup hook), main.rs:202-266 | Onboarding status: vegad started by herdr, herdr config check | machine-wide | none: hc has no startup hooks. Use launchd/systemd for vegad | gap (startup hook; a vega-side fix belongs to the post slice) |
-| theme/src/main.rs:51, 104 (`vega theme herdr` alias → config unit), 289 | Alias | — | — | keep / delete with the TUI |
 | crates/vega-theme-sync/src/adapters.rs:27, 126-151, 446-460 | Reads the herdr `[theme]` (read-only) | machine-wide | herdr-app `app.theme` / themes unit | adapt (add a herdr-app adapter, or treat it as native: the app follows the OS?) — unknown |
 | capacity, history, lanista, bd | Only use non-herdr helpers from the vega-herdr crate (`Failure`, `cell`, `relay_running`, `catalog`); lanista `DEFAULT_SEAT = "herdr-agents"` is a name | — | — | keep |
 
@@ -316,7 +299,7 @@ Facts checked against hc 2026-11 help and schema, and against `herdr-app command
 
 - skills/vega/SKILL.md:18: "not `herdr machine list`".
 - plugins/mux/SKILL.md:28 (`herdr machine list`), plugins/mux/help/spawn.md:30-63 (env "through herdr", HERDR_PANE_ID/HERDR_SOCKET_PATH for codex, herdr worktree workspaces), help/reopen.md.
-- plugins/post/SKILL.md:14, plugins/deploy/SKILL.md:8 (`herdr machine list`), plugins/board/SKILL.md:3-8, plugins/open/SKILL.md, plugins/config/SKILL.md, plugins/theme/SKILL.md, plugins/onboard/SKILL.md, plugins/ci/help/watch.md, plugins/uac/SKILL.md, plugins/uber/SKILL.md, plugins/orchestration/help/waiting.md, plugins/notify/help/test.md, plugins/lanista/help/pin.md, plugins/janitor/SKILL.md (1-6 mentions each).
+- plugins/post/SKILL.md:14, plugins/deploy/SKILL.md:8 (`herdr machine list`), plugins/config/SKILL.md, plugins/theme/SKILL.md, plugins/onboard/SKILL.md, plugins/ci/help/watch.md, plugins/uac/SKILL.md, plugins/uber/SKILL.md, plugins/orchestration/help/waiting.md, plugins/notify/help/test.md, plugins/lanista/help/pin.md, plugins/janitor/SKILL.md (1-6 mentions each).
 - docs/: 37 files. The biggest are design/vegad.md (69), theme-symbols.md (54), vega-mux-mvp.md (39), vega-mux-battletest.md (33), pane-control.md (28), herdr-attention-ui.md (27), config.md (24), mux-next.md (20), agent-tooling-principles.md (19), concepts.md (15), gate.md (8). They are design records, not runtime guides, except concepts.md and agent-tooling-principles.md.
 - Codex in hc: hc's skill says codex must run with `--no-daemon`. mux already does this for herdr (`default_args`).
 
@@ -345,7 +328,7 @@ Current state: no Rust code reads `HC_*` at all. Everything resolves identity th
 | TUI -> hc | the target is invisible: vegad lists only herdr agents, so hc terminals are not in the registry; `post send` reports unknown/`pane_gone`; `valid_pane_id` (post main.rs:6162) and `vega_shim::is_pane` reject `t7`; no mail pointer is typed; `mux send/show/close/dialog`, `uac adopt/park` return `agent_not_found`. |
 | hc -> hc | both of the above: no identity and no target. Only raw `hc send` between agents works. |
 | supervision across worlds | children are tracked from herdr status events only; an hc child of a TUI parent (or the reverse) is never marked done/silent. hc's own parent notes can duplicate vega's done mail when both run. |
-| UI side effects | sidebar tokens, UAC badge, `$upgrade` token, toasts, `vega mux next`/`vega open` focus, the human-input clock (`pane.focused`) and the waiting ledger see only the TUI. Time spent in herdr-app counts as "Slayer away" for the Uber-UAC. |
+| UI side effects | sidebar tokens, UAC badge, `$upgrade` token, toasts, `vega mux next` focus, the human-input clock (`pane.focused`) and the waiting ledger see only the TUI. Time spent in herdr-app counts as "Slayer away" for the Uber-UAC. |
 | vegad lifetime | vegad is started by the herdr plugin `[[startup]]` hook: no TUI server, no vegad. |
 | theme typing | filters `kind == "claude"`; hc reports `claude-code`. |
 
@@ -381,7 +364,7 @@ Detection caveat: env alone can mislead. If the herdr TUI server is started from
 | `mux next` focus across machines | `herdr-app do agent.focus --terminal vps/t7` | likely better than TUI (vega-8m7); unknown until tried |
 | toasts (`notification show`) | none on CLI; mod `notify()` | gap: vega mod fed by an hc doc or file |
 | focus / human input events | none in `hc events`; app-side only | gap: a mod that writes focus into an hc doc (`doc.set`, emits `doc` events) |
-| vegad startup hook, board/open plugin panes and actions | none | gap: launchd/systemd for vegad; board as a terminal via `herdr-app do pane.split --argv` (later a mod); open as a mod |
+| Legacy vegad startup hook | herdr hook retained for active panes; herdr-app mod starts vegad on hc hosts | TUI dashboard/path-menu actions are retired |
 | status stream for vegad | `events.subscribe` (one subscription, status/turn/labels/doc, `missed` resnapshot) | covered (simpler than herdr's per-pane subscriptions) |
 
 ### 3. Suggested slice order (proteus keeps working after each slice)
@@ -393,8 +376,8 @@ Principle: the backend follows the world of the agent concerned (caller for own 
 2. **Own identity everywhere.** Switch the `me()` callers that only need "who am I" to `own_terminal()`: `post inbox`/`inbox_show` parent lookup (`hc get` `parent` or vega state), `ci watch`, `notify`, `review`, orchestration `caller()`, mux PreToolUse hook, `uber answer` (session from env). After this an hc agent can read mail and run tools; it still cannot be reached.
 3. **vegad sees hc.** Second watcher on `events.subscribe` (poll `hc ls --json` fallback); registry entries for hc terminals with `backend`; delivery types pointers with `hc send --if idle`; local_send/theme/pagerduty/upstream/identity read `hc ls`; supervision consumes hc status; vegad installed as a launchd/systemd user unit (independent of the TUI plugin, which stays as a no-op-if-running starter). Now mail works in all four directions.
 4. **mux on hc.** `vega mux spawn` picks the caller's world (override `--backend`): `hc run` with name/labels/env wrapper, visible via `herdr.space`/`herdr.tab` labels or `herdr-app do tab.new`; decide `--outlive-parent` and `notes=false`. Then `send --now`, `show`, `close`, `dialog`/`answer`, `next` (`herdr-app do agent.focus`), `reopen`/`transcript` (session id recorded by vega). Add hc machines (`hc machine add`) and reconcile machine lists before enabling `--machine` for hc.
-5. **UAC and UI surfaces.** `uac status/claim/release/adopt/park/land/prune` over both backends; a vega herdr-app mod that renders `vega.*` labels (role, badges, project, git), shows toasts and the `$upgrade` item from an hc doc, and writes focus into an hc doc for `human.rs`/`waiting.rs`; board as a terminal pane via `herdr-app do pane.split --argv`, open as a mod; `config` doctor rows for `hc`/`herdr-app`; update skills/help texts (`skills/vega/SKILL.md`, `plugins/*/SKILL.md`, `plugins/mux/help/spawn.md`).
-6. **Retire the TUI.** Once no TUI agents remain on any host: delete the herdr backend, `config/herdr` unit, herdr plugins (`vega.vegad`, `vega.board`, `vega.open`), `shims/herdr`, `link-herdr.sh`, mise plugin links; consider renaming `vega-herdr` (most modules there are terminal-independent).
+5. **UAC and UI surfaces.** `uac status/claim/release/adopt/park/land/prune` over both backends; a vega herdr-app mod that renders `vega.*` labels (role, badges, project, git), shows toasts and the `$upgrade` item from an hc doc, and writes focus into an hc doc for `human.rs`/`waiting.rs`; inbox/sidebar mods replace the retired TUI UI; `config` doctor rows for `hc`/`herdr-app`; update skills/help texts (`skills/vega/SKILL.md`, `plugins/*/SKILL.md`, `plugins/mux/help/spawn.md`).
+6. **Retire TUI UI/config.** Completed in vega-0h4c.4: dashboard/path-menu plugins, the config unit and install links are removed. The herdr backend, shim and shared crate stay for active panes on puck.
 
 Risks to settle early:
 - ⚠️ Default hc lineage: children die with their parent. A UAC restart would kill its sentinels unless spawned `--outlive-parent`.

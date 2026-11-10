@@ -130,7 +130,7 @@ pub fn status(env: &Env, prefs: &Prefs, tool: &'static str) -> Status {
         tool,
         value,
         current,
-        read_only: (tool == "herdr").then_some("vega config"),
+        read_only: (tool == "herdr").then_some("host config"),
     }
 }
 
@@ -148,7 +148,7 @@ pub fn apply(env: &Env, prefs: &Prefs, tool: &'static str, mode: Mode) -> Outcom
     }
     if st.read_only.is_some() {
         return Outcome::ReadOnly(
-            "vega renders ~/.config/herdr/config.toml: set [theme] auto_switch = true in herdr/config.toml (vega config init herdr/config.toml), then vega config apply herdr"
+            "legacy herdr config is host-managed: set [theme] auto_switch = true in ~/.config/herdr/config.toml"
                 .into(),
         );
     }
@@ -443,7 +443,7 @@ fn ghdash_set(env: &Env, to: &str) -> Result<bool, String> {
     Ok(true)
 }
 
-// --- herdr: ~/.config/herdr/config.toml [theme] (rendered by vega config, read only here) --
+// --- herdr: ~/.config/herdr/config.toml [theme] (host-managed, read only here) --
 
 fn herdr_get(env: &Env) -> (String, Current) {
     let p = env.config.join("herdr/config.toml");

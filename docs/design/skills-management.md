@@ -178,8 +178,8 @@ Gaps:
 3. **Mixed global state** (links, copies, generated files). `git-assisted-by` has **already drifted** (Sep 1 vs
    Sep 19 copies), and nothing checks for drift.
 4. **axi and beads are vendored without a source or pin**, so the only way to update them is by hand.
-5. Guides are only as fresh as the installed binary. `open` and `board` are installed by `mise run install` but not
-   by `install-cli.sh` or `vega deploy`, so they are missing on deployed machines.
+5. Guides are only as fresh as the installed binary. The retired TUI-only plugin
+   install split is gone; local install and deploy use the same CLI installer.
 
 ## Options for vega
 

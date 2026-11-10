@@ -1642,7 +1642,7 @@ fn spawn_inner(
     });
     if let Err(f) = started {
         // For the user: `io:w1:p2` on another machine, so selecting it in
-        // herdr (vega open) jumps there.
+        // herdr jumps there.
         let at = qualify(machine(), &pane);
         // The agent never started, or exited at once: keep its last words,
         // then close our pane.

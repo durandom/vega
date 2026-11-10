@@ -1,4 +1,4 @@
-//! Units against a temp HOME with fake herdr, chezmoi and vega-skills.
+//! Units against a temp HOME with fake chezmoi and vega-skills.
 
 use super::*;
 use std::os::unix::fs::symlink;
@@ -10,14 +10,13 @@ fn script(d: &Path, name: &str, body: &str) -> PathBuf {
     bin
 }
 
-/// A HOME with claude, codex and pi set up, no chezmoi, a passing herdr.
+/// A HOME with claude, codex and pi set up, no chezmoi, no herdr-app.
 fn setup() -> (tempfile::TempDir, Ctx) {
     let d = tempfile::tempdir().unwrap();
     let home = d.path().join("home");
     for dir in [".claude", ".codex", ".pi/agent", ".config"] {
         fs::create_dir_all(home.join(dir)).unwrap();
     }
-    let herdr = herdr::tests::fake_herdr(d.path());
     let skills = script(
         d.path(),
         "vega-skills",
@@ -36,7 +35,6 @@ fn setup() -> (tempfile::TempDir, Ctx) {
     let ctx = Ctx {
         env: Env::at(&home),
         chezmoi: d.path().join("no-chezmoi").into_os_string(),
-        herdr: herdr.into_os_string(),
         herdr_app: d.path().join("no-herdr-app").into_os_string(),
         mux: PathBuf::from("/opt/vega/bin/vega-mux"),
         skills: skills.into_os_string(),
@@ -129,15 +127,11 @@ fn select_takes_units_and_groups_in_order() {
     let s = |n: &[&str]| select(&n.iter().map(|s| s.to_string()).collect::<Vec<_>>());
     assert_eq!(s(&[]).unwrap().len(), Unit::ALL.len());
     assert_eq!(
-        s(&["hooks", "herdr", "claude.hooks"]).unwrap(),
-        [
-            Unit::Herdr,
-            Unit::ClaudeHooks,
-            Unit::CodexHooks,
-            Unit::PiPrefix
-        ]
+        s(&["hooks", "claude.hooks"]).unwrap(),
+        [Unit::ClaudeHooks, Unit::CodexHooks, Unit::PiPrefix]
     );
-    assert!(s(&["nope"]).unwrap_err().contains("known: herdr"));
+    assert!(s(&["herdr"]).is_err());
+    assert!(s(&["nope"]).unwrap_err().contains("known: dcg.config"));
     assert!(
         GROUPS[1].1.iter().all(|u| !u.personal()),
         "hooks are not personal"
@@ -154,7 +148,6 @@ fn fresh_home_gets_everything_then_nothing_changes() {
     .unwrap();
     let all = apply_all(&ctx);
     for u in [
-        Unit::Herdr,
         Unit::ClaudeMd,
         Unit::CodexMd,
         Unit::PiMd,
@@ -454,62 +447,6 @@ fn skills_report_missing_warn_on_overlap_and_sync() {
         fs::read_to_string(d.path().join("skills-calls")).unwrap(),
         "lib sync\n"
     );
-}
-
-#[test]
-fn herdr_rejected_keeps_the_old_file() {
-    let (_d, ctx) = setup();
-    let local = sources::local_dir(&ctx.env).join("herdr");
-    fs::create_dir_all(&local).unwrap();
-    fs::write(local.join("config.toml"), "BAD = 1\n").unwrap();
-    let path = herdr::path(&ctx.env);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, "old = true\n").unwrap();
-    assert_eq!(
-        apply(&ctx, Unit::Herdr, &BTreeSet::new()),
-        Outcome::Rejected(vec!["bad key BAD".into()])
-    );
-    assert_eq!(fs::read_to_string(&path).unwrap(), "old = true\n");
-    assert!(!backup_path(&path).exists());
-    // Without herdr: skipped, nothing written.
-    let mut ctx = ctx;
-    ctx.herdr = "/nonexistent/herdr".into();
-    fs::remove_file(local.join("config.toml")).unwrap();
-    assert_eq!(
-        apply(&ctx, Unit::Herdr, &BTreeSet::new()),
-        Outcome::Skipped("herdr not installed".into())
-    );
-    assert_eq!(fs::read_to_string(&path).unwrap(), "old = true\n");
-}
-
-#[test]
-fn herdr_written_with_backup_and_reload() {
-    let (d, ctx) = setup();
-    let path = herdr::path(&ctx.env);
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, "[ui]\nagent_panel_sort = \"recent\"\n").unwrap();
-    let p = plan(&ctx, Unit::Herdr).unwrap();
-    assert_eq!(
-        p.notes,
-        ["kept: ui.agent_panel_sort = recent (herdr owns it)"]
-    );
-    let out = apply(&ctx, Unit::Herdr, &BTreeSet::new());
-    assert_eq!(
-        out,
-        Outcome::Written(vec![path.display().to_string(), "reload ok".into()])
-    );
-    assert!(fs::read_to_string(&path)
-        .unwrap()
-        .contains("agent_panel_sort = \"recent\""));
-    assert_eq!(
-        fs::read_to_string(backup_path(&path)).unwrap(),
-        "[ui]\nagent_panel_sort = \"recent\"\n"
-    );
-    assert_eq!(
-        fs::read_to_string(d.path().join("calls")).unwrap(),
-        "config check\nserver reload-config\n"
-    );
-    assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 2);
 }
 
 #[test]

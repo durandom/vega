@@ -1887,7 +1887,7 @@ fn attention_table(rows: &[Row], host: &str) -> Vec<String> {
                 .map(|d| shorten(&d.summary, 100))
                 .unwrap_or_default()
         };
-        // `io:w1:p2` off this machine: selecting it in herdr (vega open)
+        // `io:w1:p2` off this machine: selecting it in herdr
         // jumps there.
         out.push(format!(
             "  {},{},{},{},{}",
@@ -1971,7 +1971,7 @@ mod tests {
         let words = guide.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(words.contains("Agents may investigate, acknowledge and add notes."));
         assert!(
-            words.contains("Resolve/escalate/reassign require a Slayer-approved board decision.")
+            words.contains("Resolve/escalate/reassign require a Slayer-approved decision bead.")
         );
         assert!(guide.contains("[Design](pagerduty.md)"));
     }

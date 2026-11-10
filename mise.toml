@@ -53,18 +53,12 @@ description = "Install the portable CLI part (vega, mux, deploy, lanista, shims,
 run = "scripts/install-cli.sh"
 
 [tasks.install]
-description = "Install everything on this workstation: install-cli plus vega open and vega board (herdr plugins, VS Code extension)"
+description = "Install the CLI and VS Code extension on this workstation"
 run = [
   # The check, unless it already passed on this clean tree (scripts/check-stamp.sh).
   "sh scripts/check-stamp.sh fresh && echo 'check: passed on this tree, skipped' >&2 || mise run check",
-  # One release build, vega open and vega board included.
-  "VEGA_INSTALL_EXTRA='vega-open vega-board' scripts/install-cli.sh",
-  # herdr runs the open plugin from its own dir (./bin/vega-open), not from PATH;
-  # the script only links from the main checkout, never from a worktree.
-  "sh plugins/open/link-herdr.sh",
-  # vega board likewise; the PATH copy serves `vega skills board`.
-  "sh plugins/board/link-herdr.sh",
-  # vega open's reveal/diff actions go through this extension's URI handler.
+  "scripts/install-cli.sh",
+  # Reveal/diff URI handler for editor integrations.
   "cd vscode && npm run -s package",
   # Skips with a hint where `code` is not on PATH (e.g. WSL).
   "sh scripts/install-vscode-ext.sh",

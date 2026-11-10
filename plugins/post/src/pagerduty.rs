@@ -586,7 +586,7 @@ fn mail_text(i: &Incident, to: &Destination, reminder: bool) -> String {
     } else {
         &i.title
     };
-    format!("pagerduty: #{} {} {marker}{} ({}) — {}\nService: {} ({}); project: {}\n{}\nCreated: {}\nYou may investigate, acknowledge and add notes. Resolve, escalate or reassign only after the Slayer approves a board decision. Use vega secrets run --for pdc -- pdc ...{fallback}",
+    format!("pagerduty: #{} {} {marker}{} ({}) — {}\nService: {} ({}); project: {}\n{}\nCreated: {}\nYou may investigate, acknowledge and add notes. Resolve, escalate or reassign only after the Slayer approves a decision bead. Use vega secrets run --for pdc -- pdc ...{fallback}",
         i.incident_number, clean(&i.id, 80), i.status, clean(&i.urgency, 30), clean(title, 800),
         clean(&i.service.summary, 160), clean(&i.service.id, 80), clean(project, 250), clean(&i.html_url, 500), clean(&i.created_at, 80))
 }
@@ -628,7 +628,7 @@ fn cycle(path: &Path, now: i64, ops: &mut impl Ops) -> Result<(), String> {
         return Err(error);
     }
     let ownership = ops.ownership()?;
-    // Unmapped/conflicting incidents do not require a working registry to reach the board.
+    // Unmapped/conflicting incidents do not require a working registry to reach the inbox.
     let needs_registry = state
         .incidents
         .values()
