@@ -4,6 +4,8 @@
 //! target host serves `vega.cmd.<host>.>`: it takes the sender from the
 //! subject (the broker enforces it per key), allows only the kinds in
 //! HANDLERS, and runs that handler with fixed argv and the JSON on stdin.
+//! Keychain status is the in-process exception: a private receiver validates
+//! the inbox-only sender and reconstructs a header-free registry publish.
 //!
 //! The handler owns the meaning and its checks (for `open`: vega-open's
 //! remote-open maps the sender's paths to mounts and refuses anything
@@ -54,6 +56,61 @@ fn reply(ok: bool, code: &str, message: &str) -> Vec<u8> {
     json!({"ok": ok, "code": code, "message": message})
         .to_string()
         .into_bytes()
+}
+
+/// Daemon command dispatch. Keychain is handled in-process so the trusted
+/// receiver reconstructs the registry write, without forwarding headers.
+pub async fn respond(
+    client: &async_nats::Client,
+    receiver: &str,
+    request: &async_nats::Message,
+) -> Vec<u8> {
+    let Some(reply_to) = request.reply.as_ref() else {
+        return reply(false, "denied", "command requires a reply inbox");
+    };
+    if let Some((_, "keychain", from)) = parse_subject(&request.subject) {
+        // allow_responses must never turn an attacker-controlled reply
+        // subject into a write elsewhere (including the registry).
+        let prefix = format!("_INBOX_{from}.");
+        if !reply_to.strip_prefix(&prefix).is_some_and(|tail| {
+            !tail.is_empty()
+                && tail.split('.').all(|t| {
+                    !t.is_empty()
+                        && t.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                })
+        }) {
+            return reply(false, "denied", "keychain reply must use the sender inbox");
+        }
+    }
+    let answer = dispatch(client, receiver, &request.subject, &request.payload).await;
+    let _ = tokio::time::timeout(
+        crate::outage::CALL,
+        client.publish(reply_to.clone(), answer.clone().into()),
+    )
+    .await;
+    answer
+}
+
+pub async fn dispatch(
+    client: &async_nats::Client,
+    receiver: &str,
+    subject: &str,
+    payload: &[u8],
+) -> Vec<u8> {
+    let Some((to, kind, from)) = parse_subject(subject).filter(|(to, _, _)| *to == receiver) else {
+        return reply(false, "denied", "invalid command destination or subject");
+    };
+    if kind == "keychain" {
+        return match crate::keychain::receive(client, to, from, payload).await {
+            Ok(()) => reply(true, "ok", "keychain status published"),
+            Err((code, why)) => reply(false, code, &why),
+        };
+    }
+    let (kind, from, payload) = (kind.to_string(), from.to_string(), payload.to_vec());
+    tokio::task::spawn_blocking(move || serve(&kind, &from, &payload))
+        .await
+        .unwrap_or_default()
 }
 
 /// What the serving relay answers to one request.

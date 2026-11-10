@@ -165,7 +165,7 @@ enum Cmd {
     },
     /// Send a command to another machine's vegad and wait for its answer (JSON on stdin)
     #[command(
-        after_help = "Core NATS request/reply on vega.cmd.<to>.<kind>.<this host>; the target's vegad runs the\nhandler for <kind> with the JSON on stdin (max 4 KiB). Kinds served: open, orchestration (authenticated wait updates), notify (origin ask ack/resolve).\nErrors: no_responder (no vegad there), timeout, denied (kind or payload refused, or no broker\nright), broker_unreachable, handler_failed.\n\nExamples:\n  echo '{\"kind\":\"open\",\"choice\":\"vscode\",\"path\":\"/Users/me/src/x/README.md\"}' | vega post cmd open --to proteus",
+        after_help = "Core NATS request/reply on vega.cmd.<to>.<kind>.<this host>; the target's vegad runs the\nhandler for <kind> with the JSON on stdin (max 4 KiB). Kinds served: open, orchestration (authenticated wait updates), notify (origin ask ack/resolve), keychain (validated inbox-only status relay).\nErrors: no_responder (no vegad there), timeout, denied (kind or payload refused, or no broker\nright), broker_unreachable, handler_failed.\n\nExamples:\n  echo '{\"kind\":\"open\",\"choice\":\"vscode\",\"path\":\"/Users/me/src/x/README.md\"}' | vega post cmd open --to proteus",
         name = "cmd"
     )]
     Command {
@@ -1134,6 +1134,17 @@ fn auth_config(
             format!("--cmd-grant for {h}: only inbox-only hosts take grants"),
             "other hosts may already send commands as themselves",
         ));
+    }
+    for (_, subject) in &grants {
+        if let Some((to, "keychain", _)) = cmd::parse_subject(subject) {
+            if inbox_only.iter().any(|h| h == to) || !entries.iter().any(|e| e.host == to) {
+                return Err(Failure::new(
+                    "usage",
+                    "keychain command recipient must be a configured private host",
+                    "grant host=vega.cmd.<private-host>.keychain.<host>",
+                ));
+            }
+        }
     }
     let reads = registry_read
         .iter()
@@ -3147,6 +3158,7 @@ async fn serve(
         // The registry (vegad M4): this host's state into NATS KV every
         // REGISTRY_EVERY, and the other hosts' view back for supervision.
         let mut registry = Registry::default();
+        let mut status_publisher = keychain::Publisher::default();
         let mut meta_next: Option<Instant> = None;
         // Parks whose bead bd could not show (logged once each).
         let mut park_failing: HashSet<String> = HashSet::new();
@@ -3216,6 +3228,10 @@ async fn serve(
             // it within a second, not at the next 15 s round.
             if jobs.take_waiting_changed() {
                 registry.soon();
+            }
+            if !once && up && st::is_inbox_only(&host) {
+                let run = status_publisher.run(&client, &host);
+                let _ = while_up(&client, REGISTRY_CALL, run).await;
             }
             if !once && up && registry.due() {
                 let t = Instant::now();
@@ -3484,19 +3500,15 @@ async fn serve(
                     }
                 } => {
                     let parsed = cmd::parse_subject(&req.subject).map(|(_, k, f)| (k.to_string(), f.to_string()));
-                    if let (Some(reply), Some((kind, from))) = (req.reply.clone(), parsed) {
-                        let payload = req.payload.to_vec();
+                    if let (Some(_), Some((kind, from))) = (req.reply.clone(), parsed) {
                         let c = client.clone();
+                        let receiver = host.clone();
                         let busy = in_flight.clone();
                         busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         tokio::spawn(async move {
-                            let (k, f) = (kind.clone(), from.clone());
-                            let answer = tokio::task::spawn_blocking(move || cmd::serve(&k, &f, &payload))
-                                .await
-                                .unwrap_or_default();
+                            let answer = cmd::respond(&c, &receiver, &req).await;
                             let v: serde_json::Value = serde_json::from_slice(&answer).unwrap_or_default();
                             log(&format!("cmd: {kind} from {from}: {} {}", v["code"].as_str().unwrap_or("?"), v["message"].as_str().unwrap_or("")));
-                            let _ = tokio::time::timeout(outage::CALL, c.publish(reply, answer.into())).await;
                             busy.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                         });
                     }

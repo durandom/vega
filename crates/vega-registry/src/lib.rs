@@ -741,8 +741,17 @@ pub async fn read(
     read_kinds(client, kv, None).await
 }
 
-/// `read`, fetching only the keys of these kinds (`beat`, `agent`, `uac`, ...):
-/// `vega post send --uac` and the pane-gone hint need no lineage or notes.
+/// Status from restricted hosts is display data with an explicit allowlist.
+fn accepted_status_key(key: &str, inbox_only: &[String]) -> bool {
+    let Some((host, rest)) = key.split_once('.') else {
+        return true;
+    };
+    !inbox_only.iter().any(|h| h == host)
+        || !rest.starts_with("status.")
+        || rest == "status.keychain"
+}
+
+/// `read`, fetching only the keys of these kinds (`beat`, `agent`, `uac`, ...).
 /// `None`: every kind.
 pub async fn read_kinds(
     client: &async_nats::Client,
@@ -759,10 +768,13 @@ pub async fn read_kinds(
         .await
         .map_err(|e| e.to_string())?;
     let mut view = View::default();
+    let inbox_only = vega_herdr::state::inbox_only_hosts();
     while let Some(s) = subjects.next().await {
         let (subject, _) = s.map_err(|e| e.to_string())?;
         if let Some(k) = subject.strip_prefix(&prefix) {
-            view.keys.push(k.to_string());
+            if accepted_status_key(k, &inbox_only) {
+                view.keys.push(k.to_string());
+            }
         }
     }
     // Concurrent direct gets: a deleted key keeps its subject (the delete
@@ -1601,5 +1613,23 @@ esac
         v.entries.get_mut(&uber_key("io")).unwrap()["schema"] = json!(2);
         assert_eq!(v.uber_claims().len(), 1);
         assert_eq!(v.live_uber().unwrap().epoch, 100);
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    #[test]
+    fn restricted_status_is_allowlisted() {
+        let hosts = vec!["corp".to_string()];
+        assert!(super::accepted_status_key("corp.status.keychain", &hosts));
+        for key in [
+            "corp.status.x",
+            "corp.status.agent.x",
+            "corp.status.keychain.extra",
+        ] {
+            assert!(!super::accepted_status_key(key, &hosts), "{key}");
+        }
+        assert!(super::accepted_status_key("home.status.x", &hosts));
+        assert!(super::accepted_status_key("home.beat", &hosts));
     }
 }

@@ -17,6 +17,12 @@ vega.quarantine.<self>.> for that.
 ($JS.API.DIRECT.GET.KV_VEGA_REGISTRY.$KV.VEGA_REGISTRY.<key>); no stream info (it would list the keys), put,
 delete or watch. With <control>.theme there, the host's vegad follows its control host's dark/light mode.
 
+Keychain status from an inbox-only host uses an exact command grant, e.g.
+--cmd-grant puck=vega.cmd.proteus.keychain.puck. Only its private recipient (proteus) also gets
+publish on $KV.VEGA_REGISTRY.puck.status.keychain, to relay strictly validated display samples.
+Puck gets no registry write, stream info, new read or watch right. Never grant an inbox-only host
+any KV publish subject: Nats-Rollup: all can erase the entire shared bucket, even from one key.
+
 The lanista catalog: every host (inbox-only ones too) may direct-get OBJ_VEGA_LANISTA, no consumer; --lanista-writer
 <host> (the builder) may also put it. The bucket: --create lanista, then `vega post provision lanista`.
 

@@ -777,3 +777,262 @@ fn registry_ttl_removal_and_owner_cleanup() {
             });
     }
 }
+
+/// An inbox-only host cannot mutate the shared registry, even using rollup
+/// headers. Its one command grant delegates a validated, header-free write.
+#[test]
+fn keychain_command_relays_status_without_registry_rights() {
+    use futures_util::StreamExt;
+    let dir = tempfile::tempdir().unwrap();
+    let (admin_seed, admin) = user();
+    let (reader_seed, reader) = user();
+    let (puck_seed, puck) = user();
+    let authz = auth::render(
+        &[
+            Entry {
+                host: "proteus".into(),
+                key: reader,
+            },
+            Entry {
+                host: "puck".into(),
+                key: puck,
+            },
+        ],
+        Some(&admin),
+        &["registry".into()],
+        &["puck".into()],
+        None,
+        &[auth::parse_grant("puck=vega.cmd.proteus.keychain.puck").unwrap()],
+        &[],
+        &[("puck".into(), "proteus.theme".into())],
+        None,
+    );
+    let (_server, url) = start(dir.path(), &authz);
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let a = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+            jetstream::new(a)
+                .create_key_value(jetstream::kv::Config {
+                    bucket: vega_registry::BUCKET.into(),
+                    history: 1,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let r = connect(&url, &reader_seed, "_INBOX_proteus").await;
+            let kv = vega_registry::bucket(&r).await.unwrap();
+            let theme = json!({"mode":"dark"});
+            kv.put("proteus.theme", theme.to_string().into())
+                .await
+                .unwrap();
+            kv.put("proteus.beat", json!({"at":1}).to_string().into())
+                .await
+                .unwrap();
+            let p = connect(&url, &puck_seed, "_INBOX_puck").await;
+            let mut sub = r.subscribe("vega.cmd.proteus.>").await.unwrap();
+            r.flush().await.unwrap();
+            let server = r.clone();
+            let worker = tokio::spawn(async move {
+                while let Some(req) = sub.next().await {
+                    crate::cmd::respond(&server, "proteus", &req).await;
+                }
+            });
+            let at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let key = "puck.status.keychain";
+            let value = json!({"state":"locked","since":at,"at":at});
+            let mut publisher = crate::keychain::Publisher::default();
+            publisher
+                .publish(&p, Ok("proteus"), "puck", value.clone())
+                .await;
+            assert_eq!(
+                vega_registry::get_one(&r, key).await.unwrap(),
+                Some(value.clone())
+            );
+            let seq = kv.entry(key).await.unwrap().unwrap().revision;
+            publisher
+                .publish(&p, Ok("proteus"), "puck", value.clone())
+                .await;
+            assert_eq!(kv.entry(key).await.unwrap().unwrap().revision, seq);
+            let changed = json!({"state":"unlocked","since":at,"at":at});
+            publisher
+                .publish(&p, Ok("proteus"), "puck", changed.clone())
+                .await;
+            assert_eq!(
+                vega_registry::get_one(&r, key).await.unwrap(),
+                Some(changed)
+            );
+            let view = vega_registry::read(&r, &kv).await.unwrap();
+            assert!(view.entries.contains_key(key));
+            assert!(!view.entries.contains_key("puck.beat"));
+            // The actual relay ignores all request headers and reconstructs JSON.
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Rollup", "all");
+            headers.insert("KV-Operation", "PURGE");
+            headers.insert("Nats-TTL", "1");
+            let subject = "vega.cmd.proteus.keychain.puck";
+            let answer = p
+                .request_with_headers(subject, headers, value.to_string().into())
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"],
+                true
+            );
+            assert_eq!(
+                vega_registry::get_one(&r, key).await.unwrap(),
+                Some(value.clone())
+            );
+            assert_eq!(
+                vega_registry::get_one(&r, "proteus.theme").await.unwrap(),
+                Some(theme.clone())
+            );
+            assert_eq!(
+                kv.entry(key).await.unwrap().unwrap().operation,
+                jetstream::kv::Operation::Put
+            );
+            // A hostile reply subject must not exploit allow_responses to
+            // turn the acknowledgement into a write to an unrelated key.
+            let revision = kv.entry(key).await.unwrap().unwrap().revision;
+            p.publish_with_reply(
+                subject,
+                "$KV.VEGA_REGISTRY.proteus.beat",
+                value.to_string().into(),
+            )
+            .await
+            .unwrap();
+            p.publish_with_reply(subject, "_INBOX_proteus.stolen", value.to_string().into())
+                .await
+                .unwrap();
+            // Same-connection ordering makes this a barrier after both probes.
+            let answer = p.request(subject, value.to_string().into()).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"],
+                true
+            );
+            assert_eq!(kv.entry(key).await.unwrap().unwrap().revision, revision + 1);
+            assert_eq!(
+                vega_registry::get_one(&r, "proteus.beat").await.unwrap(),
+                Some(json!({"at":1}))
+            );
+            // Bad fields, timestamps, states and sizes are rejected without writes.
+            let revision = kv.entry(key).await.unwrap().unwrap().revision;
+            for body in [
+                json!({"state":"bad","since":at,"at":at}).to_string(),
+                json!({"state":"locked","since":at,"at":at,"key":"proteus.beat"}).to_string(),
+                json!({"state":"locked","since":at+1,"at":at}).to_string(),
+                " ".repeat(257),
+            ] {
+                let answer = p.request(subject, body.into()).await.unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&answer.payload).unwrap()["code"],
+                    "denied"
+                );
+            }
+            let private_sender = r
+                .request(
+                    "vega.cmd.proteus.keychain.proteus",
+                    value.to_string().into(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&private_sender.payload).unwrap()["code"],
+                "denied"
+            );
+            let unknown_kind = r
+                .request("vega.cmd.proteus.shell.proteus", "{}".into())
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&unknown_kind.payload).unwrap()["code"],
+                "denied"
+            );
+            assert_eq!(kv.entry(key).await.unwrap().unwrap().revision, revision);
+            for command in [
+                "vega.cmd.proteus.shell.puck",
+                "vega.cmd.ganymede.keychain.puck",
+                "vega.cmd.proteus.keychain.proteus",
+            ] {
+                assert!(denied(&p, command, &value.to_string()).await, "{command}");
+            }
+            // Existing exact reads remain intact; no new reads or stream info.
+            assert_eq!(
+                vega_registry::get_one(&p, "proteus.theme").await.unwrap(),
+                Some(theme.clone())
+            );
+            for k in [key, "proteus.beat"] {
+                assert!(vega_registry::get_one(&p, k).await.is_err());
+            }
+            for api in [
+                "$JS.API.STREAM.INFO.KV_VEGA_REGISTRY",
+                "$JS.API.DIRECT.GET.KV_VEGA_REGISTRY",
+                "$JS.API.STREAM.MSG.GET.KV_VEGA_REGISTRY",
+                "$JS.API.STREAM.MSG.DELETE.KV_VEGA_REGISTRY",
+                "$JS.API.STREAM.PURGE.KV_VEGA_REGISTRY",
+                "$JS.API.CONSUMER.CREATE.KV_VEGA_REGISTRY",
+                "$JS.API.CONSUMER.CREATE.KV_VEGA_REGISTRY.w.$KV.VEGA_REGISTRY.>",
+            ] {
+                assert!(denied(&p, api, "{}").await, "{api}");
+            }
+            assert!(jetstream::new(p.clone())
+                .get_key_value(vega_registry::BUCKET)
+                .await
+                .is_err());
+            // All mutation forms, including stream-wide rollup headers, are
+            // denied even on the sender's own status subject.
+            for key in [
+                "puck.status.keychain",
+                "puck.status.x",
+                "puck.beat",
+                "puck.agent.x",
+                "puck.uac.v2.61",
+                "proteus.status.keychain",
+                "proteus.beat",
+            ] {
+                let subject = format!("$KV.VEGA_REGISTRY.{key}");
+                assert!(denied(&p, &subject, "{}").await, "put {key}");
+                for operation in ["DEL", "PURGE", "ROLLUP-ALL"] {
+                    let mut headers = async_nats::HeaderMap::new();
+                    if operation == "ROLLUP-ALL" {
+                        headers.insert("Nats-Rollup", "all");
+                    } else {
+                        headers.insert("KV-Operation", operation);
+                    }
+                    if operation == "PURGE" {
+                        headers.insert("Nats-Rollup", "sub");
+                    }
+                    assert!(
+                        p.request_with_headers(subject.clone(), headers, "".into())
+                            .await
+                            .is_err(),
+                        "{operation} {key}"
+                    );
+                }
+            }
+            // No plain watch subscription either.
+            let mut watch = p.subscribe("$KV.VEGA_REGISTRY.>").await.unwrap();
+            p.flush().await.unwrap();
+            kv.put("proteus.theme", theme.to_string().into())
+                .await
+                .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(500), watch.next())
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
+            assert_eq!(
+                vega_registry::get_one(&r, "proteus.theme").await.unwrap(),
+                Some(theme)
+            );
+            assert_eq!(vega_registry::get_one(&r, key).await.unwrap(), Some(value));
+            worker.abort();
+        });
+}

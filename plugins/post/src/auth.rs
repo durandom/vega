@@ -256,6 +256,8 @@ pub fn parse_registry_read(s: &str) -> Result<(String, String), Failure> {
 /// the human, never as mail (quarantine.rs).
 /// `registry_read` (inbox-only hosts) grants one last-by-subject direct get
 /// of one registry key each; no stream info, put, delete or watch.
+/// A keychain command grant also gives its private recipient one exact
+/// foreign status-key publish right; the inbox-only sender gets none.
 /// Every host reads the lanista catalog by direct get (catalog.rs, no
 /// consumer); `lanista_writer` (not inbox-only) also puts it.
 #[allow(clippy::too_many_arguments)]
@@ -326,8 +328,8 @@ pub fn render(
             (
                 String::new(),
                 format!(
-                    "\n          \"vega.inbox.*.*.{h}\",\n          \"vega.cmd.*.*.{h}\",\n          \"$KV.VEGA_REGISTRY.{h}.>\",\n          \"$JS.API.STREAM.INFO.KV_VEGA_REGISTRY\",\n          \"$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.>\",{}",
-                    catalog_grants(h, lanista_writer)
+                    "\n          \"vega.inbox.*.*.{h}\",\n          \"vega.cmd.*.*.{h}\",\n          \"$KV.VEGA_REGISTRY.{h}.>\",\n          \"$JS.API.STREAM.INFO.KV_VEGA_REGISTRY\",\n          \"$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.>\",{}{}",
+                    catalog_grants(h, lanista_writer), keychain_relay_grants(h, inbox_only, cmd_grants)
                 ),
                 // Serves quarantined replies to itself; answers them via
                 // `allow_responses`.
@@ -369,6 +371,19 @@ fn catalog_grants(host: &str, writer: Option<&str>) -> String {
     subjects
         .iter()
         .map(|s| format!("\n          \"{s}\","))
+        .collect()
+}
+
+/// Only the private recipient of an explicit keychain command grant may
+/// write that inbox-only sender's status key. The sender gets no KV rights.
+fn keychain_relay_grants(host: &str, inbox_only: &[String], grants: &[(String, String)]) -> String {
+    grants
+        .iter()
+        .filter_map(|(sender, subject)| {
+            let (to, kind, from) = crate::cmd::parse_subject(subject)?;
+            (to == host && kind == "keychain" && from == sender && inbox_only.contains(sender))
+                .then(|| format!("\n          \"$KV.VEGA_REGISTRY.{sender}.status.keychain\","))
+        })
         .collect()
 }
 
@@ -755,6 +770,63 @@ mod tests {
         assert!(out.contains("\"_INBOX_deimos.>\""));
         // nats.conf would read an unquoted $JS as a variable.
         assert!(!out.lines().any(|l| l.trim_start().starts_with("$JS")));
+    }
+
+    #[test]
+    fn keychain_command_grants_only_private_recipient_the_status_write() {
+        let e = vec![
+            Entry {
+                host: "proteus".into(),
+                key: key(),
+            },
+            Entry {
+                host: "ganymede".into(),
+                key: key(),
+            },
+            Entry {
+                host: "puck".into(),
+                key: key(),
+            },
+        ];
+        let grant = parse_grant("puck=vega.cmd.proteus.keychain.puck").unwrap();
+        let out = render(
+            &e,
+            None,
+            &[],
+            &["puck".into()],
+            None,
+            &[grant],
+            &[],
+            &[],
+            None,
+        );
+        let g = out.find("# ganymede").unwrap();
+        let p = out.find("# puck").unwrap();
+        assert!(out[..g].contains("\"$KV.VEGA_REGISTRY.puck.status.keychain\""));
+        assert!(!out[g..p].contains("puck.status.keychain"));
+        assert!(!out[p..].contains("REGISTRY"));
+        assert!(out[p..].contains("\"vega.cmd.proteus.keychain.puck\""));
+        assert!(!out.contains("\"$KV.VEGA_REGISTRY.puck.>\""));
+        assert!(!out.contains("\"$KV.VEGA_REGISTRY.puck.status.>\""));
+        let plain = render(&e, None, &[], &["puck".into()], None, &[], &[], &[], None);
+        assert!(!plain.contains("puck.status.keychain"));
+        for to in ["ganymede", "puck", "unknown"] {
+            let result = crate::auth_config(
+                &e.iter()
+                    .map(|e| format!("{}={}", e.host, e.key))
+                    .collect::<Vec<_>>(),
+                None,
+                None,
+                &[],
+                &["puck".into()],
+                None,
+                &[format!("puck=vega.cmd.{to}.keychain.puck")],
+                &[],
+                &[],
+                None,
+            );
+            assert_eq!(result.is_ok(), to == "ganymede", "{to}");
+        }
     }
 
     #[test]

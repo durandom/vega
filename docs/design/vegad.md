@@ -13,14 +13,27 @@ all other outcomes mean `unknown`. Only state transitions are logged, without co
 
 The worker keeps `{state, since, at}` in `keychain-local.json` under vegad's state directory
 (`$XDG_STATE_HOME/vega`, default `~/.local/state/vega`). `since` changes only when the state changes
-and survives daemon restarts. The registry reconcile publishes that value as `<host>.keychain`,
+and survives daemon restarts. The registry reconcile publishes that value as `<host>.status.keychain`,
 like `<host>.theme`; non-macOS hosts never publish a keychain entry. The normal host registry ACL
-covers it. Restricted inbox-only hosts do not reconcile/publish this entry.
+covers it. Restricted inbox-only hosts do not reconcile or write the registry. Instead, vegad sends
+`vega.cmd.<control>.keychain.<host>` on a state change and every 60 seconds, independently of theme
+fetches. The destination is `control` in theme.toml (default proteus). Failures are logged once per
+state transition while the local probe continues.
+
+The private receiving vegad takes the sender from the broker-authenticated command subject and
+accepts only inbox-only senders. Payloads must be JSON objects of at most 256 bytes, containing
+exactly `{state, since, at}`: state is locked/unlocked/unknown, timestamps are positive integers,
+`since <= at`, and `at` is at most 180 seconds old or 30 seconds in the future. Arrays, duplicate
+fields and extra fields are rejected. A fresh JetStream publish/ack writes only the derived
+`<sender>.status.keychain` key, without forwarding any caller headers. Replies must be inside the
+sender's `_INBOX_<sender>.>` prefix; arbitrary reply subjects are rejected without publishing.
+Rejections are logged by the command dispatcher, without payloads.
 
 After a successful reconcile vegad atomically writes `keychains.json` in the same directory:
 `{at, local, rows: [{host, state, since, at}]}`. This is a small local projection of the registry
-view, used by the app mod without per-host `hc exec` calls. Hosts with stale beats or samples
-older than 180 seconds remain in the projection as `unknown`; the app also ages out a snapshot
+view, used by the app mod without per-host `hc exec` calls. Samples use their own `at` and do not
+require a host beat (inbox-only hosts have none). Samples older than 180 seconds remain in the
+projection as `unknown`; the app also ages out a snapshot
 older than 180 seconds when vegad or the broker stops. Cache write errors do not fail reconciliation.
 
 Only the UI offers unlock, in a dedicated hc terminal after the Slayer presses Enter. Neither
@@ -646,7 +659,16 @@ without a fresh beat (90 s) proves nothing; a remote child counts as gone only o
 reconciled 40 s after our record. Inbox-only hosts get no registry rights (decision vega-nic.1), except
 single keys granted read-only with `auth-config --registry-read <host>=<key>` (vega-lhc.90): one
 last-by-subject direct get each, no stream info, put or watch. Such a host's vegad runs no reconcile;
-it reads only `<control>.theme` (theme.md).
+it reads only `<control>.theme` (theme.md). Keychain reporting is the explicit command exception
+(Slayer 2026-11-10, vega-oiwq.1): add `--cmd-grant puck=vega.cmd.proteus.keychain.puck` to titan's
+existing auth-config arguments, keeping puck in `--inbox-only`. This also grants only the named
+private recipient publish on `$KV.VEGA_REGISTRY.puck.status.keychain`; other private hosts receive
+no extra write right. No inbox-only host gets KV publish, stream info, new reads or watch rights.
+Never grant an inbox-only host even one KV subject: NATS authorizes subjects rather than headers,
+and `Nats-Rollup: all` on any allowed key can erase the shared bucket. The relay reconstructs the
+write, ignoring hostile Rollup, KV-Operation and TTL headers. Readers accept only the known
+keychain status key in an inbox-only host's status namespace; unknown status keys are ignored.
+Regenerating and applying titan's authorization is a separate Slayer step.
 
 ## Reachability (vega-lhc.129)
 

@@ -5,6 +5,18 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 165 · 2026-11-10
+
+- required: to show puck's keychain lock, regenerate titan's broker authorization with the existing
+  arguments plus `--cmd-grant puck=vega.cmd.proteus.keychain.puck`, keeping puck under `--inbox-only`.
+  Applying this is a separate Slayer step. Puck gets only this command; the private recipient gets
+  the exact status-key write needed to relay it. Never grant inbox-only hosts KV publish rights:
+  a `Nats-Rollup: all` header on even one allowed subject can erase the shared registry.
+- migration: all hosts publish keychain state as `<host>.status.keychain`. Upgrade publishing vegad
+  and the app host reader together. Inbox-only vegad sends bounded, validated status to its theme
+  control host on change and every 60 seconds. Samples appear without a host beat and age out
+  after 180 seconds.
+
 ## 164 · 2026-11-10
 
 - feature: the keychain lock turns green within seconds of the password: while an unlock window

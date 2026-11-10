@@ -13,6 +13,10 @@ exec polling. The right side shows one monochrome lock for the focused terminal'
 terminals: this host; Slayer 2026-11-10), coloured with theme
 `ansi2` (unlocked), `ansi1` (locked), or `dim` (unknown). Tooltips give host, state, and `since`.
 Stale snapshots and stale probe samples become unknown rather than retaining a red/green claim.
+The projection reads `<host>.status.keychain` for all hosts. Samples carry their own `at`, so
+inbox-only hosts such as puck appear without a `<host>.beat`. Their vegad sends an exact keychain
+command to its theme control host; that private daemon validates and relays only the display
+sample. Puck receives no registry write permission. Unknown inbox-only status keys are ignored.
 
 A newly observed lock opens one global non-modal window, deduped across mod copies and restarts
 by `host + since` in shared state. A click on a red lock opens it again. The mod starts an
