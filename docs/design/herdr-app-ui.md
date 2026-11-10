@@ -366,3 +366,34 @@ context, the project window holds details and actions.
 - **Inputs in the project window** sit in `inputBox`, which stops the left press: the window
   refocuses its own handle on every press (for Esc) and would take the focus from the input.
 - Colours come from theme tokens only (working, blocked, done, idle), for light and dark.
+
+## Models tab (vega-aysa.2)
+
+The project/config window's descriptor list in `mods/vega-sidebar/main.js` includes
+Models; `mods/vega/main.js` opens that same window. Models is fleet-wide, read and
+edited on the app host. It consumes `vega lanista hosts --json` (`{rows: [...]}`),
+without filtering by connected hc machines: inbox-only hosts such as puck remain
+visible. Each host group lists seat, lane and tier, effective model, source
+(project/host/default/global) and expiry. A project source can continue to mask a
+successful host/default edit; the refreshed source makes that explicit.
+
+The Default group is independent of host/project overrides: one read-only
+`vega lanista pin <lane> --tier <tier> --default` per unique seat/lane/tier reads
+its model, source and expiry. That command currently prints named text fields.
+Pi is omitted from Default because the CLI rejects pi default writes; use zai's
+default cells for its fallback. Host pi cells still offer only their own allowlist,
+even when the displayed effective model is inherited from zai.
+
+Choose model opens an inline dropdown containing only the row's `allowed` models.
+Selection runs `vega lanista pin <lane> --tier <tier> --host <host> --set <model>`;
+Reset substitutes `--clear`. Default actions substitute `--default` for `--host`.
+Nonstandard seats add `--seat <seat>`. Commands use argv without a shell. Controls
+stop left mouse-down like `inputBox`, preserving the window's focus handling.
+All colours use theme tokens. CLI stdout errors, stderr errors, launch failures,
+and parse failures appear inline; failed host reads retain the last good snapshot.
+
+The snapshot and mutation guard use `shared()`/`setShared()` so separate mod copies
+see the latest values and cannot submit simultaneous edits. Reads run when Models
+is selected, every 15 seconds while selected, on Refresh, and after each action.
+`node --test scripts/herdr-app-mods.test.mjs` covers rendering, independent defaults,
+puck, allowlists, exact set/clear argv, pi omission, refresh and inline errors.

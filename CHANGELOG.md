@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 170 · 2026-11-10
+
+- feature: the herdr-app project/config window has a Models tab for registry defaults and all
+  known hosts, including inbox-only hosts. Choose an allowed model or Reset a lane/tier pin;
+  each cell shows the effective model, source and expiry, and CLI failures stay visible.
+  Pi defaults are configured through zai. Apply the updated vega-sidebar mod to use it.
+
 ## 169 · 2026-11-10
 
 - optional: codex `gpt-6.1-terra` is in the seats allowlist without a global tier. Hosts may pin it,

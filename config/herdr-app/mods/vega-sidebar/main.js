@@ -80,6 +80,7 @@ const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab"
   { id: "decisions", label: "Decisions", render: "decisionsTab" },
   { id: "asks", label: "Asks", render: "asksTab" }, { id: "notes", label: "Notes", render: "notesTab" },
   { id: "uac", label: "UAC", render: "uacTab" },
+  { id: "models", label: "Models", render: "modelsTab" },
   { id: "config", label: "Config", render: "configTab" }];
 
 // A command in a project's checkout: locally via exec, on an hc machine through `hc exec --json`
@@ -186,7 +187,8 @@ export default class Agents extends View {
         this.focusHandle?.focus();
         cx.spawn(cx => this.readOverview(cx));
         cx.spawn(cx => this.readAsks(cx));
-        cx.timer.every(15000, cx => { this.readOverview(cx); this.readAsks(cx); if (this.currentTab() === "board") this.readBoard(cx); this.readNotes(cx); });
+        if (this.currentTab() === "models") cx.spawn(cx => this.readModels(cx));
+        cx.timer.every(15000, cx => { this.readOverview(cx); this.readAsks(cx); if (this.currentTab() === "board") this.readBoard(cx); this.readNotes(cx); if (this.currentTab() === "models") this.readModels(cx); });
         cx.spawn(cx => this.readNotes(cx));
         if (props()?.follow) cx.timer.every(1000, () => this.followFocus());
         this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
@@ -334,6 +336,96 @@ export default class Agents extends View {
           .child(div().text_size(11).text_color(t.dim).child(`${n.kind ?? "note"} · ${n.host} · ${new Date(n.id).toLocaleString()}`)))
         .child(div().font_semibold().child(n.title ?? ""))
         .child(div().text_size(11.5).text_color(t.foreground).child((n.body ?? "").slice(0, 800)))));
+  }
+
+  // Shared across project/config windows; never infer a default from a host's effective
+  // row: host and project pins can mask it. The default reader is the CLI's pin view.
+  async readModels(cx) {
+    if (this.modelsRead) return this.modelsRead;
+    this.modelsRead = this.loadModels(cx);
+    try { await this.modelsRead; } finally { this.modelsRead = null; }
+  }
+
+  async loadModels(cx) {
+    try {
+      const r = await exec("vega", ["lanista", "hosts", "--json"], { timeout: 10000 });
+      if (r.code !== 0) throw new Error((r.stdout || r.stderr || `hosts failed (${r.code})`).trim());
+      const data = JSON.parse(r.stdout);
+      if (!Array.isArray(data.rows)) throw new Error("Invalid lanista hosts response: rows missing");
+      const cells = [...new Map(data.rows.filter(r => r.lane !== "pi").map(r => [`${r.seat}/${r.lane}/${r.tier}`, r])).values()];
+      const defaults = await Promise.all(cells.map(async row => {
+        try {
+          const r = await exec("vega", this.modelArgs(row, true), { timeout: 10000 });
+          if (r.code !== 0) throw new Error((r.stdout || r.stderr || `default read failed (${r.code})`).trim());
+          const field = name => r.stdout.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1];
+          const model = field("model"), source = field("source"), expires = field("expires");
+          if (!model || !source || !expires) throw new Error("Invalid lanista default response");
+          return {...row, model, source: source === "global seats" ? "global" : source, until: expires === "never" ? null : Number(expires)};
+        } catch (e) { return {...row, model: "Unknown", source: "unknown", error: String(e.message ?? e)}; }
+      }));
+      setShared("vega.models", { rows: data.rows, defaults });
+      this.modelsError = null;
+    } catch (e) { this.modelsError = String(e.message ?? e); }
+    finally { cx.notify(); }
+  }
+
+  modelArgs(row, defaults) {
+    const args = ["lanista", "pin", row.lane, "--tier", row.tier];
+    if (row.seat !== "herdr-agents") args.push("--seat", row.seat);
+    return args.concat(defaults ? ["--default"] : ["--host", row.host]);
+  }
+
+  async changeModel(row, defaults, model, cx) {
+    if (shared("vega.models-busy")) return;
+    if (defaults && row.lane === "pi") return;
+    if (model !== null && !row.allowed.includes(model)) return;
+    setShared("vega.models-busy", true);
+    this.modelResult = null; this.modelActionError = false; this.modelMenu = null; cx.notify();
+    try {
+      const r = await exec("vega", [...this.modelArgs(row, defaults), ...(model === null ? ["--clear"] : ["--set", model])], { timeout: 10000 });
+      if (r.code !== 0) throw new Error((r.stdout || r.stderr || `pin failed (${r.code})`).trim());
+      this.modelResult = model === null ? "Pin cleared." : "Model saved.";
+    } catch (e) { this.modelResult = String(e.message ?? e); this.modelActionError = true; }
+    finally {
+      // Finish a poll that started before the mutation, then request a fresh snapshot.
+      if (this.modelsRead) await this.modelsRead;
+      await this.readModels(cx);
+      setShared("vega.models-busy", false);
+      cx.notify();
+    }
+  }
+
+  modelsTab(t) {
+    const data = shared("vega.models");
+    const button = (id, label, action) => div().id(id).px(6).py(3).rounded(4).bg(t.raised).cursor_pointer()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); action(cx); cx.notify(); }).child(label);
+    const body = v_flex().gap(8)
+      .child(button("models-refresh", "Refresh", cx => cx.spawn(cx => this.readModels(cx))))
+      .when(Boolean(this.modelsError), el => el.child(div().text_color(t.blocked).child(this.modelsError)))
+      .when(Boolean(this.modelResult), el => el.child(div().text_color(this.modelActionError ? t.blocked : t.done).child(this.modelResult)));
+    if (!data) return body.child(div().text_color(t.dim).child(this.modelsError ? "Models unavailable" : "Reading models…"));
+    if (!data.rows.length) return body.child(div().text_color(t.dim).child("No known hosts"));
+    const groups = [{ name: "Default", rows: data.defaults, defaults: true },
+      ...[...new Set(data.rows.map(r => r.host))].sort().map(host => ({ name: host, rows: data.rows.filter(r => r.host === host), defaults: false }))];
+    return body.children(groups.map(group => v_flex().id(`models-group-${group.name}`).gap(6).p(8).rounded(6).bg(t.surface)
+      .child(div().font_semibold().child(group.name))
+      .when(group.defaults, el => el.child(div().text_size(11).text_color(t.dim).child("Pi inherits zai defaults.")))
+      .children(group.rows.map(row => {
+        const key = `${group.defaults ? "default" : row.host}/${row.seat}/${row.lane}/${row.tier}`;
+        return v_flex().id(`model-${key}`).gap(3)
+          .child(h_flex().gap(6).items_center()
+            .child(div().w(130).text_color(t.dim).child(`${row.lane} · ${row.tier}`))
+            .child(div().flex_1().child(`${row.model} · ${row.source}`)))
+          .child(div().text_size(10).text_color(t.dim).child(`${row.seat} · expires ${row.until == null ? "never" : new Date(row.until * 1000).toLocaleString()}`))
+          .when(Boolean(row.error), el => el.child(div().text_color(t.blocked).child(row.error)))
+          .child(h_flex().gap(6)
+            .child(button(`model-select-${key}`, "Choose model ▾", () => { this.modelMenu = this.modelMenu === key ? null : key; }))
+            .child(button(`model-clear-${key}`, "Reset", cx => cx.spawn(cx => this.changeModel(row, group.defaults, null, cx)))))
+          .when(this.modelMenu === key, el => el.child(v_flex().gap(2).p(4).bg(t.raised)
+            .children(row.allowed.map(model => button(`model-option-${key}/${model}`, model,
+              cx => cx.spawn(cx => this.changeModel(row, group.defaults, model, cx)))))));
+      }))));
   }
 
   // Open asks (vega notify) of this project from every host. Read locally for every project:
@@ -773,7 +865,7 @@ export default class Agents extends View {
           .tooltip("Close (Esc)").on_click(() => closeOverlay(props().overlay)).child("✕"))))
       .child(h_flex().gap(8).children(PROJECT_TABS.map(item => div().id(`project-tab-${item.id}`)
         .px(8).py(5).rounded(6).cursor_pointer().when(item.id === tab.id, el => el.bg(t.raised))
-        .on_click((_e, cx) => { this.projectTab = item.id; if (item.id === "board") cx.spawn(cx => this.readBoard(cx)); if (item.id === "notes") cx.spawn(cx => this.readNotes(cx)); cx.notify(); })
+        .on_click((_e, cx) => { this.projectTab = item.id; if (item.id === "models") cx.spawn(cx => this.readModels(cx)); if (item.id === "board") cx.spawn(cx => this.readBoard(cx)); if (item.id === "notes") cx.spawn(cx => this.readNotes(cx)); cx.notify(); })
         .child(item.id === "notes" && this.notes?.length ? `${item.label} ${this.notes.filter(n => n.unread).length || ""}`.trim() : item.label))))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)))
       .child(v_flex().id(`project-body-${tab.id}`).flex_1().min_h(0).overflow_y_scrollbar()
