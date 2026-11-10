@@ -17,6 +17,8 @@ fn setup() -> (tempfile::TempDir, Ctx) {
     for dir in [".claude", ".codex", ".pi/agent", ".config"] {
         fs::create_dir_all(home.join(dir)).unwrap();
     }
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    script(&home.join(".local/bin"), "dcg", "echo 0.16.0");
     let skills = script(
         d.path(),
         "vega-skills",
@@ -130,6 +132,7 @@ fn select_takes_units_and_groups_in_order() {
         s(&["hooks", "claude.hooks"]).unwrap(),
         [
             Unit::ClaudeHooks,
+            Unit::ClaudeDcg,
             Unit::CodexHooks,
             Unit::PiPrefix,
             Unit::PiDcg
@@ -1227,5 +1230,123 @@ fn dcg_hooks_preserve_mixed_entries_and_pi_source_is_managed() {
     assert_eq!(
         read(&ctx, ".pi/agent/extensions/dcg-guard.ts"),
         "// local guard\n"
+    );
+}
+
+#[test]
+fn dcg_guard_units_wait_for_the_pinned_binary() {
+    for present in [false, true] {
+        let (_d, ctx) = setup();
+        let binary = ctx.env.home.join(".local/bin/dcg");
+        if present {
+            // A present file without execute permission is not an installed guard.
+            fs::set_permissions(&binary, fs::Permissions::from_mode(0o644)).unwrap();
+        } else {
+            fs::remove_file(&binary).unwrap();
+        }
+        assert!(!dcg_installed(&ctx.env));
+        // Unavailable guards must not even read a broken local hook source.
+        let local = sources::init(&ctx.env, "dcg/hook.json").unwrap();
+        fs::write(local, "invalid JSON").unwrap();
+        for (unit, rel) in [
+            (Unit::ClaudeSettings, ".claude/settings.json"),
+            (Unit::CodexHooks, ".codex/hooks.json"),
+        ] {
+            let p = plan(&ctx, unit).unwrap();
+            assert!(p.notes.iter().any(|n| n == DCG_NOT_INSTALLED));
+            assert!(!p.sources.iter().any(|s| s.rel == "dcg/hook.json"));
+            assert_eq!(apply(&ctx, unit, &BTreeSet::new()).kind(), "written");
+            let value: Value = serde_json::from_str(&read(&ctx, rel)).unwrap();
+            let dcg_commands = value["hooks"]["PreToolUse"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e["hooks"].as_array())
+                .flatten()
+                .filter(|h| merge::is_dcg_command(h))
+                .count();
+            assert_eq!(dcg_commands, 0);
+            if unit == Unit::ClaudeSettings {
+                assert_eq!(value["outputStyle"], "Caveman ELI5");
+            } else {
+                assert_eq!(
+                    value["hooks"]["PreToolUse"][0]["matcher"],
+                    merge::CODEX_TOOL
+                );
+            }
+        }
+        let p = plan(&ctx, Unit::PiDcg).unwrap();
+        assert_eq!(p.skip.as_deref(), Some(DCG_NOT_INSTALLED));
+        assert!(p.files.is_empty());
+        assert_eq!(
+            apply(&ctx, Unit::PiDcg, &BTreeSet::new()),
+            Outcome::Skipped(DCG_NOT_INSTALLED.into())
+        );
+        assert!(!ctx
+            .env
+            .home
+            .join(".pi/agent/extensions/dcg-guard.ts")
+            .exists());
+    }
+}
+
+#[test]
+fn removing_dcg_cleans_up_only_managed_guards_and_retains_backups() {
+    let (_d, ctx) = setup();
+    let settings = ctx.env.home.join(".claude/settings.json");
+    fs::write(&settings, r#"{"outputStyle":"keep local preference","hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"other-guard"}]}]}}"#).unwrap();
+    let units = [Unit::ClaudeDcg, Unit::CodexHooks, Unit::PiDcg];
+    for unit in units {
+        assert_eq!(apply(&ctx, unit, &BTreeSet::new()).kind(), "written");
+    }
+    let settings_with_hook = read(&ctx, ".claude/settings.json");
+    let value: Value = serde_json::from_str(&settings_with_hook).unwrap();
+    assert_eq!(value["outputStyle"], "keep local preference");
+    let extension = ctx.env.home.join(".pi/agent/extensions/dcg-guard.ts");
+    let original = fs::read_to_string(&extension).unwrap();
+    fs::remove_file(ctx.env.home.join(".local/bin/dcg")).unwrap();
+    for unit in units {
+        let (outcome, event) = apply_report(&ctx, unit, &BTreeSet::new());
+        assert_eq!(outcome.kind(), "written");
+        if unit == Unit::PiDcg {
+            assert_eq!(event["writes"][0]["operation"], "removed");
+            assert_eq!(event["writes"][0]["after"], "absent");
+        }
+    }
+    assert!(!extension.exists());
+    assert_eq!(
+        fs::read_to_string(backup_path(&extension)).unwrap(),
+        original
+    );
+    assert_eq!(
+        read(&ctx, ".claude/settings.json.vega-bak"),
+        settings_with_hook
+    );
+    let value: Value = serde_json::from_str(&read(&ctx, ".claude/settings.json")).unwrap();
+    assert_eq!(value["outputStyle"], "keep local preference");
+    assert_eq!(value["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        value["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        "other-guard"
+    );
+    let value: Value = serde_json::from_str(&read(&ctx, ".codex/hooks.json")).unwrap();
+    assert_eq!(value["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        value["hooks"]["PreToolUse"][0]["matcher"],
+        merge::CODEX_TOOL
+    );
+    // Cleanup is idempotent, and a user-owned extension is never deleted.
+    assert_eq!(
+        apply(&ctx, Unit::PiDcg, &BTreeSet::new()),
+        Outcome::Skipped(DCG_NOT_INSTALLED.into())
+    );
+    fs::write(&extension, "// user-owned guard\n").unwrap();
+    assert_eq!(
+        apply(&ctx, Unit::PiDcg, &BTreeSet::new()),
+        Outcome::Skipped(DCG_NOT_INSTALLED.into())
+    );
+    assert_eq!(
+        fs::read_to_string(&extension).unwrap(),
+        "// user-owned guard\n"
     );
 }

@@ -93,8 +93,8 @@ pub fn change(ctx: &Ctx, unit: Unit, plan: &Plan, f: &FilePlan) -> Value {
             .map(|p| format!("~/{}", p.display()))
             .unwrap_or_else(|_| path.display().to_string())
     });
-    json!({"target": target, "operation": if f.live.is_none() {"added"} else {"changed"},
-        "before": if f.live.is_none() {"absent"} else {"redacted"}, "after": "redacted", "backup_refreshed": backup, "keys": keys})
+    json!({"target": target, "operation": if f.remove {"removed"} else if f.live.is_none() {"added"} else {"changed"},
+        "before": if f.live.is_none() {"absent"} else {"redacted"}, "after": if f.remove {"absent"} else {"redacted"}, "backup_refreshed": backup, "keys": keys})
 }
 
 fn diff(prefix: &str, old: Option<&Value>, new: Option<&Value>, out: &mut Vec<Value>) {

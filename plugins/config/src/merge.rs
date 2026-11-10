@@ -200,6 +200,38 @@ pub fn is_dcg_command(h: &Value) -> bool {
         })
 }
 
+/// Remove vega's pinned-path commands only, retaining other guards and metadata.
+pub fn remove_dcg_hook(root: &mut Value, binary: &Path) -> bool {
+    let quoted = format!(
+        "'{}'",
+        binary.display().to_string().replace('\'', "'\"'\"'")
+    );
+    let Some(entries) = root
+        .get_mut("hooks")
+        .and_then(|v| v.get_mut("PreToolUse"))
+        .and_then(Value::as_array_mut)
+    else {
+        return false;
+    };
+    let mut changed = false;
+    entries.retain_mut(|entry| {
+        let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|h| {
+            !(h["type"] == "command"
+                && h["command"].as_str().is_some_and(|c| {
+                    let c = c.trim().trim_matches(['\'', '"']);
+                    Path::new(c) == binary || h["command"].as_str().is_some_and(|c| c == quoted)
+                }))
+        });
+        changed |= hooks.len() != before;
+        hooks.len() == before || !hooks.is_empty()
+    });
+    changed
+}
+
 /// `pi.prefix`: the activation line first in `shellCommandPrefix`, an
 /// existing prefix kept after it.
 pub fn pi_prefix(root: &mut Value) -> Result<bool, String> {

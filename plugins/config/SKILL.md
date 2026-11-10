@@ -19,6 +19,8 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - `mise run install-dcg` installs checksum-pinned dcg 0.16.0 and rolls back on strict doctor failure.
 - `pi.dcg` (in `hooks`) manages `~/.pi/agent/extensions/dcg-guard.ts`; restart pi after apply.
   `claude.settings` and `codex.hooks` merge dcg PreToolUse from `dcg/hook.json`.
+- Guards require `~/.local/bin/dcg`; absent binaries remove managed guards. Bootstrap with
+  `mise run install-dcg -- --configure-hooks` (`claude.dcg` preserves preferences).
 - `dcg.config` and `dcg.packs` replace config.toml and their YAML pack targets;
   `allowlist.toml` stays user-owned. Preview: `vega config diff dcg.config dcg.packs`.
 - Sources in `~/.config/vega/config/` override `config/` at the same relative path.
@@ -33,8 +35,8 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - `infra` warns above 50k deps entries; `mise run target-sweep` between builds.
   `infra --fleet` additionally checks hc names against registry hosts (network);
   mismatches exit 1 with `hc machine rename <old> <host>`. It never renames machines.
-- Apply the `herdr-app` group together: checked status, agents and inbox mods precede
-  its layout. New decisions open a non-modal inbox; the status row or scale reopens it.
+- Apply `herdr-app` together: checked mods precede layout. Decisions open the inbox;
+  status or scale reopens it.
 
 Service endpoints are explicit local config, outside the rendered config units.
 NATS needs `VEGA_NATS_URL` or `vega/nats.url`; Dolt needs `VEGA_BD_REMOTE` or

@@ -32,6 +32,7 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `codex.md` | `~/.codex/AGENTS.md` | whole file | same |
 | `pi.md` | `~/.pi/agent/AGENTS.md` | whole file | same |
 | `claude.styles` | `~/.claude/output-styles/<name>.md`, one per source file | whole file each; other files in the dir untouched | `claude/output-styles/` |
+| `claude.dcg` | `~/.claude/settings.json` | dcg entry only; in `hooks` group | `dcg/hook.json` |
 | `claude.settings` | `~/.claude/settings.json` | seeded preferences plus dcg PreToolUse key-merge | `claude/settings.json`, `dcg/hook.json` |
 | `claude.hooks` | `~/.local/share/vega/claude-marketplace/`, Claude plugin registration, legacy settings hooks | whole plugin files; CLI install/enable; remove only legacy vega commands after verification | code (plugins/config) |
 | `codex.hooks` | `~/.codex/hooks.json` | key-merge: ask-parent and dcg `PreToolUse` entries | code, `dcg/hook.json` |
@@ -44,7 +45,7 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `herdr-app.layouts` | `~/.config/herdr-app/layouts/vega.json` | whole file; first apply selects it through the app | `herdr-app/layouts/vega.json` |
 | `agentsview` | `LOCAL-SETUP.md` in `~/.claude/skills/agentsview-finding-history/` and `~/.agents/skills/agentsview-finding-history/` | whole file each, only where agentsview generated the skill (`SKILL.md` exists) | `agentsview/LOCAL-SETUP.md` |
 
-Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks codex.hooks pi.prefix pi.dcg`;
+Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks claude.dcg codex.hooks pi.prefix pi.dcg`;
 `herdr-app` = `herdr-app.keys herdr-app.themes herdr-app.mods herdr-app.layouts herdr-app.settings`
 (in apply order; mods precede layouts, both precede settings).
 
@@ -127,7 +128,12 @@ The agents clone reads hc labels on render, without terminal polling. See [herdr
 
 dcg is pinned to **v0.16.0**. `mise run install-dcg` downloads the architecture-specific
 GitHub release archive with `gh`, verifies a committed SHA-256 digest, and atomically
-replaces `~/.local/bin/dcg`. It never runs upstream `dcg install` or changes agent hooks.
+replaces `~/.local/bin/dcg`. It never runs upstream `dcg install`. The explicit `--configure-hooks` option invokes
+`vega config apply claude.dcg codex.hooks pi.dcg` after replacing the binary and before
+strict doctor. `claude.dcg` touches only the dcg entry, preserving Claude preferences.
+If a fresh install rolls back to no binary, those units run again to remove their
+managed dcg entries and pi guard (with a backup). Rollback to a previous binary keeps
+the hooks. Without this option the installer never changes hooks.
 Supported targets are macOS arm64/x86_64 and Linux arm64 (glibc >=2.28)/x86_64 (static musl).
 The previous binary is retained in `~/.cache/dcg-<version>/dcg`, including
 `~/.cache/dcg-0.9.2/dcg` on proteus. The installer runs `dcg doctor --strict` after
@@ -147,7 +153,14 @@ Only the Claude hook unit was applied on proteus; dcg config and pi guard await 
 Hook wiring stays in vega config: `dcg/hook.json` contains per-agent PreToolUse entries used
 by `claude.settings` (Bash/PowerShell/Monitor) and `codex.hooks` (Bash); `@DCG@` resolves to the pinned install path.
 Bare dcg commands are replaced without dropping other commands in mixed hook entries.
-Claude preference keys remain seeded; its dcg hook is repaired on every explicit apply.
+Claude preference keys remain seeded; its dcg hook is repaired on explicit apply once
+`~/.local/bin/dcg` is executable. When that pinned binary is absent or non-executable,
+`pi.dcg` skips with `dcg not installed (scripts/install-dcg.py)` and Claude/Codex omit
+the dcg hook addition while applying their other settings/hooks. Applying these units
+with no binary removes vega's pinned-path dcg entries and its managed pi guard, retaining
+other hooks and custom extension files. Plan notes report the same reason; config check
+still reports missing dcg.
+After installing dcg, apply those units again to activate the guards.
 Custom commands with dcg arguments remain user-owned. The `pi.dcg` unit uses the same
 global extension discovery directory as `herdr-agent-state.ts`, alongside it. It follows
 [the v0.16.0 recipe](https://github.com/Dicklesworthstone/destructive_command_guard/blob/v0.16.0/docs/pi-integration.md):
@@ -180,9 +193,11 @@ denials; nested shell denials now report `config_override` instead of `heredoc_a
 Rollout is explicit and host-local; a vega deploy does not install dcg automatically:
 
 1. Review release notes and `vega config diff dcg.config dcg.packs claude.settings codex.hooks pi.dcg`.
-2. Run `nice -n 10 mise run install-dcg` (strict doctor failure restores the binary).
-   A new host with no hooks may fail this first doctor; review/apply hooks with vega,
-   resolve native Codex approvals as the human, then retry installation.
+2. Deploy a vega version that knows `claude.dcg`, review its hook-unit diff, then run
+   `nice -n 10 mise run install-dcg -- --configure-hooks` for a fresh host. This installs
+   the binary before applying just guard units and checking strict doctor. Resolve native
+   Codex approvals as the human; rollback to no binary also removes managed guards.
+   For a host whose guards are already wired, plain `mise run install-dcg` suffices.
 3. Apply reviewed units, restart agents, then run `dcg doctor`, `dcg doctor --strict`,
    `dcg test 'git reset --hard'` (deny), `dcg test 'ls'` (allow), and `vega config check`.
 4. Run `nice -n 10 node --test scripts/dcg-guard.test.mjs` in the checkout for the pi probe.

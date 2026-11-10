@@ -204,6 +204,7 @@ fn registration<T>(
             link,
             text: after.unwrap_or_else(|| "{}".into()),
             follow: true,
+            remove: false,
         };
         let mut change = evidence::change(ctx, Unit::ClaudeHooks, plan, &file);
         change["backup_refreshed"] = Value::Null;

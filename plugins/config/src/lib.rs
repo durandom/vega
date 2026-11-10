@@ -77,6 +77,7 @@ pub enum Unit {
     PiMd,
     ClaudeStyles,
     ClaudeSettings,
+    ClaudeDcg,
     ClaudeHooks,
     CodexHooks,
     PiPrefix,
@@ -93,7 +94,7 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub const ALL: [Unit; 20] = [
+    pub const ALL: [Unit; 21] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -102,6 +103,7 @@ impl Unit {
         Unit::ClaudeStyles,
         Unit::ClaudeSettings,
         Unit::ClaudeHooks,
+        Unit::ClaudeDcg,
         Unit::CodexHooks,
         Unit::PiPrefix,
         Unit::PiDcg,
@@ -128,6 +130,7 @@ impl Unit {
             Unit::PiMd => "pi.md",
             Unit::ClaudeStyles => "claude.styles",
             Unit::ClaudeSettings => "claude.settings",
+            Unit::ClaudeDcg => "claude.dcg",
             Unit::ClaudeHooks => "claude.hooks",
             Unit::CodexHooks => "codex.hooks",
             Unit::PiPrefix => "pi.prefix",
@@ -154,6 +157,7 @@ impl Unit {
             Unit::PiMd => "~/.pi/agent/AGENTS.md",
             Unit::ClaudeStyles => "~/.claude/output-styles/",
             Unit::ClaudeSettings => "~/.claude/settings.json",
+            Unit::ClaudeDcg => "~/.claude/settings.json",
             Unit::ClaudeHooks => "~/.local/share/vega/claude-marketplace/, ~/.claude/settings.json",
             Unit::CodexHooks => "~/.codex/hooks.json",
             Unit::PiPrefix => "~/.pi/agent/settings.json",
@@ -180,7 +184,7 @@ impl Unit {
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
             Unit::ClaudeHooks => "plugin + legacy hook migration",
-            Unit::CodexHooks | Unit::PiPrefix => "key-merge",
+            Unit::ClaudeDcg | Unit::CodexHooks | Unit::PiPrefix => "key-merge",
             Unit::Skills => "library",
         }
     }
@@ -215,6 +219,7 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
         "hooks",
         &[
             Unit::ClaudeHooks,
+            Unit::ClaudeDcg,
             Unit::CodexHooks,
             Unit::PiPrefix,
             Unit::PiDcg,
@@ -272,10 +277,15 @@ pub struct FilePlan {
     pub text: String,
     /// Key-merge targets are written through a symlink, whole files are not.
     pub follow: bool,
+    /// Remove a managed whole file, preserving its backup.
+    pub remove: bool,
 }
 
 impl FilePlan {
     pub fn changed(&self) -> bool {
+        if self.remove {
+            return self.live.is_some() || self.link;
+        }
         (self.link && !self.follow) || self.live.as_deref() != Some(self.text.as_str())
     }
 }
@@ -328,6 +338,7 @@ fn whole(path: PathBuf, text: String) -> Result<FilePlan, String> {
         link,
         text,
         follow: false,
+        remove: false,
     })
 }
 
@@ -362,6 +373,7 @@ fn json_plan<T>(
             link,
             text,
             follow: true,
+            remove: false,
         },
         out,
     )))
@@ -495,26 +507,80 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             )
         }
         Unit::ClaudeHooks => claude_plugin::plan(ctx),
+        Unit::ClaudeDcg => {
+            if let Some(p) = need_dir(env, ".claude") {
+                return Ok(p);
+            }
+            let src = dcg_hook(env, "claude")?;
+            let file = json_plan(home.join(".claude/settings.json"), src.is_some(), |v| {
+                update_dcg_hook(env, v, src.as_ref())
+            })?;
+            let Some((f, _)) = file else {
+                return Ok(Plan::skip(DCG_NOT_INSTALLED));
+            };
+            if src.is_none() && !f.changed() {
+                return Ok(Plan::skip(DCG_NOT_INSTALLED));
+            }
+            Ok(Plan {
+                files: vec![f],
+                notes: if src.is_none() {
+                    vec![DCG_NOT_INSTALLED.into()]
+                } else {
+                    vec![]
+                },
+                sources: src.into_iter().collect(),
+                ..Plan::default()
+            })
+        }
         Unit::CodexHooks => {
             if let Some(p) = need_dir(env, ".codex") {
                 return Ok(p);
             }
             let src = dcg_hook(env, "codex")?;
-            let entry: Value = serde_json::from_str(&src.text).map_err(|e| e.to_string())?;
             let (f, _) = json_plan(home.join(".codex/hooks.json"), true, |v| {
                 merge::codex_hooks(v, &mux)?;
-                merge::dcg_hook(v, entry)
+                update_dcg_hook(env, v, src.as_ref())?;
+                Ok(())
             })?
             .expect("created when missing");
             Ok(Plan {
                 files: vec![f],
-                sources: vec![src],
+                notes: if src.is_none() {
+                    vec![DCG_NOT_INSTALLED.into()]
+                } else {
+                    vec![]
+                },
+                sources: src.into_iter().collect(),
                 ..Plan::default()
             })
         }
         Unit::PiDcg => {
             if let Some(p) = need_dir(env, ".pi/agent") {
                 return Ok(p);
+            }
+            if !dcg_installed(env) {
+                let path = home.join(".pi/agent/extensions/dcg-guard.ts");
+                let (live, link) = read_live(&path)?;
+                let owned = live.as_ref().is_some_and(|text| {
+                    text.starts_with("// Managed by vega config (pi.dcg);")
+                        || sources::get(env, "pi/extensions/dcg-guard.ts")
+                            .is_ok_and(|s| s.text == *text)
+                });
+                if owned {
+                    return Ok(Plan {
+                        files: vec![FilePlan {
+                            path,
+                            live,
+                            link,
+                            text: String::new(),
+                            follow: false,
+                            remove: true,
+                        }],
+                        notes: vec![DCG_NOT_INSTALLED.into()],
+                        ..Plan::default()
+                    });
+                }
+                return Ok(Plan::skip(DCG_NOT_INSTALLED));
             }
             let src = sources::get(env, "pi/extensions/dcg-guard.ts")?;
             Ok(Plan {
@@ -629,8 +695,37 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
     }
 }
 
-/// Shared, locally overridable PreToolUse entry. The pinned installer owns this path.
-fn dcg_hook(env: &Env, agent: &str) -> Result<sources::Source, String> {
+const DCG_NOT_INSTALLED: &str = "dcg not installed (scripts/install-dcg.py)";
+
+fn dcg_installed(env: &Env) -> bool {
+    env.home
+        .join(".local/bin/dcg")
+        .metadata()
+        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+fn update_dcg_hook(
+    env: &Env,
+    root: &mut Value,
+    source: Option<&sources::Source>,
+) -> Result<bool, String> {
+    match source {
+        Some(src) => merge::dcg_hook(
+            root,
+            serde_json::from_str(&src.text).map_err(|e| e.to_string())?,
+        ),
+        None => Ok(merge::remove_dcg_hook(
+            root,
+            &env.home.join(".local/bin/dcg"),
+        )),
+    }
+}
+
+/// Shared, locally overridable PreToolUse entry, only when its pinned binary exists.
+fn dcg_hook(env: &Env, agent: &str) -> Result<Option<sources::Source>, String> {
+    if !dcg_installed(env) {
+        return Ok(None);
+    }
     let mut src = sources::get(env, "dcg/hook.json")?;
     let path = env.home.join(".local/bin/dcg").display().to_string();
     let command = if path.contains([' ', '\'']) {
@@ -648,7 +743,7 @@ fn dcg_hook(env: &Env, agent: &str) -> Result<sources::Source, String> {
         .filter(|v| v.is_object())
         .ok_or_else(|| format!("{}: missing {agent} hook entry", src.rel))?;
     src.text = serde_json::to_string(entry).unwrap();
-    Ok(src)
+    Ok(Some(src))
 }
 
 /// A seeded-keys plan, plus the separately owned dcg hook in Claude settings.
@@ -659,22 +754,21 @@ fn seeded(env: &Env, unit: Unit, rel: &str, path: PathBuf) -> Result<Plan, Strin
         _ => return Err(format!("{}: not a JSON object", src.rel)),
     };
     let last = last_seeds(env, unit);
-    let hook = (unit == Unit::ClaudeSettings)
-        .then(|| dcg_hook(env, "claude"))
-        .transpose()?;
+    let hook = if unit == Unit::ClaudeSettings {
+        dcg_hook(env, "claude")?
+    } else {
+        None
+    };
     let (f, s) = json_plan(path, true, |v| {
         let result = merge::seed(v, &seeds, &last)?;
-        if let Some(src) = &hook {
-            merge::dcg_hook(
-                v,
-                serde_json::from_str(&src.text).map_err(|e| e.to_string())?,
-            )?;
+        if unit == Unit::ClaudeSettings {
+            update_dcg_hook(env, v, hook.as_ref())?;
         }
         Ok(result)
     })?
     .expect("created when missing");
     let live: Option<Value> = f.live.as_deref().and_then(|t| serde_json::from_str(t).ok());
-    let notes = s
+    let mut notes: Vec<String> = s
         .local
         .iter()
         .map(|k| {
@@ -685,6 +779,9 @@ fn seeded(env: &Env, unit: Unit, rel: &str, path: PathBuf) -> Result<Plan, Strin
             )
         })
         .collect();
+    if unit == Unit::ClaudeSettings && hook.is_none() {
+        notes.push(DCG_NOT_INSTALLED.into());
+    }
     Ok(Plan {
         files: vec![f],
         notes,
@@ -858,6 +955,9 @@ fn write(f: &FilePlan) -> Result<(), String> {
     if let Some(old) = &f.live {
         let bak = backup_path(&path);
         fs::write(&bak, old).map_err(|e| format!("{}: {e}", bak.display()))?;
+    }
+    if f.remove {
+        return fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()));
     }
     let mode = fs::symlink_metadata(&path)
         .ok()

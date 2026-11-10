@@ -17,12 +17,15 @@ spec.loader.exec_module(installer)
 
 class InstallTests(unittest.TestCase):
     def exercise(self, *, bad_checksum=False, doctor_failure=False, doctor_errors=None,
-                 allow_stale_opencode=False, opencode_present=False):
+                 allow_stale_opencode=False, opencode_present=False,
+                 fresh_install=False, configure_hooks=False):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
             dest = home / ".local/bin/dcg"
             dest.parent.mkdir(parents=True)
-            dest.write_bytes(b"old binary")
+            if not fresh_install:
+                dest.write_bytes(b"old binary")
+            hook_calls = []
             archive = io.BytesIO()
             with tarfile.open(fileobj=archive, mode="w:xz") as tar:
                 member = tarfile.TarInfo("dcg")
@@ -34,6 +37,9 @@ class InstallTests(unittest.TestCase):
             def run(args, **kwargs):
                 if args[0] == "gh":
                     (Path(args[-1]) / "dcg-test.tar.xz").write_bytes(data)
+                elif args[0] == "vega":
+                    self.assertEqual(args, ["vega", "config", "apply", "claude.dcg", "codex.hooks", "pi.dcg"])
+                    hook_calls.append(dest.exists())
                 elif doctor_failure:
                     raise subprocess.CalledProcessError(1, args)
                 elif doctor_errors:
@@ -58,15 +64,22 @@ class InstallTests(unittest.TestCase):
                  patch.object(installer.subprocess, "check_output", side_effect=version):
                 if bad_checksum:
                     with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
-                        installer.install(allow_stale_opencode=allow_stale_opencode)
+                        installer.install(allow_stale_opencode=allow_stale_opencode, configure_hooks=configure_hooks)
                 elif rollback:
                     with self.assertRaises(subprocess.CalledProcessError):
-                        installer.install(allow_stale_opencode=allow_stale_opencode)
+                        installer.install(allow_stale_opencode=allow_stale_opencode, configure_hooks=configure_hooks)
                 else:
-                    installer.install(allow_stale_opencode=allow_stale_opencode)
-            self.assertEqual(dest.read_bytes(), b"old binary" if bad_checksum or rollback else b"new binary")
+                    installer.install(allow_stale_opencode=allow_stale_opencode, configure_hooks=configure_hooks)
+            if fresh_install and (bad_checksum or rollback):
+                self.assertFalse(dest.exists())
+            else:
+                self.assertEqual(dest.read_bytes(), b"old binary" if bad_checksum or rollback else b"new binary")
+            expected_calls = [] if not configure_hooks or bad_checksum else [True]
+            if configure_hooks and fresh_install and rollback:
+                expected_calls.append(False)
+            self.assertEqual(hook_calls, expected_calls)
             backup = home / ".cache/dcg-0.9.2/dcg"
-            if not bad_checksum:
+            if not bad_checksum and not fresh_install:
                 self.assertEqual(backup.read_bytes(), b"old binary")
 
     def test_valid_install_keeps_old_binary(self):
@@ -89,6 +102,15 @@ class InstallTests(unittest.TestCase):
 
     def test_exception_does_not_excuse_installed_opencode(self):
         self.exercise(doctor_errors=["opencode_plugin"], allow_stale_opencode=True, opencode_present=True)
+
+    def test_fresh_install_configures_only_guard_units_before_doctor(self):
+        self.exercise(fresh_install=True, configure_hooks=True)
+
+    def test_fresh_install_doctor_failure_cleans_up_after_binary_removal(self):
+        self.exercise(fresh_install=True, configure_hooks=True, doctor_failure=True)
+
+    def test_upgrade_rollback_keeps_hooks_for_previous_binary(self):
+        self.exercise(configure_hooks=True, doctor_failure=True)
 
 
 if __name__ == "__main__":

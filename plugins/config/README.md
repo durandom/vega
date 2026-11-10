@@ -27,7 +27,9 @@ Commands: `vega config`, `diff`, `apply`, `print`, `init`, `infra` (`check`).
 `mise run install-dcg` installs checksum-pinned dcg 0.16.0, backing up the old binary
 and restoring it if strict doctor fails. `vega config check` reports dcg version and
 Claude/Codex/pi guard registration for agents on PATH. `claude.settings` and `codex.hooks`
-merge dcg entries from `dcg/hook.json`; `pi.dcg` in the `hooks` group manages
+merge dcg entries from `dcg/hook.json`; `claude.dcg` applies only that guard entry.
+Absent pinned binaries skip new guards and remove existing vega guards. Use the explicit
+installer `--configure-hooks` option to bootstrap a fresh host before strict doctor; `pi.dcg` in the `hooks` group manages
 `~/.pi/agent/extensions/dcg-guard.ts`. Preview the diff and restart agents after apply.
 
 `infra` also warns above 50,000 entries in this checkout's `target/debug/deps`;

@@ -21,11 +21,12 @@ ARCHIVES = {
 }
 
 
-def install(*, allow_stale_opencode=False, archive_path=None):
+def install(*, allow_stale_opencode=False, archive_path=None, configure_hooks=False):
     target, digest = ARCHIVES[(platform.system(), platform.machine())]
     name = f"dcg-{target}.tar.xz"
     dest = Path.home() / ".local/bin/dcg"
     env = dict(os.environ, DCG_NO_SELF_HEAL="1")
+    hook_command = ["vega", "config", "apply", "claude.dcg", "codex.hooks", "pi.dcg"]
     with tempfile.TemporaryDirectory(prefix="vega-dcg-") as scratch:
         scratch = Path(scratch)
         archive = scratch / name
@@ -63,6 +64,8 @@ def install(*, allow_stale_opencode=False, archive_path=None):
         shutil.copy2(candidate, staged)
         staged.replace(dest)
         try:
+            if configure_hooks:
+                subprocess.run(hook_command, check=True, env=env)
             doctor = subprocess.run([str(dest), "doctor", "--strict"], env=env)
             if doctor.returncode:
                 if not allow_stale_opencode:
@@ -84,6 +87,10 @@ def install(*, allow_stale_opencode=False, archive_path=None):
                 print(f"Restored dcg from {backup}", flush=True)
             else:
                 dest.unlink()
+                if configure_hooks:
+                    # With no guard binary, these units remove only vega's dcg
+                    # hooks/extension. Claude preference keys are never applied.
+                    subprocess.run(hook_command, check=True, env=env)
             raise
         print(f"Installed dcg {VERSION}: {dest}; backup: {backup or 'none (new install)'}")
 
@@ -93,8 +100,11 @@ if __name__ == "__main__":
     parser.add_argument("--allow-stale-opencode", action="store_true",
                         help="keep the binary only if the sole doctor error is unused OpenCode (no binary on PATH)")
     parser.add_argument("--archive", type=Path, help="use a local archive, verifying the same pinned checksum")
+    parser.add_argument("--configure-hooks", action="store_true",
+                        help="apply only dcg hook units through vega before doctor; clean them up if a fresh install rolls back")
     args = parser.parse_args()
     try:
-        install(allow_stale_opencode=args.allow_stale_opencode, archive_path=args.archive)
+        install(allow_stale_opencode=args.allow_stale_opencode, archive_path=args.archive,
+                configure_hooks=args.configure_hooks)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"error: {error}\n")

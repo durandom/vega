@@ -13,6 +13,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 - unit: `pi.dcg` adds a bash guard at `~/.pi/agent/extensions/dcg-guard.ts` in the `hooks`
   group. Review/apply it and restart pi. `claude.settings` and `codex.hooks` now own dcg's
   shared `dcg/hook.json` PreToolUse entry; review their diff before applying.
+- unit: guard-only `claude.dcg` preserves preferences. Fresh hosts use installer
+  `--configure-hooks`; failed fresh installs remove managed guards after binary rollback.
 - migration: review/apply `dcg.config` to disable hook self-repair; vega owns the hooks.
   `vega config check` reports dcg version >=0.16.0 and each installed agent's guard.
   Run `dcg doctor --strict` for Codex approval/reachability; approvals remain human-owned.

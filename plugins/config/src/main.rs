@@ -293,6 +293,9 @@ fn diff(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
                 ""
             };
             println!("unit: {} {label}{held}", u.name());
+            if f.remove {
+                println!("note: removes the managed file (backup retained)");
+            }
             if f.link && !f.follow {
                 println!("note: a symlink now; apply replaces it with a file");
             }
