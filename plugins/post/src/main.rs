@@ -2719,7 +2719,7 @@ fn theme_event(e: theme::Event, live_theme: &mut theme::Live, next: &mut Instant
         theme::Event::Live(m) => {
             let panes = theme::claude_panes(&local_agents());
             log(&format!(
-                "theme: {} claude pane(s) get /config theme={} when idle",
+                "theme: {} claude pane(s) get /config theme={} now",
                 panes.len(),
                 m.as_str()
             ));
@@ -3563,14 +3563,15 @@ fn local_agents() -> Vec<serde_json::Value> {
     terminals::Inventory::read().agents()
 }
 
-/// Types `/config theme=<mode>` into each waiting Claude pane that is idle
-/// or done with an empty input and no dialog (theme::decide); a working pane
-/// waits for its next idle, a closed one is dropped. Once per pane.
+/// Types `/config theme=<mode>` into each waiting Claude pane that is idle,
+/// done or working with an empty input and no dialog (theme::decide); a
+/// working pane gets it queued, a closed one is dropped. Once per pane.
 fn type_theme(live: &mut theme::Live, drafts: &Drafts) {
     let Some(line) = live.line() else { return };
     let now = theme::claude_panes(&local_agents());
     for pane in live.pending.clone() {
         let status = now.get(&pane).map(String::as_str);
+        let working = status == Some("working");
         let held = drafts.stashed.contains_key(&pane);
         match theme::decide(status, held, || screen(&pane)) {
             theme::Action::Wait => {}
@@ -3579,7 +3580,7 @@ fn type_theme(live: &mut theme::Live, drafts: &Drafts) {
             }
             theme::Action::Send => {
                 live.pending.remove(&pane);
-                match notify(&pane, &line) {
+                match notify_queued(&pane, &line, working) {
                     Ok(()) => log(&format!("theme: typed {line} into {pane}")),
                     Err(f) => log(&format!("theme: {pane}: {} {}", f.code, f.message)),
                 }

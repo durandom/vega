@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 157 · 2026-11-10
+
+- feature: a light/dark switch reaches busy Claude panes at once: vegad types `/config theme=<mode>`
+  also while the agent works (queued), not only when idle.
+- feature: `vega mux spawn --kind claude` sets `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`: the
+  dim prompt suggestion read as a draft in hc screens and held every pointer 60 s (vega-lhc.257).
+  Pass `--env CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true` to keep it.
+
 ## 156 · 2026-11-10
 
 - feature: mail no longer waits forever for a pane whose status hc never reported (a Claude

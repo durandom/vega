@@ -6,7 +6,8 @@
 //!
 //! Running Claude panes read their theme only at start, so after a change
 //! the relay loop types `/config theme=<mode>` into each Claude pane of this
-//! host, once, when it is idle or done with an empty input and no dialog.
+//! host, once, at once: idle, done or working (Claude runs the queued slash
+//! command), with an empty input and no dialog.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -174,13 +175,13 @@ pub enum Action {
 }
 
 /// `status`: the pane's herdr status, `None` when it is gone or no longer
-/// Claude. `screen`: read only for an idle or done pane; `None` when it
-/// cannot be read. `held`: vegad stashed a draft there.
+/// Claude. `screen`: read only for an idle, done or working pane; `None` when
+/// it cannot be read. `held`: vegad stashed a draft there.
 pub fn decide(status: Option<&str>, held: bool, screen: impl FnOnce() -> Option<String>) -> Action {
     let Some(status) = status else {
         return Action::Drop;
     };
-    if !matches!(status, "idle" | "done") || held {
+    if !matches!(status, "idle" | "done" | "working") || held {
         return Action::Wait;
     }
     let Some(s) = screen() else {
@@ -251,7 +252,7 @@ mod tests {
     fn decide_guards_the_pane() {
         let empty = || Some("output\n────\n❯ \n────".to_string());
         assert_eq!(decide(None, false, empty), Action::Drop);
-        assert_eq!(decide(Some("working"), false, empty), Action::Wait);
+        assert_eq!(decide(Some("working"), false, empty), Action::Send);
         assert_eq!(decide(Some("blocked"), false, empty), Action::Wait);
         assert_eq!(decide(Some("unknown"), false, empty), Action::Wait);
         assert_eq!(decide(Some("idle"), true, empty), Action::Wait);

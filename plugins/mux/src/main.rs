@@ -1165,6 +1165,10 @@ fn spawn_env(
     let own = user.iter().any(|e| e.starts_with("BEADS_ACTOR="));
     let color = (kind == "codex" && !user.iter().any(|e| e.starts_with("FORCE_COLOR=")))
         .then(|| "FORCE_COLOR=1".to_string());
+    // Claude's dim prompt suggestion reads as a draft in plain hc screens and
+    // holds every pointer 60 s (vega-lhc.257); spawned agents go without it.
+    let suggest = (kind == "claude" && !user.iter().any(|e| e.starts_with(NO_SUGGESTION_KEY)))
+        .then(|| format!("{NO_SUGGESTION_KEY}false"));
     let socket = socket
         .filter(|_| !user.iter().any(|e| e.starts_with("SSH_AUTH_SOCK=")))
         .map(|socket| format!("SSH_AUTH_SOCK={socket}"));
@@ -1174,9 +1178,12 @@ fn spawn_env(
         .into_iter()
         .chain(socket)
         .chain(color)
+        .chain(suggest)
         .chain(user.iter().cloned())
         .collect()
 }
+
+const NO_SUGGESTION_KEY: &str = "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=";
 
 /// herdr's `--env` flags for `env`, one per variable.
 fn env_args(env: &[String]) -> Vec<&str> {
@@ -2459,6 +2466,16 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
             ]
         );
         assert_eq!(spawn_env("codex", None, None, &[]), ["FORCE_COLOR=1"]);
+        assert_eq!(
+            spawn_env("claude", None, None, &[]),
+            ["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false"]
+        );
+        let own = ["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true".to_string()];
+        assert_eq!(
+            spawn_env("claude", None, None, &own),
+            own,
+            "an explicit --env wins"
+        );
         for value in ["0", "2", "3", ""] {
             let user = [format!("FORCE_COLOR={value}")];
             assert_eq!(spawn_env("codex", None, None, &user), user);
@@ -2469,11 +2486,20 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
             spawn_env("codex", None, None, &user),
             ["FORCE_COLOR=1", "FORCE_COLOR_EXTRA=3"]
         );
-        for kind in ["claude", "pi", "agy"] {
+        for kind in ["pi", "agy"] {
             assert!(spawn_env(kind, None, None, &[]).is_empty());
             let user = ["FORCE_COLOR=3".into()];
             assert_eq!(spawn_env(kind, None, None, &user), user);
         }
+        // claude gets only its prompt-suggestion default, no colour default.
+        let user = ["FORCE_COLOR=3".into()];
+        assert_eq!(
+            spawn_env("claude", None, None, &user),
+            [
+                "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",
+                "FORCE_COLOR=3"
+            ]
+        );
     }
 
     fn sock_args(

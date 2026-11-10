@@ -682,7 +682,7 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
     );
     assert!(f
         .log()
-        .contains("claude pane(s) get /config theme=light when idle"));
+        .contains("claude pane(s) get /config theme=light now"));
     assert!(f.prompts("w1:p2").is_empty());
 }
 

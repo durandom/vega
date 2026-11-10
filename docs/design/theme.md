@@ -68,9 +68,10 @@ A legacy `system/system` pair migrates to the defaults; explicit `[tools.pi]` ov
 - **Live Claude switch.** Claude Code reads `.theme` at start only; typing `/config theme=<mode>` switches a
   running pane. After a real change (from the mode this vegad applied, or at start from the recorded state;
   never on a restart with the same mode, never on the first apply on a host), the relay loop collects this
-  host's Claude panes and types the line into each, once, when herdr reports it `idle` or `done`, the screen
-  shows no dialog (`vega_herdr::dialog`), the input is empty (`delivery::draft`) and vegad holds no stashed
-  draft there. A working pane waits for its next idle; a closed one is dropped; a newer change replaces the
+  host's Claude panes and types the line into each, once, at once when herdr reports it `idle`, `done` or
+  `working` (Claude runs a slash command typed during a turn; it is sent queued), the screen shows no dialog
+  (`vega_herdr::dialog`), the input is empty (`delivery::draft`) and vegad holds no stashed draft there. A
+  blocked or unknown pane waits; a closed one is dropped; a newer change replaces the
   pending one. `live_claude = false` turns it off. The relay loop types both pointers and theme lines, so they
   never interleave.
 - **Inbox-only hosts** (deimos) have no registry rights but one: `vega post auth-config ... --inbox-only deimos
