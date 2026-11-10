@@ -554,7 +554,7 @@ function projectFixture(h) {
   return project;
 }
 
-test('inactive filter retains UAC context and active descendants; hides idle, sub-agent done and unknown rows and empty groups',()=>{
+test('inactive filter retains UAC context and active descendants; retains done sub-agents; hides idle and unknown rows and empty groups',()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);
   const all=h.api.terminals();
   all.push(
@@ -573,10 +573,9 @@ test('inactive filter retains UAC context and active descendants; hides idle, su
   h.mod.init({},h.cx);
   elements(h.render()).find(n=>n.idValue==='ag-hide-inactive').handlers.on_click({},h.cx);
   const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
-  for(const id of [`uac-${project}`,'ag-puck/t1','sub-t2','sub-t6']) assert(ids.includes(id),id);
-  // A sub-agent's done shows as an idle ring (kidStatus): it hides like idle.
-  for(const id of ['sub-t8','ag-t3','ag-t4','sub-t5','sub-t7','sub-t9','uac-idle-project','ag-t10','sub-t11','space-scratch']) assert(!ids.includes(id),id);
-  assert(texts(tree).includes('7 idle hidden'),'counts sessions once, including unknown, excluding retained UAC and exited child');
+  for(const id of [`uac-${project}`,'ag-puck/t1','sub-t2','sub-t6','sub-t8']) assert(ids.includes(id),id);
+  for(const id of ['ag-t3','ag-t4','sub-t5','sub-t7','sub-t9','uac-idle-project','ag-t10','sub-t11','space-scratch']) assert(!ids.includes(id),id);
+  assert(texts(tree).includes('6 idle hidden'),'counts sessions once, including unknown, excluding retained UAC and exited child');
   assert.equal(h.state.get('vega.hide-inactive'),true);
   assert.equal(h.storage.get('hide-inactive'),'true');
   assert(h.calls.some(c=>c[0]==='stop'),'toggle stops row propagation');
@@ -615,11 +614,63 @@ test('inactive filter combines with label and machine views and hides fully idle
     assert(!ids.includes('space-scratch'),'view still applies to active scratch agent');
     assert(texts(tree).includes('1 idle hidden'),'count excludes sessions outside the view');
   }
+  agents[1].status='done';
+  assert(elements(h.render()).some(n=>n.idValue==='sub-t2'),'done sentinel remains visible until read');
   agents[1].status='idle';
   const tree=h.render();assert(!elements(tree).some(n=>n.idValue===`uac-${project}`));
   assert(texts(tree).includes('3 idle hidden'));
   h.state.set('vega.hide-inactive',false);
   assert(elements(h.render()).some(n=>n.idValue===`uac-${project}`));
+});
+
+test('project pin icon toggles persisted argv, stops header events, and shows CLI errors',async()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);await h.flush();
+  let pinned=false;
+  h.api.exec=async(bin,args)=>{
+    h.calls.push(['exec',bin,args]);
+    if(args.includes('--pin')) pinned=true;
+    if(args.includes('--unpin')) pinned=false;
+    return {code:0,stdout:JSON.stringify({projects:{[project]:{pinned,labels:[]}},views:{}})};
+  };
+  for(const flag of ['--pin','--unpin']) {
+    const pin=elements(h.render()).find(n=>n.idValue===`pin-uac-${project}`);
+    const stops=h.calls.filter(c=>c[0]==='stop').length;
+    pin.handlers['on_mouse_down:left']({},h.cx);
+    await pin.handlers.on_click({},h.cx);
+    assert.equal(h.calls.filter(c=>c[0]==='stop').length,stops+2);
+    assert.equal(h.mod.dragFrom,undefined,'pin does not start header drag');
+    const call=h.calls.filter(c=>c[0]==='exec'&&c[2].includes(flag)).at(-1);
+    assert.equal(call[1],'vega');
+    assert.deepEqual(Array.from(call[2]),['project','config',project,flag,'--json']);
+    assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='exec').at(-1)[2]),['project','config','--json']);
+    assert.equal(h.mod.preferences.projects[project].pinned,flag==='--pin');
+  }
+  h.api.exec=async()=>({code:1,stdout:'pin denied'});
+  await elements(h.render()).find(n=>n.idValue===`pin-uac-${project}`).handlers.on_click({},h.cx);
+  assert(texts(h.render()).some(s=>s.includes('pin denied')));
+  assert.equal(h.mod.preferences.projects[project].pinned,false);
+});
+
+test('pinned idle project retains its UAC only within the current view and excludes it from hidden count',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
+  h.mod.preferences={projects:{[project]:{pinned:true,labels:['work']}},views:{Remote:{labels:[],machines:['puck']},Local:{labels:[],machines:['local']}}};
+  h.state.set('vega.hide-inactive',true);
+  for(const view of ['all','label:work','Remote']) {
+    h.state.set('vega.view',view);
+    const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+    assert(ids.includes(`uac-${project}`));assert(ids.includes('ag-puck/t1'));
+    assert(!ids.includes('sub-t2'),'idle sub-agent still hides');
+    assert(!ids.includes('ag-t3'),'other idle project agent still hides');
+    assert(texts(tree).includes(view==='all'?'3 idle hidden':'2 idle hidden'));
+  }
+  for(const view of ['label:other','Local']) {
+    h.state.set('vega.view',view);
+    const tree=h.render();
+    assert(!elements(tree).some(n=>n.idValue===`uac-${project}`));
+    assert(texts(tree).includes(view==='Local'?'1 idle hidden':'0 idle hidden'));
+  }
+  h.state.set('vega.view','all');h.api.agents=()=>[];
+  assert(elements(h.render()).some(n=>n.idValue==='ag-puck/t1'),'pin retains a UAC without status');
 });
 
 test('unknown UAC without a status entry keeps active descendants; narrow rail can focus a terminal-only child and disable filtering',()=>{

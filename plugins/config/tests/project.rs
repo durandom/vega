@@ -19,7 +19,7 @@ fn project_cli_uses_private_home_and_xdg_config_and_reports_failures() {
         let absent = call(&["config", id, "--json"], xdg);
         assert_eq!(
             serde_json::from_slice::<Value>(&absent.stdout).unwrap()["projects"][id],
-            json!({"name":"","labels":[]})
+            json!({"name":"","labels":[],"pinned":false})
         );
         let path = if xdg {
             config.clone()
@@ -53,7 +53,7 @@ fn project_cli_uses_private_home_and_xdg_config_and_reports_failures() {
         let out: Value = serde_json::from_slice(&result.stdout).unwrap();
         assert_eq!(
             out["projects"][id],
-            json!({"name":"My project","labels":["work"]})
+            json!({"name":"My project","labels":["work"],"pinned":false})
         );
         let path = if xdg {
             config.clone()

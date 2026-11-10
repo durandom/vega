@@ -173,6 +173,8 @@ const MOD_FILES: [&str; 2] = ["main.js", "mod.json"];
 fn mod_files(name: &str) -> &[&str] {
     if name == "vega" {
         &["main.js", "mod.json", "lock.svg"]
+    } else if name == "vega-sidebar" {
+        &["main.js", "mod.json", "pin.svg"]
     } else {
         &MOD_FILES
     }

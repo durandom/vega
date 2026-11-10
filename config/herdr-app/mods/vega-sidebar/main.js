@@ -70,10 +70,10 @@ function title(tab, l) {
   return (tab.name === prog || !tab.named) && telling ? live : tab.name;
 }
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
-// blocked. It's never done: it reports to its parent, and the parent's done is the news.
+// blocked. Done stays unread completion news (blue), just like the tab bar.
 const kidStatus = (k, listed) => {
   const s = listed.get(k.address) ?? k.status;
-  return s === "error" ? "blocked" : s === "done" ? "idle" : s;
+  return s === "error" ? "blocked" : s;
 };
 // Later stages add tab descriptors and renderers here without changing the shell.
 const PROJECT_TABS = [{ id: "overview", label: "Overview", render: "overviewTab" }, { id: "board", label: "Board", render: "boardTab" },
@@ -275,6 +275,18 @@ export default class Agents extends View {
       this.configError = null;
     } catch (e) { this.configError = String(e); }
     finally { this.readingPreferences = false; cx.notify(); }
+  }
+
+  async toggleProjectPin(project, cx) {
+    if (this.saving) return;
+    this.saving = true; this.configError = null; cx.notify();
+    try {
+      const pinned = this.preferences?.projects?.[project]?.pinned;
+      const r = await exec("vega", ["project", "config", project, pinned ? "--unpin" : "--pin", "--json"]);
+      if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Project pin failed");
+      await this.refreshPreferences(cx);
+    } catch (e) { this.configError = String(e); }
+    finally { this.saving = false; cx.notify(); }
   }
 
   // One draggable window per project (key: project ID) with its tabs. No terminal block:
@@ -1220,6 +1232,11 @@ export default class Agents extends View {
               : totals.waiting ? (cx.stop_propagation(), run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address }))
               : this.openProject(project, cx, "notes")));
         })
+        .child(div().id(`pin-${gid}`).flex_none().text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim)
+          .cursor_pointer().tooltip(this.preferences?.projects?.[project]?.pinned ? "Unpin project" : "Pin project in Active view")
+          .child(svg("mods/vega-sidebar/pin.svg").size(12).text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); return this.toggleProjectPin(project, cx); }))
         .child(div().id(`gear-${gid}`).flex_none().text_color(t.dim).cursor_pointer().tooltip("Project window")
           .child(svg("mods/workspace-chrome/settings.svg").size(12).text_color(t.dim))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -1366,13 +1383,14 @@ export default class Agents extends View {
     // Count only this view's sessions, before folds; UACs may remain as context.
     const kids = new Set(list.flatMap(a => this.tree(all, a.address).map(s => s.t.address)));
     const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)]).map(a => [a.address, a]));
-    // The status the row shows: a sub-agent's done reads as idle (kidStatus), so it hides too.
+    // Judge the status the row shows, including unread done sub-agents.
     const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : (this.listed.get(a.address) ?? a.status);
     this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
       a.address === shown || ["working", "blocked", "done", "error"].includes(rowStatus(a))
     ).map(a => a.address)) : null;
     if (filtering) for (const uac of membership.uacs.values()) {
-      if (this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
+      if (this.preferences?.projects?.[uac.labels?.["vega.project-id"]]?.pinned
+        || this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
     }
     const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
     list = list.filter(a => this.hasVisibleTree(all, a));

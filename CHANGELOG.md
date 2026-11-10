@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 175 · 2026-11-10
+
+- feature: sidebar sub-agents now show unread done as a blue dot like tabs and remain in Active
+  until read. Pin a project with its header needle to keep its UAC visible even when idle;
+  pins respect label/machine views and persist via `vega project config <id> --pin|--unpin`.
+  Apply the updated vega-sidebar mod (`vega config apply herdr-app`).
+
 ## 174 · 2026-11-10
 
 - optional: the sidebar's Active filter now also hides finished sentinels: a sub-agent's done

@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 27] = [
+pub const DEFAULTS: [(&str, &str); 28] = [
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
     default!("instructions/reasoning.md"),
@@ -36,6 +36,7 @@ pub const DEFAULTS: [(&str, &str); 27] = [
     default!("herdr-app/mods/vega/lock.svg"),
     default!("herdr-app/mods/vega-sidebar/main.js"),
     default!("herdr-app/mods/vega-sidebar/mod.json"),
+    default!("herdr-app/mods/vega-sidebar/pin.svg"),
     default!("herdr-app/mods/vega-inbox/main.js"),
     default!("herdr-app/mods/vega-inbox/mod.json"),
     default!("herdr-app/layouts/vega.json"),

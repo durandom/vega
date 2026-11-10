@@ -118,6 +118,7 @@ syncing the file is a future option if the app runs on several hosts.
 [projects."github.com/team/repo"]
 name = "My project" # empty means use the UAC's vega.project label
 labels = ["work"]
+pinned = true # keep the UAC visible with the Active filter
 
 [views.Work]
 labels = ["work"]
@@ -125,12 +126,12 @@ machines = ["puck"]
 ```
 
 `vega project config <project-id> [--name <name>] [--label <label>]...
-[--unlabel <label>]... [--json]` reads or edits one entry. Keys are the full normalized
+[--unlabel <label>]... [--pin|--unpin] [--json]` reads or edits one entry. Keys are the full normalized
 remote from `vega.project-id`, never a terminal ID or short repository name.
 Label additions/removals are idempotent; removal wins if both are requested.
 `vega project config --json` returns `{projects: {...}, views: {...}}` in one exec.
-An individual read returns `{projects: {<id>: {name, labels}}}`; absent entries have
-empty defaults, and a read never creates the file.
+An individual read returns `{projects: {<id>: {name, labels, pinned}}}`; absent entries have
+empty defaults with pinned false, and a read never creates the file.
 
 Right-clicking a project header or its UAC row opens a popup with a descriptor-driven
 tab bar. Stage 1 exposes only Config (display name, comma-separated labels, Save).
@@ -323,18 +324,27 @@ provider credit units must not be rendered as USD (vega-lweq).
 ## Inactive sidebar sessions (vega-0h4c.63)
 
 The **Active** toggle beside the view selector hides idle (grey ring) and unknown/no-status
-sessions. Working, blocked and done sessions stay: done is unread completion news. A sub-agent's
-done shows as an idle ring (`kidStatus`: it reports to its parent, whose done is the news), so it
-hides like idle; the filter judges the status the row shows. The
+sessions. Working, blocked and done sessions stay: done is unread completion news, including
+sub-agents. `kidStatus` preserves done as a blue dot like the tabs and maps error to blocked.
+Done sub-agents stay visible until the Slayer looks at them and they become idle. The
 focused terminal's agent also stays, even when idle. This filter applies within the selected
 label/machine view, and does not change that view.
 
 A UAC stays when it is active itself or has any active live descendant. Only active descendants
 are shown beneath it; active grandchildren are promoted past hidden idle parents, with tree
 connectors rebuilt for the visible rows. Spaces without a UAC use the same per-agent rule.
-Project and space groups with no remaining sessions disappear. Worktree placeholder shells
-and exited descendants remain excluded. Folds still control expansion; folded rows do not
+Project and space groups with no remaining sessions disappear unless the project is pinned.
+Worktree placeholder shells and exited descendants remain excluded. Folds still control expansion; folded rows do not
 increase the inactive count.
+
+Each project header has a small needle pin: dim when unpinned, theme accent when pinned.
+Its click toggles the pin and stops propagation, as does its left mouse-down, so it does not
+fold or drag the header. Pins live in vega project preferences (`projects.toml`, `pinned: true`),
+not localStorage. The sidebar reads `vega project config --json`, writes
+`vega project config <id> --pin|--unpin --json`, then refreshes; failures use the config error line.
+With Active on, a pinned project's group and UAC remain even if idle or without status; idle
+sub-agents and other idle agents still hide. Pins respect the current label/machine view and
+do not retain projects outside it. Retained pinned UACs do not count in `N idle hidden`.
 
 The toggle defaults off and uses shared state `vega.hide-inactive`, mirrored into each sidebar
 copy's `localStorage` key `hide-inactive` as `true`/`false`, with that copy as the restart fallback,

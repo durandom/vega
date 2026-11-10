@@ -44,6 +44,12 @@ enum Cmd {
         /// Remove a label; repeatable and idempotent
         #[arg(long, requires = "id")]
         unlabel: Vec<String>,
+        /// Keep this project visible in the sidebar Active filter
+        #[arg(long, requires = "id", conflicts_with = "unpin")]
+        pin: bool,
+        /// Remove the project pin; idempotent
+        #[arg(long, requires = "id")]
+        unpin: bool,
         #[arg(long)]
         json: bool,
     },
@@ -165,7 +171,11 @@ fn snapshot(doc: &DocumentMut) -> Result<Value, String> {
                         None => "",
                         Some(v) => v.as_str().ok_or("name: expected a string")?,
                     };
-                    json!({"name": name, "labels": labels})
+                    let pinned = match entry.get("pinned") {
+                        None => false,
+                        Some(v) => v.as_bool().ok_or("pinned: expected a boolean")?,
+                    };
+                    json!({"name": name, "labels": labels, "pinned": pinned})
                 } else {
                     let mode = match entry.get("match") {
                         None => "all",
@@ -198,14 +208,26 @@ fn array(values: &[String]) -> Item {
 
 fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
     let mut match_mode: Option<String> = None;
+    let mut pinned = None;
     let (kind, id, name, labels, unlabels, machines, delete, json_output) = match cmd {
         Some(Cmd::Config {
             id,
             name,
             label,
             unlabel,
+            pin,
+            unpin,
             json,
-        }) => ("projects", id, name, label, unlabel, vec![], false, json),
+        }) => {
+            pinned = if pin {
+                Some(true)
+            } else if unpin {
+                Some(false)
+            } else {
+                None
+            };
+            ("projects", id, name, label, unlabel, vec![], false, json)
+        }
         Some(Cmd::View {
             id,
             label,
@@ -233,7 +255,8 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
     {
         return Err("labels and machines must be nonempty".into());
     }
-    let mutate = name.is_some()
+    let mutate = pinned.is_some()
+        || name.is_some()
         || !labels.is_empty()
         || !unlabels.is_empty()
         || !machines.is_empty()
@@ -278,6 +301,9 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
             if doc[kind].get(id).is_none() {
                 doc[kind][id] = Item::Table(Table::new());
             }
+            if let Some(pinned) = pinned {
+                doc[kind][id]["pinned"] = value(pinned);
+            }
             if let Some(name) = name {
                 doc[kind][id]["name"] = value(name.trim());
             }
@@ -311,7 +337,7 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
     if let Some(id) = id {
         let row = data[kind].get(&id).cloned().unwrap_or_else(|| {
             if kind == "projects" {
-                json!({"name":"","labels":[]})
+                json!({"name":"","labels":[],"pinned":false})
             } else {
                 json!({"labels":[],"machines":[],"match":"all"})
             }
@@ -342,6 +368,8 @@ mod tests {
             name: name.map(String::from),
             label: labels.iter().map(|s| s.to_string()).collect(),
             unlabel: unlabels.iter().map(|s| s.to_string()).collect(),
+            pin: false,
+            unpin: false,
             json: true,
         })
     }
@@ -376,7 +404,7 @@ mod tests {
         let data = execute(&path, None).unwrap().0;
         assert_eq!(
             data["projects"][id],
-            json!({"name":"","labels":["private"]})
+            json!({"name":"","labels":["private"],"pinned":false})
         );
         assert_eq!(data["projects"]["github.com/other/a"]["name"], "Other");
         assert_eq!(data["views"]["Work"]["machines"], json!(["puck"]));
@@ -389,6 +417,41 @@ mod tests {
         assert_eq!(saved, fs::read_to_string(&path).unwrap());
     }
     #[test]
+    fn pin_flags_round_trip_are_idempotent_and_preserve_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        fs::write(&path, "# keep\n[projects.a]\nname = 'A'\nlabels = ['work']\nfuture = 42\n[projects.b]\nname = 'B'\n[views.Work]\nlabels = ['work']\n").unwrap();
+        let original = execute(&path, None).unwrap().0;
+        for flag in ["--pin", "--unpin"] {
+            let expected = flag == "--pin";
+            for _ in 0..2 {
+                let cli =
+                    Cli::try_parse_from(["vega-project", "config", "a", flag, "--json"]).unwrap();
+                let (data, json) = execute(&path, cli.cmd).unwrap();
+                assert!(json);
+                assert_eq!(data["projects"]["a"]["pinned"], expected);
+            }
+            let saved = fs::read_to_string(&path).unwrap();
+            let cli = Cli::try_parse_from(["vega-project", "config", "a", flag]).unwrap();
+            execute(&path, cli.cmd).unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+            assert!(saved.contains("future = 42"));
+            assert!(saved.starts_with("# keep"));
+            let data = execute(&path, None).unwrap().0;
+            assert_eq!(data["projects"]["a"]["name"], "A");
+            assert_eq!(data["projects"]["a"]["labels"], json!(["work"]));
+            assert_eq!(data["projects"]["b"], original["projects"]["b"]);
+            assert_eq!(data["views"], original["views"]);
+        }
+        for args in [
+            vec!["vega-project", "config", "--pin"],
+            vec!["vega-project", "config", "--unpin"],
+            vec!["vega-project", "config", "a", "--pin", "--unpin"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+    #[test]
     fn malformed_config_is_never_overwritten_and_usage_is_strict() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("projects.toml");
@@ -397,6 +460,7 @@ mod tests {
             "projects = 2",
             "[projects.a]\nlabels = [3]",
             "[views.a]\nmachines = true",
+            "[projects.a]\npinned = 3",
         ] {
             fs::write(&p, text).unwrap();
             assert!(execute(&p, config("a", Some("x"), &[], &[])).is_err());

@@ -962,6 +962,10 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
     }
+    assert_eq!(
+        fs::read_to_string(home.join("mods/vega-sidebar/pin.svg")).unwrap(),
+        sources::default("herdr-app/mods/vega-sidebar/pin.svg").unwrap()
+    );
     fs::write(home.join("offline"), "").unwrap();
     assert!(matches!(
         apply(&ctx, Unit::HerdrAppLayouts, &managed),
