@@ -321,6 +321,27 @@ A thin binding window on spendable credits keeps its quota percentages and sets
 `on_credits: true`, `warns: false`. Missing/stale credit data stays unknown;
 provider credit units must not be rendered as USD (vega-lweq).
 
+## Inactive sidebar sessions (vega-0h4c.63)
+
+The **Active** toggle beside the view selector hides idle (grey ring) and unknown/no-status
+sessions. Working, blocked and done sessions stay: done is unread completion news. The
+focused terminal's agent also stays, even when idle. This filter applies within the selected
+label/machine view, and does not change that view.
+
+A UAC stays when it is active itself or has any active live descendant. Only active descendants
+are shown beneath it; active grandchildren are promoted past hidden idle parents, with tree
+connectors rebuilt for the visible rows. Spaces without a UAC use the same per-agent rule.
+Project and space groups with no remaining sessions disappear. Worktree placeholder shells
+and exited descendants remain excluded. Folds still control expansion; folded rows do not
+increase the inactive count.
+
+The toggle defaults off and uses shared state `vega.hide-inactive`, mirrored into each sidebar
+copy's `localStorage` key `hide-inactive` as `true`/`false`, with that copy as the restart fallback,
+like `vega.view`/`active-view`. A dim `N idle hidden` line counts sessions removed by activity
+within the current view, including unknown sessions, excluding UACs retained as context and
+the focused agent. Clicking the line disables the activity filter. It remains available in the
+narrow rail too, where active descendants remain navigable.
+
 ## Project window, status line and sidebar badge (vega-0h4c.50, built live)
 
 Each place has one job: the sidebar navigates, the status line shows the focused project's

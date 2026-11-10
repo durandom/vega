@@ -554,6 +554,89 @@ function projectFixture(h) {
   return project;
 }
 
+test('inactive filter retains UAC context, active descendants and unread done; hides idle and unknown rows and empty groups',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  const all=h.api.terminals();
+  all.push(
+    {address:'t5',state:'live',parent:'puck/t1',status:'idle'},
+    {address:'t6',state:'live',parent:'t5',status:'blocked'},
+    {address:'t7',state:'live',parent:'puck/t1'},
+    {address:'t8',state:'live',parent:'puck/t1',status:'done'},
+    {address:'t9',state:'exited',parent:'puck/t1',status:'working'},
+    {address:'t10',state:'live',labels:{'vega.role':'uac','vega.project-id':'idle-project'}},
+    {address:'t11',state:'live',parent:'t10',status:'idle'},
+  );
+  h.api.terminals=()=>all;
+  const agents=h.api.agents();agents[1].status='working';
+  agents.push({address:'t10',status:'idle',program:{}});
+  h.api.agents=()=>agents;
+  h.mod.init({},h.cx);
+  elements(h.render()).find(n=>n.idValue==='ag-hide-inactive').handlers.on_click({},h.cx);
+  const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+  for(const id of [`uac-${project}`,'ag-puck/t1','sub-t2','sub-t6','sub-t8']) assert(ids.includes(id),id);
+  for(const id of ['ag-t3','ag-t4','sub-t5','sub-t7','sub-t9','uac-idle-project','ag-t10','sub-t11','space-scratch']) assert(!ids.includes(id),id);
+  assert(texts(tree).includes('6 idle hidden'),'counts sessions once, including unknown, excluding retained UAC and exited child');
+  assert.equal(h.state.get('vega.hide-inactive'),true);
+  assert.equal(h.storage.get('hide-inactive'),'true');
+  assert(h.calls.some(c=>c[0]==='stop'),'toggle stops row propagation');
+  assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='order').at(-1)[1]),['puck/t1','t2']);
+});
+
+test('focused idle terminal and its UAC stay visible; activity toggle persists true and false across copies and restarts',()=>{
+  const h=load('vega-sidebar');projectFixture(h);h.mod.init({},h.cx);
+  h.api.focused=()=>({terminal:'t2'});
+  h.state.set('vega.hide-inactive',true);
+  let tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+  assert(ids.includes('ag-puck/t1'));assert(ids.includes('sub-t2'));assert(!ids.includes('ag-t3'));
+  assert(texts(tree).includes('2 idle hidden'));
+  assert.equal(h.storage.get('hide-inactive'),'true','copies shared state into this mod storage');
+  h.state.delete('vega.hide-inactive');
+  tree=h.render();assert(texts(tree).includes('2 idle hidden'),'restart uses localStorage fallback');
+  elements(tree).find(n=>n.idValue==='ag-idle-hidden').handlers.on_click({},h.cx);
+  assert.equal(h.state.get('vega.hide-inactive'),false);
+  tree=h.render();assert(!elements(tree).some(n=>n.idValue==='ag-idle-hidden'));
+  assert(elements(tree).some(n=>n.idValue==='space-scratch'));
+  assert.equal(h.storage.get('hide-inactive'),'false');
+  h.storage.set('hide-inactive','true');h.state.set('vega.hide-inactive',false);
+  h.render();assert.equal(h.storage.get('hide-inactive'),'false','shared false overrides an older true copy');
+  h.state.delete('vega.hide-inactive');assert(!texts(h.render()).some(s=>s.endsWith('idle hidden')));
+});
+
+test('inactive filter combines with label and machine views and hides fully idle projects',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
+  const agents=h.api.agents();agents[1].status='done';agents[3].status='working';h.api.agents=()=>agents;
+  h.mod.preferences={projects:{[project]:{labels:['work']}},views:{Remote:{labels:[],machines:['puck']}}};
+  h.state.set('vega.hide-inactive',true);
+  for(const view of ['label:work','Remote']) {
+    h.state.set('vega.view',view);
+    const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+    assert(ids.includes(`uac-${project}`));assert(ids.includes('sub-t2'),'done retained');
+    assert(!ids.includes('space-scratch'),'view still applies to active scratch agent');
+    assert(texts(tree).includes('1 idle hidden'),'count excludes sessions outside the view');
+  }
+  agents[1].status='idle';
+  const tree=h.render();assert(!elements(tree).some(n=>n.idValue===`uac-${project}`));
+  assert(texts(tree).includes('3 idle hidden'));
+  h.state.set('vega.hide-inactive',false);
+  assert(elements(h.render()).some(n=>n.idValue===`uac-${project}`));
+});
+
+test('unknown UAC without a status entry keeps active descendants; narrow rail can focus a terminal-only child and disable filtering',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  h.api.agents=()=>[];
+  const all=h.api.terminals();all[1].status='working';h.api.terminals=()=>all;
+  h.state.set('vega.hide-inactive',true);h.mod.init({},h.cx);
+  let ids=elements(h.render()).map(n=>n.idValue);
+  assert(ids.includes(`uac-${project}`));assert(ids.includes('ag-puck/t1'));assert(ids.includes('sub-t2'));
+  h.api.layout=()=>({id:'sidebar',size:{px:76}});
+  const tree=h.render();
+  const child=elements(tree).find(n=>n.idValue==='ag-t2');assert(child);
+  child.handlers.on_click({},h.cx);
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='terminal.peek'&&c[2].terminal==='t2'));
+  elements(tree).find(n=>n.idValue==='ag-idle-hidden').handlers.on_click({},h.cx);
+  assert.equal(h.state.get('vega.hide-inactive'),false);
+});
+
 test('project Config overlay loads once, saves argv including label removal, and keeps failures editable',async()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);
   h.mod.init({},h.cx);

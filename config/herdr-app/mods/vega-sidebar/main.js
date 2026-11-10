@@ -127,6 +127,9 @@ const dismissArgs = (row, pane) => ["mux", "dismiss", row?.machine ? pane.replac
 const VIEW_KEY = "vega.view";
 const activeView = () => shared(VIEW_KEY) ?? localStorage.getItem("active-view") ?? "all";
 const setActiveView = id => { setShared(VIEW_KEY, id); localStorage.setItem("active-view", id); };
+const INACTIVE_KEY = "vega.hide-inactive";
+const hideInactive = () => shared(INACTIVE_KEY) ?? localStorage.getItem("hide-inactive") === "true";
+const setHideInactive = on => { setShared(INACTIVE_KEY, on); localStorage.setItem("hide-inactive", String(on)); };
 const machineOf = address => address?.includes("/") ? address.split("/")[0] : "local";
 
 function duration(ms) {
@@ -994,13 +997,22 @@ export default class Agents extends View {
   }
 
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
-  tree(all, addr, lead = []) {
-    const kids = all.filter((k) => k.parent === addr && k.state === "live" && !k.labels?.["vega.worktree-owner"]);
+  tree(all, addr, lead = [], visible = null, seen = new Set()) {
+    if (seen.has(addr)) return [];
+    seen = new Set([...seen, addr]);
+    const children = parent => all.filter(k => k.parent === parent && k.state === "live"
+      && !seen.has(k.address) && !k.labels?.["vega.worktree-owner"]);
+    // Promote active grandchildren past hidden idle parents, preserving tree connectors.
+    const frontier = (parent, path) => children(parent).flatMap(k => {
+      if (path.has(k.address)) return [];
+      return !visible || visible.has(k.address) ? [k] : frontier(k.address, new Set([...path, k.address]));
+    });
+    const kids = frontier(addr, seen);
     return kids.flatMap((k, i) => {
       const last = i === kids.length - 1;
       return [
         { t: k, lines: [...lead, last ? "└" : "├"] },
-        ...this.tree(all, k.address, [...lead, last ? "" : "│"]),
+        ...this.tree(all, k.address, [...lead, last ? "" : "│"], visible, seen),
       ];
     });
   }
@@ -1104,7 +1116,8 @@ export default class Agents extends View {
     const { live, labelsOf, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
     const projects = this.orderedProjects(uacs).filter(p => {
       const uac = uacs.get(p);
-      return this.matchesView(uac.labels?.["vega.project-id"], machineOf(uac.address));
+      return this.matchesView(uac.labels?.["vega.project-id"], machineOf(uac.address))
+        && (!this.visibleSessions || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a)));
     });
     const C = this.colors();
     const kindOf = (k) => {
@@ -1133,7 +1146,7 @@ export default class Agents extends View {
         .when(on, el => el.bg(t.selected))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
-        .on_click(() => depth ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
+        .on_click(() => depth || !a.pane ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
         .when(uac, el => el.on_mouse_down("right", (_e, cx) => this.openProject(l["vega.project-id"], cx)))
         .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
@@ -1149,8 +1162,10 @@ export default class Agents extends View {
         .child(host(a.address));
     };
     const withTree = (a) => {
-      const subs = this.tree(all, a.address);
-      return [agentRow(a, subs, 0), ...(this.folded.has(a.address) ? [] : subs.map(s => agentRow(s.t, [], 1, s.lines)))];
+      const subs = this.tree(all, a.address, [], this.visibleSessions);
+      const visible = !this.visibleSessions || this.visibleSessions.has(a.address);
+      return [...(visible ? [agentRow(a, subs, 0)] : []),
+        ...(visible && this.folded.has(a.address) ? [] : subs.map(s => agentRow(s.t, [], 1, s.lines)))];
     };
     const badge = (key, glyph, n, action, gid) => div().id(`total-${gid}-${key}`).flex_none().text_size(11).font_semibold().text_color(C[key])
       .tooltip(`Project ${key}`).child(`${glyph} ${n}`)
@@ -1213,7 +1228,8 @@ export default class Agents extends View {
       if (open) for (const a of members) out.push(...withTree(a));
     }
     const all_spaces = spaces();
-    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && this.matchesView(null, s.machine || "local"));
+    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && this.matchesView(null, s.machine || "local")
+      && (!this.visibleSessions || list.some(a => a.space === s.id && !projectOfAgent(a) && this.hasVisibleTree(all, a))));
     if (rest.length) {
       out.push(div().px(6).pt(12).pb(2).text_size(11).font_medium().text_color(t.dim).child("Spaces"));
       for (const sp of rest) {
@@ -1233,6 +1249,11 @@ export default class Agents extends View {
     const known = new Set(all_spaces.map(s => s.id));
     for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a) && this.matchesView(null, machineOf(a.address)))) out.push(...withTree(a));
     return out;
+  }
+
+  hasVisibleTree(all, a) {
+    return !this.visibleSessions || this.visibleSessions.has(a.address)
+      || this.tree(all, a.address).some(s => this.visibleSessions.has(s.t.address));
   }
 
   // The local machine's $host label: the one vegad wrote on a local terminal.
@@ -1313,8 +1334,16 @@ export default class Agents extends View {
     // A worktree's placeholder shell holds the checkout for its sentinel; the TUI never listed it.
     const placeholder = (address) => Boolean(this.vegaTerminals.get(address)?.labels?.["vega.worktree-owner"]);
     list = list.filter(a => !placeholder(a.address));
+    const filtering = hideInactive();
+    // A UAC without an agent-status entry still provides context for its live children.
+    if (filtering) {
+      const known = new Set(list.map(a => a.address));
+      list = [...list, ...all.filter(a => a.state === "live" && a.labels?.["vega.role"] === "uac"
+        && !known.has(a.address) && !placeholder(a.address)).map(a => ({ ...a, space: this.spaceOfTerminal(a) }))];
+    }
     this.migratePins(all);
-    const shown = focused()?.agent;
+    const focus = focused();
+    const shown = focus?.terminal ?? focus?.agent;
     const now = Date.now();
     this.track(list, now);
     // A listed child belongs to its visible ancestor's tree, even in another space.
@@ -1333,6 +1362,17 @@ export default class Agents extends View {
       const project = membership.projectOfAgent(a), uac = membership.uacs.get(project);
       return this.matchesView(uac?.labels?.["vega.project-id"], uac ? machineOf(uac.address) : machineOf(a.address));
     });
+    if (shared(INACTIVE_KEY) != null) localStorage.setItem("hide-inactive", String(filtering));
+    // Count only this view's sessions, before folds; UACs may remain as context.
+    const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)]).map(a => [a.address, a]));
+    this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
+      a.address === shown || ["working", "blocked", "done", "error"].includes(this.listed.get(a.address) ?? a.status)
+    ).map(a => a.address)) : null;
+    if (filtering) for (const uac of membership.uacs.values()) {
+      if (this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
+    }
+    const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
+    list = list.filter(a => this.hasVisibleTree(all, a));
     const projectOrder = this.orderedProjects(membership.uacs);
     list.sort((a, b) => {
       const pa = membership.projectOfAgent(a), pb = membership.projectOfAgent(b);
@@ -1340,7 +1380,8 @@ export default class Agents extends View {
       return (ia < 0 ? Infinity : ia) - (ib < 0 ? Infinity : ib) ||
         (pa && pa === pb ? (membership.labelsOf(b.address)["vega.role"] === "uac") - (membership.labelsOf(a.address)["vega.role"] === "uac") : 0);
     });
-    setAgentOrder(list.flatMap(a => [a.address, ...this.tree(all, a.address).filter(s => listed.has(s.t.address)).map(s => s.t.address)]));
+    setAgentOrder(list.flatMap(a => [a.address, ...this.tree(all, a.address).map(s => s.t.address)])
+      .filter(a => listed.has(a) && (!this.visibleSessions || this.visibleSessions.has(a))));
 
     // A row reads "space \u00b7 detail": the detail is a tab someone named or the
     // agent's own title, never an automatic tab number unless two rows would
@@ -1358,16 +1399,19 @@ export default class Agents extends View {
     }
 
     const railRow = (a, i) => h_flex().id(`ag-${a.address}`).h(26).px(8).flex_none().items_center().gap(4)
-      .hover(el => el.bg(t.hover)).on_click(() => run("pane.focus", { pane: a.pane }))
+      .hover(el => el.bg(t.hover)).on_click(() => a.pane ? run("pane.focus", { pane: a.pane }) : this.peek(a.address))
       .when(this.vegaTerminals.get(a.address)?.labels?.["vega.role"] === "uac", el =>
         el.on_mouse_down("right", (_e, cx) => this.openProject(this.vegaTerminals.get(a.address).labels["vega.project-id"], cx)))
       .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
-      .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
+      .child(h_flex().w(14).flex_none().items_center().justify_center()
+        .child(this.status(t, { status: this.listed.get(a.address) ?? a.status }, true)));
 
     this.rowLabel = a => detail.get(a.address) ?? label(a);
     this.activeView = activeView();
     if (shared(VIEW_KEY) && localStorage.getItem("active-view") !== this.activeView) localStorage.setItem("active-view", this.activeView);
-    const rows = collapsed ? list.map(railRow) : this.projectTree(t, all, list, shown, now);
+    const rail = filtering ? list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)])
+      .filter(a => this.visibleSessions.has(a.address)) : list;
+    const rows = collapsed ? rail.map(railRow) : this.projectTree(t, all, list, shown, now);
 
     return v_flex()
       .size_full()
@@ -1387,7 +1431,11 @@ export default class Agents extends View {
             .items_center()
             .justify_between()
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("VEGA"))
-            .child(
+            .child(h_flex().gap(8).items_center()
+              .child(pill(t, "ag-hide-inactive", "Active", { on: filtering,
+                tooltip: filtering ? "Show inactive sessions" : "Hide inactive sessions",
+                action: () => setHideInactive(!filtering) }))
+              .child(
               div()
                 .id("ag-views")
                 .text_size(11)
@@ -1397,11 +1445,16 @@ export default class Agents extends View {
                 .tooltip("Filter by labels and machines")
                 .child(`${this.activeView.startsWith(LABEL_VIEW) ? `#${this.activeView.slice(LABEL_VIEW.length)}`
                   : this.preferences?.views?.[this.activeView] ? this.activeView : "All"} ▾`),
-            ),
+            )),
         ),
       )
+      .when(filtering, el => el.child(div().id("ag-idle-hidden").px(collapsed ? 4 : 16).text_size(11).text_color(t.dim)
+        .cursor_pointer().tooltip("Show inactive sessions")
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); setHideInactive(false); cx.notify(); })
+        .child(`${hiddenCount} idle hidden`)))
       .when(Boolean(this.configError) && !collapsed, el => el.child(div().px(12).text_size(11).text_color(t.blocked).child(this.configError)))
-      .when(list.length === 0 && !collapsed, (el) =>
+      .when(list.length === 0 && !collapsed && !filtering, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
       .child(v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).overflow_y_scrollbar().mode("always").children(rows))

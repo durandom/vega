@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 172 · 2026-11-10
+
+- feature: the herdr-app sidebar has an Active toggle beside the view selector. It hides idle
+  and unknown sessions and empty groups, keeps working, blocked, done and focused agents,
+  and keeps a UAC with active descendants. The setting survives restarts and combines with
+  label/machine views; click the dim idle-hidden count to show everything in the view again.
+  Apply the updated vega-sidebar mod (`vega config apply herdr-app`).
+
 ## 171 · 2026-11-10
 
 - optional: the herdr-app vega status line and project Overview read beads, asks and CI in the
