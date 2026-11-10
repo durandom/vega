@@ -77,7 +77,7 @@ Legend: **hc native** = vega code can go; **adapt** = keep the logic, swap the b
 | mux/src/worktree.rs:245-275 `herdr_create`: `worktree create --cwd --branch --label` (no wt) | fallback worktree creation via herdr | machine-wide | none in hc; app has a `worktree` mod (unknown if scriptable) | adapt (drop herdr fallback; require wt or plain `git worktree add`) |
 | mux/src/trust.rs:435 | git worktree list (not herdr) | — | — | keep |
 | mux/src/tier.rs | no herdr | — | — | keep |
-| mux tests: tests/fixtures/reopen-herdr.pl, main.rs:2860 fake `herdr` on PATH | fakes the herdr CLI | — | an `hc` fake, or `HC_SESSION` + scratch XDG for a real test core (hc skill) | adapt |
+| mux tests: examples/reopen_herdr.rs, main.rs:2860 fake `herdr` on PATH | fakes the herdr CLI | — | an `hc` fake (now a Rust example), or `HC_SESSION` + scratch XDG for a real test core (hc skill) | adapt |
 
 ### uac
 

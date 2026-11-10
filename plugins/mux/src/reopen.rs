@@ -225,10 +225,15 @@ mod tests {
         assert_eq!(vega_herdr::state::post_host(), "reopen-registry-host");
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let fake = bin.join("herdr");
-        std::fs::write(&fake, include_str!("../tests/fixtures/reopen-herdr.pl")).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // examples/reopen_herdr.rs: cargo builds examples next to the test binary (target/*/deps).
+        let fake_src = env::current_exe()
+            .unwrap()
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .join("examples/reopen_herdr");
+        assert!(fake_src.exists(), "build the example first: {fake_src:?}");
+        std::os::unix::fs::symlink(&fake_src, bin.join("herdr")).unwrap();
         let mut paths = vec![bin];
         paths.extend(env::split_paths(&env::var_os("PATH").unwrap()));
         env::set_var("PATH", env::join_paths(paths).unwrap());
