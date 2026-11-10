@@ -1,26 +1,34 @@
 ---
 name: vega-lanista
-description: Installs and upgrades the lanista LLM model catalog from git, ships its seats allowlist from the vega repo, and returns the model id to start per provider lane and tier. Use when choosing a model for an agent, when lanista is missing, outdated or unhealthy on a machine, or when editing which models a host can start.
+description: Installs and upgrades the lanista LLM model catalog, ships its seats allowlist, and resolves model tiers. Use when choosing an agent model, editing project/host/default pins, or diagnosing a missing or stale catalog.
 ---
 
-# vega lanista: the model catalog
+# vega lanista
 
-lanista (github.com/b4arena/lanista) is the Slayer's catalog of LLMs with prices and benchmarks. vega owns its lifecycle; for queries (`lanista pareto`, `profiles`, `pick`) run `lanista` itself.
+- `vega lanista`: install, catalog sync, seats and global pins.
+- `vega lanista install [--ref <ref>]`: install/upgrade from git and sync repo seats.
+  Editable or foreign installs require `--replace`.
+- `vega lanista doctor`: health checks.
+- `vega lanista pin <lane> --tier flagship|balanced|budget`: resolve project >
+  host > registry default > repo seats. Source identifies the winning layer.
+- Add `--set <model> [--until 2h|never]` or `--clear` for project overrides.
+  Project expiry defaults to the binding quota reset; unknown quota requires --until.
+- Add `--host <host>` for host configuration, or `--default` for the control
+  host's registry default. These layers default to expiry never. Every set must
+  match the repo allowlist. Private foreign writes require a broker grant.
+- Inbox-only hosts edit only themselves through their theme control host's
+  validated relay. They read only their exact host key, use its cache offline,
+  and never read/edit registry defaults. Explicit project read grants use
+  `VEGA_LANISTA_PIN_HOSTS`; no bucket enumeration is attempted.
+- `vega lanista hosts [--host <host>] --json`: effective models, source, expiry,
+  resolved lane and allowlists. Private views include the current project's pins.
 
-- `vega lanista`: installed commit against git main, catalog age and source host, its sync state, seats file state, and global seat pins per lane and tier. Use `pin` for project resolution.
-- `vega lanista install [--ref <ref>]`: `uv tool install` from git at the commit the ref names (default main), then writes the seats file. Idempotent; `scripts/install-cli.sh` runs it, so `vega deploy` keeps machines current. An editable install (a dev checkout) is left alone: it says what it would do; `--replace` replaces it.
-- `vega lanista pin <provider> [--tier flagship|balanced|budget]`: resolve inside the target project: project override, then host pins, then global seats; `source` names the writer host or global seats. Use the returned model for gate or mux harness arguments.
-- Add `--set <model> [--until 2h|never]` to share a runtime project override across hosts. Default expiry is the binding quota reset; unknown/stale quota requires explicit `--until`. `--clear` returns to global seats. Registry read failure says it fell back; writes fail. Inbox-only hosts need exact read grants plus `VEGA_LANISTA_PIN_HOSTS=host1,host2`, otherwise they use their host pins.
-- `vega lanista doctor`: lanista's health checks.
+Pi project/host overrides may select allowlisted Google models; otherwise Pi
+uses the full zai chain: project > host > registry default > repo seats.
+`pin pi --default --set` is refused; configure `pin zai --default --set <glm-model>`.
+Explicit spawn model flags win.
 
-Seats: `plugins/lanista/seats.json` in the vega repo is the source. Install writes it to `~/.config/lanista/seats.json` and backs a differing file up once to `seats.json.vega-bak`. Edit the repo copy, never a host's. Each pin's `tier` decides `pin`; lanista's profiles cannot, as models without a benchmark score drop out of them.
-
-Catalog: vegad on the builder host (ganymede; `VEGA_LANISTA_BUILDER` or `~/.config/vega/lanista-builder` override) runs `lanista fetch` daily with the lanista secrets and puts the index into the broker; every other host's vegad copies it within 15 min. `catalog` in the home view shows age and source host, `catalog_sync` what vegad last did. Do not run `lanista fetch` on other hosts; a stale catalog means the builder's vegad needs a look. By hand on the builder: `vega secrets run --for lanista -- lanista fetch`.
-
-Migration/recovery: `vega post identity --help`.
-# Host pins
-
-`vega lanista pin codex --tier budget --host puck --set gpt-6.1-sol` edits host
-tiers (default expiry never); `--clear` restores global. Inbox-only hosts edit
-only themselves through their theme control host. `vega lanista hosts --json`
-includes allowlists. Resolution: project > host > global, with offline host cache.
+Seats live in `plugins/lanista/seats.json`; edit the repo, not host copies.
+Vegad fetches the catalog on ganymede and distributes it. Do not fetch on other
+hosts. Inspect `catalog_sync` for stale data. For catalog queries, use lanista's
+own `pareto`, `profiles`, or `pick` commands.

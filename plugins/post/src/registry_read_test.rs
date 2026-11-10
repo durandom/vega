@@ -1208,7 +1208,10 @@ fn lanista_command_relays_host_pins_without_registry_rights() {
             let c: vega_lanista::hosts::Change = serde_json::from_value(change.clone()).unwrap();
             vega_lanista::hosts::write(&r, "puck", &c).await.unwrap();
             vega_lanista::hosts::write(&r, "proteus", &c).await.unwrap();
-            vega_registry::reconcile(&kv, "proteus", Default::default(), &Default::default(), &["proteus.lanista.host".into()]).await.unwrap();
+            vega_lanista::hosts::write_default(&r, "proteus", "proteus", &c).await.unwrap();
+            assert!(vega_lanista::hosts::write_default(&p, "puck", "proteus", &c).await.is_err());
+
+            vega_registry::reconcile(&kv, "proteus", Default::default(), &Default::default(), &["proteus.lanista.host".into(), "proteus.lanista.default".into()]).await.unwrap();
             assert_eq!(vega_registry::get_one(&r, "proteus.lanista.host").await.unwrap(), Some(value.clone()));
 
             kv.put("proteus.beat", json!({"at":1}).to_string().into()).await.unwrap();
@@ -1328,7 +1331,7 @@ fn lanista_command_relays_host_pins_without_registry_rights() {
                     .await;
             }
             assert_eq!(vega_registry::get_one(&p, key).await.unwrap(), Some(value.clone()));
-            for k in ["proteus.lanista.host", "proteus.theme", "proteus.beat", "puck.lanista.v2.61.62.63.64"] {
+            for k in ["proteus.lanista.default", "proteus.lanista.host", "proteus.theme", "proteus.beat", "puck.lanista.v2.61.62.63.64"] {
                 probe.publish_denied(&vega_registry::direct_get_subject(k), Default::default(), "").await;
             }
             for api in [
@@ -1377,7 +1380,12 @@ fn lanista_command_relays_host_pins_without_registry_rights() {
                 vega_registry::get_one(&r, "proteus.theme").await.unwrap(),
                 Some(theme)
             );
-            assert_eq!(vega_registry::get_one(&r, key).await.unwrap(), Some(value));
+            assert_eq!(vega_registry::get_one(&r, key).await.unwrap(), Some(value.clone()));
+            assert_eq!(vega_registry::get_one(&r, "proteus.lanista.default").await.unwrap(), Some(value.clone()));
+            let clear_default = vega_lanista::hosts::Change { model:None, clear:true, ..c.clone() };
+            vega_lanista::hosts::write_default(&r, "proteus", "proteus", &clear_default).await.unwrap();
+            let defaults = vega_lanista::hosts::Config::parse(vega_registry::get_one(&r, "proteus.lanista.default").await.unwrap().unwrap()).unwrap();
+            assert!(defaults.active("herdr-agents","codex","budget",0).is_none());
             let other = json!({"lane":"pi","tier":"budget","model":"google/gemini-3.8-flash","until":null});
             let answer = p.request(subject, other.to_string().into()).await.unwrap();
             assert_eq!(serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"], true);

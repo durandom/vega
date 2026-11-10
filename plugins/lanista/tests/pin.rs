@@ -11,6 +11,19 @@ fn run(dir: &std::path::Path, args: &[&str]) -> Output {
 }
 
 #[test]
+fn pi_registry_default_is_rejected_before_broker_access() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = run(
+        dir.path(),
+        &["pin", "pi", "--default", "--set", "google/gemini-3.8-flash"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8(out.stdout)
+        .unwrap()
+        .contains("pin zai --default"));
+}
+
+#[test]
 fn project_reads_fall_back_visibly_and_mutations_fail_without_registry() {
     let dir = tempfile::tempdir().unwrap();
     assert!(Command::new("git")
@@ -99,6 +112,11 @@ fn inbox_host_cache_resolves_offline_and_foreign_mutations_are_denied() {
     assert!(String::from_utf8(out.stdout)
         .unwrap()
         .contains("only their own"));
+    let denied_default = run(&["pin", "codex", "--default", "--set", "gpt-6.1-sol"]);
+    assert_eq!(denied_default.status.code(), Some(1));
+    assert!(String::from_utf8(denied_default.stdout)
+        .unwrap()
+        .contains("cannot read or edit registry defaults"));
     let out = run(&["pin", "codex", "--host", "puck", "--set", "not-allowed"]);
     assert_eq!(out.status.code(), Some(2));
 }

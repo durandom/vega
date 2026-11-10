@@ -4,7 +4,7 @@
 
 ### Host layer (vega-aysa.1)
 
-Resolution is project > local host > global. `<host>.lanista.host` is a schema-1
+Resolution is project > local host > registry default > global. `<host>.lanista.host` is a schema-1
 record with `seats: {seat: {lane: {tier: {model, until}}}}`. The default seat is
 `herdr-agents`; `until` is Unix seconds or null. Expired/cleared entries fall back
 to global. Source prints `host (<host>)`. Every set is validated against the repo
@@ -17,6 +17,30 @@ Without `--host`, private hosts edit the project; inbox-only hosts edit themselv
 Host reads work outside a project. `hosts [--host <host>] --json` returns rows with
 host, seat, lane, tier, model, source (`host` or `global`), until, and allowed models.
 Private hosts enumerate known registry hosts; inbox-only hosts list only self.
+
+### Registry defaults
+
+`vega lanista pin <lane> --tier <tier> --default --set <model>` (or `--clear`)
+edits `<control>.lanista.default`, using the same schema, allowlist, CAS writes,
+and default expiry of never. `--default` conflicts with `--host`. Control is the
+theme control preference (normally proteus); write on proteus under its existing
+own-namespace permission. Other private writers need an explicit broker grant.
+Private readers consult this key after their own host map. Ganymede and proteus
+therefore share it when they have no host override. Default reads fall back to
+repo seats when unavailable; host cache behavior is unchanged.
+
+Inbox-only clients never request the default key and cannot invoke `--default`.
+They use host values then repo seats, with no new default read grant. The private
+`hosts --json` view also excludes defaults for inbox-only target rows. It overlays
+the current checkout's project pins for private targets, returning source
+`project`, `host`, `default`, or `global` per cell, including expiry and allowlists.
+Default keys survive reconciliation and are excluded from legacy project migration.
+
+Pi's explicit project pin, then host pin, wins first. Without either, Pi uses the
+entire zai chain: project zai > host zai > registry default zai > repo zai.
+A stored default for lane pi is ignored; `pin pi --default --set` is refused with
+a hint to use `pin zai --default --set <glm-model>`. This preserves private Pi's
+zai/GLM defaults while allowing puck's explicit Google host pins.
 
 Puck was inspected read-only: Codex's existing pins are present; Pi accepts
 provider/id and lists `google/gemini-4-argon` and `google/gemini-3.8-flash`.

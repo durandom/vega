@@ -18,39 +18,44 @@ pub fn resolve(provider: &str, tier: &str, cwd: &Path) -> Result<String, Failure
     })?;
     let local = vega_herdr::state::post_host();
     let host_config = hosts::read(&local).unwrap_or_default();
-    let host_selection = host_config.active(
+    let defaults = hosts::read_default(&local).unwrap_or_default();
+    let fallback_pin = hosts::resolve_cell(
+        &vega_registry::View::default(),
+        &host_config,
+        &defaults,
+        None,
         seats::DEFAULT_SEAT,
         provider,
         tier,
-        vega_herdr::capacity::now(),
     );
-    let fallback_source = if host_selection.is_some() {
-        format!("pi (host {local})")
-    } else {
-        "zai fallback".into()
-    };
-    let report = |source: &str| {
+    let fallback = fallback_pin
+        .as_ref()
+        .map_or_else(|| pin.model.clone(), |p| p.model.clone());
+    let report = |p: Option<&hosts::Resolution>| {
         if provider == "pi" {
-            eprintln!("vega lanista: lane {source}");
+            if let Some(p) = p {
+                eprintln!(
+                    "vega lanista: lane {} ({}{})",
+                    p.lane,
+                    p.source,
+                    if p.source == "host" {
+                        format!(" {local}")
+                    } else {
+                        String::new()
+                    }
+                );
+            }
         }
     };
-    let fallback = host_config
-        .active(
-            seats::DEFAULT_SEAT,
-            provider,
-            tier,
-            vega_herdr::capacity::now(),
-        )
-        .map_or_else(|| pin.model.clone(), |p| p.model.clone());
     if vega_herdr::state::is_inbox_only(&local)
         && std::env::var_os("VEGA_LANISTA_PIN_HOSTS").is_none()
     {
-        report(&fallback_source);
+        report(fallback_pin.as_ref());
         return Ok(fallback);
     }
     let project = vega_herdr::project::resolve_optional(cwd, &vega_herdr::state::post_host())?;
     let Some(project) = project else {
-        report(&fallback_source);
+        report(fallback_pin.as_ref());
         return Ok(fallback);
     };
     let record = vega_registry::pins::Pin {
@@ -65,33 +70,21 @@ pub fn resolve(provider: &str, tier: &str, cwd: &Path) -> Result<String, Failure
     };
     match vega_registry::pins::access(record, None) {
         Ok(view) => {
-            if provider == "pi"
-                && effective_model(
-                    &view,
-                    project.id.as_str(),
-                    seats::DEFAULT_SEAT,
-                    provider,
-                    tier,
-                )
-                .is_some()
-            {
-                report("pi (project override)");
-            } else {
-                report(&fallback_source);
-            }
-            Ok(select(
+            let resolved = hosts::resolve_cell(
                 &view,
                 &host_config,
-                project.id.as_str(),
+                &defaults,
+                Some(project.id.as_str()),
                 seats::DEFAULT_SEAT,
                 provider,
                 tier,
-            )
-            .unwrap_or(fallback.clone()))
+            );
+            report(resolved.as_ref());
+            Ok(resolved.map_or(fallback, |p| p.model))
         }
         Err(e) => {
             eprintln!("vega lanista: registry unavailable: {e}; using host/global fallback");
-            report(&fallback_source);
+            report(fallback_pin.as_ref());
             Ok(fallback)
         }
     }
@@ -106,18 +99,27 @@ pub fn select(
     lane: &str,
     tier: &str,
 ) -> Option<String> {
-    effective_model(view, project, seat, lane, tier)
-        .map(|(_, model, _)| model)
-        .or_else(|| {
-            config
-                .active(seat, lane, tier, vega_herdr::capacity::now())
-                .map(|p| p.model.clone())
-        })
-        .or_else(|| {
-            seats::pins(seats::SEATS, seat)
-                .ok()
-                .and_then(|pins| seats::global(&pins, lane, tier).map(|p| p.model.clone()))
-        })
+    select_layers(
+        view,
+        config,
+        &hosts::Config::default(),
+        project,
+        seat,
+        lane,
+        tier,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub fn select_layers(
+    view: &vega_registry::View,
+    config: &hosts::Config,
+    defaults: &hosts::Config,
+    project: &str,
+    seat: &str,
+    lane: &str,
+    tier: &str,
+) -> Option<String> {
+    hosts::resolve_cell(view, config, defaults, Some(project), seat, lane, tier).map(|p| p.model)
 }
 
 /// Active project override (host, model, expiry), shared with the pin CLI.

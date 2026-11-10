@@ -20,6 +20,11 @@ Examples:
 Host layer: `pin <lane> --tier <tier> --host <host> --set <allowed-model>`
 (or `--clear`). Host expiry defaults to never; `--until 2h` expires to global.
 Without --host, private hosts edit the project; inbox-only hosts edit themselves.
-Resolution: project > local host > global. Host source prints `host (<host>)`.
+Resolution: project > local host > registry default > global.
+`--default --set <model>` / `--default --clear` edits `<control>.lanista.default`
+on a private host (default expiry never). It conflicts with --host.
+Inbox-only hosts neither read nor edit defaults. Host source is `host (<host>)`.
 `vega lanista hosts [--host <host>] --json` includes effective pins and allowlists.
 Inbox-only hosts relay through their theme control host and cache exact-key reads.
+Pi project/host overrides win; otherwise Pi resolves the full zai chain.
+Use `pin zai --default --set <glm-model>` for Pi's shared default, not lane pi.

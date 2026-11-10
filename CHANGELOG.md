@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 168 · 2026-11-10
+
+- feature: private hosts can configure shared model defaults with
+  `vega lanista pin <lane> --tier <tier> --default --set <model>` or `--clear`.
+  Defaults live at `<control>.lanista.default` (theme control, normally proteus).
+  Resolution is project > host > registry default > repo seats. Inbox-only hosts
+  never read defaults and need no new grant; their own host pins stay independent.
+  `hosts --json` identifies project, host, default, or global sources per cell.
+
 ## 167 · 2026-11-10
 
 - required: orrery must regenerate titan auth-config with existing flags plus

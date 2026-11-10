@@ -149,11 +149,17 @@ pub async fn write(
     change: &Change,
 ) -> Result<Config, String> {
     validate_host(host)?;
+    write_key(client, &key(host), change).await
+}
+async fn write_key(
+    client: &async_nats::Client,
+    key: &str,
+    change: &Change,
+) -> Result<Config, String> {
     change.validate(vega_herdr::capacity::now())?;
     let kv = vega_registry::bucket(client).await?;
-    let key = key(host);
     for _ in 0..8 {
-        let entry = kv.entry(&key).await.map_err(|e| e.to_string())?;
+        let entry = kv.entry(key).await.map_err(|e| e.to_string())?;
         let (mut config, revision) = match entry {
             Some(e) if e.operation == async_nats::jetstream::kv::Operation::Put => (
                 Config::parse(serde_json::from_slice(&e.value).map_err(|e| e.to_string())?)?,
@@ -164,7 +170,7 @@ pub async fn write(
         };
         config.apply(change);
         let bytes = serde_json::to_vec(&config).map_err(|e| e.to_string())?;
-        match kv.update(&key, bytes.into(), revision).await {
+        match kv.update(key, bytes.into(), revision).await {
             Ok(_) => return Ok(config),
             Err(e) if e.kind() == async_nats::jetstream::kv::UpdateErrorKind::WrongLastRevision => {
                 continue
@@ -242,6 +248,70 @@ pub fn read(host: &str) -> Result<Config, String> {
         vega_registry::get_one_blocking(&key(host), Duration::from_secs(5)),
     )
 }
+/// Use the same control identity as the bounded host relay.
+pub fn control() -> Result<String, String> {
+    let env = vega_theme_sync::Env::from_env().ok_or("no control environment")?;
+    let host = vega_theme_sync::prefs::load(&env)?.control;
+    validate_host(&host)?;
+    Ok(host)
+}
+pub fn default_key(control: &str) -> String {
+    format!("{control}.lanista.default")
+}
+/// Limited hosts never even resolve or request a default key.
+pub fn read_default(reader: &str) -> Result<Config, String> {
+    if vega_herdr::state::is_inbox_only(reader) {
+        return Ok(Config::default());
+    }
+    let control = control()?;
+    let value = vega_registry::get_one_blocking(&default_key(&control), Duration::from_secs(5))?;
+    value
+        .map(Config::parse)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+pub async fn write_default(
+    client: &async_nats::Client,
+    writer: &str,
+    control: &str,
+    change: &Change,
+) -> Result<Config, String> {
+    validate_host(control)?;
+    validate_default(change)?;
+    if vega_herdr::state::is_inbox_only(writer) {
+        return Err("inbox-only hosts cannot edit registry defaults".into());
+    }
+    // The broker enforces ownership or an explicit foreign-key grant.
+    write_key(client, &default_key(control), change).await
+}
+pub fn validate_default(change: &Change) -> Result<(), String> {
+    if change.lane == "pi" && !change.clear {
+        return Err("pi has no registry default; use pin zai --default --set <glm-model>".into());
+    }
+    change.validate(vega_herdr::capacity::now())
+}
+pub fn mutate_default(change: &Change) -> Result<Config, String> {
+    validate_default(change)?;
+    let local = vega_herdr::state::post_host();
+    if vega_herdr::state::is_inbox_only(&local) {
+        return Err("inbox-only hosts cannot edit registry defaults".into());
+    }
+    let control = control()?;
+    change.validate(vega_herdr::capacity::now())?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let client = vega_registry::connect("lanista default").await?;
+            write_default(&client, &local, &control, change).await
+        })
+        .await
+        .map_err(|_| "default write timed out".to_string())?
+    })
+}
+
 pub fn mutate(host: &str, change: &Change) -> Result<Config, String> {
     validate_host(host)?;
     change.validate(vega_herdr::capacity::now())?;
@@ -293,6 +363,69 @@ pub fn mutate(host: &str, change: &Change) -> Result<Config, String> {
     )
 }
 
+pub struct Resolution {
+    pub model: String,
+    pub source: &'static str,
+    pub until: Option<i64>,
+    pub lane: String,
+    pub writer: Option<String>,
+}
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_cell(
+    view: &vega_registry::View,
+    config: &Config,
+    defaults: &Config,
+    project: Option<&str>,
+    seat: &str,
+    lane: &str,
+    tier: &str,
+) -> Option<Resolution> {
+    if let Some(project) = project {
+        if let Some((writer, model, until)) =
+            crate::effective_model(view, project, seat, lane, tier)
+        {
+            return Some(Resolution {
+                model,
+                source: "project",
+                until,
+                lane: lane.into(),
+                writer: Some(writer),
+            });
+        }
+    }
+    if let Some(pin) = config.active(seat, lane, tier, vega_herdr::capacity::now()) {
+        return Some(Resolution {
+            model: pin.model.clone(),
+            source: "host",
+            until: pin.until,
+            lane: lane.into(),
+            writer: None,
+        });
+    }
+    // Pi is an override lane. Otherwise preserve the entire zai chain.
+    if lane == "pi" {
+        return resolve_cell(view, config, defaults, project, seat, "zai", tier);
+    }
+    if let Some(pin) = defaults.active(seat, lane, tier, vega_herdr::capacity::now()) {
+        return Some(Resolution {
+            model: pin.model.clone(),
+            source: "default",
+            until: pin.until,
+            lane: lane.into(),
+            writer: None,
+        });
+    }
+    let pins = seats::pins(seats::SEATS, seat).ok()?;
+    let pin = seats::global(&pins, lane, tier)?;
+    Some(Resolution {
+        model: pin.model.clone(),
+        source: "global",
+        until: None,
+        lane: lane.into(),
+        writer: None,
+    })
+}
+
 pub fn rows(host: &str, config: &Config) -> Vec<Value> {
     let mut rows = Vec::new();
     for seat in seats::seat_ids(seats::SEATS) {
@@ -314,14 +447,57 @@ pub fn rows(host: &str, config: &Config) -> Vec<Value> {
     }
     rows
 }
+/// Overlay default then project, keeping host values above defaults. A limited
+/// target's rows must never inherit defaults even when inspected privately.
+pub fn layered_rows(
+    host: &str,
+    config: &Config,
+    defaults: &Config,
+    view: &vega_registry::View,
+    project: Option<&str>,
+) -> Vec<Value> {
+    let mut result = rows(host, config);
+    let empty = Config::default();
+    let limited = vega_herdr::state::is_inbox_only(host);
+    let defaults = if limited { &empty } else { defaults };
+    let project = if limited { None } else { project };
+    for row in &mut result {
+        if let Some(pin) = resolve_cell(
+            view,
+            config,
+            defaults,
+            project,
+            row["seat"].as_str().unwrap(),
+            row["lane"].as_str().unwrap(),
+            row["tier"].as_str().unwrap(),
+        ) {
+            row["model"] = json!(pin.model);
+            row["until"] = json!(pin.until);
+            row["source"] = json!(pin.source);
+            row["resolved_lane"] = json!(pin.lane);
+        }
+    }
+    result
+}
+
 pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
     let local = vega_herdr::state::post_host();
-    if let Some(host) = host {
-        return Ok(rows(host, &read(host)?));
+    if let Some(h) = host {
+        validate_host(h)?;
     }
     if vega_herdr::state::is_inbox_only(&local) {
-        return Ok(rows(&local, &read(&local)?));
+        let target = host.unwrap_or(&local);
+        return Ok(layered_rows(
+            target,
+            &read(target)?,
+            &Config::default(),
+            &vega_registry::View::default(),
+            None,
+        ));
     }
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let project = vega_herdr::project::resolve_optional(&cwd, &local).map_err(|e| e.message)?;
+    let control = control()?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -330,20 +506,38 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
         tokio::time::timeout(Duration::from_secs(5), async {
             let c = vega_registry::connect("lanista hosts").await?;
             let kv = vega_registry::bucket(&c).await?;
-            let view = vega_registry::read_kinds(&c, &kv, Some(&[])).await?;
-            let hosts: std::collections::BTreeSet<_> = view
-                .keys
-                .iter()
-                .filter_map(|k| k.split('.').next())
-                .collect();
+            let view = vega_registry::read_kinds(&c, &kv, Some(&["lanista"])).await?;
+            let defaults = view
+                .entries
+                .get(&default_key(&control))
+                .cloned()
+                .map(Config::parse)
+                .transpose()?
+                .unwrap_or_default();
+            let hosts: std::collections::BTreeSet<_> = match host {
+                Some(h) => [h].into_iter().collect(),
+                None => view
+                    .keys
+                    .iter()
+                    .filter_map(|k| k.split('.').next())
+                    .collect(),
+            };
             let mut result = Vec::new();
             for h in hosts {
-                let config = vega_registry::get_one(&c, &key(h))
-                    .await?
+                let config = view
+                    .entries
+                    .get(&key(h))
+                    .cloned()
                     .map(Config::parse)
                     .transpose()?
                     .unwrap_or_default();
-                result.extend(rows(h, &config));
+                // Inbox-only targets do not have this private project's view.
+                let project = if vega_herdr::state::is_inbox_only(h) {
+                    None
+                } else {
+                    project.as_ref().map(|p| p.id.as_str())
+                };
+                result.extend(layered_rows(h, &config, &defaults, &view, project));
             }
             Ok(result)
         })
@@ -355,6 +549,138 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pi_override_then_entire_zai_chain_and_no_pi_default() {
+        let seat = seats::DEFAULT_SEAT;
+        let change = |lane: &str, model: &str| Change {
+            seat: seat.into(),
+            lane: lane.into(),
+            tier: "budget".into(),
+            model: Some(model.into()),
+            clear: false,
+            until: None,
+        };
+        let mut host = Config::default();
+        let mut defaults = Config::default();
+        let mut view = vega_registry::View::default();
+        let pick = |v: &vega_registry::View, h: &Config, d: &Config| {
+            resolve_cell(
+                v,
+                h,
+                d,
+                Some("github.com/team/project"),
+                seat,
+                "pi",
+                "budget",
+            )
+            .unwrap()
+        };
+        assert_eq!(pick(&view, &host, &defaults).model, "glm-4.7");
+        let google = change("pi", "google/gemini-3.8-flash");
+        assert!(validate_default(&google)
+            .unwrap_err()
+            .contains("pin zai --default"));
+        defaults.apply(&google); // Ignore even a previously stored pi default.
+        assert_eq!(pick(&view, &host, &defaults).model, "glm-4.7");
+        defaults.apply(&change("zai", "glm-5.2"));
+        assert_eq!(pick(&view, &host, &defaults).source, "default");
+        assert_eq!(pick(&view, &host, &defaults).model, "glm-5.2");
+        host.apply(&change("zai", "glm-5.3"));
+        assert_eq!(pick(&view, &host, &defaults).model, "glm-5.3");
+        let project_pin = |lane: &str, model: &str| json!({"schema":2,"project":"github.com/team/project","seat":seat,"lane":lane,"tier":"budget","model":model,"at":1,"expires":null});
+        view.entries.insert(
+            vega_registry::pins::key("proteus", "github.com/team/project", seat, "zai", "budget"),
+            project_pin("zai", "glm-4.7"),
+        );
+        assert_eq!(pick(&view, &host, &defaults).source, "project");
+        assert_eq!(pick(&view, &host, &defaults).model, "glm-4.7");
+        host.apply(&google);
+        assert_eq!(pick(&view, &host, &defaults).source, "host");
+        assert_eq!(pick(&view, &host, &defaults).lane, "pi");
+        view.entries.insert(
+            vega_registry::pins::key("proteus", "github.com/team/project", seat, "pi", "budget"),
+            project_pin("pi", "google/gemini-4-argon"),
+        );
+        assert_eq!(pick(&view, &host, &defaults).model, "google/gemini-4-argon");
+    }
+
+    #[test]
+    fn every_layer_and_limited_host_default_exclusion() {
+        let seat = seats::DEFAULT_SEAT;
+        let change = |model: &str| Change {
+            seat: seat.into(),
+            lane: "codex".into(),
+            tier: "budget".into(),
+            model: Some(model.into()),
+            clear: false,
+            until: None,
+        };
+        let mut host = Config::default();
+        let mut defaults = Config::default();
+        let mut view = vega_registry::View::default();
+        let row = |host_name: &str, h: &Config, d: &Config, v: &vega_registry::View| {
+            layered_rows(host_name, h, d, v, Some("github.com/team/project"))
+                .into_iter()
+                .find(|r| r["lane"] == "codex" && r["tier"] == "budget")
+                .unwrap()
+        };
+        assert_eq!(row("proteus", &host, &defaults, &view)["source"], "global");
+        defaults.apply(&change("gpt-6.1-sol"));
+        assert_eq!(row("proteus", &host, &defaults, &view)["source"], "default");
+        assert_eq!(
+            row("ganymede", &host, &defaults, &view)["model"],
+            "gpt-6.1-sol"
+        );
+        assert_eq!(row("puck", &host, &defaults, &view)["source"], "global");
+        host.apply(&change("gpt-6-astra"));
+        assert_eq!(row("proteus", &host, &defaults, &view)["source"], "host");
+        assert_eq!(row("puck", &host, &defaults, &view)["model"], "gpt-6-astra");
+        let key = vega_registry::pins::key(
+            "proteus",
+            "github.com/team/project",
+            seat,
+            "codex",
+            "budget",
+        );
+        view.entries.insert(key, json!({"schema":2,"project":"github.com/team/project","seat":seat,"lane":"codex","tier":"budget","model":"gpt-6-luna","at":1,"expires":null}));
+        assert_eq!(row("proteus", &host, &defaults, &view)["source"], "project");
+        assert_eq!(
+            crate::select_layers(
+                &view,
+                &host,
+                &defaults,
+                "github.com/team/project",
+                seat,
+                "codex",
+                "budget"
+            )
+            .unwrap(),
+            "gpt-6-luna"
+        );
+        view.entries.clear();
+        assert_eq!(
+            crate::select_layers(&view, &host, &defaults, "p", seat, "codex", "budget").unwrap(),
+            "gpt-6-astra"
+        );
+        host.seats.clear();
+        assert_eq!(
+            crate::select_layers(&view, &host, &defaults, "p", seat, "codex", "budget").unwrap(),
+            "gpt-6.1-sol"
+        );
+        defaults
+            .seats
+            .get_mut(seat)
+            .unwrap()
+            .get_mut("codex")
+            .unwrap()
+            .get_mut("budget")
+            .unwrap()
+            .until = Some(1);
+        assert_eq!(row("proteus", &host, &defaults, &view)["source"], "global");
+        // This returns before loading control config or making any broker request.
+        assert!(read_default("puck").unwrap().seats.is_empty());
+    }
+
     #[test]
     fn rejects_untrusted_changes_and_expired_selections() {
         let valid = json!({"lane":"codex","tier":"budget","model":"gpt-6.1-sol"});
