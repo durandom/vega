@@ -105,11 +105,14 @@ impl Note {
 
     /// Whether the badge of project `key` counts it: its own project's, or
     /// for a note without one (or whose project has no UAC here, not in
-    /// `uacs`), the vega project's `home`; every badge without a `home`.
+    /// `uacs`), the vega project's `home`. A host without a vega UAC counts
+    /// such notes nowhere: the vega UAC's host shows them (the notes list is
+    /// fleet-wide), and counting them on every other project there showed
+    /// counts the project's Notes tab could not list.
     pub fn counts_on(&self, key: &str, home: Option<&str>, uacs: &[String]) -> bool {
         match &self.project {
             Some(p) if uacs.contains(p) => p == key,
-            _ => home.is_none_or(|h| h == key),
+            _ => home.is_some_and(|h| h == key),
         }
     }
 }
@@ -512,8 +515,13 @@ mod tests {
         let orphan = of(Some("~/src/y/.git"));
         assert!(orphan.counts_on(vega, Some(vega), &uacs));
         assert!(!orphan.counts_on(x, Some(vega), &uacs));
-        // No vega UAC known: every badge counts the host-level notes.
-        assert!(host_level.counts_on(x, None, &uacs));
+        // No vega UAC on this host: no badge counts the host-level notes.
+        assert!(!host_level.counts_on(x, None, &uacs));
+        assert!(!orphan.counts_on(x, None, &uacs));
+        assert!(
+            of(Some(x)).counts_on(x, None, &uacs),
+            "own project notes still count"
+        );
     }
 
     #[test]

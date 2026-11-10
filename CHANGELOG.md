@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 155 · 2026-11-10
+
+- feature: a host without a vega UAC no longer counts notes without a project on every
+  project badge (e.g. 3 notes on spellkave whose Notes tab was empty); they count on the vega
+  project of the host that runs the vega UAC. Update with `vega deploy apply <host>`.
+
 ## 154 · 2026-11-10
 
 - feature: sidebar views can match any condition: `vega project view <name> --match any` (or the
