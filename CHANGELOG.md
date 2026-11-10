@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 166 · 2026-11-10
+
+- feature: `vega mux spawn --worktree` starts a tab in the caller's space when no local
+  herdr-app is available, preserving the worktree cwd, brief and parent link. Remote
+  `--machine` worktrees are created on the target and use the same tab fallback.
+
 ## 165 · 2026-11-10
 
 - required: to show puck's keychain lock, regenerate titan's broker authorization with the existing

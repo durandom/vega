@@ -69,7 +69,7 @@ elif cmd=='exec':
  assert a[a.index('--')+1:a.index('--')+3]==['vega-mux','prepare']
  if (root/'remote-home').exists():
   import subprocess
-  e=dict(os.environ, HOME=str(root/'remote-home'))
+  e=dict(os.environ, HOME=str(root/'remote-home'), PATH=str(root/'remote-home/bin')+':'+os.environ['PATH'])
   for k in ['HC_TERMINAL_ID','HERDR_PANE_ID','XDG_CONFIG_HOME','XDG_STATE_HOME']: e.pop(k,None)
   r=subprocess.run([os.environ['TEST_MUX_EXE']]+a[a.index('--')+2:],env=e,capture_output=True)
   out,errb,rc=r.stdout,r.stderr,r.returncode

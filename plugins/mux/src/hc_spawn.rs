@@ -81,74 +81,83 @@ pub fn spawn(
     } else {
         None
     };
+    let remote_prepared = if let Some(target) = machine() {
+        let prepared = prepare_remote(target, kind, &cwd, &place)?;
+        if matches!(place, Place::Worktree { .. }) {
+            cwd = prepared["cwd"]
+                .as_str()
+                .filter(|s| Path::new(s).is_absolute())
+                .ok_or_else(|| {
+                    Failure::new(
+                        "remote_prepare_failed",
+                        "target returned no worktree path",
+                        "deploy matching vega binaries to the target",
+                    )
+                })?
+                .into();
+        }
+        Some(prepared)
+    } else {
+        None
+    };
     let mut placeholder = None;
+    let mut tab_fallback = false;
     if let Place::Worktree { branch, base } = place {
-        let (path, how) = worktree::hc_worktree(&cwd, &branch, base.as_deref())?;
+        let (path, how) = if let Some(prepared) = &remote_prepared {
+            (
+                cwd.clone(),
+                prepared["how"]
+                    .as_str()
+                    .unwrap_or("prepared remotely")
+                    .into(),
+            )
+        } else {
+            worktree::hc_worktree(&cwd, &branch, base.as_deref())?
+        };
         cwd = path;
         println!("worktree: {} ({how})", cell(&branch));
-        // space.new shows the new space; a spawn must not take the person's screen.
-        let shown = shown_space();
-        if let Err(f) = &shown {
-            eprintln!("warning: cannot read the shown herdr-app space ({}); the new space may take the screen", f.message);
-        }
-        let v = app(&["do", "space.new", "--name", &branch, "--folder", &cwd])?;
-        placeholder = v["terminal"].as_str().map(String::from);
-        space = v["space"].as_str().or(v["id"].as_str()).map(String::from);
-        if space.is_none() {
-            return Err(Failure::new(
-                "app_bad_output",
-                "new space has no id",
-                "inspect herdr-app ls before retrying",
-            ));
-        }
-        if let Some(prev) = shown.ok().flatten().filter(|p| Some(p) != space.as_ref()) {
-            // The space exists either way; a failed reselect only leaves it shown.
-            if let Err(f) = app(&["do", "space.select", "--id", &prev]) {
-                eprintln!(
-                    "warning: cannot show space {prev} again ({}); the new space is shown",
-                    f.message
-                );
+        // Remote IDs cannot be used in the local app. Headless local hosts use
+        // exactly the ordinary tab path, retaining the caller's space label.
+        let shown = if machine().is_some() {
+            Err(Failure::new("app_unavailable", "remote spawn", "use a tab"))
+        } else {
+            local_shown_space()
+        };
+        match shown {
+            Err(f) if f.code == "app_unavailable" => {
+                tab_fallback = true;
+            }
+            shown => {
+                if let Err(f) = &shown {
+                    eprintln!("warning: cannot read the shown herdr-app space ({}); the new space may take the screen", f.message);
+                }
+                let v = app(&["do", "space.new", "--name", &branch, "--folder", &cwd])?;
+                placeholder = v["terminal"].as_str().map(String::from);
+                space = v["space"].as_str().or(v["id"].as_str()).map(String::from);
+                if space.is_none() {
+                    return Err(Failure::new(
+                        "app_bad_output",
+                        "new space has no id",
+                        "inspect herdr-app ls before retrying",
+                    ));
+                }
+                if let Some(prev) = shown.ok().flatten().filter(|p| Some(p) != space.as_ref()) {
+                    // The space exists either way; a failed reselect only leaves it shown.
+                    if let Err(f) = app(&["do", "space.select", "--id", &prev]) {
+                        eprintln!(
+                            "warning: cannot show space {prev} again ({}); the new space is shown",
+                            f.message
+                        );
+                    }
+                }
             }
         }
     }
+
     if machine().is_none() && !no_parent {
         vega_herdr::project::resolve_optional(Path::new(&cwd), &vega_herdr::state::post_host())?;
     }
-    let trust_line = if let Some(target) = machine() {
-        let prepared =
-            vega_herdr::hc::hc_on(
-                Some(target),
-                &[
-                    "exec",
-                    "--timeout",
-                    "15",
-                    "--",
-                    "vega-mux",
-                    "prepare",
-                    "--kind",
-                    kind,
-                    "--cwd",
-                    &cwd,
-                ],
-                Some(std::time::Duration::from_secs(20)),
-            )
-            .map_err(|f| {
-                Failure::new("remote_prepare_failed",
-            format!("cannot prepare {target}: {}", f.message),
-            "deploy matching vega binaries to the target and check its cwd and hc connection")
-            })?;
-        let prepared = exec_output(target, &prepared)?;
-        if prepared["schema"] != 1
-            || !prepared
-                .get("trust")
-                .is_some_and(|v| v.is_null() || v.is_string())
-        {
-            return Err(Failure::new(
-                "remote_prepare_failed",
-                "target returned an incompatible preparation result",
-                "deploy the matching vega version to the target before spawning",
-            ));
-        }
+    let trust_line = if let Some(prepared) = remote_prepared {
         prepared["trust"].as_str().map(String::from)
     } else {
         trust::apply(kind, &cwd)
@@ -291,6 +300,9 @@ pub fn spawn(
             return Err(Failure::new("brief_not_delivered", format!("terminal {pane} started, but hc did not deliver its first message"), &format!("inspect `vega mux show {pane}`; after resolving startup, use `vega mux spawn --resume {pane}`")));
         }
     }
+    if tab_fallback {
+        println!("placement: no local herdr-app; started as a tab in the caller's space");
+    }
     println!(
         "spawned: {name} ({kind})\npane: {pane}\nbackend: hc\ncwd: {}",
         cell(&cwd)
@@ -311,6 +323,74 @@ pub fn spawn(
         eprintln!("{w}");
     }
     Ok(pane)
+}
+
+/// Prepare on the target: filesystem paths and worktrunk hooks belong there.
+fn prepare_remote(target: &str, kind: &str, cwd: &str, place: &Place) -> Result<Value, Failure> {
+    let mut args = vec![
+        "exec",
+        "--timeout",
+        "120",
+        "--",
+        "vega-mux",
+        "prepare",
+        "--kind",
+        kind,
+        "--cwd",
+        cwd,
+    ];
+    if let Place::Worktree { branch, base } = place {
+        args.extend(["--worktree", branch]);
+        if let Some(base) = base {
+            args.extend(["--base", base]);
+        }
+    }
+    let wrapped = vega_herdr::hc::hc_on(
+        Some(target),
+        &args,
+        Some(std::time::Duration::from_secs(125)),
+    )
+    .map_err(|f| {
+        Failure::new(
+            "remote_prepare_failed",
+            format!("cannot prepare {target}: {}", f.message),
+            "deploy matching vega binaries to the target and check its cwd and hc connection",
+        )
+    })?;
+    let prepared = exec_output(target, &wrapped)?;
+    if prepared["schema"] != 1
+        || !prepared
+            .get("trust")
+            .is_some_and(|v| v.is_null() || v.is_string())
+    {
+        return Err(Failure::new(
+            "remote_prepare_failed",
+            "target returned an incompatible preparation result",
+            "deploy the matching vega version to the target before spawning",
+        ));
+    }
+    Ok(prepared)
+}
+
+/// Check the configured socket before invoking a CLI that emits plain-text
+/// transport errors. HERDR_APP_HOME follows the app CLI's home override.
+fn local_shown_space() -> Result<Option<String>, Failure> {
+    let home = env::var_os("HERDR_APP_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var_os("XDG_CONFIG_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| Path::new(&env::var("HOME").unwrap_or_default()).join(".config"))
+                .join("herdr-app")
+        });
+    if !home.join("herdr-app.sock").exists() {
+        return Err(Failure::new(
+            "app_unavailable",
+            "no local app socket",
+            "open herdr-app",
+        ));
+    }
+    shown_space()
 }
 
 /// `machine.exec` wraps the program's output: base64 `stdout`, its exit `code`.
@@ -360,10 +440,32 @@ fn shown_space() -> Result<Option<String>, Failure> {
 }
 
 pub fn app(args: &[&str]) -> Result<Value, Failure> {
-    let out = Command::new("herdr-app")
-        .args(args)
-        .output()
-        .map_err(|e| Failure::new("app_unavailable", e.to_string(), "open herdr-app"))?;
+    let out = Command::new("herdr-app").args(args).output().map_err(|e| {
+        Failure::new(
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "app_unavailable"
+            } else {
+                "app_failed"
+            },
+            e.to_string(),
+            "open herdr-app",
+        )
+    })?;
+    // Older app CLIs have no structured transport error. Restrict the legacy
+    // compatibility check to the explicit no-window diagnostic on failed calls.
+    if !out.status.success()
+        && [&out.stdout, &out.stderr].iter().any(|s| {
+            String::from_utf8_lossy(s)
+                .trim()
+                .starts_with("no Herdr window at ")
+        })
+    {
+        return Err(Failure::new(
+            "app_unavailable",
+            "no local app window",
+            "open herdr-app",
+        ));
+    }
     let v: Value = serde_json::from_slice(&out.stdout).map_err(|_| {
         Failure::new(
             "app_bad_output",
@@ -371,6 +473,16 @@ pub fn app(args: &[&str]) -> Result<Value, Failure> {
             "inspect herdr-app status",
         )
     })?;
+    if matches!(
+        v["error"]["code"].as_str(),
+        Some("no_window" | "app_unavailable")
+    ) {
+        return Err(Failure::new(
+            "app_unavailable",
+            "no local app window",
+            "open herdr-app",
+        ));
+    }
     if !out.status.success() || v.get("error").is_some() {
         return Err(Failure::new(
             "app_failed",

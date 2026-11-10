@@ -77,6 +77,10 @@ enum Cmd {
         kind: String,
         #[arg(long)]
         cwd: String,
+        #[arg(long)]
+        worktree: Option<String>,
+        #[arg(long, requires = "worktree")]
+        base: Option<String>,
     },
     /// Agent hooks: question routing, shadow state and config installation
     #[command(hide = true)]
@@ -379,7 +383,12 @@ fn main() -> ExitCode {
     }
     let result = match cli.cmd {
         None => home(cli.all),
-        Some(Cmd::Prepare { kind, cwd }) => {
+        Some(Cmd::Prepare {
+            kind,
+            cwd,
+            worktree,
+            base,
+        }) => {
             if machine().is_some() || !Path::new(&cwd).is_absolute() {
                 Err(Failure::new(
                     "usage",
@@ -387,11 +396,14 @@ fn main() -> ExitCode {
                     "run prepare on the target machine with --cwd /absolute/path",
                 ))
             } else {
-                println!(
-                    "{}",
-                    serde_json::json!({"schema":1,"trust":trust::apply(&kind, &cwd)})
-                );
-                Ok(())
+                let tree = worktree
+                    .as_ref()
+                    .map(|branch| worktree::hc_worktree(&cwd, branch, base.as_deref()))
+                    .transpose();
+                tree.map(|tree| {
+                    let (cwd, how) = tree.unwrap_or((cwd, String::new()));
+                    println!("{}", serde_json::json!({"schema":1,"trust":trust::apply(&kind, &cwd),"cwd":cwd,"how":how}));
+                })
             }
         }
         Some(Cmd::Hook {
@@ -520,13 +532,6 @@ fn validate(cmd: &Cmd) -> Option<Failure> {
             "usage",
             "--worktree branch is empty",
             "pass a branch name, e.g. --worktree fix-login",
-        )),
-        Cmd::Spawn {
-            worktree: Some(_), ..
-        } if machine().is_some() => Some(Failure::new(
-            "usage",
-            "--worktree works only on this machine",
-            "spawn with --cwd <existing checkout> on that machine, or drop --machine",
         )),
         Cmd::Spawn {
             kind: Some(kind),
@@ -1378,6 +1383,13 @@ fn spawn_inner(
     tier: Option<&str>,
     reopening: Option<&vega_herdr::state::SpawnRecord>,
 ) -> Result<String, Failure> {
+    if machine().is_some() && matches!(place, Place::Worktree { .. }) {
+        return Err(Failure::new(
+            "usage",
+            "remote worktrees require hc",
+            "use --backend hc with --machine, or pass --cwd for an existing checkout",
+        ));
+    }
     if machine().is_some() && matches!(place, Place::At(At::Split)) {
         return Err(Failure::new(
             "usage",

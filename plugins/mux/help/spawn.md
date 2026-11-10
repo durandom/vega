@@ -1,8 +1,11 @@
 The backend follows the caller's verified terminal; --backend herdr|hc overrides it.
 In hc, spawn opens a tab in the caller's herdr-app space, keeps the native parent link,
-and uses --outlive-parent. --worktree uses wt and a new app space, opened
+and uses --outlive-parent. --worktree uses wt and, with a local app, a new app space, opened
 in the background: the space shown before is selected again (a warning on stderr when that fails). Explicit --at split
-or --at workspace is currently TUI-only. hc receives env separately through terminal.run and the task at launch;
+or --at workspace is currently TUI-only. Without a local app binary, socket or window,
+worktree agents start as tabs in the caller's space with cwd set to the worktree.
+Remote --machine worktrees run wt on the target and use the ordinary tab path without local app space IDs.
+hc receives env separately through terminal.run and the task at launch;
 show reports startup output. Session IDs are captured by ancestry-verified vega calls
 from the child, for commands such as mux and post.
 
@@ -69,9 +72,10 @@ its startup background probe; see [openai/codex#54159](https://github.com/openai
 An explicit --env FORCE_COLOR=... wins, including an empty value. This applies to every
 spawn location, including worktrees and remote machines.
 
-With --worktree, worktrunk (`wt switch`) creates the worktree and runs the repo's hooks;
-without wt, herdr creates it (only for repos without a worktrunk config). The agent starts in
-the worktree's own herdr workspace, nested under the repo. An existing worktree is reused.
+With --worktree, worktrunk (`wt switch`) creates the worktree and runs the repo's hooks.
+hc requires wt and starts the agent in a new local app space, or a tab as described above.
+The TUI backend starts in the worktree's own herdr workspace, nested under the repo;
+without wt, herdr creates it (only for repos without a worktrunk config). An existing worktree is reused.
 Pass --base the branch that holds the work the task needs: origin/main after a fetch, or
 local main when it has unpushed commits the task needs.
 

@@ -14,6 +14,8 @@ impl Fixture {
         for (name, text) in [("renice","#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/renice-calls\"\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app",include_str!("fixtures/app.py")),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
             fs::write(bin.join(name),text).unwrap();fs::set_permissions(bin.join(name),fs::Permissions::from_mode(0o755)).unwrap();
         }
+        fs::create_dir_all(d.path().join("config/herdr-app")).unwrap();
+        fs::write(d.path().join("config/herdr-app/herdr-app.sock"), "").unwrap();
         Self(d)
     }
     fn root(&self) -> &Path {
@@ -397,6 +399,141 @@ fn qualified_mail_preserves_the_machine_host_convention() {
         .as_str()
         .unwrap()
         .contains("vega post send --host test t7"));
+}
+
+fn fake_worktree(f: &Fixture) {
+    fs::create_dir(f.root().join("worktree")).unwrap();
+    let wt = f.root().join("bin/wt");
+    fs::write(
+        &wt,
+        r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+root=Path(os.environ['HOME'])
+with open(root/'wt-calls','a') as f: f.write(json.dumps(sys.argv[1:])+'\n')
+if sys.argv[1:] == ['--version']: print('fixture wt')
+else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_branch':'main'}))
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(wt, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn hc_worktree_falls_back_to_tab_without_a_local_app() {
+    for unavailable in ["binary", "socket", "window", "structured"] {
+        let f = Fixture::new();
+        fake_worktree(&f);
+        match unavailable {
+            "binary" => fs::remove_file(f.root().join("bin/herdr-app")).unwrap(),
+            "socket" => fs::remove_file(f.root().join("config/herdr-app/herdr-app.sock")).unwrap(),
+            _ => fs::write(f.root().join("app-unavailable"), unavailable).unwrap(),
+        }
+        let o = f
+            .cmd()
+            .args([
+                "spawn",
+                "worker",
+                "--kind",
+                "codex",
+                "--worktree",
+                "fix-branch",
+                "--prompt",
+                "do the task",
+                "--",
+                "-m",
+                "chosen",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            o.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        let text = success(o);
+        assert_eq!(text.matches("no local herdr-app").count(), 1, "{text}");
+        let calls = f.calls();
+        let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+        assert_eq!(run["cwd"], f.root().join("worktree").to_str().unwrap());
+        assert_eq!(run["caller"], "t7");
+        assert_eq!(run["no_parent"], false);
+        assert_eq!(run["labels"]["herdr.space"], "s1");
+        assert_eq!(run["labels"]["vega.harness"], "codex");
+        assert!(run["labels"].get("vega.worktree-placeholder").is_none());
+        let brief = run["argv"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert!(
+            brief.contains("do the task") && brief.contains("vega post done"),
+            "{brief}"
+        );
+        let shown = f.run(&["show", "worker"]);
+        assert!(shown.contains("t7"), "{shown}");
+        let app = fs::read_to_string(f.root().join("app-calls")).unwrap_or_default();
+        assert_eq!(
+            app,
+            if unavailable == "window" || unavailable == "structured" {
+                "ls\n"
+            } else {
+                ""
+            }
+        );
+    }
+}
+
+#[test]
+fn remote_hc_worktree_uses_target_preparation_and_no_local_app_space() {
+    let f = Fixture::new();
+    // Execute the actual prepare command under a separate target home. Local wt
+    // is deliberately absent: all worktree filesystem operations must run there.
+    let remote = f.root().join("remote-home");
+    fs::create_dir_all(remote.join("bin")).unwrap();
+    fs::create_dir(remote.join("worktree")).unwrap();
+    let wt = remote.join("bin/wt");
+    fs::write(
+        &wt,
+        r#"#!/usr/bin/python3
+import json, os, sys
+from pathlib import Path
+root=Path(os.environ['HOME'])
+with open(root/'wt-calls','a') as f: f.write(json.dumps(sys.argv[1:])+'\n')
+if sys.argv[1:] == ['--version']: print('fixture wt')
+else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_branch':'main'}))
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&wt, fs::Permissions::from_mode(0o755)).unwrap();
+    let text = success(f.cmd()
+        .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
+        .env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.18","state":"connected","target":"user@remote","via":false}]}"#)
+        .args(["spawn", "worker", "--kind", "codex", "--machine", "remote", "--cwd", "/remote/repo", "--worktree", "fix-branch", "--base", "main", "--prompt", "remote task", "--", "-m", "chosen"]).output().unwrap());
+    assert!(text.contains("no local herdr-app"), "{text}");
+    let calls = f.calls();
+    let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+    assert_eq!(run["cwd"], remote.join("worktree").to_str().unwrap());
+    assert_eq!(run["on"], "remote");
+    assert_eq!(run["caller"], "t7");
+    assert_eq!(run["no_parent"], false);
+    assert!(run["labels"].get("herdr.space").is_none());
+    assert!(run["argv"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains("remote task"));
+    assert!(!f.root().join("app-calls").exists());
+    let wt_calls = fs::read_to_string(remote.join("wt-calls")).unwrap();
+    assert!(
+        wt_calls.contains("fix-branch") && wt_calls.contains("--base") && wt_calls.contains("main"),
+        "{wt_calls}"
+    );
 }
 
 #[test]

@@ -4,6 +4,12 @@ from pathlib import Path
 root = Path(os.environ['HOME'])
 with (root/'app-calls').open('a') as f:
     f.write(' '.join(sys.argv[1:])+'\n')
+if (root/'app-unavailable').exists():
+    if (root/'app-unavailable').read_text() == 'structured':
+        print(json.dumps({'error': {'code': 'no_window'}}))
+    else:
+        print('no Herdr window at '+str(root/'config/herdr-app/herdr-app.sock'), file=sys.stderr)
+    sys.exit(1)
 if sys.argv[1:] == ['ls'] and (root/'app-ls.json').exists():
     print((root/'app-ls.json').read_text())
     sys.exit(0)

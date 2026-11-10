@@ -276,6 +276,13 @@ Remote transport or inner-command failures keep the card open. Waiting panes
 retain their qualified machine address, and positive group totals still match
 both source machine and project.
 
+For local worktree spawns, mux checks the configured app socket and reads the shown
+space once. Without a local app binary, socket or window, it starts the ordinary hc
+tab in the caller's space with cwd set to the worktree, preserving the brief, labels
+and parent link, and prints one stdout placement line. `--machine` worktrees run wt
+and trust preparation on the target; they always use the ordinary remote tab path,
+without copying local app space IDs. An available local app keeps the new-space path.
+
 `space.new` creates a shell before mux starts a worktree agent. It also shows the
 new space, so mux reads the shown space (`herdr-app ls`) first and selects it again
 afterwards: a spawn must not take the person's screen. When reading or reselecting
