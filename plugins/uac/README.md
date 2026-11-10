@@ -18,7 +18,7 @@ Done reports arrive by mail without a duplicate attention wake. Silent gate/CI
 waits, parked children and closed hc terminals remain quiet. Spawn briefs request
 only done, blocked, or requested CI verdict mail, without acknowledgement or progress.
 
-On the receiving vegad host, `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`
+On the receiving vegad host, `vega uac grant puck:w15W:p2 proteus:w3V:p1 --expires 2h`
 allows exactly one inbox-only peer pair until expiry. `revoke` takes the same pair; `grants`
 and the home view list live, expired and revoked records. The sender pane is its host's own
 claim; replies are peer requests, never Slayer approval. See `grant --help` and

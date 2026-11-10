@@ -360,7 +360,7 @@ fn rpc_with_timeout(
 
 /// hc 0.1.18 and 0.1.19 drop an empty `machines` from `terminal.list` (ListResult has
 /// `skip_serializing_if = "Vec::is_empty"` without `default`), although its own
-/// schema requires it. A core with no machines added (io, deimos) means `[]`.
+/// schema requires it. A core with no machines added (io, puck) means `[]`.
 fn fill_empty_machines(method: &str, result: &mut Value) {
     if method == "terminal.list" {
         if let Some(o) = result.as_object_mut() {

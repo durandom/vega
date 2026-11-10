@@ -190,7 +190,7 @@ pub fn parse_grant(s: &str) -> Result<(String, String), Failure> {
         Failure::new(
             "usage",
             format!("--cmd-grant {s}: {why}"),
-            "use host=vega.cmd.<to>.<kind>.<host>, e.g. deimos=vega.cmd.proteus.notify.deimos",
+            "use host=vega.cmd.<to>.<kind>.<host>, e.g. puck=vega.cmd.proteus.notify.puck",
         )
     };
     let (host, subject) = s.split_once('=').ok_or_else(|| bad("no ="))?;
@@ -208,13 +208,13 @@ pub fn parse_grant(s: &str) -> Result<(String, String), Failure> {
 }
 
 /// A `--registry-read host=key` entry: one exact registry key, no wildcards
-/// (vega-lhc.90), e.g. deimos=proteus.theme.
+/// (vega-lhc.90), e.g. puck=proteus.theme.
 pub fn parse_registry_read(s: &str) -> Result<(String, String), Failure> {
     let bad = |why: &str| {
         Failure::new(
             "usage",
             format!("--registry-read {s}: {why}"),
-            "use host=<exact-key>: <writer>.uac.v2.<hex(ProjectId)> or <writer>.lanista.v2.<hex(ProjectId)>.<hex(seat)>.<hex(lane)>.<hex(tier)>; theme: deimos=proteus.theme",
+            "use host=<exact-key>: <writer>.uac.v2.<hex(ProjectId)> or <writer>.lanista.v2.<hex(ProjectId)>.<hex(seat)>.<hex(lane)>.<hex(tier)>; theme: puck=proteus.theme",
         )
     };
     let (host, key) = s.split_once('=').ok_or_else(|| bad("no ="))?;

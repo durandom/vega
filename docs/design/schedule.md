@@ -64,7 +64,7 @@ vega post reminders cancel <id>
 - Undeliverable at firing (the name or UAC does not resolve, the pane closed): one inbox note naming the
   reminder; a one-shot ends, a recurring one stays for its next slot.
 - Who may: any agent on the host, no approval (no code runs, P7: the box is the boundary). Inbox-only hosts
-  (deimos) cannot create reminders. Limits: text ≤ 2 KiB, at most 100 active reminders per host
+  (puck) cannot create reminders. Limits: text ≤ 2 KiB, at most 100 active reminders per host
   (`reminder_limit` error naming `vega post reminders`).
 - AXI output. Create: `scheduled: <id>`, `to: <target>`, `next: <local time> (<in>)`, `help: vega post
   reminders cancel <id>`. List (TOON): `id, when, next, to, by, text` (text truncated to 60 chars), by

@@ -6,7 +6,7 @@
 //! This host's notes live in `$XDG_STATE_HOME/vega/notes/<id>.json`; vegad
 //! reconciles them into the registry as `<host>.note.<id>` (local state is
 //! the truth, as for agents and links), so a host without registry rights
-//! (deimos) keeps them here only. Ids are Unix milliseconds, unique per host,
+//! (puck) keeps them here only. Ids are Unix milliseconds, unique per host,
 //! so the newest is the largest. What this host's viewer has read or cleared
 //! is a watermark per source host in `notes/seen.json`.
 //!

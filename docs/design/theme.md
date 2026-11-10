@@ -74,8 +74,8 @@ A legacy `system/system` pair migrates to the defaults; explicit `[tools.pi]` ov
   blocked or unknown pane waits; a closed one is dropped; a newer change replaces the
   pending one. `live_claude = false` turns it off. The relay loop types both pointers and theme lines, so they
   never interleave.
-- **Inbox-only hosts** (deimos) have no registry rights but one: `vega post auth-config ... --inbox-only deimos
-  --registry-read deimos=proteus.theme` grants exactly
+- **Inbox-only host** (puck) has no registry rights but one: `vega post auth-config ... --inbox-only puck
+  --registry-read puck=proteus.theme` grants exactly
   `$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.$KV.VEGA_REGISTRY.proteus.theme` (vega-lhc.90). Not even
   `STREAM.INFO.KV_VEGA_REGISTRY`, which async-nats sends to open the bucket: its `subjects_filter` would list
   every key. So `vega_registry::get_one` sends that one direct get as a plain request (`404` = nothing

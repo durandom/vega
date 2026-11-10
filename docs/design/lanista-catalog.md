@@ -190,7 +190,7 @@ compression), one object `model_index.json` with metadata `generated_at` and `so
   right lets a host set any `deliver_subject`, and the server publishes past permissions, e.g. into another
   host's inbox (vega-mux-broker-spike.md). Readers therefore get only `$JS.API.DIRECT.GET.OBJ_VEGA_LANISTA`
   and `...OBJ_VEGA_LANISTA.>`, which reach nothing outside the bucket. This includes the inbox-only host
-  deimos: the catalog is public data flowing toward it, and a direct get lets it send nothing.
+  puck: the catalog is public data flowing toward it, and a direct get lets it send nothing.
 - **Writer grants** (`auth-config --lanista-writer ganymede`): stream info, message get and purge of
   `OBJ_VEGA_LANISTA`, publish `$O.VEGA_LANISTA.>`. An inbox-only host cannot be the writer.
 - **Admin:** stream info always; create only with `auth-config --create lanista` while provisioning

@@ -64,8 +64,8 @@ its config is host-managed. Vega owns agent and herdr-app config ([config](confi
 7. **`hc machine` owns the fleet (Slayer, 2026-11-06).** It takes the role `herdr machine` has today:
    `vega deploy` reads `hc machine ls` instead of `herdr machine list`, and the registry stays the record of
    who is reachable, not an inventory. Moving it is one `hc machine add` (ssh) per saved herdr machine:
-   ganymede, deimos, io (ssh host `io-wsl`), puck. Direction rule: a private host may add a corp host
-   (proteus adds deimos, as with herdr), never the reverse: no corp host gets a private host as an hc
+   ganymede, io (ssh host `io-wsl`), puck. Direction rule: a private host may add a corp host
+   (proteus adds puck), never the reverse: no corp host gets a private host as an hc
    machine, since that would let it run commands and drive agents there ([vegad](vegad.md), trust model).
 
 8. **The vega mod is a config unit (Slayer, 2026-11-06).** Source `config/herdr-app/mods/vega/` in the
@@ -299,7 +299,7 @@ An hc machine name must equal its vega registry host. `machine/t7` and
 `hc:machine/t7` resolve directly to host `machine`, pane `t7`; no remote identity
 query, alias mapping, SSH target matching, or hostname guessing is used. Post
 checks that the host has a registry beat before enqueueing, including tool sends.
-An inbox-only host (state.rs list: deimos, puck) never publishes a beat by design, so it counts
+The inbox-only host (state.rs list: puck) never publishes a beat by design, so it counts
 as a known registry host without one (reachability then warns "mailed anyway"); the
 direction rules are unchanged, and `vega config infra --fleet` no longer flags it.
 Unknown hosts fail with `machine_host_unknown`; unavailable registry checks fail

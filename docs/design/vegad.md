@@ -436,7 +436,7 @@ channel was full the next broker call waited forever, taking the single-threaded
 ## Security
 
 - Each host writes only its own KV keys and its own sender subjects (as today for mail).
-- deimos is inbox-only (user decision). Cross-host replies use quarantine (Slayer decision
+- puck is inbox-only (user decision). Cross-host replies use quarantine (Slayer decision
   2026-10-12, vega-lhc.83); same-host messages use local herdr delivery (vega-lhc.248).
 
 ### Quarantine (inbox-only replies)
@@ -444,12 +444,12 @@ channel was full the next broker call waited forever, taking the single-threaded
 An inbox-only host may message its own agents through herdr. Cross-host replies require an
 operator pair grant to reach an agent; otherwise they become human notices:
 
-- Broker: `auth-config --inbox-only deimos --quarantine deimos` lets deimos publish only
-  `vega.quarantine.*.*.deimos` (still no `vega.inbox.*`); every other host may subscribe
+- Broker: `auth-config --inbox-only puck --quarantine puck` lets puck publish only
+  `vega.quarantine.*.*.puck` (still no `vega.inbox.*`); every other host may subscribe
   `vega.quarantine.<self>.>` and answers through its existing `allow_responses`. No stream, no
   provisioning.
 - Local send (vega-lhc.248): on a host in the inbox-only list (`VEGA_POST_INBOX_ONLY`, else
-  `$XDG_CONFIG_HOME/vega/inbox-only`, else `deimos` and `puck`), same-host `vega post send` and `done`
+  `$XDG_CONFIG_HOME/vega/inbox-only`, else `puck`), same-host `vega post send` and `done`
   deliver direct herdr prompts with local reply tokens and parent/child supervision. No broker
   access, pair grant or inbox archive is involved. `--uac` resolves open local v2 UAC claims,
   including IDs, aliases and `.`; remote UAC enumeration and `--uber` remain unavailable.
@@ -461,13 +461,13 @@ operator pair grant to reach an agent; otherwise they become human notices:
   transitions and self-exec. Uber asks and digest generation are skipped without registry rights.
 - Cross-host send: `vega post send --host <other-host> <pane>` and cross-host `done` make a core NATS
   request to `vega.quarantine.<to>.<pane>.<self>` (at most 4 KiB). The target's vegad writes a note
-  (kind `quarantine`, title `deimos (quarantine) to <pane>: ...`, toast plus `vega post notes` and the
+  (kind `quarantine`, title `puck (quarantine) to <pane>: ...`, toast plus `vega post notes` and the
   inbox) and answers `stored`. Without a live pair grant it never enters delivery or an ask's
   fan-in. No vegad there: `no_responder`, nothing stored. `ask` from such a host is refused.
 - Operator pair grant (vega-lhc.237): on the **receiving** vegad host run
-  `vega uac grant deimos:w15W:p2 proteus:w3V:p1 --expires 2h`. Expiry is mandatory
+  `vega uac grant puck:w15W:p2 proteus:w3V:p1 --expires 2h`. Expiry is mandatory
   (positive integer with `s`, `m`, `h` or `d`); one literal pair per grant, no wildcards.
-  `vega uac revoke deimos:w15W:p2 proteus:w3V:p1` revokes it idempotently; `vega uac grants`
+  `vega uac revoke puck:w15W:p2 proteus:w3V:p1` revokes it idempotently; `vega uac grants`
   and the `vega uac` home view list live, expired and revoked pairs with Unix timestamps.
   Grants live in `$XDG_STATE_HOME/vega/mail-grants` (default `~/.local/state/vega/mail-grants`),
   one atomic JSON file per pair, read for each request: no restart. Use vegad's HOME and
@@ -632,7 +632,7 @@ reported, waiting and held children do not inflate that set.
    `uac claim` and `adopt --machine` across machines; sidebar metadata; the herdr startup hook.
 
 Live on titan after the Slayer applies the regenerated auth config (commands + registry rights,
-`--cmd-grant deimos=vega.cmd.proteus.open.deimos`) and runs `vega post provision registry`; until
+`--cmd-grant puck=vega.cmd.proteus.open.puck`) and runs `vega post provision registry`; until
 then every vegad logs "commands: not served" and "registry: off" and keeps mail and local
 supervision running.
 
@@ -855,7 +855,7 @@ herdr toast is the banner, the herdr-app inbox's Inbox (`N`) the list, the UAC p
   draft and lost-draft notices; other events can follow.
 - Store: local state is the truth, as for agents. vegad reconciles the notes into the registry as
   `<host>.note.<id>` and deletes pruned ones; no auth change, each host writes only its keys. An
-  inbox-only host (deimos) has no registry rights: its notes stay in the local store, which
+  inbox-only host (puck) has no registry rights: its notes stay in the local store, which
   `vega post notes` reads the same way.
 - Read state: per viewing host, a watermark per source host (last id read, last id cleared) in
   `notes/seen.json`, published as `<viewer>.notes.seen.<source>`. `vega post notes read|clear`

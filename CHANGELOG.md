@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 180 · 2026-11-10
+
+- migration: deimos is retired and replaced by puck. The built-in inbox-only host default and
+  current user-facing host examples now name puck.
+
 ## 179 · 2026-11-10
 
 - optional: dcg is pinned to 0.16.0 via `mise run install-dcg` (verified release archive,

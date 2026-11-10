@@ -205,13 +205,13 @@ Views: `find` and `list` (all and `--dirty`) add a `host` column (this host firs
 line; peer rows show no pane or install. `find --paths` prints this host's paths only (for `cd`); a name
 checked out only elsewhere is `not_found` with the hosts in the hint. `report`, `skills` and the home view stay local (peer rows lack the git dirs they need); the home
 view adds one line per peer host: rows and age. Broker away: the peer files stay; rows older than a day get a
-`stale` note. deimos has no registry rights: no peer files, local only, said in the home view.
+`stale` note. puck has no registry rights: no peer files, local only, said in the home view.
 
 ## README search (stage 2, optional embed)
 
 - Offline core: when a clone's row is new or changed (and on `scan`), its README (`README.md`, else
   `README*`, first 8 KB, after the repo name) goes into `readme` if its sha moved; a clone without one gets
-  an empty row. `vega janitor search <words>` ranks with FTS5 (bm25, any word); works on deimos.
+  an empty row. `vega janitor search <words>` ranks with FTS5 (bm25, any word); works on puck.
 - Embed stage: `vega janitor embed` sends READMEs without a vector to the OpenAI-compatible endpoint
   (`VEGA_JANITOR_EMBED_ENDPOINT`, or `~/.config/vega/janitor-embed.url`; no default, model
   `qwen3-embedding-0.6b-q8-0`, 1024 dims, as brainz `scripts/vault-embed.py`). Key: the vega secret

@@ -29,8 +29,8 @@ The lanista catalog: every host (inbox-only ones too) may direct-get OBJ_VEGA_LA
 Examples:
   vega post auth-config proteus=UABC... ganymede=UDEF... --admin UXYZ...
   vega post auth-config --file hosts.txt --admin UXYZ... --create ganymede
-  vega post auth-config --file hosts.txt --admin UXYZ... --inbox-only deimos --quarantine deimos \
-      --registry-read deimos=proteus.theme
+  vega post auth-config --file hosts.txt --admin UXYZ... --inbox-only puck --quarantine puck \
+      --registry-read puck=proteus.theme
   (hosts.txt: host=U... lines, # comments)
 
 One-time registry TTL migration: `--create registry-ttl` grants the admin only

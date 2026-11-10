@@ -348,7 +348,7 @@ chezmoi nothing is managed. Two exceptions, because chezmoi cannot see them or v
   values until the dotfiles delete the script.
 - `skills`: `vega skills lib sync` already writes these directories on every deploy. An overlap is a
   warning in the status (`chezmoi also manages …`), not a refusal, so hosts that keep chezmoi longer
-  (deimos, io) still get their skills.
+  (puck, io) still get their skills.
 
 ## Per-host differences
 

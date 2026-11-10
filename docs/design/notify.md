@@ -60,7 +60,7 @@ Resolve, whichever comes first:
 
 Delivery state (which channel sent what, ack, reminder done) lives with the deliverer, in
 `$XDG_STATE_HOME/vega/notify/sent.json`, published as `<host>.notify.sent`, so a restart or a new deliverer
-does not resend. Inbox-only hosts (deimos) have no registry: their asks reach only the local toast.
+does not resend. The inbox-only host (puck) has no registry: its asks reach only the local toast.
 
 ## CLI/state build (.226.1)
 
