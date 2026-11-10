@@ -817,6 +817,7 @@ test('keychain popup opens once globally per lock, click reopens only its own te
   // Another copy shares the same dedupe state (as multiple status bars do).
   const copy=new h.mod.constructor();copy.applyKeychains([row],now,h.cx);await h.flush();
   assert.equal(h.calls.filter(c=>c[0]==='open').length,1);
+  h.api.focused=()=>({terminal:'puck/t1'});
   const red=elements(h.render()).find(e=>e.idValue==='keychain-puck');
   red.handlers.on_click({},h.cx);await h.flush();
   assert.equal(h.calls.filter(c=>c[0]==='open').length,2,'click reopens a dismissed popup');
@@ -834,14 +835,17 @@ test('keychain status uses theme colours, host and since tooltips, and stale dat
   const t={ansi1:'theme-red',ansi2:'theme-green',dim:'theme-dim'};h.api.theme=()=>t;
   h.mod.applyKeychains(['unlocked','locked','unknown'].map((state,i)=>({host:['localmac','puck','offline'][i],state,since:now-30,at:now})),now,h.cx);
   await h.flush();
-  const nodes=elements(h.render());
-  for(const [host,color] of [['localmac',t.ansi2],['puck',t.ansi1],['offline',t.dim]]) {
-    const n=nodes.find(n=>n.idValue===`keychain-${host}`);
+  h.mod.localKeychainHost='localmac';
+  const lockOf=focus=>{h.api.focused=()=>({terminal:focus});return elements(h.render()).filter(n=>String(n.idValue).startsWith('keychain-'));};
+  for(const [focus,host,color] of [['t1','localmac',t.ansi2],['puck/t1','puck',t.ansi1],['offline/t3','offline',t.dim]]) {
+    const locks=lockOf(focus);
+    assert.equal(locks.length,1,'one lock: the focused terminal\'s machine');
+    const n=locks[0];assert.equal(n.idValue,`keychain-${host}`);
     assert.equal(n.text_colorValue,color);assert(n.tooltipValue.includes(host));assert(n.tooltipValue.includes('since'));
   }
   const opens=h.calls.filter(c=>c[0]==='open').length;
-  nodes.find(n=>n.idValue==='keychain-localmac').handlers.on_click({},h.cx);
-  nodes.find(n=>n.idValue==='keychain-offline').handlers.on_click({},h.cx);await h.flush();
+  lockOf('t1')[0].handlers.on_click({},h.cx);
+  lockOf('offline/t3')[0].handlers.on_click({},h.cx);await h.flush();
   assert.equal(h.calls.filter(c=>c[0]==='open').length,opens);
   h.mod.applyKeychains([{host:'puck',state:'locked',since:1,at:now}],now-181,h.cx);
   assert.equal(h.mod.keychains[0].state,'unknown','stopped vegad cannot leave a red/green claim');

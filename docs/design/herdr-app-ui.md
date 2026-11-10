@@ -9,7 +9,8 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the `vega b
 
 The `vega` status mod reads vegad's local `keychains.json` registry projection every five seconds
 in one local read. It uses the same `XDG_STATE_HOME` as vegad, as for badges. There is no per-host
-exec polling. The right side shows one monochrome lock per macOS host, coloured with theme
+exec polling. The right side shows one monochrome lock for the focused terminal's machine (local
+terminals: this host; Slayer 2026-11-10), coloured with theme
 `ansi2` (unlocked), `ansi1` (locked), or `dim` (unknown). Tooltips give host, state, and `since`.
 Stale snapshots and stale probe samples become unknown rather than retaining a red/green claim.
 

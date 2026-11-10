@@ -198,8 +198,12 @@ export default class Vega extends View {
     });
   }
 
+  // One lock: the focused terminal's machine (local terminals: this host). Unlock popups for
+  // other machines still open on their own when those lock.
   keychainSegments(t) {
-    return (this.keychains ?? []).map(row => div().id(`keychain-${row.host}`).px(4)
+    const f = focused()?.terminal ?? "";
+    const host = (f.includes("/") ? f.split("/")[0] : this.localKeychainHost ?? "").toLowerCase();
+    return (this.keychains ?? []).filter(row => row.host === host).map(row => div().id(`keychain-${row.host}`).px(4)
       .text_color(row.state === "locked" ? t.ansi1 : row.state === "unlocked" ? t.ansi2 : t.dim)
       .tooltip(`${row.host}: ${row.state} since ${new Date(row.since*1000).toLocaleString()}`)
       .on_click((_e, cx) => { if (row.state === "locked") this.openKeychain(row, cx); })

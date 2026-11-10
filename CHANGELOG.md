@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 162 · 2026-11-10
+
+- feature: the status line shows one keychain lock, the focused terminal's machine's, instead of
+  one per Mac. Unlock windows for other machines still open when they lock. Apply with
+  `vega config apply herdr-app`.
+
 ## 161 · 2026-11-10
 
 - feature: vegad probes the login keychain on each macOS host every minute and shares its state
