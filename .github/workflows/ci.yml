@@ -46,6 +46,15 @@ jobs:
         with:
           install_args: nats-server
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Rust executable diagnostics
+        run: |
+          type -a cargo rustc cargo-clippy
+          ls -l "$(command -v cargo)" "$(command -v rustc)" "$(command -v cargo-clippy)"
+          cargo -Vv
+          rustc -Vv
+          cargo clippy -V
+          rustup which cargo
+          rustup which cargo-clippy
       - name: Test git identity
         run: |
           git config --global user.name ci
@@ -53,7 +62,7 @@ jobs:
       - name: cargo fmt
         run: nice cargo fmt --all --check
       - name: cargo clippy
-        run: nice cargo clippy --workspace --all-targets -- -D warnings
+        run: nice cargo clippy --workspace --all-targets -vv -- -D warnings
       - name: cargo test
         run: nice cargo test --workspace
       - name: vscode tests
