@@ -1,0 +1,20 @@
+{
+  "claude": {
+    "matcher": "Bash|PowerShell|Monitor",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "@DCG@"
+      }
+    ]
+  },
+  "codex": {
+    "matcher": "Bash",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "@DCG@"
+      }
+    ]
+  }
+}

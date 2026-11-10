@@ -5,6 +5,18 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 179 · 2026-11-10
+
+- optional: dcg is pinned to 0.16.0 via `mise run install-dcg` (verified release archive,
+  previous binary backed up, strict doctor failure rolls back). Install it per host;
+  vega deploy does not upgrade dcg automatically.
+- unit: `pi.dcg` adds a bash guard at `~/.pi/agent/extensions/dcg-guard.ts` in the `hooks`
+  group. Review/apply it and restart pi. `claude.settings` and `codex.hooks` now own dcg's
+  shared `dcg/hook.json` PreToolUse entry; review their diff before applying.
+- migration: review/apply `dcg.config` to disable hook self-repair; vega owns the hooks.
+  `vega config check` reports dcg version >=0.16.0 and each installed agent's guard.
+  Run `dcg doctor --strict` for Codex approval/reachability; approvals remain human-owned.
+
 ## 178 · 2026-11-10
 
 - feature: post waits up to 60 s for slow broker operations. Send and done retry uncertain

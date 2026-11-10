@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 28] = [
+pub const DEFAULTS: [(&str, &str); 30] = [
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
     default!("instructions/reasoning.md"),
@@ -30,6 +30,8 @@ pub const DEFAULTS: [(&str, &str); 28] = [
     // Read by vega_herdr::capacity (window scopes), not rendered to a target.
     default!("capacity/windows.toml"),
     default!("dcg/config.toml"),
+    default!("dcg/hook.json"),
+    default!("pi/extensions/dcg-guard.ts"),
     default!("dcg/packs/oc.yaml"),
     default!("herdr-app/mods/vega/main.js"),
     default!("herdr-app/mods/vega/mod.json"),
@@ -218,6 +220,7 @@ mod tests {
             "agentsview",
             "capacity",
             "dcg/packs",
+            "pi/extensions",
             "herdr-app/themes",
             "herdr-app/mods/vega",
             "herdr-app/mods/vega-sidebar",

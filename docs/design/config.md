@@ -26,14 +26,15 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | Unit | Target | Ownership | Source |
 |---|---|---|---|
 | `dcg.config` | `$XDG_CONFIG_HOME/dcg/config.toml` | whole file | `dcg/config.toml` |
+| `pi.dcg` | `~/.pi/agent/extensions/dcg-guard.ts` | whole file; in `hooks` group | `pi/extensions/dcg-guard.ts` |
 | `dcg.packs` | `$XDG_CONFIG_HOME/dcg/packs/<name>.yaml` (also `.yml`) | whole file each; other live packs untouched | `dcg/packs/` |
 | `claude.md` | `~/.claude/CLAUDE.md` | whole file | `instructions/*.md`, parts per agent |
 | `codex.md` | `~/.codex/AGENTS.md` | whole file | same |
 | `pi.md` | `~/.pi/agent/AGENTS.md` | whole file | same |
 | `claude.styles` | `~/.claude/output-styles/<name>.md`, one per source file | whole file each; other files in the dir untouched | `claude/output-styles/` |
-| `claude.settings` | `~/.claude/settings.json` | key-merge: the top-level keys of the source, re-asserted only when their source value changes | `claude/settings.json` |
+| `claude.settings` | `~/.claude/settings.json` | seeded preferences plus dcg PreToolUse key-merge | `claude/settings.json`, `dcg/hook.json` |
 | `claude.hooks` | `~/.local/share/vega/claude-marketplace/`, Claude plugin registration, legacy settings hooks | whole plugin files; CLI install/enable; remove only legacy vega commands after verification | code (plugins/config) |
-| `codex.hooks` | `~/.codex/hooks.json` | key-merge: vega's `PreToolUse` entry | code |
+| `codex.hooks` | `~/.codex/hooks.json` | key-merge: ask-parent and dcg `PreToolUse` entries | code, `dcg/hook.json` |
 | `pi.prefix` | `~/.pi/agent/settings.json` | key-merge: the activation line in `shellCommandPrefix` | code |
 | `skills` | `~/.agents/skills/<n>`, `~/.claude/skills/<n>` | the skills library; `vega skills lib sync` | `~/.config/vega/skills-global`, the library clone |
 | `herdr-app.keys` | `~/.config/herdr-app/keys.json` | whole file; actions checked against `herdr-app commands` | `herdr-app/keys.json` |
@@ -43,7 +44,7 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `herdr-app.layouts` | `~/.config/herdr-app/layouts/vega.json` | whole file; first apply selects it through the app | `herdr-app/layouts/vega.json` |
 | `agentsview` | `LOCAL-SETUP.md` in `~/.claude/skills/agentsview-finding-history/` and `~/.agents/skills/agentsview-finding-history/` | whole file each, only where agentsview generated the skill (`SKILL.md` exists) | `agentsview/LOCAL-SETUP.md` |
 
-Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks codex.hooks pi.prefix`;
+Groups: `instructions` = `claude.md codex.md pi.md`; `hooks` = `claude.hooks codex.hooks pi.prefix pi.dcg`;
 `herdr-app` = `herdr-app.keys herdr-app.themes herdr-app.mods herdr-app.layouts herdr-app.settings`
 (in apply order; mods precede layouts, both precede settings).
 
@@ -124,6 +125,73 @@ The agents clone reads hc labels on render, without terminal polling. See [herdr
 
 ### Destructive Command Guard
 
+dcg is pinned to **v0.16.0**. `mise run install-dcg` downloads the architecture-specific
+GitHub release archive with `gh`, verifies a committed SHA-256 digest, and atomically
+replaces `~/.local/bin/dcg`. It never runs upstream `dcg install` or changes agent hooks.
+Supported targets are macOS arm64/x86_64 and Linux arm64 (glibc >=2.28)/x86_64 (static musl).
+The previous binary is retained in `~/.cache/dcg-<version>/dcg`, including
+`~/.cache/dcg-0.9.2/dcg` on proteus. The installer runs `dcg doctor --strict` after
+replacement and restores that backup on failure. Plain doctor can exit 0 on unhealthy
+reports; strict mode is required for automated rollout.
+
+Proteus has an explicit UAC-approved exception: no OpenCode binary exists on PATH, but
+a stale `~/.config/opencode` directory makes doctor say `Checking OpenCode plugin
+registration... NOT REGISTERED` and strict doctor exit 1. The directory remains untouched.
+`mise run install-dcg -- --allow-stale-opencode` keeps the new binary only when that is
+the sole doctor error and no OpenCode executable is present; any other error rolls back.
+The default installer has no exception. Use this flag only after reviewing that host.
+An existing archive can be supplied with `--archive <path>`; the same platform-specific
+pinned checksum is mandatory, so offline retries retain verification.
+Only the Claude hook unit was applied on proteus; dcg config and pi guard await UAC rollout.
+
+Hook wiring stays in vega config: `dcg/hook.json` contains per-agent PreToolUse entries used
+by `claude.settings` (Bash/PowerShell/Monitor) and `codex.hooks` (Bash); `@DCG@` resolves to the pinned install path.
+Bare dcg commands are replaced without dropping other commands in mixed hook entries.
+Claude preference keys remain seeded; its dcg hook is repaired on every explicit apply.
+Custom commands with dcg arguments remain user-owned. The `pi.dcg` unit uses the same
+global extension discovery directory as `herdr-agent-state.ts`, alongside it. It follows
+[the v0.16.0 recipe](https://github.com/Dicklesworthstone/destructive_command_guard/blob/v0.16.0/docs/pi-integration.md):
+`tool_call` for bash, `dcg --robot test --dialect posix`, block on exit 1. Vega additionally
+blocks unavailable/indeterminate/error results (including invalid config), bounds the
+subprocess to five seconds, and caps captured output. `DCG_BIN` overrides the pi binary.
+Restart pi after apply. Tests call the extension handler without executing requested
+shell commands, covering real deny/allow verdicts and failure paths.
+
+`vega config check` (alias of `infra`) reports dcg's version (requires >=0.16.0),
+Claude/Codex PreToolUse registration, and pi's pre-tool `tool_call` guard. Installed
+agents are recognized by an executable on PATH; stale config directories are ignored. The pi check compares
+with the resolved source, so a placeholder/stale extension fails. These are local
+registration checks; run `dcg doctor --strict` for reachability, including Codex's
+existing approval state. Vega never fabricates hook approvals.
+
+The 0.10–0.16 release review found no renamed active keys in this config. Removed
+`overrides.allowlist`/`allowlist_rules` keys are not used. Keep the 1000 ms default hook
+budget (not the old 200 ms example) and bounded fallback scanning via
+`heredoc.fallback_on_parse_error/timeout = true`. These keys still exist in 0.16;
+false blocks incomplete analysis. `general.update_pin = true` prevents dcg's updater
+from bypassing the pinned installer. `general.self_heal_hook = false` keeps dcg from
+rewriting vega-owned hooks. Version 0.16 blocks malformed/unreadable user config,
+rejects zero-width custom rules, matches custom safe patterns against original command
+segments, and honors disabled custom packs. The obsolete advisory `[response]` settings were
+removed: hook denials are not graduated. The custom branch rule removes nested token quantifiers that exceeded 0.16 regex work
+limits on benign formatting text. Real evaluator fixtures cover the oc pack and branch
+denials; nested shell denials now report `config_override` instead of `heredoc_ast`.
+
+Rollout is explicit and host-local; a vega deploy does not install dcg automatically:
+
+1. Review release notes and `vega config diff dcg.config dcg.packs claude.settings codex.hooks pi.dcg`.
+2. Run `nice -n 10 mise run install-dcg` (strict doctor failure restores the binary).
+   A new host with no hooks may fail this first doctor; review/apply hooks with vega,
+   resolve native Codex approvals as the human, then retry installation.
+3. Apply reviewed units, restart agents, then run `dcg doctor`, `dcg doctor --strict`,
+   `dcg test 'git reset --hard'` (deny), `dcg test 'ls'` (allow), and `vega config check`.
+4. Run `nice -n 10 node --test scripts/dcg-guard.test.mjs` in the checkout for the pi probe.
+   Existing Claude/Codex sessions may need a restart to load hook changes.
+
+ganymede/io/puck require a separate Slayer-approved rollout: inspect existing binaries,
+config and approvals, install the pinned artifact locally, apply reviewed config units,
+and repeat those probes.
+
 `dcg.config` and `dcg.packs` are personal whole-file units. Explicit config apply/deploy
 manages them, but install remains hooks-only; onboard preserves differing existing files.
 `vega config diff dcg.config dcg.packs` previews the change. Local sources use the same
@@ -191,7 +259,8 @@ replaces the file atomically (temp file + rename in the same directory).
 ## Claude hook plugin (vega-lhc.243)
 
 Claude Code can overwrite external settings edits from a running session's stale snapshot
-(vega-lhc.241). `claude.settings` keeps its seeded preference semantics. Hooks instead live in the
+(vega-lhc.241). `claude.settings` keeps its seeded preference semantics and separately manages dcg.
+Vega lifecycle/ask-parent hooks live in the
 minimal `vega-hooks@vega-local` plugin: `.claude-plugin/plugin.json` and `hooks/hooks.json`, with no
 skills, prompts or servers. Vega renders a local marketplace under
 `~/.local/share/vega/claude-marketplace/`, registers it with
@@ -325,6 +394,8 @@ config/                         # repo defaults; ~/.config/vega/config/ override
   claude/settings.json          # seeded keys
   agentsview/LOCAL-SETUP.md
   dcg/config.toml
+  dcg/hook.json
+  pi/extensions/dcg-guard.ts
   dcg/packs/oc.yaml
   capacity/windows.toml         # window scopes; read by vega capacity, no unit (capacity.md)
 ```

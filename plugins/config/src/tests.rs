@@ -128,7 +128,12 @@ fn select_takes_units_and_groups_in_order() {
     assert_eq!(s(&[]).unwrap().len(), Unit::ALL.len());
     assert_eq!(
         s(&["hooks", "claude.hooks"]).unwrap(),
-        [Unit::ClaudeHooks, Unit::CodexHooks, Unit::PiPrefix]
+        [
+            Unit::ClaudeHooks,
+            Unit::CodexHooks,
+            Unit::PiPrefix,
+            Unit::PiDcg
+        ]
     );
     assert!(s(&["herdr"]).is_err());
     assert!(s(&["nope"]).unwrap_err().contains("known: dcg.config"));
@@ -180,7 +185,9 @@ fn fresh_home_gets_everything_then_nothing_changes() {
     assert!(ctx.env.home.join(".claude/output-styles/ELI5.md").is_file());
     let settings: Value = serde_json::from_str(&read(&ctx, ".claude/settings.json")).unwrap();
     assert_eq!(settings["outputStyle"], "Caveman ELI5");
-    assert!(settings.get("hooks").is_none());
+    assert!(merge::is_dcg_command(
+        &settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    ));
     let s: Value = serde_json::from_str(&read(
         &ctx,
         ".local/share/vega/claude-marketplace/plugins/vega-hooks/hooks/hooks.json",
@@ -359,7 +366,9 @@ fn settings_merge_keeps_tool_state_and_local_seeds() {
     );
     let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(v["outputStyle"], "Concise");
-    assert!(v.get("hooks").is_none());
+    assert!(merge::is_dcg_command(
+        &v["hooks"]["PreToolUse"][0]["hooks"][0]
+    ));
     assert_eq!(v["enabledPlugins"]["vega-hooks@vega-local"], true);
     // A file that does not parse stays untouched.
     fs::write(&path, "not json").unwrap();
@@ -464,16 +473,28 @@ fn evidence_attributes_repair_and_source_change_without_values_and_refreshes_bac
     let (out, first) = apply_report(&ctx, Unit::ClaudeSettings, &BTreeSet::new());
     assert_eq!(out.kind(), "written");
     assert_eq!(fs::read_to_string(backup_path(&target)).unwrap(), before);
-    assert_eq!(first["writes"][0]["keys"][0]["key"], "/outputStyle");
-    assert_eq!(first["writes"][0]["keys"][0]["operation"], "changed");
-    assert_eq!(first["writes"][0]["keys"][0]["source_changed"], true);
+    let first_key = first["writes"][0]["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["key"] == "/outputStyle")
+        .unwrap();
+    assert_eq!(first_key["key"], "/outputStyle");
+    assert_eq!(first_key["operation"], "changed");
+    assert_eq!(first_key["source_changed"], true);
     let repaired = r#"{"env":{"TOKEN":"USER_SECRET"}}"#;
     fs::write(&target, repaired).unwrap();
     let (_, second) = apply_report(&ctx, Unit::ClaudeSettings, &BTreeSet::new());
     assert_eq!(fs::read_to_string(backup_path(&target)).unwrap(), repaired);
-    assert_eq!(second["writes"][0]["keys"][0]["operation"], "added");
-    assert_eq!(second["writes"][0]["keys"][0]["reason"], "missing_key");
-    assert_eq!(second["writes"][0]["keys"][0]["source_changed"], false);
+    let second_key = second["writes"][0]["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["key"] == "/outputStyle")
+        .unwrap();
+    assert_eq!(second_key["operation"], "added");
+    assert_eq!(second_key["reason"], "missing_key");
+    assert_eq!(second_key["source_changed"], false);
     assert!(second["at_unix_ms"].as_u64().unwrap() >= first["at_unix_ms"].as_u64().unwrap());
     let text = fs::read_to_string(evidence::path(&ctx.env)).unwrap();
     let events: Vec<Value> = serde_json::from_str(&text).unwrap();
@@ -1153,4 +1174,58 @@ fn app_layout_mod_discovery_retry_is_bounded_and_rolls_back() {
     assert!(started.elapsed() < std::time::Duration::from_secs(15));
     assert!(!home.join("layouts/vega.json").exists());
     assert!(!home.join("selected").exists());
+}
+
+#[test]
+fn dcg_hooks_preserve_mixed_entries_and_pi_source_is_managed() {
+    let (_d, ctx) = setup();
+    let original = serde_json::json!({"hooks": {"PreToolUse": [{"matcher":"Bash", "hooks":[
+        {"type":"command","command":"/old/dcg"},
+        {"type":"command","command":"other-guard"}
+    ]}, {"matcher":"Read", "hooks":[]}]}, "other":true});
+    for (unit, rel) in [
+        (Unit::ClaudeSettings, ".claude/settings.json"),
+        (Unit::CodexHooks, ".codex/hooks.json"),
+    ] {
+        fs::write(ctx.env.home.join(rel), original.to_string()).unwrap();
+        assert_eq!(apply(&ctx, unit, &BTreeSet::new()).kind(), "written");
+        let value: Value = serde_json::from_str(&read(&ctx, rel)).unwrap();
+        assert_eq!(value["other"], true);
+        let entries = value["hooks"]["PreToolUse"].as_array().unwrap();
+        assert!(entries
+            .iter()
+            .any(|e| e["matcher"] == "Read" && e["hooks"].as_array().unwrap().is_empty()));
+        assert!(entries
+            .iter()
+            .any(|e| e["hooks"][0]["command"] == "other-guard"));
+        assert_eq!(
+            entries
+                .iter()
+                .flat_map(|e| e["hooks"].as_array().unwrap())
+                .filter(|h| merge::is_dcg_command(h))
+                .count(),
+            1
+        );
+        assert_eq!(apply(&ctx, unit, &BTreeSet::new()), Outcome::Unchanged);
+        // A canonical hook alongside a stale duplicate must still be repaired.
+        let mut duplicate = value.clone();
+        duplicate["hooks"]["PreToolUse"].as_array_mut().unwrap().push(
+            serde_json::json!({"matcher":"Bash", "hooks":[{"type":"command","command":"/stale/dcg"}]}));
+        fs::write(ctx.env.home.join(rel), duplicate.to_string()).unwrap();
+        assert_eq!(apply(&ctx, unit, &BTreeSet::new()).kind(), "written");
+        let repaired: Value = serde_json::from_str(&read(&ctx, rel)).unwrap();
+        assert_eq!(repaired, value);
+    }
+    assert_eq!(apply(&ctx, Unit::PiDcg, &BTreeSet::new()).kind(), "written");
+    assert_eq!(
+        read(&ctx, ".pi/agent/extensions/dcg-guard.ts"),
+        sources::default("pi/extensions/dcg-guard.ts").unwrap()
+    );
+    let local = sources::init(&ctx.env, "pi/extensions/dcg-guard.ts").unwrap();
+    fs::write(local, "// local guard\n").unwrap();
+    assert_eq!(apply(&ctx, Unit::PiDcg, &BTreeSet::new()).kind(), "written");
+    assert_eq!(
+        read(&ctx, ".pi/agent/extensions/dcg-guard.ts"),
+        "// local guard\n"
+    );
 }

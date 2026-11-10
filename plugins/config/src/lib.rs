@@ -80,6 +80,7 @@ pub enum Unit {
     ClaudeHooks,
     CodexHooks,
     PiPrefix,
+    PiDcg,
     Skills,
     Agentsview,
     HerdrAppKeys,
@@ -92,7 +93,7 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub const ALL: [Unit; 19] = [
+    pub const ALL: [Unit; 20] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -103,6 +104,7 @@ impl Unit {
         Unit::ClaudeHooks,
         Unit::CodexHooks,
         Unit::PiPrefix,
+        Unit::PiDcg,
         Unit::Skills,
         Unit::Agentsview,
         Unit::HerdrAppKeys,
@@ -129,6 +131,7 @@ impl Unit {
             Unit::ClaudeHooks => "claude.hooks",
             Unit::CodexHooks => "codex.hooks",
             Unit::PiPrefix => "pi.prefix",
+            Unit::PiDcg => "pi.dcg",
             Unit::Skills => "skills",
             Unit::Agentsview => "agentsview",
             Unit::HerdrAppKeys => "herdr-app.keys",
@@ -154,6 +157,7 @@ impl Unit {
             Unit::ClaudeHooks => "~/.local/share/vega/claude-marketplace/, ~/.claude/settings.json",
             Unit::CodexHooks => "~/.codex/hooks.json",
             Unit::PiPrefix => "~/.pi/agent/settings.json",
+            Unit::PiDcg => "~/.pi/agent/extensions/dcg-guard.ts",
             Unit::Skills => "~/.agents/skills/, ~/.claude/skills/",
             Unit::Agentsview => "*/skills/agentsview-finding-history/LOCAL-SETUP.md",
             Unit::HerdrAppKeys => "~/.config/herdr-app/keys.json",
@@ -169,7 +173,9 @@ impl Unit {
     pub fn ownership(self) -> &'static str {
         match self {
             Unit::ClaudeMd | Unit::CodexMd | Unit::PiMd | Unit::Agentsview => "whole file",
-            Unit::DcgConfig | Unit::HerdrAppKeys | Unit::HerdrAppLayouts => "whole file",
+            Unit::DcgConfig | Unit::PiDcg | Unit::HerdrAppKeys | Unit::HerdrAppLayouts => {
+                "whole file"
+            }
             Unit::HerdrAppMods | Unit::HerdrAppSidebar | Unit::HerdrAppInbox => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
@@ -207,7 +213,12 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
     ("instructions", &[Unit::ClaudeMd, Unit::CodexMd, Unit::PiMd]),
     (
         "hooks",
-        &[Unit::ClaudeHooks, Unit::CodexHooks, Unit::PiPrefix],
+        &[
+            Unit::ClaudeHooks,
+            Unit::CodexHooks,
+            Unit::PiPrefix,
+            Unit::PiDcg,
+        ],
     ),
     (
         "herdr-app",
@@ -488,12 +499,30 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             if let Some(p) = need_dir(env, ".codex") {
                 return Ok(p);
             }
+            let src = dcg_hook(env, "codex")?;
+            let entry: Value = serde_json::from_str(&src.text).map_err(|e| e.to_string())?;
             let (f, _) = json_plan(home.join(".codex/hooks.json"), true, |v| {
-                merge::codex_hooks(v, &mux)
+                merge::codex_hooks(v, &mux)?;
+                merge::dcg_hook(v, entry)
             })?
             .expect("created when missing");
             Ok(Plan {
                 files: vec![f],
+                sources: vec![src],
+                ..Plan::default()
+            })
+        }
+        Unit::PiDcg => {
+            if let Some(p) = need_dir(env, ".pi/agent") {
+                return Ok(p);
+            }
+            let src = sources::get(env, "pi/extensions/dcg-guard.ts")?;
+            Ok(Plan {
+                files: vec![whole(
+                    home.join(".pi/agent/extensions/dcg-guard.ts"),
+                    src.text.clone(),
+                )?],
+                sources: vec![src],
                 ..Plan::default()
             })
         }
@@ -600,8 +629,29 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
     }
 }
 
-/// A seeded-keys plan: the top-level keys of the source `rel`, set in `path`
-/// when missing or when their source value changed since the last apply.
+/// Shared, locally overridable PreToolUse entry. The pinned installer owns this path.
+fn dcg_hook(env: &Env, agent: &str) -> Result<sources::Source, String> {
+    let mut src = sources::get(env, "dcg/hook.json")?;
+    let path = env.home.join(".local/bin/dcg").display().to_string();
+    let command = if path.contains([' ', '\'']) {
+        format!("'{}'", path.replace('\'', "'\"'\"'"))
+    } else {
+        path
+    };
+    src.text = src
+        .text
+        .replace("\"@DCG@\"", &serde_json::to_string(&command).unwrap());
+    let entries: Value =
+        serde_json::from_str(&src.text).map_err(|e| format!("{}: {e}", src.rel))?;
+    let entry = entries
+        .get(agent)
+        .filter(|v| v.is_object())
+        .ok_or_else(|| format!("{}: missing {agent} hook entry", src.rel))?;
+    src.text = serde_json::to_string(entry).unwrap();
+    Ok(src)
+}
+
+/// A seeded-keys plan, plus the separately owned dcg hook in Claude settings.
 fn seeded(env: &Env, unit: Unit, rel: &str, path: PathBuf) -> Result<Plan, String> {
     let src = sources::get(env, rel)?;
     let seeds = match serde_json::from_str::<Value>(&src.text) {
@@ -609,8 +659,20 @@ fn seeded(env: &Env, unit: Unit, rel: &str, path: PathBuf) -> Result<Plan, Strin
         _ => return Err(format!("{}: not a JSON object", src.rel)),
     };
     let last = last_seeds(env, unit);
-    let (f, s) =
-        json_plan(path, true, |v| merge::seed(v, &seeds, &last))?.expect("created when missing");
+    let hook = (unit == Unit::ClaudeSettings)
+        .then(|| dcg_hook(env, "claude"))
+        .transpose()?;
+    let (f, s) = json_plan(path, true, |v| {
+        let result = merge::seed(v, &seeds, &last)?;
+        if let Some(src) = &hook {
+            merge::dcg_hook(
+                v,
+                serde_json::from_str(&src.text).map_err(|e| e.to_string())?,
+            )?;
+        }
+        Ok(result)
+    })?
+    .expect("created when missing");
     let live: Option<Value> = f.live.as_deref().and_then(|t| serde_json::from_str(t).ok());
     let notes = s
         .local
@@ -626,7 +688,7 @@ fn seeded(env: &Env, unit: Unit, rel: &str, path: PathBuf) -> Result<Plan, Strin
     Ok(Plan {
         files: vec![f],
         notes,
-        sources: vec![src],
+        sources: std::iter::once(src).chain(hook).collect(),
         seeds: Some(seeds),
         ..Plan::default()
     })

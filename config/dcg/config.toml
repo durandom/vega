@@ -1,4 +1,4 @@
-# dcg configuration
+# dcg v0.16.0 configuration
 # https://github.com/Dicklesworthstone/destructive_command_guard
 
 [general]
@@ -14,12 +14,15 @@ verbose = false
 # Check for updates in the background (shows a notice if available)
 # check_updates = true
 
-# Self-heal hook registration in settings.json on every invocation.
-# Protects against Claude Code overwriting settings.json mid-session.
-self_heal_hook = true
+# Upgrades go through vega's checksum-pinned installer, not dcg update.
+update_pin = true
+
+# Vega owns hook registration (claude.settings, codex.hooks, pi.dcg).
+self_heal_hook = false
 
 # Hook evaluation budget override (milliseconds)
-# hook_timeout_ms = 200
+# v0.16 default is 1000 ms; retain it rather than the old example 200 ms.
+# hook_timeout_ms = 1000
 
 #─────────────────────────────────────────────────────────────
 # OUTPUT CONFIGURATION
@@ -264,6 +267,8 @@ block = [
     # Quoted examples and formatting values remain data.
     # dcg also applies this to extracted inline-shell bodies.
     # Recognize common command/env prefixes without relaxing any core rule.
+    # Token alternatives consume one plain character at a time: nested +
+    # quantifiers exhaust v0.16's regex work budget on benign quoted text.
     { pattern = '''(?x)
 \A \s*
 # Common literal shell prefixes; command -v/-V are deliberately excluded.
@@ -271,20 +276,20 @@ block = [
   (?:
     command (?:\s+-p)? (?:\s+--)?
     | env (?:\s+-i)? (?:\s+--)?
-    | [A-Za-z_][A-Za-z0-9_]*= (?:[^\s\x27"\\;&|<>()\x24\x60]+|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))*
+    | [A-Za-z_][A-Za-z0-9_]*= (?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))*
   ) \s+
 )*
 (?: (?:[A-Za-z0-9_./~+-]*/)?git | \x27(?:[^\x27\n]*/)?git\x27 | "(?:[^"\n]*/)?git" ) \s+
 # Git global options, consuming their complete values.
 (?:
-  (?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env)(?:=|\s+)|-(?:C|c)) (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]+|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
+  (?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env)(?:=|\s+)|-(?:C|c)) (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
   | (?:--(?:no-pager|paginate|bare|no-optional-locks|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-replace-objects|no-lazy-fetch)|-[pP]) \s+
 )*
 branch \s+
 # Consume branch arguments as complete words. Capture 1 pairs option quotes.
 (?:
-  ([\x27"]?) (?:--(?:format|sort|points-at|set-upstream-to)|-u) \1 \s+ (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]+|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
-  | (?![\x27"]?(?:--(?:format|sort|points-at|set-upstream-to)|-u)[\x27"]?(?:\s|$)) (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]+|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
+  ([\x27"]?) (?:--(?:format|sort|points-at|set-upstream-to)|-u) \1 \s+ (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
+  | (?![\x27"]?(?:--(?:format|sort|points-at|set-upstream-to)|-u)[\x27"]?(?:\s|$)) (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
 )*
 # Capture 2 pairs flag quotes. An attached -u value is not a delete flag.
 ([\x27"]?) (?:-[A-TV-Za-tv-z]*[dD][A-Za-z]*|--delete) \2 (?=\s|=|$)
@@ -324,7 +329,8 @@ max_heredocs = 10
 # Optional language filter (scan only these languages). Omit for "all".
 # languages = ["python", "bash", "javascript", "typescript", "ruby", "perl"]
 
-# Graceful degradation (hook defaults are fail-open).
+# Bounded fallback scanning on incomplete AST analysis (v0.16 semantics).
+# These keys remain supported; false blocks incomplete analysis.
 fallback_on_parse_error = true
 fallback_on_timeout = true
 
@@ -345,35 +351,6 @@ max_size_mb = 500
 
 # Optional database path override.
 # database_path = "~/.config/dcg/history.db"
-
-#─────────────────────────────────────────────────────────────
-# GRADUATED RESPONSE SYSTEM
-#─────────────────────────────────────────────────────────────
-
-[response]
-# Enable the graduated response system.
-# When enabled, repeated occurrences of the same command escalate
-# from warning → soft block → hard block.
-enabled = true
-
-# Global graduation mode: "paranoid" | "strict" | "standard" | "lenient" | "warning_only" | "disabled"
-mode = "standard"
-
-# Session thresholds (within current process).
-session_warning_count = 1
-session_soft_block = 2
-
-# History thresholds (across sessions within history_window).
-history_soft_block = 3
-history_hard_block = 5
-history_window = "24h"
-
-# Per-severity overrides (uncomment to customize).
-# [response.severity_overrides]
-# critical = "paranoid"
-# high = "strict"
-# medium = "standard"
-# low = "warning_only"
 
 #─────────────────────────────────────────────────────────────
 # PROJECT-SPECIFIC OVERRIDES

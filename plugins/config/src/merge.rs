@@ -155,6 +155,51 @@ pub fn codex_hooks(root: &mut Value, mux: &str) -> Result<bool, String> {
     )
 }
 
+/// Replace only bare dcg hook commands; preserve other commands in mixed entries.
+pub fn dcg_hook(root: &mut Value, entry: Value) -> Result<bool, String> {
+    let before = root.clone();
+    let entries = root
+        .as_object_mut()
+        .ok_or("not a JSON object")?
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or("hooks is not an object")?
+        .entry("PreToolUse")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .ok_or("hooks.PreToolUse is not an array")?;
+    let dcg_commands = entries
+        .iter()
+        .filter_map(|e| e["hooks"].as_array())
+        .flatten()
+        .filter(|h| is_dcg_command(h))
+        .count();
+    if entries.iter().any(|e| e == &entry) && dcg_commands == 1 {
+        return Ok(false);
+    }
+    entries.retain_mut(|e| {
+        let Some(hooks) = e.get_mut("hooks").and_then(Value::as_array_mut) else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|h| !is_dcg_command(h));
+        hooks.len() == before || !hooks.is_empty()
+    });
+    entries.push(entry);
+    Ok(*root != before)
+}
+
+pub fn is_dcg_command(h: &Value) -> bool {
+    h["type"] == "command"
+        && h["command"].as_str().is_some_and(|c| {
+            let c = c.trim().trim_matches(['\'', '"']);
+            c == "dcg"
+                || Path::new(c).is_absolute()
+                    && Path::new(c).file_name().is_some_and(|n| n == "dcg")
+        })
+}
+
 /// `pi.prefix`: the activation line first in `shellCommandPrefix`, an
 /// existing prefix kept after it.
 pub fn pi_prefix(root: &mut Value) -> Result<bool, String> {

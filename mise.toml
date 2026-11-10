@@ -33,6 +33,8 @@ run = [
   "python3 scripts/rustc-wrapper.test.py",
   "python3 scripts/herdr-app-layout.test.py",
   "node --test scripts/herdr-app-mods.test.mjs",
+  "node --test scripts/dcg-guard.test.mjs",
+  "python3 scripts/install-dcg.test.py",
   "sh scripts/install-vscode-ext.test.sh",
   "sh scripts/check-stamp.test.sh",
   "sh scripts/install-cli.test.sh",
@@ -63,6 +65,10 @@ run = [
   # Skips with a hint where `code` is not on PATH (e.g. WSL).
   "sh scripts/install-vscode-ext.sh",
 ]
+
+[tasks.install-dcg]
+description = "Install checksum-pinned dcg 0.16.0 without modifying agent hooks; rollback if doctor fails"
+run = "python3 scripts/install-dcg.py"
 
 [tasks.nats]
 description = "Run the local NATS JetStream broker for the vega mux broker spike (foreground)"

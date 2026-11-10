@@ -63,7 +63,7 @@ pub const COMPONENTS: [Component; 26] = [
     c("herdr", Optional, "legacy backend: agents in panes", "install herdr: https://github.com/herdrdev/herdr"),
     c("chezmoi", Optional, "vega config apply writes every unit", "drop vega's targets from the dotfiles; vega config lists them"),
     c("wt", Optional, "vega mux spawn --worktree with worktrunk (else herdr worktrees)", "install worktrunk (wt)"),
-    c("dcg", Optional, "recommended: destructive command protection before shell execution", "install dcg: https://github.com/Dicklesworthstone/destructive_command_guard#installation; register hooks with its installer, then dcg doctor (Claude: dcg install; Codex: ~/.codex/hooks.json)"),
+    c("dcg", Optional, "recommended: destructive command protection before shell execution", "mise run install-dcg in the vega checkout (pinned 0.16.0); vega config diff claude.settings codex.hooks pi.dcg, then apply those units; dcg doctor --strict"),
     c("bd", Optional, "beads: UAC decisions, the bd shim", "install beads: https://github.com/gastownhall/beads"),
     c("gh", Optional, "vega ci for GitHub, the gh shim", "install gh: https://cli.github.com, then gh auth login"),
     c("tea", Optional, "vega ci for Gitea and Forgejo", "install tea: https://gitea.com/gitea/tea"),
@@ -221,15 +221,29 @@ fn bin(p: &Probe, name: &str) -> (bool, String) {
 }
 
 fn dcg(p: &Probe) -> (bool, String) {
-    if p.find("dcg").is_none() {
-        return (false, "missing (recommended)".into());
-    }
-    let mut gaps = Vec::new();
+    let version = p.find("dcg").and_then(|bin| {
+        let out = Command::new(bin)
+            .arg("--version")
+            .env("DCG_NO_SELF_HEAL", "1")
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    });
+    let parsed = version.as_deref().and_then(dcg_version);
+    let version_ok = parsed.is_some_and(|v| v >= (0, 16, 0));
+    let mut states = vec![format!(
+        "version={} (requires >=0.16.0)",
+        version.as_deref().unwrap_or("missing")
+    )];
+    let mut hooks_ok = true;
     for (agent, dir, file) in [
         ("claude", ".claude", "settings.json"),
         ("codex", ".codex", "hooks.json"),
     ] {
-        if !p.env.home.join(dir).is_dir() {
+        if p.find(agent).is_none() {
+            states.push(format!("{agent}=not installed"));
             continue;
         }
         let registered = std::fs::read_to_string(p.env.home.join(dir).join(file))
@@ -239,7 +253,10 @@ fn dcg(p: &Probe) -> (bool, String) {
             .is_some_and(|entries| {
                 entries.iter().any(|entry| {
                     let matcher = entry.get("matcher").and_then(|m| m.as_str()).unwrap_or("");
-                    if !["", "Bash", "Bash|PowerShell", ".*"].contains(&matcher) {
+                    if !["", ".*"].contains(&matcher)
+                        && (agent == "claude" && matcher != "Bash|PowerShell|Monitor"
+                            || agent == "codex" && !matcher.split('|').any(|m| m == "Bash"))
+                    {
                         return false;
                     }
                     entry
@@ -269,24 +286,48 @@ fn dcg(p: &Probe) -> (bool, String) {
                         })
                 })
             });
-        if !registered {
-            gaps.push(agent);
-        }
+        hooks_ok &= registered;
+        states.push(format!(
+            "{agent}.PreToolUse={}",
+            if registered {
+                "ok"
+            } else {
+                "missing or invalid"
+            }
+        ));
     }
-    if gaps.is_empty() {
-        (
-            true,
-            "ok: installed; hooks registered for present Claude/Codex agents".into(),
-        )
+    if p.find("pi").is_some() {
+        let expected = crate::sources::get(&p.env, "pi/extensions/dcg-guard.ts");
+        let live = std::fs::read_to_string(p.env.home.join(".pi/agent/extensions/dcg-guard.ts"));
+        let registered = matches!((expected, live), (Ok(e), Ok(l)) if e.text == l);
+        hooks_ok &= registered;
+        states.push(format!(
+            "pi.PreToolUse(tool_call)={}",
+            if registered {
+                "ok"
+            } else {
+                "missing or modified"
+            }
+        ));
     } else {
-        (
-            false,
-            format!(
-                "installed; missing or invalid PreToolUse hook: {}",
-                gaps.join(" ")
-            ),
-        )
+        states.push("pi=not installed".into());
     }
+    (version_ok && hooks_ok, states.join("; "))
+}
+
+fn dcg_version(text: &str) -> Option<(u32, u32, u32)> {
+    let version = text
+        .strip_prefix("dcg ")
+        .unwrap_or(text)
+        .split_whitespace()
+        .next()?;
+    let mut parts = version.split('.');
+    let parsed = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(parsed)
 }
 
 /// `git version 2.51.0` -> (2, 51).
@@ -590,16 +631,17 @@ mod tests {
     fn dcg_requires_a_binary_and_real_pretool_hooks_for_present_agents() {
         let (d, p, ctx) = setup(&[]);
         assert!(!row(&check(&p, &ctx), "dcg").ok);
-        fake(&d.path().join("bin"), "dcg", "exit 0");
-        for agent in [".claude", ".codex"] {
-            fs::create_dir_all(p.env.home.join(agent)).unwrap();
+        fake(&d.path().join("bin"), "dcg", "echo dcg 0.16.0");
+        for agent in ["claude", "codex"] {
+            fake(&d.path().join("bin"), agent, "exit 0");
+            fs::create_dir_all(p.env.home.join(format!(".{agent}"))).unwrap();
         }
         let claude = p.env.home.join(".claude/settings.json");
         let codex = p.env.home.join(".codex/hooks.json");
         fs::write(&claude, r#"{"comment":"dcg"}"#).unwrap();
         assert!(!row(&check(&p, &ctx), "dcg").ok);
         let hook = r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"dcg"}]}]}}"#;
-        fs::write(&claude, hook).unwrap();
+        fs::write(&claude, hook.replace("Bash", "Bash|PowerShell|Monitor")).unwrap();
         assert!(row(&check(&p, &ctx), "dcg").state.contains("codex"));
         fs::write(&codex, hook).unwrap();
         assert!(row(&check(&p, &ctx), "dcg").ok);
@@ -614,7 +656,7 @@ mod tests {
             format!("\"{absolute}\""),
         ] {
             let mut installed: serde_json::Value = serde_json::from_str(hook).unwrap();
-            installed["hooks"]["PreToolUse"][0]["matcher"] = "Bash|PowerShell".into();
+            installed["hooks"]["PreToolUse"][0]["matcher"] = "Bash|PowerShell|Monitor".into();
             installed["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command.into();
             let text = serde_json::to_string(&installed).unwrap();
             fs::write(&claude, &text).unwrap();
@@ -629,6 +671,37 @@ mod tests {
             fs::write(&codex, bad).unwrap();
             assert!(!row(&check(&p, &ctx), "dcg").ok);
         }
+    }
+
+    #[test]
+    fn dcg_checks_version_and_pi_guard_content() {
+        let (d, p, ctx) = setup(&[]);
+        let bin = d.path().join("bin");
+        fake(&bin, "dcg", "echo dcg 0.15.3");
+        assert!(!row(&check(&p, &ctx), "dcg").ok);
+        fake(&bin, "dcg", "echo dcg 0.16.0");
+        assert!(row(&check(&p, &ctx), "dcg").ok);
+        fake(&bin, "pi", "exit 0");
+        let extensions = p.env.home.join(".pi/agent/extensions");
+        fs::create_dir_all(&extensions).unwrap();
+        assert!(!row(&check(&p, &ctx), "dcg").ok);
+        fs::write(
+            extensions.join("dcg-guard.ts"),
+            crate::sources::default("pi/extensions/dcg-guard.ts").unwrap(),
+        )
+        .unwrap();
+        assert!(row(&check(&p, &ctx), "dcg").ok);
+        fs::write(extensions.join("dcg-guard.ts"), "// dcg placeholder").unwrap();
+        assert!(!row(&check(&p, &ctx), "dcg").ok);
+        fs::remove_file(bin.join("pi")).unwrap();
+        assert!(
+            row(&check(&p, &ctx), "dcg").ok,
+            "stale config directory is not an installed agent"
+        );
+        for invalid in ["garbage", "dcg 0.16.0-dev", "0.16", "0.16.0.1"] {
+            assert!(dcg_version(invalid).is_none());
+        }
+        assert_eq!(dcg_version("dcg 0.17.0"), Some((0, 17, 0)));
     }
 
     #[test]
