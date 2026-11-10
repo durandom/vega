@@ -632,11 +632,17 @@ test('project pin icon toggles persisted argv, stops header events, and shows CL
     if(args.includes('--unpin')) pinned=false;
     return {code:0,stdout:JSON.stringify({projects:{[project]:{pinned,labels:[]}},views:{}})};
   };
+  // A click's cx is valid only during the handler (herdr-app throws later): use it like the app.
+  const click=async handler=>{
+    let dead=false;const live=f=>(...a)=>{if(dead)throw new TypeError('cx is no longer valid');return f(...a);};
+    const cx={stop_propagation:live(()=>h.cx.stop_propagation()),notify:live(()=>{}),spawn:live(f=>h.cx.spawn(f)),timer:h.cx.timer};
+    handler({},cx);dead=true;await h.flush();
+  };
   for(const flag of ['--pin','--unpin']) {
     const pin=elements(h.render()).find(n=>n.idValue===`pin-uac-${project}`);
     const stops=h.calls.filter(c=>c[0]==='stop').length;
     pin.handlers['on_mouse_down:left']({},h.cx);
-    await pin.handlers.on_click({},h.cx);
+    await click(pin.handlers.on_click);
     assert.equal(h.calls.filter(c=>c[0]==='stop').length,stops+2);
     assert.equal(h.mod.dragFrom,undefined,'pin does not start header drag');
     const call=h.calls.filter(c=>c[0]==='exec'&&c[2].includes(flag)).at(-1);
@@ -646,7 +652,7 @@ test('project pin icon toggles persisted argv, stops header events, and shows CL
     assert.equal(h.mod.preferences.projects[project].pinned,flag==='--pin');
   }
   h.api.exec=async()=>({code:1,stdout:'pin denied'});
-  await elements(h.render()).find(n=>n.idValue===`pin-uac-${project}`).handlers.on_click({},h.cx);
+  await click(elements(h.render()).find(n=>n.idValue===`pin-uac-${project}`).handlers.on_click);
   assert(texts(h.render()).some(s=>s.includes('pin denied')));
   assert.equal(h.mod.preferences.projects[project].pinned,false);
 });

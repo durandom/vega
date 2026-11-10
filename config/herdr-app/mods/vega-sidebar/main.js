@@ -1236,7 +1236,8 @@ export default class Agents extends View {
           .cursor_pointer().tooltip(this.preferences?.projects?.[project]?.pinned ? "Unpin project" : "Pin project in Active view")
           .child(svg("mods/vega-sidebar/pin.svg").size(12).text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click((_e, cx) => { cx.stop_propagation(); return this.toggleProjectPin(project, cx); }))
+          // The click's cx dies after the handler: the awaiting toggle runs in cx.spawn.
+          .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => this.toggleProjectPin(project, cx)); }))
         .child(div().id(`gear-${gid}`).flex_none().text_color(t.dim).cursor_pointer().tooltip("Project window")
           .child(svg("mods/workspace-chrome/settings.svg").size(12).text_color(t.dim))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
