@@ -1169,6 +1169,10 @@ fn spawn_env(
     // holds every pointer 60 s (vega-lhc.257); spawned agents go without it.
     let suggest = (kind == "claude" && !user.iter().any(|e| e.starts_with(NO_SUGGESTION_KEY)))
         .then(|| format!("{NO_SUGGESTION_KEY}false"));
+    // Unattended git over ssh fails fast instead of waiting on an invisible
+    // passphrase prompt (a locked macOS keychain on puck, vega-oiwq).
+    let batch = (!user.iter().any(|e| e.starts_with(BATCH_SSH_KEY)))
+        .then(|| format!("{BATCH_SSH_KEY}ssh -o BatchMode=yes"));
     let socket = socket
         .filter(|_| !user.iter().any(|e| e.starts_with("SSH_AUTH_SOCK=")))
         .map(|socket| format!("SSH_AUTH_SOCK={socket}"));
@@ -1179,9 +1183,12 @@ fn spawn_env(
         .chain(socket)
         .chain(color)
         .chain(suggest)
+        .chain(batch)
         .chain(user.iter().cloned())
         .collect()
 }
+
+const BATCH_SSH_KEY: &str = "GIT_SSH_COMMAND=";
 
 const NO_SUGGESTION_KEY: &str = "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=";
 
@@ -2290,6 +2297,18 @@ fn started_within(
 
 #[cfg(test)]
 mod tests {
+    /// spawn_env without the batch ssh default every spawn gets.
+    fn env_of(
+        kind: &str,
+        actor: Option<&str>,
+        socket: Option<&str>,
+        user: &[String],
+    ) -> Vec<String> {
+        let mut env = spawn_env(kind, actor, socket, user);
+        env.retain(|e| e != "GIT_SSH_COMMAND=ssh -o BatchMode=yes");
+        env
+    }
+
     #[test]
     fn pinned_host_names_remote_reply_origin() {
         const TEST: &str = "VEGA_REPLY_ORIGIN_TEST";
@@ -2430,7 +2449,7 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
             assert!(parse_env(bad).is_err(), "{bad}");
         }
         let user = ["VEGA_GATE_ROLE=reviewer".to_string(), "FOO=bar".to_string()];
-        let env = spawn_env("pi", Some("proteus/vega"), None, &user);
+        let env = env_of("pi", Some("proteus/vega"), None, &user);
         assert_eq!(
             env_args(&env),
             [
@@ -2445,15 +2464,25 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
         // An --env BEADS_ACTOR replaces the lane's.
         let own = ["BEADS_ACTOR=me".to_string()];
         assert_eq!(
-            spawn_env("pi", Some("proteus/vega"), None, &own),
+            env_of("pi", Some("proteus/vega"), None, &own),
             ["BEADS_ACTOR=me"]
         );
-        assert!(spawn_env("pi", None, None, &[]).is_empty());
+        assert!(env_of("pi", None, None, &[]).is_empty());
+    }
+
+    #[test]
+    fn spawned_git_uses_batch_ssh_unless_overridden() {
+        assert_eq!(
+            spawn_env("codex", None, None, &[]),
+            ["FORCE_COLOR=1", "GIT_SSH_COMMAND=ssh -o BatchMode=yes"]
+        );
+        let own = ["GIT_SSH_COMMAND=ssh -i key".to_string()];
+        assert_eq!(spawn_env("pi", None, None, &own), own);
     }
 
     #[test]
     fn codex_defaults_to_basic_ansi_unless_explicitly_overridden() {
-        let env = spawn_env("codex", Some("proteus/vega"), None, &["FOO=bar".into()]);
+        let env = env_of("codex", Some("proteus/vega"), None, &["FOO=bar".into()]);
         assert_eq!(
             env_args(&env),
             [
@@ -2465,36 +2494,36 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
                 "FOO=bar"
             ]
         );
-        assert_eq!(spawn_env("codex", None, None, &[]), ["FORCE_COLOR=1"]);
+        assert_eq!(env_of("codex", None, None, &[]), ["FORCE_COLOR=1"]);
         assert_eq!(
-            spawn_env("claude", None, None, &[]),
+            env_of("claude", None, None, &[]),
             ["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false"]
         );
         let own = ["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true".to_string()];
         assert_eq!(
-            spawn_env("claude", None, None, &own),
+            env_of("claude", None, None, &own),
             own,
             "an explicit --env wins"
         );
         for value in ["0", "2", "3", ""] {
             let user = [format!("FORCE_COLOR={value}")];
-            assert_eq!(spawn_env("codex", None, None, &user), user);
+            assert_eq!(env_of("codex", None, None, &user), user);
         }
         // Similar names do not suppress the default, and other kinds get no default.
         let user = ["FORCE_COLOR_EXTRA=3".into()];
         assert_eq!(
-            spawn_env("codex", None, None, &user),
+            env_of("codex", None, None, &user),
             ["FORCE_COLOR=1", "FORCE_COLOR_EXTRA=3"]
         );
         for kind in ["pi", "agy"] {
-            assert!(spawn_env(kind, None, None, &[]).is_empty());
+            assert!(env_of(kind, None, None, &[]).is_empty());
             let user = ["FORCE_COLOR=3".into()];
-            assert_eq!(spawn_env(kind, None, None, &user), user);
+            assert_eq!(env_of(kind, None, None, &user), user);
         }
         // claude gets only its prompt-suggestion default, no colour default.
         let user = ["FORCE_COLOR=3".into()];
         assert_eq!(
-            spawn_env("claude", None, None, &user),
+            env_of("claude", None, None, &user),
             [
                 "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false",
                 "FORCE_COLOR=3"
@@ -2606,7 +2635,7 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
     fn spawn_env_forwards_caller_socket_unless_explicitly_overridden() {
         for kind in ["codex", "claude", "pi", "agy"] {
             for user in [vec![], vec!["FOO=bar".into()]] {
-                let env = spawn_env(kind, None, Some("/tmp/caller agent.sock"), &user);
+                let env = env_of(kind, None, Some("/tmp/caller agent.sock"), &user);
                 assert!(env.contains(&"SSH_AUTH_SOCK=/tmp/caller agent.sock".into()));
                 assert!(user.iter().all(|entry| env.contains(entry)));
                 let flags = env_args(&env);
@@ -2617,7 +2646,7 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
             for value in ["/tmp/user.sock", ""] {
                 let user = [format!("SSH_AUTH_SOCK={value}")];
                 for socket in [None, Some("/tmp/caller.sock")] {
-                    let env = spawn_env(kind, None, socket, &user);
+                    let env = env_of(kind, None, socket, &user);
                     let sockets: Vec<_> = env
                         .iter()
                         .filter(|entry| entry.starts_with("SSH_AUTH_SOCK="))
@@ -2626,11 +2655,11 @@ printf '{"result":{"process_info":{"pane_id":"w1:p2","shell_pid":4242}}}\n'"#,
                 }
             }
             let user = ["SSH_AUTH_SOCK_EXTRA=ignored".into()];
-            let env = spawn_env(kind, None, Some("/tmp/caller.sock"), &user);
+            let env = env_of(kind, None, Some("/tmp/caller.sock"), &user);
             assert!(env.contains(&"SSH_AUTH_SOCK=/tmp/caller.sock".into()));
-            let env = spawn_env(kind, None, None, &[]);
+            let env = env_of(kind, None, None, &[]);
             assert!(!env.iter().any(|entry| entry.starts_with("SSH_AUTH_SOCK=")));
-            let env = spawn_env(kind, None, Some(""), &[]);
+            let env = env_of(kind, None, Some(""), &[]);
             assert!(env.contains(&"SSH_AUTH_SOCK=".into()));
         }
     }

@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 159 · 2026-11-10
+
+- feature: `vega mux spawn` sets `GIT_SSH_COMMAND=ssh -o BatchMode=yes` for the agent: git over
+  ssh fails at once instead of hanging on an invisible passphrase prompt (locked keychain on puck,
+  vega-oiwq). `--env GIT_SSH_COMMAND=...` overrides it. Applies to new spawns.
+
 ## 158 · 2026-11-10
 
 - feature: the theme switch in a working Claude pane now runs: the Enter after the typed
