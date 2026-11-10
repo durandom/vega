@@ -147,7 +147,7 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
     fs::write(
         &conf,
         format!(
-            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n",
+            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 1TB }}\n",
             home.join("js").display()
         ),
     )

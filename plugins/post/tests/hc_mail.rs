@@ -114,7 +114,7 @@ impl Fixture {
         fs::write(
             &conf,
             format!(
-                "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n",
+                "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 1TB }}\n",
                 h.join("js").display()
             ),
         )

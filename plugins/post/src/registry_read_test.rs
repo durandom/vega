@@ -39,7 +39,7 @@ pub fn start(dir: &std::path::Path, authz: &str) -> (Server, String) {
         std::fs::write(
             &conf,
             format!(
-                "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\" }}\n{authz}",
+                "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 1TB }}\n{authz}",
                 dir.join("js").display()
             ),
         )
