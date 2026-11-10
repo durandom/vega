@@ -227,6 +227,12 @@ results are local, uncommitted artifacts in `target/hc-probes`.
    identity currently fails closed across an unverified process-tree boundary.
    Verification: `container.py`, `container2.log`; the Podman connection was
    explicitly selected because scratch XDG paths hide its normal connection config.
+   **Linux toolbox (2026-11-10, fedora, toolbox 0.3):** `toolbox run` forwards only a fixed
+   env allowlist, so `HC_*` is lost, and the exec'd tree hangs off `conmon`, so plain ancestry
+   stops there. Fixed in two parts: `config/herdr-core/hc-toolbox-shell` (herdr-core `shell`,
+   installed by `scripts/install-hc-toolbox-shell.sh`) re-injects `HC_*`; `own_terminal` also
+   accepts the unique `podman exec` client of the container, matched by name and start time
+   (`reaches_via_container`).
 6. **`hc keys` is not arbitrary literal text.** `keys keyprobe 'hello world'`
    returned `invalid_params`/exit 6. `keys keyprobe a b space c enter` sent `ab c`
    to a `cat` terminal. Single-character literal keys work; multi-character strings

@@ -33,6 +33,7 @@ run = [
   "python3 scripts/herdr-app-layout.test.py",
   "node --test scripts/herdr-app-mods.test.mjs",
   "sh scripts/install-vscode-ext.test.sh",
+  "sh scripts/install-hc-toolbox-shell.test.sh",
   "sh scripts/check-stamp.test.sh",
   "sh scripts/install-cli.test.sh",
   "python3 scripts/target-cache.test.py",
@@ -67,6 +68,8 @@ run = [
   "cd vscode && npm run -s package",
   # Skips with a hint where `code` is not on PATH (e.g. WSL).
   "sh scripts/install-vscode-ext.sh",
+  # Toolbox hosts: new hc terminals enter the toolbox with HC_* intact. Skips elsewhere.
+  "sh scripts/install-hc-toolbox-shell.sh",
 ]
 
 [tasks.nats]
