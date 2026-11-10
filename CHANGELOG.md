@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 164 · 2026-11-10
+
+- feature: the keychain lock turns green within seconds of the password: while an unlock window
+  is open, herdr-app probes that host directly instead of waiting for vegad's next round.
+
 ## 163 · 2026-11-10
 
 - feature: the keychain unlock window explains the lock and shows the exact command, retries a

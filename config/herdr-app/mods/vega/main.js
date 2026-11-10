@@ -140,16 +140,50 @@ export default class Vega extends View {
       const data = JSON.parse(r.stdout);
       this.localKeychainHost = data.local;
       this.applyKeychains(data.rows ?? [], data.at, cx);
+      this.probeOpenPopups(cx);
     } catch (_) {
       this.keychains = this.keychains.map(r => ({...r, state: "unknown"}));
       cx.notify();
     } finally { this.readingKeychains = false; }
   }
 
+  // While an unlock window is open for a locked host, read its keychain directly every few
+  // seconds, so the lock turns green right after the password instead of after vegad's next
+  // probe and registry round (up to about 80 s). One probe per host across mod copies.
+  probeOpenPopups(cx) {
+    const popups = shared("vega.keychain-popups") ?? {};
+    const last = shared("vega.keychain-probe-at") ?? {};
+    for (const host of Object.keys(popups)) {
+      if ((this.keychains ?? []).find(r => r.host === host)?.state !== "locked") continue;
+      if (Date.now() - (last[host] ?? 0) < 4000) continue;
+      setShared("vega.keychain-probe-at", {...(shared("vega.keychain-probe-at") ?? {}), [host]: Date.now()});
+      const check = 'security show-keychain-info "$HOME/Library/Keychains/login.keychain-db"';
+      cx.spawn(async (cx) => {
+        try {
+          let code;
+          if (host === this.localKeychainHost) code = (await exec("sh", ["-c", check])).code;
+          else {
+            const r = await exec("hc", ["exec", "--json", "--on", host, "--timeout", "8", "--", "sh", "-c", check]);
+            code = r.code === 0 ? JSON.parse(r.stdout).code : null;
+          }
+          if (code !== 0) return;
+          setShared("vega.keychain-unlocked-at", {...(shared("vega.keychain-unlocked-at") ?? {}), [host]: Date.now()});
+          this.applyKeychains(this.lastKeychainRows ?? [], this.lastKeychainAt ?? 0, cx);
+        } catch (_) {}
+      });
+    }
+  }
+
   applyKeychains(rows, at, cx) {
+    this.lastKeychainRows = rows; this.lastKeychainAt = at;
     const now = Date.now()/1000;
-    this.keychains = rows.filter(r => /^[a-zA-Z0-9_-]+$/.test(r.host)).map(r => ({...r,
-      state: now-at <= 180 && now-r.at <= 180 && ["locked", "unlocked"].includes(r.state) ? r.state : "unknown"}));
+    // A direct unlock seen by probeOpenPopups wins over older registry samples.
+    const unlockedAt = shared("vega.keychain-unlocked-at") ?? {};
+    this.keychains = rows.filter(r => /^[a-zA-Z0-9_-]+$/.test(r.host)).map(r => {
+      const state = now-at <= 180 && now-r.at <= 180 && ["locked", "unlocked"].includes(r.state) ? r.state : "unknown";
+      const seen = unlockedAt[r.host];
+      return seen && seen > r.at * 1000 && state !== "unlocked" ? {...r, state: "unlocked", since: Math.floor(seen / 1000)} : {...r, state};
+    });
     setShared("vega.keychains", this.keychains);
     for (const row of this.keychains) {
       const key = `${row.host}/${row.since}`;

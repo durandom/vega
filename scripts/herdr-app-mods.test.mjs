@@ -894,3 +894,25 @@ test('persisted keychain overlay ids and pending launches cannot affect a new ap
   h.mod.applyKeychains([{host:'puck',state:'unlocked',since:now,at:now}],now,h.cx);await h.flush();
   assert(!h.calls.some(c=>c[0]==='close'&&c[1]==='other-reused-id'));
 });
+
+test('an open unlock window probes its host directly and turns the lock green before vegad',async()=>{
+  const h=load('vega'),now=Date.now()/1000;
+  h.mod.localKeychainHost='proteus';
+  h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);return bin==='hc'&&args[0]==='exec'?{code:0,stdout:'{"code":0}'}:{code:0,stdout:'{}'};};
+  const row={host:'ganymede',state:'locked',since:now-100,at:now-30};
+  h.state.set('vega.keychain-seen',['ganymede/'+row.since]);
+  h.mod.applyKeychains([row],now,h.cx);
+  h.mod.probeOpenPopups(h.cx);await h.flush();
+  assert(!h.calls.some(c=>c[2]?.[0]==='exec'),'no window: no direct probe');
+  h.state.set('vega.keychain-popups',{ganymede:{terminal:'ganymede/t9',overlay:'o',session:'x'}});
+  h.mod.probeOpenPopups(h.cx);h.mod.probeOpenPopups(h.cx);await h.flush();
+  const probes=h.calls.filter(c=>c[1]==='hc'&&c[2][0]==='exec');
+  assert.equal(probes.length,1,'throttled across calls');
+  assert.deepEqual(probes[0][2].slice(0,5),['exec','--json','--on','ganymede','--timeout']);
+  assert(probes[0][2].at(-1).startsWith('security show-keychain-info'),'read-only probe');
+  assert.equal(h.mod.keychains[0].state,'unlocked');
+  h.mod.applyKeychains([row],now,h.cx);
+  assert.equal(h.mod.keychains[0].state,'unlocked','an older registry sample cannot turn it red again');
+  h.mod.applyKeychains([{...row,at:now+60,since:now+60}],now+60,h.cx);
+  assert.equal(h.mod.keychains[0].state,'locked','a newer locked probe wins');
+});

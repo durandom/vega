@@ -23,7 +23,10 @@ The title bar is a `vega` copy with `keychainTitle` props and no background poll
 does not take focus automatically. The title bar shows the lock in its state colour, the host
 and the state with its `since` time. The window stays until the Slayer closes it (Slayer
 2026-11-10): an unlock only turns the title green; Close closes the window and kills only its
-dedicated terminal.
+dedicated terminal. While the window is open and the host is locked, the mod
+reads that host's keychain itself every 5 s (`security show-keychain-info`, through `hc exec` for
+peers, one probe per host across mod copies), so the lock turns green right after the password;
+a newer locked sample from vegad wins again.
 
 The terminal explains the lock (host, why agents fail, the exact command
 `security unlock-keychain ~/Library/Keychains/login.keychain-db` it runs on that host, that the
