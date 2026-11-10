@@ -1,4 +1,6 @@
-#!/bin/sh
+#!/bin/bash
+# Bash preserves Cargo environment names containing hyphens (CARGO_BIN_EXE_vega-*).
+# Ubuntu /bin/sh (dash) drops them before exec, breaking integration-test clippy.
 # RUSTC_WRAPPER (mise.toml, vega-919z): sccache when installed, so worktrees
 # share compiled dependencies; else rustc unchanged. sccache refuses
 # incremental builds, so the main checkout (CARGO_INCREMENTAL=1, its target/

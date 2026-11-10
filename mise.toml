@@ -30,6 +30,7 @@ run = [
   "sh scripts/vegad-refresh.test.sh",
   "sh scripts/readmes.test.sh",
   "sh scripts/inline-md.test.sh",
+  "python3 scripts/rustc-wrapper.test.py",
   "python3 scripts/herdr-app-layout.test.py",
   "node --test scripts/herdr-app-mods.test.mjs",
   "sh scripts/install-vscode-ext.test.sh",
