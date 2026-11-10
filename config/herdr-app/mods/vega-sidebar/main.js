@@ -164,6 +164,7 @@ export default class Agents extends View {
         this.viewName = InputState.new({ placeholder: "View name" });
         this.viewLabels = InputState.new({ placeholder: "Labels, comma separated" });
         this.viewMachines = InputState.new({ placeholder: "Machines, comma separated (local for this host)" });
+        this.viewMatch = "all";
       }
       cx.spawn(async cx => {
         await this.refreshPreferences(cx);
@@ -796,6 +797,7 @@ export default class Agents extends View {
       }
       for (const label of labels) args.push("--label", label);
       for (const machine of machines) args.push("--machine", machine);
+      args.push("--match", this.viewMatch === "any" ? "any" : "all");
     }
     args.push("--json");
     try {
@@ -834,19 +836,25 @@ export default class Agents extends View {
       .children(labels.map(l => choice(`view-label-${l}`, `#${l}`, active === LABEL_VIEW + l, [], () => select(LABEL_VIEW + l))))
       .children(Object.entries(this.preferences.views ?? {}).map(([id, view]) => h_flex().gap(4).items_center()
         .child(div().flex_1().min_w(0).child(choice(`view-${id}`, id, active === id,
-          [...view.labels.map(l => pill(t, `view-${id}-l-${l}`, `#${l}`)), ...view.machines.map(m => pill(t, `view-${id}-m-${m}`, `@${m}`))],
+          [...view.labels.map(l => pill(t, `view-${id}-l-${l}`, `#${l}`)),
+            ...(view.match === "any" && view.labels.length && view.machines.length ? [div().text_size(10.5).text_color(t.dim).child("or")] : []),
+            ...view.machines.map(m => pill(t, `view-${id}-m-${m}`, `@${m}`))],
           () => select(id))))
         .child(link(`edit-view-${id}`, "Edit", (_e, cx) => {
           this.viewName.set_value(id); this.viewLabels.set_value(view.labels.join(", "));
-          this.viewMachines.set_value(view.machines.join(", ")); cx.notify();
+          this.viewMachines.set_value(view.machines.join(", ")); this.viewMatch = view.match === "any" ? "any" : "all"; cx.notify();
         }))
         .child(link(`delete-view-${id}`, "Delete", (_e, cx) => cx.spawn(cx => this.saveView(cx, true, id))))))
-      .child(heading("Save a view · any chosen label and any chosen machine"))
+      .child(heading("Save a view"))
       .child(Input.new(this.viewName).h(30).px(8).rounded(6).border_1().border_color(t.input).bg(t.background))
       .child(div().text_size(11).text_color(t.dim).child("Labels"))
       .child(toggles("label", labels, chosenLabels, this.viewLabels))
       .child(div().text_size(11).text_color(t.dim).child("Machines"))
       .child(toggles("machine", machines, chosenMachines, this.viewMachines))
+      .child(h_flex().gap(6).items_center().pt(2)
+        .child(div().text_size(11).text_color(t.dim).child("Show projects matching"))
+        .child(pill(t, "match-all", "a label and a machine", { on: this.viewMatch !== "any", action: () => { this.viewMatch = "all"; } }))
+        .child(pill(t, "match-any", "a label or a machine", { on: this.viewMatch === "any", action: () => { this.viewMatch = "any"; } })))
       .child(h_flex().pt(4).child(div().id("save-view").px(12).py(5).rounded(6).bg(t.raised).cursor_pointer()
         .child(this.saving ? "Saving…" : "Save view").on_click((_e, cx) => cx.spawn(cx => this.saveView(cx)))))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)));
@@ -974,8 +982,10 @@ export default class Agents extends View {
   matchesView(project, machine) {
     const view = this.viewFilter();
     const labels = this.preferences?.projects?.[project]?.labels ?? [];
-    return (!view.labels.length || view.labels.some(label => labels.includes(label))) &&
-      (!view.machines.length || view.machines.includes(machine));
+    const byLabel = view.labels.some(label => labels.includes(label)), byMachine = view.machines.includes(machine);
+    // any: a chosen label OR a chosen machine; an empty dimension then adds nothing.
+    if (view.match === "any") return byLabel || byMachine;
+    return (!view.labels.length || byLabel) && (!view.machines.length || byMachine);
   }
 
   orderedProjects(uacs) {

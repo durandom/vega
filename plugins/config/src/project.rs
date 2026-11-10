@@ -56,6 +56,9 @@ enum Cmd {
         /// hc machine name; use local for terminals on the app host
         #[arg(long, requires = "id")]
         machine: Vec<String>,
+        /// all: a project needs a chosen label and a chosen machine; any: either is enough
+        #[arg(long = "match", requires = "id", value_parser = ["all", "any"], conflicts_with = "delete")]
+        match_mode: Option<String>,
         #[arg(long, requires = "id", conflicts_with_all = ["label", "machine"])]
         delete: bool,
         #[arg(long)]
@@ -164,7 +167,18 @@ fn snapshot(doc: &DocumentMut) -> Result<Value, String> {
                     };
                     json!({"name": name, "labels": labels})
                 } else {
-                    json!({"labels": labels, "machines": strings(entry.get("machines"))?})
+                    let mode = match entry.get("match") {
+                        None => "all",
+                        Some(v) => match v.as_str() {
+                            Some(m @ ("all" | "any")) => m,
+                            _ => {
+                                return Err(format!(
+                                    "views.{id}.match: expected \"all\" or \"any\""
+                                ))
+                            }
+                        },
+                    };
+                    json!({"labels": labels, "machines": strings(entry.get("machines"))?, "match": mode})
                 };
                 rows.insert(id.to_string(), row);
             }
@@ -183,6 +197,7 @@ fn array(values: &[String]) -> Item {
 }
 
 fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
+    let mut match_mode: Option<String> = None;
     let (kind, id, name, labels, unlabels, machines, delete, json_output) = match cmd {
         Some(Cmd::Config {
             id,
@@ -195,9 +210,13 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
             id,
             label,
             machine,
+            match_mode: mode,
             delete,
             json,
-        }) => ("views", id, None, label, vec![], machine, delete, json),
+        }) => {
+            match_mode = mode;
+            ("views", id, None, label, vec![], machine, delete, json)
+        }
         None => ("projects", None, None, vec![], vec![], vec![], false, false),
     };
     if id
@@ -218,6 +237,7 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
         || !labels.is_empty()
         || !unlabels.is_empty()
         || !machines.is_empty()
+        || match_mode.is_some()
         || delete;
     // Readers need no writable directory. Writers serialize the read-modify-write,
     // including distinct project and view edits, and atomically replace the file.
@@ -278,6 +298,8 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
                 ms.sort();
                 ms.dedup();
                 doc[kind][id]["machines"] = array(&ms);
+                // A view is replaced whole: no --match means the default, all.
+                doc[kind][id]["match"] = value(match_mode.as_deref().unwrap_or("all"));
             }
         }
         let after = snapshot(&doc)?;
@@ -291,7 +313,7 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
             if kind == "projects" {
                 json!({"name":"","labels":[]})
             } else {
-                json!({"labels":[],"machines":[]})
+                json!({"labels":[],"machines":[],"match":"all"})
             }
         });
         data = if delete {
@@ -339,6 +361,7 @@ mod tests {
             id: Some("Work".into()),
             label: vec!["work".into()],
             machine: vec!["puck".into()],
+            match_mode: Some("any".into()),
             delete: false,
             json: true,
         });
@@ -357,6 +380,7 @@ mod tests {
         );
         assert_eq!(data["projects"]["github.com/other/a"]["name"], "Other");
         assert_eq!(data["views"]["Work"]["machines"], json!(["puck"]));
+        assert_eq!(data["views"]["Work"]["match"], "any");
         assert!(fs::read_to_string(&path)
             .unwrap()
             .starts_with("# keep me\nfuture = true"));

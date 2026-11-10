@@ -80,7 +80,7 @@ fn project_cli_uses_private_home_and_xdg_config_and_reports_failures() {
         let data: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(
             data["views"]["Work"],
-            json!({"labels":["work"],"machines":["puck"]})
+            json!({"labels":["work"],"machines":["puck"],"match":"all"})
         );
         assert!(call(&["view", "Work", "--delete", "--json"], xdg)
             .status
@@ -149,7 +149,7 @@ fn view_filters_replace_both_dimensions_and_label_removal_wins() {
     let replaced = call(&["view", "Focus", "--machine", "local", "--json"]);
     assert_eq!(
         replaced["views"]["Focus"],
-        json!({"labels":[],"machines":["local"]})
+        json!({"labels":[],"machines":["local"],"match":"all"})
     );
 }
 

@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 154 · 2026-11-10
+
+- feature: sidebar views can match any condition: `vega project view <name> --match any` (or the
+  "a label or a machine" toggle in the filter popup) shows projects with a chosen label OR on a
+  chosen machine, e.g. everything on puck plus label vega. Default stays `all`.
+
 ## 153 · 2026-11-10
 
 - feature: a headed child no longer shows the waiting hand for turns you typed into it after it

@@ -300,7 +300,9 @@ context, the project window holds details and actions.
 - **Labels and views**: the Config tab edits a project's labels as pills (Enter adds, the
   pill's ✕ removes, both save at once through `vega project config`). Sidebar project headers
   show up to two label pills; a click sets the ad-hoc view `label:<name>`, a second click goes
-  back to All. The active view lives in shared state `vega.view`, because `localStorage` is per
+  back to All. A saved view matches `all` (a chosen label and a chosen machine; empty
+  dimensions match everything) or `any` (a chosen label or a chosen machine: everything on puck
+  plus label vega), set by `vega project view --match` and the popup toggle. The active view lives in shared state `vega.view`, because `localStorage` is per
   mod copy and the filter popup is another copy; the sidebar mirrors it into its own
   `localStorage` (key `active-view`) to keep it across restarts. Saving a view shows it.
 - **Waiting on you**: the Overview lists the badge row's `waiting_panes` under the tiles with

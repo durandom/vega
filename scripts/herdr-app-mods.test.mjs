@@ -623,7 +623,7 @@ test('view popup selects, saves and deletes CLI-owned views without persisting c
   h.mod.viewName.set_value('Focus');h.mod.viewMachines.set_value('puck, local');
   await h.mod.saveView(h.cx);
   const saved=h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1);
-  assert.deepEqual(Array.from(saved[2]),['project','view','Focus','--label','work','--machine','puck','--machine','local','--json']);
+  assert.deepEqual(Array.from(saved[2]),['project','view','Focus','--label','work','--machine','puck','--machine','local','--match','all','--json']);
   await h.mod.saveView(h.cx,true,'Work');
   assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2]),['project','view','Work','--delete','--json']);
   elements(h.render()).find(n=>n.idValue==='view-Work').handlers.on_click({},h.cx);
@@ -750,8 +750,9 @@ test('label pills filter the sidebar ad hoc; the view editor toggles known label
   nodes.find(n=>n.idValue==='pick-label-work').handlers.on_click({},m.cx);
   nodes.find(n=>n.idValue==='pick-machine-puck').handlers.on_click({},m.cx);
   assert.equal(m.mod.viewLabels.value(),'work');assert.equal(m.mod.viewMachines.value(),'puck');
+  elements(m.render()).find(n=>n.idValue==='match-any').handlers.on_click({},m.cx);
   m.mod.viewName.set_value('Work');await m.mod.saveView(m.cx);
-  assert.deepEqual(m.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2],['project','view','Work','--label','work','--machine','puck','--json']);
+  assert.deepEqual(m.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2],['project','view','Work','--label','work','--machine','puck','--match','any','--json']);
   assert.equal(m.state.get('vega.view'),'Work','a saved view is shown at once');
   elements(m.render()).find(n=>n.idValue==='view-label-ops').handlers.on_click({},m.cx);
   assert.equal(m.state.get('vega.view'),'label:ops');
@@ -781,4 +782,15 @@ test('waiting panes offer Dismiss for silent and asking only, run vega mux dismi
   i.mod.init({},i.cx);
   elements(i.render()).find(n=>n.idValue==='dismiss-wait-hc:t5').handlers.on_click({},i.cx);await new Promise(r=>setImmediate(r));
   assert.deepEqual(i.calls.find(c=>c[0]==='exec'&&c[2].includes('dismiss')).slice(1),['vega',['mux','dismiss','hc:t5']],'local badge: local vega');
+});
+
+test('a match-any view shows projects with a chosen label or on a chosen machine, and that machine spaces',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);
+  h.mod.init({},h.cx);
+  h.mod.preferences={projects:{[project]:{labels:['vega']}},views:{Work:{labels:['vega'],machines:['local'],match:'any'},Strict:{labels:['vega'],machines:['local'],match:'all'}}};
+  h.storage.set('active-view','Work');let nodes=elements(h.render());
+  assert(nodes.some(n=>n.idValue===`uac-${project}`),'label vega matches although the UAC runs on puck');
+  assert(nodes.some(n=>n.idValue==='space-scratch'),'local spaces match by machine');
+  h.storage.set('active-view','Strict');nodes=elements(h.render());
+  assert(!nodes.some(n=>n.idValue===`uac-${project}`),'all: label and machine both needed');
 });
