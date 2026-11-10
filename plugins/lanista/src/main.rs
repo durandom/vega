@@ -55,6 +55,13 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
     },
+    /// Effective host pins and allowed models (all known hosts, or --host)
+    Hosts {
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Run lanista's health checks
     Doctor,
     /// Resolve or override the project model for a provider lane and tier
@@ -68,6 +75,9 @@ enum Cmd {
         tier: String,
         #[arg(long, default_value = seats::DEFAULT_SEAT)]
         seat: String,
+        /// Select the host layer instead of the project layer
+        #[arg(long)]
+        host: Option<String>,
         /// Set this project's model override
         #[arg(long, conflicts_with = "clear")]
         set: Option<String>,
@@ -141,6 +151,7 @@ fn main() -> ExitCode {
         None => home(),
         Some(Cmd::Install { r#ref, replace }) => install_cmd(&r#ref, replace),
         Some(Cmd::Doctor) => doctor(),
+        Some(Cmd::Hosts { host, json }) => hosts_cmd(host.as_deref(), json),
         Some(Cmd::Pin {
             provider,
             tier,
@@ -148,7 +159,8 @@ fn main() -> ExitCode {
             set,
             clear,
             until,
-        }) => pin(&provider, &tier, &seat, set, clear, until),
+            host,
+        }) => pin(&provider, &tier, &seat, set, clear, until, host.as_deref()),
     };
     match result {
         Ok(code) => code,
@@ -244,7 +256,7 @@ fn home() -> Result<ExitCode, Failure> {
         lanes.len()
     );
     for prov in &lanes {
-        let m = |t| seats::pick(&pins, prov, t).map_or("-", |p| p.model.as_str());
+        let m = |t| seats::global(&pins, prov, t).map_or("-", |p| p.model.as_str());
         println!(
             "  {},{prov},{},{},{}",
             seats::DEFAULT_SEAT,
@@ -506,6 +518,7 @@ fn doctor_rows(v: &Value) -> Vec<String> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pin(
     provider: &str,
     tier: &str,
@@ -513,6 +526,7 @@ fn pin(
     set: Option<String>,
     clear: bool,
     until: Option<String>,
+    target: Option<&str>,
 ) -> Result<ExitCode, Failure> {
     // vega's tiers: the repo copy, whatever a host's file says.
     let blob = seats::SEATS;
@@ -531,16 +545,36 @@ fn pin(
             format!("lanes: {}", lanes.join(" ")),
         ));
     }
-    let p = seats::pick(&pins, provider, tier).ok_or_else(|| {
+    let p = seats::global(&pins, provider, tier).ok_or_else(|| {
         Failure::new(
             "tier_missing",
             format!("no {tier} pin for {provider} in seat {seat}"),
             "add a `tier` to a pin in plugins/lanista/seats.json, then vega lanista install",
         )
     })?;
+    let local = host();
+    if target.is_some() || vega_herdr::state::is_inbox_only(&local) && (set.is_some() || clear) {
+        return host_pin(
+            target.unwrap_or(&local),
+            provider,
+            tier,
+            seat,
+            set,
+            clear,
+            until,
+        );
+    }
     let now = vega_herdr::capacity::now();
     let mut model = p.model.clone();
     let mut source = "global seats".to_string();
+    let mut effective_expiry = None;
+    if let Ok(config) = vega_lanista::hosts::read(&local) {
+        if let Some(p) = config.active(seat, provider, tier, now) {
+            model = p.model.clone();
+            source = format!("host ({local})");
+            effective_expiry = p.until;
+        }
+    }
     let cwd =
         env::current_dir().map_err(|e| Failure::new("project_io", e.to_string(), "check cwd"))?;
     let project = vega_herdr::project::resolve_optional(&cwd, &vega_herdr::state::post_host())
@@ -563,6 +597,15 @@ fn pin(
             "cwd is not a git project",
             "run the pin command inside the project's checkout",
         ));
+    }
+    if let Some(m) = &set {
+        if !pins.iter().any(|p| p.provider == provider && p.model == *m) {
+            return Err(Failure::new(
+                "usage",
+                "model is not allowed in this seat and lane",
+                "choose a model from vega lanista hosts --json",
+            ));
+        }
     }
     let expires = if set.is_some() {
         match until.as_deref() {
@@ -602,10 +645,7 @@ fn pin(
                 {
                     model = active;
                     source = format!("project ({host})");
-                    println!(
-                        "expires: {}",
-                        expires.map_or("never".into(), |t| t.to_string())
-                    );
+                    effective_expiry = expires;
                 }
                 if mutation {
                     println!("action: {}", if clear { "cleared" } else { "set" });
@@ -620,18 +660,149 @@ fn pin(
             }
             Err(e) => println!(
                 "registry: {}",
-                cell(&format!("unavailable: {e}; using global seats"))
+                cell(&format!("unavailable: {e}; using {source}"))
             ),
         }
         println!("project: {}", cell(&project));
     }
+    if source != "global seats" {
+        println!(
+            "expires: {}",
+            effective_expiry.map_or("never".into(), |t| t.to_string())
+        );
+    }
     println!("model: {}", cell(&model));
     println!("source: {}", cell(&source));
-    println!("provider: {}", p.provider);
+    println!("provider: {provider}");
+    if provider == "pi" {
+        println!(
+            "lane: {}",
+            if source == "global seats" {
+                "zai fallback"
+            } else {
+                "pi"
+            }
+        );
+    }
     println!("tier: {}", p.tier);
     println!("role: {}", p.role);
     println!("engine: {}", p.engine);
     println!("seat: {seat}");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn hosts_cmd(host: Option<&str>, json: bool) -> Result<ExitCode, Failure> {
+    let rows = vega_lanista::hosts::list(host).map_err(|e| {
+        Failure::new(
+            "registry_read",
+            e,
+            "check broker grants or use --host <host>",
+        )
+    })?;
+    if json {
+        println!("{}", serde_json::json!({"rows":rows}));
+    } else {
+        println!(
+            "pins[{}]{{host,seat,lane,tier,model,source,until}}:",
+            rows.len()
+        );
+        for row in rows {
+            let cells: Vec<_> = ["host", "seat", "lane", "tier", "model", "source", "until"]
+                .iter()
+                .map(|k| {
+                    cell(
+                        &row[*k]
+                            .as_str()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| row[*k].to_string()),
+                    )
+                })
+                .collect();
+            println!("  {}", cells.join(","));
+        }
+        println!("help: vega lanista hosts --json   # includes allowed models per lane");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+#[allow(clippy::too_many_arguments)]
+fn host_pin(
+    host: &str,
+    lane: &str,
+    tier: &str,
+    seat: &str,
+    model: Option<String>,
+    clear: bool,
+    until: Option<String>,
+) -> Result<ExitCode, Failure> {
+    let mutation = model.is_some() || clear;
+    let config = if mutation {
+        let until = until
+            .as_deref()
+            .map(|s| vega_registry::pins::expiry(s, vega_herdr::capacity::now()))
+            .transpose()
+            .map_err(|e| Failure::new("usage", e, "--until 30m|2h|1d|never"))?
+            .flatten();
+        let change = vega_lanista::hosts::Change {
+            lane: lane.into(),
+            tier: tier.into(),
+            seat: seat.into(),
+            model,
+            clear,
+            until,
+        };
+        change.validate(vega_herdr::capacity::now()).map_err(|e| {
+            Failure::new(
+                "usage",
+                e,
+                "choose an allowed model from vega lanista hosts --json",
+            )
+        })?;
+        vega_lanista::hosts::mutate(host, &change).map_err(|e| {
+            Failure::new(
+                "registry_write",
+                e,
+                "check broker command/read grants and control host",
+            )
+        })?
+    } else {
+        vega_lanista::hosts::read(host)
+            .map_err(|e| Failure::new("registry_read", e, "check broker read grant"))?
+    };
+    let pins = seats::pins(seats::SEATS, seat).unwrap();
+    let selected = config.active(seat, lane, tier, vega_herdr::capacity::now());
+    let model = selected
+        .map(|p| p.model.as_str())
+        .or_else(|| seats::global(&pins, lane, tier).map(|p| p.model.as_str()))
+        .unwrap_or("-");
+    if mutation {
+        println!("action: {}", if clear { "cleared" } else { "set" });
+    }
+    println!("model: {}", cell(model));
+    println!(
+        "source: {}",
+        if selected.is_some() {
+            format!("host ({host})")
+        } else {
+            "global seats".into()
+        }
+    );
+    println!(
+        "expires: {}",
+        selected
+            .and_then(|p| p.until)
+            .map_or("never".into(), |t| t.to_string())
+    );
+    if lane == "pi" {
+        println!(
+            "lane: {}",
+            if selected.is_some() {
+                "pi"
+            } else {
+                "zai fallback"
+            }
+        );
+    }
+    println!("host: {host}\nprovider: {lane}\ntier: {tier}\nseat: {seat}");
     Ok(ExitCode::SUCCESS)
 }
 

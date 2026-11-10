@@ -5,6 +5,19 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 167 · 2026-11-10
+
+- required: orrery must regenerate titan auth-config with existing flags plus
+  `--cmd-grant puck=vega.cmd.proteus.lanista.puck` and
+  `--registry-read puck=puck.lanista.host`, keeping `--inbox-only puck`.
+  Applying this requires Slayer approval. Puck gets no KV publish rights;
+  proteus validates commands and writes only the derived host key.
+- feature: lanista resolves project > host > global. `pin --host <host> --set`
+  edits host tiers (default expiry never); inbox-only hosts relay their own edits
+  and cache exact-key reads offline. `hosts --json` exposes models and allowlists.
+  Pi allowlists Google Argon/Flash for host/project pins; its global fallback remains
+  zai/GLM. Puck mappings are configured after deploy.
+
 ## 166 · 2026-11-10
 
 - feature: `vega mux spawn --worktree` starts a tab in the caller's space when no local

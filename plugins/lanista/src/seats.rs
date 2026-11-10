@@ -88,6 +88,11 @@ pub fn pick<'a>(pins: &'a [Pin], provider: &str, tier: &str) -> Option<&'a Pin> 
         .find(|p| p.provider == provider && p.tier == tier)
 }
 
+/// Pi has no Google global tiers: retain the historical zai fallback.
+pub fn global<'a>(pins: &'a [Pin], lane: &str, tier: &str) -> Option<&'a Pin> {
+    pick(pins, if lane == "pi" { "zai" } else { lane }, tier)
+}
+
 /// How the installed file relates to the repo copy.
 #[derive(Debug, PartialEq)]
 pub enum State {
@@ -146,10 +151,10 @@ mod tests {
     #[test]
     fn repo_copy_has_no_copilot_and_tiers_every_lane() {
         let pins = repo();
-        assert_eq!(providers(&pins), ["zai", "agy", "claude", "codex"]);
+        assert_eq!(providers(&pins), ["pi", "zai", "agy", "claude", "codex"]);
         for prov in providers(&pins) {
             for tier in TIERS {
-                assert!(pick(&pins, &prov, tier).is_some(), "{prov} lacks {tier}");
+                assert!(global(&pins, &prov, tier).is_some(), "{prov} lacks {tier}");
             }
         }
         assert!(pins

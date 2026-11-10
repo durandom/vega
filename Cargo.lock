@@ -3318,15 +3318,19 @@ dependencies = [
 name = "vega-lanista"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "clap",
+ "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "vega-bd-sync",
  "vega-build",
  "vega-herdr",
  "vega-plugin",
  "vega-registry",
  "vega-secrets",
+ "vega-theme-sync",
 ]
 
 [[package]]
@@ -3437,6 +3441,7 @@ dependencies = [
  "vega-gate",
  "vega-herdr",
  "vega-history",
+ "vega-lanista",
  "vega-notify",
  "vega-onboard",
  "vega-plugin",

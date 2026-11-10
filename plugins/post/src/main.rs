@@ -1136,12 +1136,12 @@ fn auth_config(
         ));
     }
     for (_, subject) in &grants {
-        if let Some((to, "keychain", _)) = cmd::parse_subject(subject) {
+        if let Some((to, "keychain" | "lanista", _)) = cmd::parse_subject(subject) {
             if inbox_only.iter().any(|h| h == to) || !entries.iter().any(|e| e.host == to) {
                 return Err(Failure::new(
                     "usage",
-                    "keychain command recipient must be a configured private host",
-                    "grant host=vega.cmd.<private-host>.keychain.<host>",
+                    "relay command recipient must be a configured private host",
+                    "grant host=vega.cmd.<private-host>.<keychain|lanista>.<host>",
                 ));
             }
         }

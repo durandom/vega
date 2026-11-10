@@ -229,7 +229,7 @@ pub fn parse_registry_read(s: &str) -> Result<(String, String), Failure> {
         ));
     }
     let parts: Vec<_> = key.split('.').collect();
-    if matches!(parts.get(1), Some(&"uac" | &"lanista")) {
+    if matches!(parts.get(1), Some(&"uac" | &"lanista")) && parts[1..] != ["lanista", "host"] {
         let count = if parts[1] == "uac" { 4 } else { 7 };
         if parts.len() != count
             || parts.get(2) != Some(&"v2")
@@ -381,8 +381,13 @@ fn keychain_relay_grants(host: &str, inbox_only: &[String], grants: &[(String, S
         .iter()
         .filter_map(|(sender, subject)| {
             let (to, kind, from) = crate::cmd::parse_subject(subject)?;
-            (to == host && kind == "keychain" && from == sender && inbox_only.contains(sender))
-                .then(|| format!("\n          \"$KV.VEGA_REGISTRY.{sender}.status.keychain\","))
+            let suffix = match kind {
+                "keychain" => "status.keychain",
+                "lanista" => "lanista.host",
+                _ => return None,
+            };
+            (to == host && from == sender && inbox_only.contains(sender))
+                .then(|| format!("\n          \"$KV.VEGA_REGISTRY.{sender}.{suffix}\","))
         })
         .collect()
 }
@@ -770,6 +775,38 @@ mod tests {
         assert!(out.contains("\"_INBOX_deimos.>\""));
         // nats.conf would read an unquoted $JS as a variable.
         assert!(!out.lines().any(|l| l.trim_start().starts_with("$JS")));
+    }
+
+    #[test]
+    fn lanista_grants_are_exact_and_recipient_only() {
+        assert!(parse_registry_read("puck=puck.lanista.host").is_ok());
+        assert!(parse_registry_read("puck=puck.lanista.host.extra").is_err());
+        let entries = vec![
+            Entry {
+                host: "proteus".into(),
+                key: "PRIVATE".into(),
+            },
+            Entry {
+                host: "puck".into(),
+                key: "LIMITED".into(),
+            },
+        ];
+        let out = render(
+            &entries,
+            None,
+            &[],
+            &["puck".into()],
+            None,
+            &[parse_grant("puck=vega.cmd.proteus.lanista.puck").unwrap()],
+            &[],
+            &[parse_registry_read("puck=puck.lanista.host").unwrap()],
+            None,
+        );
+        let split = out.find("LIMITED").unwrap();
+        assert!(out[..split].contains("$KV.VEGA_REGISTRY.puck.lanista.host"));
+        assert!(!out[split..].contains("          \"$KV.VEGA_REGISTRY."));
+        assert!(out[split..]
+            .contains("$JS.API.DIRECT.GET.KV_VEGA_REGISTRY.$KV.VEGA_REGISTRY.puck.lanista.host"));
     }
 
     #[test]

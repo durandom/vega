@@ -110,7 +110,8 @@ pub fn uac_key(host: &str, project: &str) -> String {
 /// Ordinary reconciliation must never garbage-collect them.
 pub fn is_legacy_project_key(key: &str) -> bool {
     let parts: Vec<_> = key.split('.').collect();
-    matches!(parts.get(1), Some(&"uac" | &"lanista"))
+    parts.get(1..) != Some(&["lanista", "host"][..])
+        && matches!(parts.get(1), Some(&"uac" | &"lanista"))
         && !(parts.get(2) == Some(&"v2") && parts.len() > 3)
 }
 
@@ -979,6 +980,7 @@ pub async fn reconcile(
             && *k != beat_key(host)
             && *k != format!("{}.notify.sent", token(host))
             && !pins::is_pin(k)
+            && *k != format!("{}.lanista.host", token(host))
             && !is_legacy_project_key(k)
             && !desired.contains_key(k)
         {

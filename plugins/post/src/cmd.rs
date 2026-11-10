@@ -68,7 +68,7 @@ pub async fn respond(
     let Some(reply_to) = request.reply.as_ref() else {
         return reply(false, "denied", "command requires a reply inbox");
     };
-    if let Some((_, "keychain", from)) = parse_subject(&request.subject) {
+    if let Some((_, "keychain" | "lanista", from)) = parse_subject(&request.subject) {
         // allow_responses must never turn an attacker-controlled reply
         // subject into a write elsewhere (including the registry).
         let prefix = format!("_INBOX_{from}.");
@@ -80,7 +80,7 @@ pub async fn respond(
                             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
                 })
         }) {
-            return reply(false, "denied", "keychain reply must use the sender inbox");
+            return reply(false, "denied", "relay reply must use the sender inbox");
         }
     }
     let answer = dispatch(client, receiver, &request.subject, &request.payload).await;
@@ -101,6 +101,12 @@ pub async fn dispatch(
     let Some((to, kind, from)) = parse_subject(subject).filter(|(to, _, _)| *to == receiver) else {
         return reply(false, "denied", "invalid command destination or subject");
     };
+    if kind == "lanista" {
+        return match vega_lanista::hosts::receive(client, to, from, payload).await {
+            Ok(()) => reply(true, "ok", "host pins published"),
+            Err((code, why)) => reply(false, code, &why),
+        };
+    }
     if kind == "keychain" {
         return match crate::keychain::receive(client, to, from, payload).await {
             Ok(()) => reply(true, "ok", "keychain status published"),

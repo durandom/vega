@@ -8,6 +8,9 @@
       "source": "spellkave .agents/skills/herdr-agents-collaboration (+ local ~/.pi/agent/models-store.json lanes)",
       "models": [
 
+        {"provider": "pi", "engine": "pi", "pin": "google/gemini-4-argon", "role": "frontier"},
+        {"provider": "pi", "engine": "pi", "pin": "google/gemini-3.8-flash", "role": "thrifty"},
+
         {"provider": "zai", "engine": "pi", "pin": "glm-5.3", "role": "frontier", "tier": "flagship"},
         {"provider": "zai", "engine": "pi", "pin": "glm-5.2", "role": "default", "tier": "balanced"},
         {"provider": "zai", "engine": "pi", "pin": "glm-4.7", "role": "thrifty", "tier": "budget"},

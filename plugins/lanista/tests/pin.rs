@@ -62,3 +62,43 @@ fn project_and_flag_validation_happen_before_registry_access() {
         assert_eq!(run(dir.path(), &args).status.code(), Some(2));
     }
 }
+
+#[test]
+fn inbox_host_cache_resolves_offline_and_foreign_mutations_are_denied() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("vega/lanista");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("puck.json"), r#"{"schema":1,"seats":{"herdr-agents":{"codex":{"budget":{"model":"gpt-6.1-sol","until":null}}}}}"#).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_vega-lanista"))
+            .current_dir(dir.path())
+            .env("XDG_CACHE_HOME", dir.path())
+            .env("VEGA_POST_HOST", "puck")
+            .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
+            .env("VEGA_NATS_NKEY", dir.path().join("absent"))
+            .env_remove("VEGA_LANISTA_PIN_HOSTS")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["pin", "codex", "--tier", "budget"]);
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("model: gpt-6.1-sol"), "{text}");
+    assert!(text.contains("source: host (puck)"), "{text}");
+    let out = run(&["hosts", "--json"]);
+    assert!(out.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(value["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["host"] == "puck"));
+    let out = run(&["pin", "codex", "--host", "proteus", "--set", "gpt-6.1-sol"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8(out.stdout)
+        .unwrap()
+        .contains("only their own"));
+    let out = run(&["pin", "codex", "--host", "puck", "--set", "not-allowed"]);
+    assert_eq!(out.status.code(), Some(2));
+}

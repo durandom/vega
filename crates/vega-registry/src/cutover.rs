@@ -35,6 +35,7 @@ impl Plan {
         for (key, value) in snapshot {
             let parts: Vec<_> = key.split('.').collect();
             if parts.first().copied() != Some(host.as_str())
+                || !crate::is_legacy_project_key(key)
                 || !matches!(parts.get(1), Some(&"uac" | &"lanista"))
                 || parts.get(2) == Some(&"v2")
             {

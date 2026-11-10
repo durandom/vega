@@ -17,3 +17,9 @@ Examples:
   vega lanista pin codex --tier budget
   vega lanista pin zai --tier budget --set glm-5.2 --until 2h
   vega lanista pin zai --tier budget --clear
+Host layer: `pin <lane> --tier <tier> --host <host> --set <allowed-model>`
+(or `--clear`). Host expiry defaults to never; `--until 2h` expires to global.
+Without --host, private hosts edit the project; inbox-only hosts edit themselves.
+Resolution: project > local host > global. Host source prints `host (<host>)`.
+`vega lanista hosts [--host <host>] --json` includes effective pins and allowlists.
+Inbox-only hosts relay through their theme control host and cache exact-key reads.

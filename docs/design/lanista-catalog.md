@@ -2,8 +2,58 @@
 
 ## Project model pins (vega-lhc.156)
 
+### Host layer (vega-aysa.1)
+
+Resolution is project > local host > global. `<host>.lanista.host` is a schema-1
+record with `seats: {seat: {lane: {tier: {model, until}}}}`. The default seat is
+`herdr-agents`; `until` is Unix seconds or null. Expired/cleared entries fall back
+to global. Source prints `host (<host>)`. Every set is validated against the repo
+allowlist, including project sets.
+
+`pin codex --tier budget --host puck --set gpt-6.1-sol` edits the host map;
+`--clear` removes that tier. Host writes default to `--until never`. Private hosts
+write their own key, or foreign keys only with explicit broker permission.
+Without `--host`, private hosts edit the project; inbox-only hosts edit themselves.
+Host reads work outside a project. `hosts [--host <host>] --json` returns rows with
+host, seat, lane, tier, model, source (`host` or `global`), until, and allowed models.
+Private hosts enumerate known registry hosts; inbox-only hosts list only self.
+
+Puck was inspected read-only: Codex's existing pins are present; Pi accepts
+provider/id and lists `google/gemini-4-argon` and `google/gemini-3.8-flash`.
+The pi lane allowlists Argon and Flash without global tiers. Mux uses lane pi
+project/host overrides first, then the historical zai/GLM global fallback;
+explicit model flags still win. Source output identifies pi versus zai fallback. No puck
+mapping is hardcoded: host assignments are registry data to set after deploy.
+
+Inbox-only writes send `vega.cmd.<theme-control>.lanista.<self>` with a bounded
+4096-byte object `{lane,tier,seat?,model|clear,until?}`. The private receiver derives
+the key from the broker-authenticated sender, requires an inbox-only sender,
+rejects unknown fields/lanes/tiers/seats/models and stale expiry, and reconstructs
+a revision-checked whole-map write. Conflicts retry without losing other lanes.
+No caller headers are forwarded; replies require the sender's `_INBOX_<host>.`
+prefix. Never grant inbox-only hosts KV publish: `Nats-Rollup: all` on even one
+allowed subject can erase the bucket.
+
+Titan auth-config retains existing arguments (including `--inbox-only puck`) and adds:
+
+```
+--cmd-grant puck=vega.cmd.proteus.lanista.puck
+--registry-read puck=puck.lanista.host
+```
+
+Orrery applies these separately with Slayer approval. The command grant derives
+only proteus's exact `$KV.VEGA_REGISTRY.puck.lanista.host` publish permission.
+Puck gets no KV publish, enumeration, watch, or other-host read rights.
+Its exact-key `get_one` never opens the bucket. Last valid maps are cached at
+`$XDG_CACHE_HOME/vega/lanista/<host>.json` (default `~/.cache`) and used offline
+with a diagnostic; expiry still applies. Successful absence clears the cache.
+Inbox-only project reads never enumerate; explicit exact project read grants
+remain supported through `VEGA_LANISTA_PIN_HOSTS`.
+
+### Project layer
+
 `vega lanista pin <lane> --tier <tier>` resolves a runtime project override,
-then the embedded global seats (`plugins/lanista/seats.json`). `source` names
+then the host layer and the embedded global seats (`plugins/lanista/seats.json`). `source` names
 `project (<writer host>)` or `global seats`; an active override also prints
 `expires` as Unix seconds or `never`. Project overrides change no repo file.
 
@@ -20,7 +70,7 @@ different checkout paths share an ID when their selected fetch remotes match.
 Local/file identities remain host-scoped. See the flag-day
 [registry cutover handoff](project-registry-cutover.md); deploy all hosts only
 after the startup migration is ready.
-Outside a git project, reads use global seats and mutations fail.
+Outside a git project, reads use host/global seats and project mutations fail.
 
 ### Registry and merge rule
 
@@ -58,8 +108,7 @@ A failed read visibly falls back to global seats (`registry: unavailable: ...;
 using global seats`); mutations fail when the registry cannot be read/written.
 No local cache claims to be the cross-host truth.
 
-Inbox-only hosts such as deimos cannot enumerate or write and normally use
-global seats. If already granted exact keys via
+Inbox-only hosts cannot enumerate or write KV directly and normally use their host layer. If already granted exact keys via
 `auth-config --registry-read <reader>=<key>`, set `VEGA_LANISTA_PIN_HOSTS` to
 the comma-separated writer hosts to read. This uses only exact direct gets,
 without stream info. List every writer whose overrides must be considered;

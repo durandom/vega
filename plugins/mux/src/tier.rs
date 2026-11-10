@@ -31,14 +31,6 @@ pub fn explicit_model(args: &[String]) -> Option<String> {
     model
 }
 
-fn lane(kind: &str) -> &str {
-    if kind == "pi" {
-        "zai"
-    } else {
-        kind
-    }
-}
-
 fn checkout(cwd: Option<&str>) -> Result<PathBuf, Failure> {
     match cwd.filter(|_| machine().is_none()) {
         Some(cwd) => Ok(PathBuf::from(expand_home(
@@ -59,7 +51,7 @@ pub fn required(kind: &str, cwd: Option<&str>) -> Failure {
     .into_iter()
     .map(|(tier, criteria)| {
         let model = checkout(cwd)
-            .and_then(|cwd| vega_lanista::resolve(lane(kind), tier, &cwd))
+            .and_then(|cwd| vega_lanista::resolve(kind, tier, &cwd))
             .unwrap_or_else(|e| format!("unavailable ({})", e.message));
         format!("--tier {tier}: {criteria} ({model})")
     })
@@ -90,7 +82,7 @@ pub fn select(
             model: None,
         });
     };
-    let model = vega_lanista::resolve(lane(kind), tier, &checkout(cwd)?)?;
+    let model = vega_lanista::resolve(kind, tier, &checkout(cwd)?)?;
     // Pi accepts provider/model and otherwise may find an ambiguous model id.
     let model = if kind == "pi" && !model.contains('/') {
         format!("zai/{model}")
@@ -114,6 +106,45 @@ mod tests {
     }
 
     #[test]
+    fn pi_host_override_reaches_spawn_model() {
+        const MARKER: &str = "VEGA_PI_HOST_TIER_TEST";
+        if env::var_os(MARKER).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let cache = dir.path().join("vega/lanista");
+            std::fs::create_dir_all(&cache).unwrap();
+            std::fs::write(cache.join("puck.json"), r#"{"schema":1,"seats":{"herdr-agents":{"pi":{"budget":{"model":"google/gemini-3.8-flash","until":null}}}}}"#).unwrap();
+            let out = std::process::Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tier::tests::pi_host_override_reaches_spawn_model",
+                    "--nocapture",
+                ])
+                .env(MARKER, "1")
+                .env("XDG_CACHE_HOME", dir.path())
+                .env("VEGA_POST_HOST", "puck")
+                .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
+                .env("VEGA_NATS_NKEY", dir.path().join("missing"))
+                .env_remove("VEGA_LANISTA_PIN_HOSTS")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(String::from_utf8_lossy(&out.stderr).contains("lane pi (host puck)"));
+            return;
+        }
+        let selected = select("pi", Some("budget"), &[], None).unwrap();
+        assert_eq!(selected.model.as_deref(), Some("google/gemini-3.8-flash"));
+        assert_eq!(
+            selected.args,
+            strings(&["--model", "google/gemini-3.8-flash"])
+        );
+    }
+
+    #[test]
     fn tiers_select_pins_and_provider_for_every_kind() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_str();
@@ -125,7 +156,7 @@ mod tests {
                     vega_lanista::seats::DEFAULT_SEAT,
                 )
                 .unwrap();
-                let pin = vega_lanista::seats::pick(&pins, lane(kind), tier).unwrap();
+                let pin = vega_lanista::seats::global(&pins, kind, tier).unwrap();
                 let expected = if kind == "pi" {
                     format!("zai/{}", pin.model)
                 } else {

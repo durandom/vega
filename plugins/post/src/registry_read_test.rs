@@ -555,7 +555,7 @@ fn project_pins_cross_hosts_under_rendered_grants() {
             assert!(
                 pins::access_with(&d, "deimos", record.clone(), None, None, 10)
                     .await
-                    .is_err()
+                    .unwrap().entries.is_empty()
             );
             assert!(denied(&g, &format!("$KV.VEGA_REGISTRY.{k}"), "{}").await);
             // At the reset, owner prunes the payload but preserves a tombstone.
@@ -943,6 +943,9 @@ fn keychain_command_relays_status_without_registry_rights() {
                 vega_registry::get_one(&r, key).await.unwrap(),
                 Some(changed)
             );
+            kv.put("proteus.beat", json!({"at":1}).to_string().into())
+                .await
+                .unwrap();
             let view = vega_registry::read(&r, &kv).await.unwrap();
             assert!(view.entries.contains_key(key));
             assert!(!view.entries.contains_key("puck.beat"));
@@ -1117,6 +1120,273 @@ fn keychain_command_relays_status_without_registry_rights() {
                 Some(theme)
             );
             assert_eq!(vega_registry::get_one(&r, key).await.unwrap(), Some(value));
+            worker.abort();
+        });
+}
+
+/// An inbox-only host cannot mutate the shared registry, even using rollup
+/// headers. Its one command grant delegates a validated, header-free write.
+#[test]
+fn lanista_command_relays_host_pins_without_registry_rights() {
+    use futures_util::StreamExt;
+    let dir = tempfile::tempdir().unwrap();
+    let (admin_seed, admin) = user();
+    let (reader_seed, reader) = user();
+    let (puck_seed, puck) = user();
+    let authz = auth::render(
+        &[
+            Entry {
+                host: "proteus".into(),
+                key: reader,
+            },
+            Entry {
+                host: "puck".into(),
+                key: puck,
+            },
+        ],
+        Some(&admin),
+        &["registry".into()],
+        &["puck".into()],
+        None,
+        &[auth::parse_grant("puck=vega.cmd.proteus.lanista.puck").unwrap()],
+        &[],
+        &[("puck".into(), "puck.lanista.host".into())],
+        None,
+    );
+    let (_server, url) = start(dir.path(), &authz);
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let a = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+            jetstream::new(a)
+                .create_key_value(jetstream::kv::Config {
+                    bucket: vega_registry::BUCKET.into(),
+                    history: 1,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let r = connect(&url, &reader_seed, "_INBOX_proteus").await;
+            let kv = vega_registry::bucket(&r).await.unwrap();
+            let theme = json!({"mode":"dark"});
+            kv.put("proteus.theme", theme.to_string().into())
+                .await
+                .unwrap();
+            kv.put("proteus.beat", json!({"at":1}).to_string().into())
+                .await
+                .unwrap();
+            let mut probe = PermissionProbe::connect(&url, &puck_seed, "_INBOX_puck").await;
+            let p = probe.client.clone();
+            let mut sub = r.subscribe("vega.cmd.proteus.>").await.unwrap();
+            let server = r.clone();
+            let worker = tokio::spawn(async move {
+                while let Some(req) = sub.next().await {
+                    crate::cmd::respond(&server, "proteus", &req).await;
+                }
+            });
+            // flush() only writes socket bytes. A request on the same
+            // connection as SUB is ordered after it at the broker, and its
+            // answer proves both registration and the worker are ready
+            // before puck sends on a different connection. No retry/sleep.
+            let ready = r
+                .request("vega.cmd.proteus.shell.proteus", "{}".into())
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&ready.payload).unwrap()["code"],
+                "denied"
+            );
+            let key = "puck.lanista.host";
+            let change = json!({"lane":"codex","tier":"budget","model":"gpt-6.1-sol","until":null});
+            let value = json!({"schema":1,"seats":{"herdr-agents":{"codex":{"budget":{"model":"gpt-6.1-sol","until":null}}}}});
+            let answer = p.request("vega.cmd.proteus.lanista.puck", change.to_string().into()).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"], true);
+            assert_eq!(vega_registry::get_one(&p, key).await.unwrap(), Some(value.clone()));
+            // Private CLI write path uses the exact derived foreign grant too.
+            let c: vega_lanista::hosts::Change = serde_json::from_value(change.clone()).unwrap();
+            vega_lanista::hosts::write(&r, "puck", &c).await.unwrap();
+            vega_lanista::hosts::write(&r, "proteus", &c).await.unwrap();
+            vega_registry::reconcile(&kv, "proteus", Default::default(), &Default::default(), &["proteus.lanista.host".into()]).await.unwrap();
+            assert_eq!(vega_registry::get_one(&r, "proteus.lanista.host").await.unwrap(), Some(value.clone()));
+
+            kv.put("proteus.beat", json!({"at":1}).to_string().into()).await.unwrap();
+            let view = vega_registry::read(&r, &kv).await.unwrap();
+            assert!(view.entries.contains_key(key));
+            assert!(!view.entries.contains_key("puck.beat"));
+            // The actual relay ignores all request headers and reconstructs JSON.
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Rollup", "all");
+            headers.insert("KV-Operation", "PURGE");
+            headers.insert("Nats-TTL", "1");
+            let subject = "vega.cmd.proteus.lanista.puck";
+            let answer = p
+                .request_with_headers(subject, headers, change.to_string().into())
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"],
+                true
+            );
+            assert_eq!(
+                vega_registry::get_one(&r, key).await.unwrap(),
+                Some(value.clone())
+            );
+            assert_eq!(
+                vega_registry::get_one(&r, "proteus.theme").await.unwrap(),
+                Some(theme.clone())
+            );
+            assert_eq!(
+                kv.entry(key).await.unwrap().unwrap().operation,
+                jetstream::kv::Operation::Put
+            );
+            // Inspect stored headers directly instead of waiting for a
+            // forwarded TTL to expire. This keeps header stripping covered
+            // even when the permission probes complete in milliseconds.
+            let stored = r
+                .request(vega_registry::direct_get_subject(key), "".into())
+                .await
+                .unwrap();
+            for header in ["Nats-Rollup", "KV-Operation", "Nats-TTL"] {
+                assert!(
+                    stored
+                        .headers
+                        .as_ref()
+                        .and_then(|h| h.get(header))
+                        .is_none(),
+                    "forwarded {header}"
+                );
+            }
+            // A hostile reply subject must not exploit allow_responses to
+            // turn the acknowledgement into a write to an unrelated key.
+            let revision = kv.entry(key).await.unwrap().unwrap().revision;
+            p.publish_with_reply(
+                subject,
+                "$KV.VEGA_REGISTRY.proteus.beat",
+                change.to_string().into(),
+            )
+            .await
+            .unwrap();
+            p.publish_with_reply(subject, "_INBOX_proteus.stolen", change.to_string().into())
+                .await
+                .unwrap();
+            // Same-connection ordering makes this a barrier after both probes.
+            let answer = p.request(subject, change.to_string().into()).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"],
+                true
+            );
+            assert_eq!(kv.entry(key).await.unwrap().unwrap().revision, revision + 1);
+            assert_eq!(
+                vega_registry::get_one(&r, "proteus.beat").await.unwrap(),
+                Some(json!({"at":1}))
+            );
+            // Bad fields, timestamps, states and sizes are rejected without writes.
+            let revision = kv.entry(key).await.unwrap().unwrap().revision;
+            for body in [
+                json!({"lane":"unknown","tier":"budget","model":"gpt-6.1-sol"}).to_string(),
+                json!({"lane":"codex","tier":"budget","model":"evil"}).to_string(),
+                json!({"lane":"codex","tier":"budget","model":"gpt-6.1-sol","host":"proteus"}).to_string(),
+                json!({"lane":"codex","tier":"budget","model":"gpt-6.1-sol","key":"proteus.beat"}).to_string(),
+                json!({"lane":"codex","tier":"budget","model":"gpt-6.1-sol","until":1}).to_string(),
+                " ".repeat(4097),
+            ] {
+                let answer = p.request(subject, body.into()).await.unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&answer.payload).unwrap()["code"],
+                    "denied"
+                );
+            }
+            let private_sender = r
+                .request(
+                    "vega.cmd.proteus.lanista.proteus",
+                    change.to_string().into(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&private_sender.payload).unwrap()["code"],
+                "denied"
+            );
+            let unknown_kind = r
+                .request("vega.cmd.proteus.shell.proteus", "{}".into())
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&unknown_kind.payload).unwrap()["code"],
+                "denied"
+            );
+            assert_eq!(kv.entry(key).await.unwrap().unwrap().revision, revision);
+            for command in [
+                "vega.cmd.proteus.shell.puck",
+                "vega.cmd.ganymede.lanista.puck",
+                "vega.cmd.proteus.lanista.proteus",
+            ] {
+                probe
+                    .publish_denied(command, Default::default(), &value.to_string())
+                    .await;
+            }
+            assert_eq!(vega_registry::get_one(&p, key).await.unwrap(), Some(value.clone()));
+            for k in ["proteus.lanista.host", "proteus.theme", "proteus.beat", "puck.lanista.v2.61.62.63.64"] {
+                probe.publish_denied(&vega_registry::direct_get_subject(k), Default::default(), "").await;
+            }
+            for api in [
+                "$JS.API.STREAM.INFO.KV_VEGA_REGISTRY",
+                "$JS.API.DIRECT.GET.KV_VEGA_REGISTRY",
+                "$JS.API.STREAM.MSG.GET.KV_VEGA_REGISTRY",
+                "$JS.API.STREAM.MSG.DELETE.KV_VEGA_REGISTRY",
+                "$JS.API.STREAM.PURGE.KV_VEGA_REGISTRY",
+                "$JS.API.CONSUMER.CREATE.KV_VEGA_REGISTRY",
+                "$JS.API.CONSUMER.CREATE.KV_VEGA_REGISTRY.w.$KV.VEGA_REGISTRY.>",
+            ] {
+                probe.publish_denied(api, Default::default(), "{}").await;
+            }
+            // All mutation forms, including stream-wide rollup headers, are
+            // denied even on the sender's own status subject.
+            for key in [
+                "puck.lanista.host",
+                "puck.status.x",
+                "puck.beat",
+                "puck.agent.x",
+                "puck.uac.v2.61",
+                "proteus.lanista.host",
+                "proteus.beat",
+            ] {
+                let subject = format!("$KV.VEGA_REGISTRY.{key}");
+                probe
+                    .publish_denied(&subject, Default::default(), "{}")
+                    .await;
+                for operation in ["DEL", "PURGE", "ROLLUP-ALL"] {
+                    let mut headers = async_nats::HeaderMap::new();
+                    if operation == "ROLLUP-ALL" {
+                        headers.insert("Nats-Rollup", "all");
+                    } else {
+                        headers.insert("KV-Operation", operation);
+                    }
+                    if operation == "PURGE" {
+                        headers.insert("Nats-Rollup", "sub");
+                    }
+                    probe.publish_denied(&subject, headers, "").await;
+                }
+            }
+            // No plain watch subscription either.
+            let _watch = p.subscribe("$KV.VEGA_REGISTRY.>").await.unwrap();
+            probe.rejected("Subscription", "$KV.VEGA_REGISTRY.>").await;
+            assert_eq!(
+                vega_registry::get_one(&r, "proteus.theme").await.unwrap(),
+                Some(theme)
+            );
+            assert_eq!(vega_registry::get_one(&r, key).await.unwrap(), Some(value));
+            let other = json!({"lane":"pi","tier":"budget","model":"google/gemini-3.8-flash","until":null});
+            let answer = p.request(subject, other.to_string().into()).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"], true);
+            let clear = json!({"lane":"codex","tier":"budget","clear":true});
+            let answer = p.request(subject, clear.to_string().into()).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&answer.payload).unwrap()["ok"], true);
+            let config = vega_lanista::hosts::Config::parse(vega_registry::get_one(&p, key).await.unwrap().unwrap()).unwrap();
+            assert!(config.active("herdr-agents", "codex", "budget", 0).is_none());
+            assert!(config.active("herdr-agents", "pi", "budget", 0).is_some());
             worker.abort();
         });
 }

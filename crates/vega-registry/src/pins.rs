@@ -134,7 +134,7 @@ pub async fn access_with(
                 view.entries.insert(k, v);
             }
         }
-    } else {
+    } else if !vega_herdr::state::is_inbox_only(&host) {
         let kv = crate::bucket(client).await?;
         // Enumerate without fetching: read_kinds intentionally tolerates
         // individual get errors, whereas this resolver must not.
