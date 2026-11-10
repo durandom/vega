@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 153 · 2026-11-10
+
+- feature: a headed child no longer shows the waiting hand for turns you typed into it after it
+  answered its parent: silent now needs an unanswered brief. `vega mux dismiss <child>` (on the
+  parent's host) drops a hand you handled; the project window Overview and the vega inbox offer
+  it as Dismiss (vega-0h4c.56). Update vegad with `mise run install` or `vega deploy apply`, then
+  `vega config apply herdr-app`.
+
 ## 152 · 2026-11-09
 
 - feature: the herdr-app project window has an Asks tab: open `vega notify` asks of the project

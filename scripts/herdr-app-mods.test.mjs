@@ -756,3 +756,29 @@ test('label pills filter the sidebar ad hoc; the view editor toggles known label
   elements(m.render()).find(n=>n.idValue==='view-label-ops').handlers.on_click({},m.cx);
   assert.equal(m.state.get('vega.view'),'label:ops');
 });
+
+test('waiting panes offer Dismiss for silent and asking only, run vega mux dismiss on the badge machine',async()=>{
+  const project='github.com/team/a';
+  const w=load('vega-sidebar');
+  w.api.terminals=()=>[{address:'ganymede/t1n',state:'live',labels:{'vega.role':'uac','vega.project-id':project}}];
+  w.setProps({projectConfig:project,tab:'overview',uac:'ganymede/t1n'});
+  w.state.set('vega.badges',[{project,machine:'ganymede',checkout:'/remote/a',at:Date.now()/1000,decisions:0,notes:0,waiting:2,
+    waiting_panes:[{pane:'hc:ganymede/t1w',name:'fable-chat',attention:'silent',title:''},{pane:'hc:ganymede/t1x',name:'dialog',attention:'input',title:'approve'}]}]);
+  w.api.exec=async(bin,args)=>{w.calls.push(['exec',bin,[...args]]);return bin==='python3'&&args.includes('dismiss')?{code:0,stdout:JSON.stringify({code:0,stdout:'dismissed',stderr:''})}:{code:0,stdout:'{}'};};
+  w.mod.init({},w.cx);await w.flush();
+  const nodes=elements(w.render());
+  assert(nodes.some(n=>n.idValue==='ov-wait-go-hc:ganymede/t1x'));
+  assert(!nodes.some(n=>n.idValue==='ov-wait-dismiss-hc:ganymede/t1x'),'a live dialog cannot be dismissed');
+  nodes.find(n=>n.idValue==='ov-wait-dismiss-hc:ganymede/t1w').handlers.on_click({},w.cx);await w.flush();
+  const call=w.calls.find(c=>c[0]==='exec'&&c[2].includes('dismiss'));
+  assert.equal(call[1],'python3');
+  assert.deepEqual(call[2].slice(2),['ganymede','/remote/a','vega','mux','dismiss','hc:t1w'],'machine-local pane id on the parent machine');
+  assert(texts(w.render()).some(s=>s.startsWith('Dismissed')));
+
+  const i=load('vega-inbox');i.setProps({project});i.api.terminals=()=>[{address:'t5',state:'live'}];
+  i.state.set('vega.badges',[{project,at:Date.now()/1000,checkout:'/repo',decision_texts:[],waiting_panes:[{pane:'hc:t5',name:'chat',attention:'asking',title:'asks: ok?'}]}]);
+  i.api.exec=async(bin,args)=>{i.calls.push(['exec',bin,[...args]]);return {code:0,stdout:'dismissed'};};
+  i.mod.init({},i.cx);
+  elements(i.render()).find(n=>n.idValue==='dismiss-wait-hc:t5').handlers.on_click({},i.cx);await new Promise(r=>setImmediate(r));
+  assert.deepEqual(i.calls.find(c=>c[0]==='exec'&&c[2].includes('dismiss')).slice(1),['vega',['mux','dismiss','hc:t5']],'local badge: local vega');
+});

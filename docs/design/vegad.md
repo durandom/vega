@@ -453,7 +453,7 @@ Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestrat
 | `failure` | `done --outcome failed`; delivered by mail, no duplicate attention wake |
 | `waiting` | would be `silent`, but a local CI watch still owes a verdict mail (docs/design/ci-watch.md), or a local gate review awaits a verdict; no wake. Removed or expired gate records stop suppressing silence |
 | `unanswered` | a known idle child is an unresolved post ask target; requires a resolved host and positive current-name mode record; wakes once per actionable transition |
-| `silent` | idle/done since its last prompt, no `done` sent (its last 1-2 lines show in `vega uac`) |
+| `silent` | idle/done since its last prompt, no `done` sent, and it owes the parent an answer: the last brief (spawn, adopt, mail from the parent) is newer than its last message to the parent (`state::owes`). A turn the user typed into a headed pane after the child answered stays unflagged; `vega mux dismiss` drops the silence and counts the brief as answered (vega-0h4c.56). Its last 1-2 lines show in `vega uac` |
 | `exited` | `pane.closed`, `pane.exited`, or the agent left the pane |
 | `completed` | `done --outcome succeeded`, waiting for the parent to land or release it; delivered by mail, no duplicate attention wake |
 | `parked` | the parent parked it on an open decision bead (`vega uac park`) or explicitly held it without a bead (`vega uac hold`); no wake |

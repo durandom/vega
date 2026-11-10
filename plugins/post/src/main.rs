@@ -6358,7 +6358,7 @@ fn turn_screen(pane: &str) -> String {
 fn confirm_silent(key: &str) -> Option<st::Quota> {
     // A child on another machine (`<machine>/<pane>`): no screen to read here.
     if let Some((m, pane)) = key.split_once('/') {
-        if st::done_of(Some(m), pane).is_none() && !st::has_replied(Some(m), pane) {
+        if st::done_of(Some(m), pane).is_none() && st::owes(Some(m), pane) {
             st::set_silent(Some(m), pane, true);
             log(&format!(
                 "sentinel: {key} idle without done or reply: silent"
@@ -6367,7 +6367,8 @@ fn confirm_silent(key: &str) -> Option<st::Quota> {
         return None;
     }
     let pane = key;
-    if st::done_of(None, pane).is_some() || st::has_replied(None, pane) {
+    // Not owed: the turn was the user's own, typed into a headed pane.
+    if st::done_of(None, pane).is_some() || !st::owes(None, pane) {
         return None;
     }
     let screen = turn_screen(pane);

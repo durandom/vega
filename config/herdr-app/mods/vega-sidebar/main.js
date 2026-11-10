@@ -117,6 +117,9 @@ const toggleValue = (state, value) => {
 };
 // Ad-hoc filter by one label, set by clicking a label pill in the sidebar (no saved view).
 const LABEL_VIEW = "label:";
+// A waiting pane from a badge row as `vega mux dismiss` on that row's machine knows it: the
+// vega mod qualifies remote panes as hc:<machine>/<pane>, the machine's records say hc:<pane>.
+const dismissArgs = (row, pane) => ["mux", "dismiss", row?.machine ? pane.replace(`hc:${row.machine}/`, "hc:") : pane];
 // The active view lives in shared state: localStorage is per mod copy, so the filter popup
 // could not reach the sidebar through it. The sidebar copies it to its own localStorage to
 // keep it across restarts; shared state is empty after a restart, so that copy is the fallback.
@@ -187,6 +190,7 @@ export default class Agents extends View {
         if (props()?.follow) cx.timer.every(1000, () => this.followFocus());
         this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
         this.askBusy = new Set(); this.askResults = new Map();
+        this.dismissBusy = new Set(); this.dismissResults = new Map();
         this.expanded = new Set(); this.readyLimit = 12;
       }
       return;
@@ -347,6 +351,19 @@ export default class Agents extends View {
     if (sig !== this.asksSig) { this.asksSig = sig; this.asks = asks; cx.notify(); }
   }
 
+  // The user handled a waiting child in its pane: `vega mux dismiss` where its parent record is
+  // (the badge row's machine), so its own turns stop raising the hand (vega-0h4c.56).
+  async dismissWaiting(row, w, cx) {
+    if (this.dismissBusy.has(w.pane)) return;
+    this.dismissBusy.add(w.pane); this.dismissResults.delete(w.pane); cx.notify();
+    try {
+      const r = await inCheckout(row?.machine || null, row?.checkout || "/", "vega", dismissArgs(row, w.pane));
+      this.dismissResults.set(w.pane, r.code === 0 ? "Dismissed; the hand goes with the next refresh."
+        : (r.stderr || r.stdout || `Failed (${r.code})`).trim().split("\n")[0]);
+    } catch (e) { this.dismissResults.set(w.pane, String(e)); }
+    finally { this.dismissBusy.delete(w.pane); cx.notify(); }
+  }
+
   // Ack keeps the ask open and stops escalation; resolve closes it. argv only, no shell.
   async askAct(a, action, cx) {
     if (this.askBusy.has(a.id)) return;
@@ -487,6 +504,21 @@ export default class Agents extends View {
         .child(tile("notes", "✉", totals.notes ?? 0, "notes", t.accent, notes)))
       .when(Boolean(asks?.length), el => el.child(v_flex().gap(2).children(asks.slice(0, 5).map((a, i) =>
         div().id(`ov-ask-${i}`).px(8).text_size(11.5).text_color(t.foreground).child(`⚠ ${a.line ?? ""}`)))))
+      .when(Boolean(totals.waiting_panes?.length), el => el.child(v_flex().gap(2).children(totals.waiting_panes.map(w => {
+        const result = this.dismissResults?.get(w.pane);
+        const small = (id, label, tip, action) => div().id(id).flex_none().px(6).py(1).rounded(4).cursor_pointer().bg(t.raised)
+          .text_size(11).tooltip(tip).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); action(cx); }).child(label);
+        return h_flex().id(`ov-wait-${w.pane}`).gap(6).px(8).items_center().text_size(11.5)
+          .child(div().flex_none().child("✋"))
+          .child(div().flex_1().min_w(0).truncate().child(`${w.name || w.pane} · ${w.title || w.attention}`))
+          .when(Boolean(result), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(result)))
+          .child(small(`ov-wait-go-${w.pane}`, "Go", "Focus the pane", () => run("pane.focus", { terminal: w.pane.replace(/^hc:/, "") })))
+          // A dialog (input) is live and an open ask (unanswered) closes elsewhere: not dismissable.
+          .when(w.attention === "silent" || w.attention === "asking", el => el.child(small(`ov-wait-dismiss-${w.pane}`,
+            this.dismissBusy?.has(w.pane) ? "…" : "Dismiss", "Handled: drop the hand until the parent briefs it again",
+            cx => cx.spawn(cx => this.dismissWaiting(totals, w, cx)))));
+      }))))
       .child(section("Beads", b ? (b.in_progress_issues ?? 0) + (b.ready_issues ?? 0) + (b.blocked_issues ?? 0) : "–"))
       .child(beadsBody)
       .child(section("Sentinels", kids.length))

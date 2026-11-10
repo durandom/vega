@@ -594,6 +594,31 @@ pub fn has_replied(machine: Option<&str>, pane: &str) -> bool {
     state_file_on("replied", machine, pane).is_some_and(|f| f.exists())
 }
 
+/// The child owes its parent an answer: the parent's last brief (spawn, adopt,
+/// mail to it) is newer than the child's last message to the parent. A turn
+/// that ends while nothing is owed was the user's own (they typed into a
+/// headed pane): not silent (vega-0h4c.56). No brief record: nothing owed.
+pub fn owes(machine: Option<&str>, pane: &str) -> bool {
+    let Some(brief) = brief_of(machine, pane) else {
+        return false;
+    };
+    let replied = state_file_on("replied", machine, pane)
+        .and_then(|f| std::fs::metadata(f).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis());
+    replied.is_none_or(|r| brief > r)
+}
+
+/// The user dismissed the child's waiting hand (`vega mux dismiss`): its
+/// silence goes, and it counts as having answered the last brief, so turns
+/// the user types into it stay unflagged until the parent briefs it again.
+/// Done and park records stay: they are the parent's to settle.
+pub fn dismiss(machine: Option<&str>, pane: &str) {
+    remove(&state_file_on("silent", machine, pane));
+    set_replied(machine, pane);
+}
+
 /// The relay saw the child go idle after its prompt without a done report.
 pub fn set_silent(machine: Option<&str>, pane: &str, silent: bool) {
     let file = state_file_on("silent", machine, pane);
@@ -1070,6 +1095,52 @@ mod tests {
             split_key("io_hc-other_w1_p2"),
             Some((Some("io_hc-other".into()), "w1:p2".into()))
         );
+    }
+
+    #[test]
+    fn owed_follows_briefs_and_replies_and_dismiss_clears_the_hand() {
+        if std::env::var_os("VEGA_OWES_TEST_CHILD").is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "state::tests::owed_follows_briefs_and_replies_and_dismiss_clears_the_hand",
+                ])
+                .env("VEGA_OWES_TEST_CHILD", "1")
+                .env("XDG_STATE_HOME", dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let tick = || std::thread::sleep(std::time::Duration::from_millis(5));
+        let pane = "hc:t1w";
+        assert!(!owes(None, pane), "no brief: nothing owed");
+        save_parent_on(None, pane, "fable-chat", "hc:t1n");
+        assert!(owes(None, pane), "the spawn brief is owed");
+        tick();
+        set_replied(None, pane);
+        assert!(
+            !owes(None, pane),
+            "a reply answers it: user turns are not silent"
+        );
+        tick();
+        save_brief(None, pane);
+        assert!(owes(None, pane), "a new brief is owed again");
+        set_silent(None, pane, true);
+        tick();
+        dismiss(None, pane);
+        assert!(!is_silent(None, pane), "dismiss drops the silence");
+        assert!(!owes(None, pane), "and counts the brief as answered");
+        tick();
+        save_brief(Some("io"), pane);
+        assert!(owes(Some("io"), pane), "records stay per machine");
+        assert!(!owes(None, pane));
     }
 
     #[test]

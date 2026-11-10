@@ -39,7 +39,7 @@ export default class VegaInbox extends View {
 
   waiting(rows) {
     const live = new Set(terminals().filter(t => t.state === "live").map(t => t.address));
-    return rows.flatMap(row => (row.waiting_panes ?? []).map(w => ({...w, project: row.project, machine: row.machine ?? null})))
+    return rows.flatMap(row => (row.waiting_panes ?? []).map(w => ({...w, project: row.project, machine: row.machine ?? null, checkout: row.checkout ?? null})))
       .filter(w => live.has(w.pane.replace(/^hc:/,"")));
   }
 
@@ -91,6 +91,28 @@ export default class VegaInbox extends View {
     });
   }
 
+  // The user handled a waiting child in its pane: `vega mux dismiss` on the badge's machine,
+  // where the parent record lives (vega-0h4c.56). Remote panes arrive as hc:<machine>/<pane>.
+  dismissWaiting(w, cx) {
+    const key = `wait:${w.pane}`;
+    if (this.busy.has(key)) return;
+    this.busy.add(key); this.results.delete(key); cx.notify();
+    const pane = w.machine ? w.pane.replace(`hc:${w.machine}/`, "hc:") : w.pane;
+    cx.spawn(async (cx) => {
+      try {
+        let r;
+        if (w.machine) {
+          const wrapped = await exec("python3", ["-c", remoteAction, w.machine, w.checkout || "/", "vega", "mux", "dismiss", pane]);
+          r = wrapped.code === 0 ? JSON.parse(wrapped.stdout) : wrapped;
+        } else {
+          r = await exec("vega", ["mux", "dismiss", pane]);
+        }
+        this.results.set(key, r.code === 0 ? "Dismissed. Waiting for refresh." : (r.stderr || r.stdout || `Command failed (${r.code})`).trim());
+      } catch (e) { this.results.set(key, String(e)); }
+      finally { this.busy.delete(key); cx.notify(); }
+    });
+  }
+
   button(id, label, action, t) {
     return div().id(id).px(12).py(6).rounded(6).bg(t.raised).cursor_pointer().child(label)
       .on_mouse_down("left", (_e,cx) => cx.stop_propagation())
@@ -122,7 +144,12 @@ export default class VegaInbox extends View {
         .when(!cards.length, el => el.child("No open decisions."))
         .children(cards)
         .child(div().font_semibold().child(`Waiting panes · ${waiting.length}`))
-        .children(waiting.map(w => this.button(`waiting-${w.pane}`,`${w.name} · ${w.title || w.attention}`,
-          () => run("agent.focus",{terminal:w.pane.replace(/^hc:/,"")}),t))));
+        .children(waiting.map(w => h_flex().gap(8).items_center()
+          .child(div().flex_1().min_w(0).child(this.button(`waiting-${w.pane}`,`${w.name} · ${w.title || w.attention}`,
+            () => run("agent.focus",{terminal:w.pane.replace(/^hc:/,"")}),t)))
+          // A dialog (input) is live and an open ask (unanswered) closes elsewhere: not dismissable.
+          .when(w.attention === "silent" || w.attention === "asking", el => el.child(this.button(`dismiss-wait-${w.pane}`,
+            this.busy.has(`wait:${w.pane}`) ? "…" : "Dismiss", cx => this.dismissWaiting(w, cx), t)))
+          .when(this.results.has(`wait:${w.pane}`), el => el.child(div().text_size(12).text_color(t.muted).child(this.results.get(`wait:${w.pane}`)))))));
   }
 }

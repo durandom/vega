@@ -187,6 +187,14 @@ enum Cmd {
         /// Target agent: pane id (e.g. w4C:p1) or unique herdr agent name
         target: String,
     },
+    /// Dismiss a child's waiting hand: the user handled it in the pane
+    #[command(
+        after_help = "Clears the child's silence and counts it as having answered its last brief, so\nturns you type into a headed child stay unflagged until its parent briefs it\nagain. Done and park records stay. Run it on the machine that holds the parent\nrecord (the parent's vegad host).\n\nExamples:\n  vega mux dismiss fable-chat\n  vega mux dismiss hc:t1w"
+    )]
+    Dismiss {
+        /// Child: pane id (e.g. hc:t1w, w4C:p1) or its recorded agent name
+        target: String,
+    },
     /// Respawn a closed agent in its recorded cwd, resuming its session
     #[command(after_help = include_str!("../help/reopen.md"))]
     Reopen {
@@ -426,6 +434,7 @@ fn main() -> ExitCode {
             return transcript::run(&target, view, full, session.as_deref());
         }
         Some(Cmd::Close { target }) => close(&target),
+        Some(Cmd::Dismiss { target }) => dismiss(&target),
         Some(Cmd::Reopen { target }) => reopen::run(&target),
         Some(Cmd::Next { status }) => next::run(&status),
         Some(Cmd::Mode { target, mode }) => set_mode(&target, mode),
@@ -487,6 +496,7 @@ fn validate(cmd: &Cmd) -> Option<Failure> {
         | Cmd::Show { target, .. }
         | Cmd::Transcript { target, .. }
         | Cmd::Close { target }
+        | Cmd::Dismiss { target }
         | Cmd::Mode { target, .. }
             if empty(target) =>
         {
@@ -751,6 +761,40 @@ fn mode_agent_name(agent: &Value) -> String {
     kept_brief(str_of(agent, "pane_id"))
         .filter(|record| same_agent(record, agent))
         .map_or_else(|| agent_name(agent).into(), |record| record.name)
+}
+
+/// `vega mux dismiss`: the user handled a waiting child (vega-0h4c.56).
+fn dismiss(target: &str) -> Result<(), Failure> {
+    let strip = |p: &str| {
+        let p = p.strip_prefix("herdr:").unwrap_or(p);
+        p.strip_prefix("hc:").unwrap_or(p).to_string()
+    };
+    let want = strip(target);
+    let all = children();
+    let hits: Vec<_> = all
+        .iter()
+        .filter(|c| strip(&c.pane) == want || c.name == target)
+        .collect();
+    let c = match hits.as_slice() {
+        [c] => *c,
+        [] => {
+            return Err(Failure::new(
+                "not_a_child",
+                format!("{target} is no child recorded on this machine"),
+                "run it where the parent's vegad runs; vega uac lists children",
+            ))
+        }
+        _ => {
+            return Err(Failure::new(
+                "ambiguous",
+                format!("{target} names {} children", hits.len()),
+                "pass the pane id instead of the name",
+            ))
+        }
+    };
+    vega_herdr::state::dismiss(c.machine.as_deref(), &c.pane);
+    println!("dismissed: {} ({})", c.pane, c.name);
+    Ok(())
 }
 
 fn has_records(pane: &str) -> bool {

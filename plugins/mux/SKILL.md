@@ -25,6 +25,7 @@ Help: `--help`.
 - `--worktree <branch> --base <ref>` uses worktrunk and a TUI workspace or app space.
   hc explicit split/workspace placement is unsupported; use tabs or worktrees.
 - `vega mux close <target>` closes the agent; then `wt remove <branch>`.
+  `dismiss <child>` drops a headed child's waiting hand the user handled (on the parent's host).
   `reopen <target>` resumes local Claude/Codex spawns; keep their cwd.
   hc sessions are captured by ancestry-verified vega calls from the child.
 - Remote: `--machine <label>`, spawn needs `--cwd`. Fleet: `hc machine ls`,

@@ -303,6 +303,11 @@ context, the project window holds details and actions.
   back to All. The active view lives in shared state `vega.view`, because `localStorage` is per
   mod copy and the filter popup is another copy; the sidebar mirrors it into its own
   `localStorage` (key `active-view`) to keep it across restarts. Saving a view shows it.
+- **Waiting on you**: the Overview lists the badge row's `waiting_panes` under the tiles with
+  Go (focus) and, for `silent` and `asking`, Dismiss; the vega inbox offers the same Dismiss.
+  Dismiss runs `vega mux dismiss <pane>` on the badge row's machine (the parent's vegad host,
+  through `hc exec` when remote, pane unqualified to `hc:<pane>`). A live dialog (`input`) and an
+  open ask (`unanswered`) are not dismissable (vega-0h4c.56).
 - **Inputs in the project window** sit in `inputBox`, which stops the left press: the window
   refocuses its own handle on every press (for Esc) and would take the focus from the input.
 - Colours come from theme tokens only (working, blocked, done, idle), for light and dark.
