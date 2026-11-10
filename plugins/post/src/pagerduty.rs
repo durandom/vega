@@ -11,7 +11,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use async_nats::{jetstream, HeaderMap};
+use async_nats::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use vega_herdr::notes::{Note, Store};
@@ -945,7 +945,7 @@ async fn publish_mail(
     headers.insert(crate::h::FROM_CWD, "vegad");
     headers.insert(crate::h::SENT_MS, crate::now_ms().to_string().as_str());
     crate::history::mail(
-        &jetstream::new(client),
+        &vega_registry::broker_context(client),
         crate::inbox_subject(&crate::subject_token(host), pane, &crate::host()),
         headers,
         text.to_string(),

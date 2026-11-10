@@ -230,7 +230,7 @@ pub fn spawn() {
                             .map_err(|e| e.message)?,
                     );
                 }
-                let js = async_nats::jetstream::new(client.as_ref().unwrap().clone());
+                let js = vega_registry::broker_context(client.as_ref().unwrap().clone());
                 drain_to(&js, &dir, &host, otlp.as_ref()).await
             });
             if let Err(e) = result {
@@ -440,11 +440,173 @@ pub async fn mail(
     })
 }
 
+/// A lost acknowledgement does not prove the mail was lost. Retry the exact
+/// envelope so JetStream's Nats-Msg-Id deduplication returns the original seq.
+pub async fn mail_retry(
+    js: &async_nats::jetstream::Context,
+    subject: String,
+    headers: async_nats::HeaderMap,
+    body: String,
+) -> Result<async_nats::jetstream::publish::PublishAck, async_nats::jetstream::context::PublishError>
+{
+    retry_mail(
+        js,
+        subject,
+        headers,
+        body,
+        vega_registry::BROKER_WAIT,
+        vega_registry::BROKER_WAIT / 3,
+    )
+    .await
+}
+
+async fn retry_mail(
+    js: &async_nats::jetstream::Context,
+    subject: String,
+    headers: async_nats::HeaderMap,
+    body: String,
+    budget: Duration,
+    attempt: Duration,
+) -> Result<async_nats::jetstream::publish::PublishAck, async_nats::jetstream::context::PublishError>
+{
+    use async_nats::jetstream::context::{PublishError, PublishErrorKind as K};
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let until = deadline.min(tokio::time::Instant::now() + attempt);
+        let result = tokio::time::timeout_at(until, async {
+            mail(js, subject.clone(), headers.clone(), body.clone())
+                .await?
+                .await
+        })
+        .await
+        .unwrap_or_else(|_| Err(PublishError::new(K::TimedOut)));
+        match result {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    K::TimedOut | K::Other | K::BrokenPipe | K::MaxAckPending
+                ) && tokio::time::Instant::now() + Duration::from_millis(250) < deadline =>
+            {
+                eprintln!("post: retrying publish after {e} (same message id)");
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            result => return result,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::auth::{self, Entry};
     use crate::registry_read_test::{connect, denied, start, user};
+
+    // The proxy stores every attempt in a real stream with the original
+    // headers, but can discard/delay the reply. This models the ambiguous
+    // outcome that a disconnected sender cannot distinguish from lost mail.
+    async fn ack_proxy(drop_first: bool, delay: Duration) {
+        use futures_util::StreamExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (_server, url) = start(dir.path(), "");
+        let client = async_nats::connect(url).await.unwrap();
+        let js = vega_registry::broker_context(client.clone());
+        let mut stream = js
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: "MAIL_RETRY".into(),
+                subjects: vec!["mail.stored".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut requests = client.subscribe("mail.proxy").await.unwrap();
+        client.flush().await.unwrap();
+        let forwarding = js.clone();
+        let replying = client.clone();
+        let proxy = tokio::spawn(async move {
+            let mut ids = Vec::new();
+            while let Some(req) = requests.next().await {
+                let headers = req.headers.unwrap();
+                ids.push(headers.get("Nats-Msg-Id").unwrap().to_string());
+                let ack = forwarding
+                    .publish_with_headers("mail.stored", headers, req.payload)
+                    .await
+                    .unwrap()
+                    .await
+                    .unwrap();
+                if drop_first && ids.len() == 1 {
+                    continue;
+                }
+                tokio::time::sleep(delay).await;
+                replying
+                    .publish(req.reply.unwrap(), serde_json::to_vec(&json!({"stream": ack.stream, "seq": ack.sequence, "duplicate": ack.duplicate})).unwrap().into())
+                    .await
+                    .unwrap();
+                replying.flush().await.unwrap();
+                return ids;
+            }
+            panic!("proxy subscription ended");
+        });
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("Nats-Msg-Id", "one-logical-send");
+        headers.insert(crate::h::DONE, "succeeded");
+        let ack = retry_mail(
+            &js,
+            "mail.proxy".into(),
+            headers,
+            "done".into(),
+            Duration::from_secs(10),
+            if drop_first {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(8)
+            },
+        )
+        .await
+        .unwrap();
+        let ids = proxy.await.unwrap();
+        assert_eq!(ids.len(), if drop_first { 2 } else { 1 });
+        assert!(ids.iter().all(|id| id == "one-logical-send"));
+        assert_eq!(ack.duplicate, drop_first);
+        assert_eq!(ack.sequence, 1);
+        assert_eq!(stream.info().await.unwrap().state.messages, 1);
+    }
+
+    #[tokio::test]
+    async fn timed_out_ack_retries_without_duplicate_mail() {
+        ack_proxy(true, Duration::ZERO).await;
+    }
+
+    #[tokio::test]
+    async fn slow_ack_is_awaited_without_retrying() {
+        ack_proxy(false, Duration::from_secs(6)).await;
+    }
+
+    #[tokio::test]
+    async fn mail_retry_stops_at_its_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_server, url) = start(dir.path(), "");
+        let client = async_nats::connect(url).await.unwrap();
+        // Keep a subscriber so NATS does not return no-responders; no ack.
+        let _silent = client.subscribe("mail.silent").await.unwrap();
+        client.flush().await.unwrap();
+        let js = vega_registry::broker_context(client);
+        let started = std::time::Instant::now();
+        let error = retry_mail(
+            &js,
+            "mail.silent".into(),
+            Default::default(),
+            "x".into(),
+            Duration::from_millis(400),
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            async_nats::jetstream::context::PublishErrorKind::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 
     #[test]
     fn failed_herdr_snapshot_preserves_live_registry_and_lineage() {

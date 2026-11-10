@@ -16,7 +16,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, object_store};
+use async_nats::jetstream::object_store;
 use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine;
 use sha2::{Digest, Sha256};
@@ -239,7 +239,7 @@ pub async fn put(
     generated: &str,
     source: &str,
 ) -> Result<(), String> {
-    let js = jetstream::new(client.clone());
+    let js = vega_registry::broker_context(client.clone());
     let store = js
         .get_object_store(cat::BUCKET)
         .await

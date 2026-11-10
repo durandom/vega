@@ -138,7 +138,7 @@ pub async fn receive(
     }
     let sample = validate(from, payload, now()).map_err(|why| ("denied", why))?;
     let result = tokio::time::timeout(Duration::from_secs(5), async {
-        async_nats::jetstream::new(client.clone())
+        vega_registry::broker_context(client.clone())
             .publish(
                 format!("$KV.{}.{}.status.keychain", vega_registry::BUCKET, from),
                 serde_json::to_vec(&sample)

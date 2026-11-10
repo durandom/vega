@@ -14,11 +14,11 @@ use vega_herdr::Failure;
 /// request's answer, not its queueing: while it reconnects it stops reading
 /// its command channel (2048 slots), and once that is full a send waits
 /// forever. That hung vegad for hours on 2026-10-25.
-pub const CALL: Duration = Duration::from_secs(10);
+pub const CALL: Duration = vega_registry::BROKER_WAIT;
 
 /// How long the client may stay disconnected before vegad gives up on it and
 /// switches to local mode; a broker restart is usually back sooner.
-pub const LOST_AFTER: Duration = Duration::from_secs(10);
+pub const LOST_AFTER: Duration = vega_registry::BROKER_WAIT;
 
 /// The note kind and cause of an outage; the cause clears it.
 pub const KIND: &str = "broker";

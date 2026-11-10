@@ -720,10 +720,20 @@ pub async fn connect_with(
         .map_err(|e| format!("broker unreachable: {e}"))
 }
 
+/// Broker operations tolerate accepted disk stalls of up to one minute.
+pub const BROKER_WAIT: Duration = Duration::from_secs(60);
+
+/// Use the same request/ack timeout for registry setup and post mail.
+pub fn broker_context(client: async_nats::Client) -> async_nats::jetstream::Context {
+    let mut js = async_nats::jetstream::new(client);
+    js.set_timeout(BROKER_WAIT);
+    js
+}
+
 pub async fn bucket(
     client: &async_nats::Client,
 ) -> Result<async_nats::jetstream::kv::Store, String> {
-    async_nats::jetstream::new(client.clone())
+    broker_context(client.clone())
         .get_key_value(BUCKET)
         .await
         .map_err(|e| format!("registry bucket {BUCKET}: {e}"))
@@ -759,7 +769,7 @@ pub async fn read_kinds(
     kv: &async_nats::jetstream::kv::Store,
     kinds: Option<&[&str]>,
 ) -> Result<View, String> {
-    let stream = async_nats::jetstream::new(client.clone())
+    let stream = broker_context(client.clone())
         .get_stream(format!("KV_{BUCKET}"))
         .await
         .map_err(|e| e.to_string())?;

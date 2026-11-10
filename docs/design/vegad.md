@@ -351,11 +351,42 @@ identity and stay off.
 - Local delivery: tool mail for a pane on this host (today only the upgrade proposal) is typed as one line,
   `[<tool>] <text>` with the lines joined by ` | ` (a multi-line paste can stay staged in Claude's input),
   when the agent is `idle`/`done`, behind the draft guard. A closed pane drops its mail.
-- A probe connects off the loop, bounded by 10 s, with backoff: after 2 s, then doubling up to every 60 s.
+- A probe connects off the loop, bounded by 60 s, with backoff: after 2 s, then doubling up to every 60 s.
   Once a broker answers, vegad switches to the broker loop and hands it the delivery and supervision state
   plus undelivered tool mail (published as mail then, or delivered locally on inbox-only hosts).
 - A configured broker that is unreachable is noted for the human (below).
 - `--once` still needs a broker.
+
+### Slow broker acknowledgements (vega-0h4c.65)
+
+Titan's HDD can pause the broker for 2–11 s; that delay is accepted. Shared post connection and
+request setup, JetStream contexts (including registry bucket/stream lookup), inbox fetch/show,
+and both archive stall waits use `vega_registry::BROKER_WAIT` (60 s). `cmd` defaults to 60 s;
+an explicit `--timeout` still controls its answer deadline. Inbox fetches use NATS `no_wait`
+without a server expiry and a 60 s client bound, so a partial batch returns promptly too.
+
+`send` and `done` keep the same headers and `Nats-Msg-Id` through retries. Publication has a
+60 s total budget, including queueing, ack waits and 250 ms retry delays; each attempt gets at
+most 20 s, leaving room to retry an ack that was lost after storage. Ack timeouts, broken reply
+pipes and transient broker errors retry with one stderr line per retry. Missing streams,
+message-size errors and sequence/id precondition failures retain their immediate error contract.
+JetStream's default two-minute deduplication window covers the whole publication budget. The
+connect retry window and each setup/read operation have their own 60 s limit; this is not a
+60 s deadline for the entire multi-step command. Background history spooling still bounds each
+publish to 5 s and retains failed receipts for a later round; it does not decide broker health.
+
+Vegad uses the same 60 s call limit and disconnected grace. Ten-second connection pings remain,
+so a dead TCP peer is noticed in about 30 s, followed by a bounded grace period before local
+mode. This tolerates a 10 s pause without an outage note or repeated reconnect setup, while a
+sustained outage still switches to local mode within roughly 1–2 minutes after disconnect is
+observed. Registry rounds retain their 30 s outer limit and background catalog rounds their
+120 s bound. The longer broker wait can delay one broker loop step; it cannot hang it forever.
+
+Tests discard the first publish ack after storing mail in a local JetStream, then verify the
+retry returns sequence 1 with the duplicate flag and exactly one stored message. Another case
+delays an ack for 6 s (past the old default). The outage integration test stops its own broker
+process for 11 s, verifies a waiting archive read succeeds and the relay stays connected, then
+checks genuine outage detection and recovery as before.
 
 ### Broker outage (vega-lhc.205)
 
@@ -364,18 +395,18 @@ labels, no badges. Cause: async-nats bounds a request's answer, not its queueing
 stops reading its command channel (2048 slots); each timed-out count stayed queued there, and once the
 channel was full the next broker call waited forever, taking the single-threaded loop with it. So:
 
-- Every broker call in the broker loop is bounded (`outage::CALL`, 10 s; a registry round 30 s): setup,
+- Every broker call in the broker loop is bounded (`outage::CALL`, 60 s; a registry round 30 s): setup,
   the rescan, each pane's count, bounces, tool mail, command and quarantine replies. The catalog thread's
   rounds are bounded too (120 s).
 - While the client is not `Connected`, the loop makes no broker call: counts, registry, bounces and tool
   mail wait (mail candidates stay pending). The herdr-side work (sidebar metadata, badges, attention,
   wakes, herdr events, the upgrade check, theme) runs on.
-- A broker away for `outage::LOST_AFTER` (10 s) ends the broker loop. The clock starts when the loop
+- A broker away for `outage::LOST_AFTER` (60 s) ends the broker loop. The clock starts when the loop
   next sees the client disconnected. A registry round or bounce in flight is cut short within 0.5 s of
   the disconnect (`while_up`) and the count loop stops at the next pane; any other call in flight (one
-  count, a tool mail, a setup step) ends within `outage::CALL` (10 s). So the switch comes 10 s after the
-  disconnect at best and 20.5 s at worst. vegad logs once
-  `broker: lost (<url> unreachable for 10 s); switching to local mode` and runs local mode with its
+  count, a tool mail, a setup step) ends within `outage::CALL` (60 s). So the switch comes 60 s after the
+  disconnect at best and about 120 s at worst. vegad logs once
+  `broker: lost (<url> unreachable for 60 s); switching to local mode` and runs local mode with its
   state. A broker lost during setup (stream or subscription right after the connect) goes the same way.
   Only a completed setup ends the outage: it writes `connected`, clears the note and resets the probe
   backoff, so a broker that accepts connections but fails the setup keeps the one note and is probed

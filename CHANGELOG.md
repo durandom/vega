@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 178 · 2026-11-10
+
+- feature: post waits up to 60 s for slow broker operations. Send and done retry uncertain
+  publishes with the same message ID, preventing duplicate mail after a lost acknowledgement;
+  vegad tolerates short broker pauses before reporting an outage.
+
 ## 177 · 2026-11-10
 
 - feature: inbox-only hosts deliver relay tool mail (hygiene, CI, beads sync and upgrade

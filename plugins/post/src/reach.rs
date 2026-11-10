@@ -18,7 +18,7 @@ use vega_herdr::Failure;
 use vega_registry::{self as reg, View};
 
 /// How long send waits for the registry before it mails unchecked.
-pub const WAIT: Duration = Duration::from_secs(2);
+pub const WAIT: Duration = vega_registry::BROKER_WAIT;
 
 #[derive(Debug, PartialEq)]
 pub enum Reach {

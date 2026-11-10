@@ -177,7 +177,7 @@ enum Cmd {
         #[arg(long)]
         to: String,
         /// How long to wait for the answer: 10s, 1m
-        #[arg(long, default_value = "15s")]
+        #[arg(long, default_value = "60s")]
         timeout: String,
     },
     /// Ask several agents one question; their answers come back as one pointer
@@ -536,7 +536,7 @@ const ACK_WAIT: Duration = Duration::from_secs(30);
 /// the status bar can show a background shell first.
 const SILENT_AFTER: Duration = Duration::from_secs(3);
 /// `send` keeps trying to reach the broker this long, e.g. across a restart.
-const SEND_WAIT: Duration = Duration::from_secs(10);
+const SEND_WAIT: Duration = vega_registry::BROKER_WAIT;
 
 /// Header names. `Nats-Msg-Id` makes a retried publish idempotent.
 mod h {
@@ -650,7 +650,7 @@ fn home() -> Result<(), Failure> {
     println!("me: {} ({}, {})", me.pane, me.agent, cell(&me.cwd));
     let unread = runtime()?.block_on(async {
         let client = connect("home", None).await?;
-        let stream = inbox_stream(&jetstream::new(client), &host).await?;
+        let stream = inbox_stream(&vega_registry::broker_context(client), &host).await?;
         unread(&stream, &host, &me.pane).await
     })?;
     println!("unread: {unread}");
@@ -872,8 +872,8 @@ async fn connect_as(
             Seed::Host => inbox_prefix(&host()),
             Seed::Admin => ADMIN_INBOX.to_string(),
         })
-        .connection_timeout(Duration::from_secs(2))
-        .request_timeout(Some(Duration::from_secs(3)))
+        .connection_timeout(vega_registry::BROKER_WAIT)
+        .request_timeout(Some(vega_registry::BROKER_WAIT))
         // A broker host that vanishes sends no FIN: vegad's pings notice it
         // within ~30 s instead of the default ~3 min (vega-lhc.205).
         .ping_interval(if role == "relay" {
@@ -922,20 +922,23 @@ async fn connect_as(
                 }
             }
         });
-    opts.connect(&url).await.map_err(|e| {
-        if e.to_string().contains("authorization violation") {
-            return Failure::new(
-                "auth_failed",
-                format!("{url} rejected this machine's key"),
-                "run `vega post keygen` and add its host=U... line to the server's auth config (`vega post auth-config`)",
-            );
-        }
-        Failure::new(
-            "broker_unreachable",
-            format!("cannot connect to {url}: {e}"),
-            unreachable_hint(broker_configured()),
-        )
+    outage::bounded("connect", async {
+        opts.connect(&url).await.map_err(|e| {
+            if e.to_string().contains("authorization violation") {
+                return Failure::new(
+                    "auth_failed",
+                    format!("{url} rejected this machine's key"),
+                    "run `vega post keygen` and add its host=U... line to the server's auth config (`vega post auth-config`)",
+                );
+            }
+            Failure::new(
+                "broker_unreachable",
+                format!("cannot connect to {url}: {e}"),
+                unreachable_hint(broker_configured()),
+            )
+        })
     })
+    .await
 }
 
 /// The hint of `broker_unreachable`, distinguishing missing configuration.
@@ -1028,7 +1031,7 @@ fn provision(hosts: &[String], ttl: bool, archive: bool) -> Result<(), Failure> 
             println!("help: remove --create archive from auth-config and reload the broker");
             return Ok(());
         }
-        let js = jetstream::new(client);
+        let js = vega_registry::broker_context(client);
         if hosts.iter().any(|h| h == "history") {
             history::provision(&js).await?;
             println!("history: VEGA_HISTORY ready; remove --create history and reload the broker");
@@ -1627,12 +1630,10 @@ fn send(
     let subject = inbox_subject(&to_host, target, &my_host);
     let headers = send_headers(&me, &thread, hop, now, done, kind);
     let ack = rt.block_on(async {
-        let js = jetstream::new(client);
+        let js = vega_registry::broker_context(client);
         // No stream lookup: the target host's stream captures the subject. If
         // that host never ran `relay` or `inbox`, nothing does.
-        history::mail(&js, subject.clone(), headers, text.to_string())
-            .await
-            .map_err(broker_err)?
+        history::mail_retry(&js, subject.clone(), headers, text.to_string())
             .await
             .map_err(|e| {
                 if e.kind() == jetstream::context::PublishErrorKind::StreamNotFound {
@@ -1718,7 +1719,7 @@ fn send_quarantine(
         let req = async_nats::Request::new()
             .headers(headers)
             .payload(text.to_string().into())
-            .timeout(Some(Duration::from_secs(10)));
+            .timeout(Some(vega_registry::BROKER_WAIT));
         let answer = client.send_request(subject.clone(), req).await.map_err(|e| {
             use async_nats::client::RequestErrorKind as K;
             match e.kind() {
@@ -2121,20 +2122,23 @@ fn recorded_parent(pane: &str) -> Option<vega_herdr::state::Parent> {
 
 /// `send` outlives a short broker restart: retry the connect for SEND_WAIT.
 async fn connect_patiently() -> Result<async_nats::Client, Failure> {
-    let deadline = Instant::now() + SEND_WAIT;
-    loop {
-        match connect("send", None).await {
-            Ok(c) => return Ok(c),
-            Err(f)
-                if f.code == "broker_unreachable"
-                    && broker_configured()
-                    && Instant::now() < deadline =>
-            {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+    outage::within(SEND_WAIT, "connect", async {
+        let deadline = Instant::now() + SEND_WAIT;
+        loop {
+            match connect("send", None).await {
+                Ok(c) => return Ok(c),
+                Err(f)
+                    if f.code == "broker_unreachable"
+                        && broker_configured()
+                        && Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Err(f) => return Err(f),
             }
-            Err(f) => return Err(f),
         }
-    }
+    })
+    .await
 }
 
 // Mail needs caller metadata, but no TUI workspace or target operation.
@@ -2168,7 +2172,7 @@ fn inbox(keep: bool, max: usize) -> Result<(), Failure> {
     let parent = own_parent();
     runtime()?.block_on(async {
         let client = connect("inbox", None).await?;
-        let js = jetstream::new(client.clone());
+        let js = vega_registry::broker_context(client.clone());
         let stream = inbox_stream(&js, &host).await?;
         let consumer = stream
             .get_or_create_consumer(
@@ -2180,14 +2184,13 @@ fn inbox(keep: bool, max: usize) -> Result<(), Failure> {
         let mut batch = consumer
             .fetch()
             .max_messages(max)
-            .expires(Duration::from_millis(500))
             .messages()
             .await
             .map_err(broker_err)?;
 
         let mut shown = Vec::new();
         let children = st::children();
-        while let Some(m) = batch.next().await {
+        while let Some(m) = outage::bounded("inbox read", async { Ok(batch.next().await) }).await? {
             let m = m.map_err(broker_err)?;
             let info = m.info().map_err(broker_err)?;
             shown.push((info.stream_sequence, info.delivered, info.pending));
@@ -2235,7 +2238,7 @@ fn inbox_show(id: u64) -> Result<(), Failure> {
     let parent = own_parent();
     runtime()?.block_on(async {
         let client = connect("inbox", None).await?;
-        let js = jetstream::new(client);
+        let js = vega_registry::broker_context(client);
         let stream = inbox_stream(&js, &host).await?;
         let consumer = stream
             .create_consumer(pull::OrderedConfig {
@@ -2250,7 +2253,7 @@ fn inbox_show(id: u64) -> Result<(), Failure> {
             .await
             .map_err(broker_err)?;
         let mut msgs = consumer.messages().await.map_err(broker_err)?;
-        let first = match tokio::time::timeout(Duration::from_millis(500), msgs.next()).await {
+        let first = match tokio::time::timeout(vega_registry::BROKER_WAIT, msgs.next()).await {
             Ok(Some(m)) => Some(m.map_err(broker_err)?),
             _ => None,
         };
@@ -3075,7 +3078,7 @@ async fn serve(
     let host = host.to_string();
     let filter = format!("vega.inbox.{host}.>");
     {
-        let js = jetstream::new(client.clone());
+        let js = vega_registry::broker_context(client.clone());
         // A broker that drops during setup is an outage, not a crash.
         let setup = async {
             let stream = inbox_stream(&js, &host).await?;
@@ -3843,9 +3846,9 @@ async fn bounce(
 }
 
 /// Wait for the first archive message (cold wildcard scans are slow).
-const LOG_FIRST_WAIT: Duration = Duration::from_secs(10);
+const LOG_FIRST_WAIT: Duration = vega_registry::BROKER_WAIT;
 /// Gap allowed between archive messages once they flow.
-const LOG_IDLE_WAIT: Duration = Duration::from_secs(5);
+const LOG_IDLE_WAIT: Duration = vega_registry::BROKER_WAIT;
 
 // A timeout is not evidence of an empty archive. Only consumer metadata can
 // establish that; once a read is expected, any premature end is a broker error.
@@ -3883,7 +3886,7 @@ fn log_view(
     );
     runtime()?.block_on(async {
         let client = connect("log", None).await?;
-        let js = jetstream::new(client);
+        let js = vega_registry::broker_context(client);
         let stream = inbox_stream(&js, &host).await?;
         let deliver_policy = match since {
             Some(d) => jetstream::consumer::DeliverPolicy::ByStartTime {
@@ -4672,7 +4675,7 @@ fn ask(
     };
     let sent = runtime()?.block_on(async {
         let client = connect_patiently().await?;
-        let js = jetstream::new(client);
+        let js = vega_registry::broker_context(client);
         let mut sent = Vec::new();
         for (to_host, pane) in &targets {
             let mut headers = HeaderMap::new();

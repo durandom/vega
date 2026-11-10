@@ -22,7 +22,7 @@ const SPEEDUP: u64 = 20;
 const PROBE_GAP: Duration = Duration::from_secs(60 / SPEEDUP);
 /// One bounded broker step: the probe's connect, the setup (`outage::CALL`,
 /// not sped up).
-const BROKER_CALL: Duration = Duration::from_secs(10);
+const BROKER_CALL: Duration = vega_registry::BROKER_WAIT;
 /// Two local-mode reports of an unchanged row. The sidebar sends one again
 /// after 60 s (`RENEW_AFTER`) on a 5 s tick (`TICK`, sidebar.rs). A row sent
 /// just before the switch needs that twice; one that changes at the first local
@@ -227,10 +227,26 @@ fn a_lost_broker_leaves_the_sidebar_running_and_vegad_reconnects() {
         log().contains("seen: w1:p2 -> w1:p1")
     });
 
+    // Accepted HDD pauses must not turn into a setup failure or outage.
+    // Only stop this test's child broker; resume before observing failures.
+    assert_eq!(unsafe { libc::kill(nats.0.id() as i32, libc::SIGSTOP) }, 0);
+    let paused_read = cmd(&["log", "--limit", "1"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(11));
+    assert_eq!(unsafe { libc::kill(nats.0.id() as i32, libc::SIGCONT) }, 0);
+    let read = paused_read.wait_with_output().unwrap();
+    assert!(read.status.success(), "archive read after pause: {read:?}");
+    assert_eq!(broker_state().trim(), "connected");
+    assert!(!log().contains("broker: lost"), "{}", log());
+    assert!(!log().contains("broker: setup failed"), "{}", log());
+
     // The broker goes away.
     let _ = nats.0.kill();
     let _ = nats.0.wait();
-    wait_for(&log_file, "local mode", Duration::from_secs(40), || {
+    wait_for(&log_file, "local mode", BROKER_CALL + LOAD, || {
         broker_state().starts_with("local")
     });
     let lost = log();
