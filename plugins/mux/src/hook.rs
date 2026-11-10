@@ -80,6 +80,27 @@ pub fn ask_parent() {
     }
 }
 
+/// Shadow telemetry: all failures are silent and leave Claude running.
+pub fn state() {
+    let _ = capture_state(std::io::stdin(), || {
+        let me = own_terminal().ok()?;
+        vega_herdr::pane_state::path(me.pane())
+    });
+}
+
+fn capture_state(
+    input: impl Read,
+    path: impl FnOnce() -> Option<std::path::PathBuf>,
+) -> Option<()> {
+    let mut text = String::new();
+    input.take(1024 * 1024 + 1).read_to_string(&mut text).ok()?;
+    if text.len() > 1024 * 1024 {
+        return None;
+    }
+    let record = vega_herdr::pane_state::from_input(&text, vega_herdr::notes::now_ms())?;
+    vega_herdr::pane_state::append(&path()?, &record).ok()
+}
+
 /// What the hook does with one dialog.
 #[derive(Debug, PartialEq)]
 enum Route {
@@ -186,6 +207,22 @@ fn questions(input: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_capture_read_errors_and_missing_path_do_not_write() {
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("read failed"))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.jsonl");
+        let input = br#"{"hook_event_name":"Stop","session_id":"s"}"#;
+        assert_eq!(capture_state(Broken, || Some(path.clone())), None);
+        assert_eq!(capture_state(input.as_slice(), || None), None);
+        assert!(!path.exists());
+    }
 
     #[test]
     fn deny_reason_names_command_and_question() {

@@ -2919,6 +2919,9 @@ async fn local(
             slow("metadata", t);
             meta_next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
         }
+        for line in sup.hook_disagreements(vega_herdr::notes::now_ms()) {
+            log(&line);
+        }
         for p in sup.ripe(SILENT_AFTER) {
             turn_ended(&p, &mut d);
         }
@@ -3274,6 +3277,9 @@ async fn serve(
                     ));
                 }
                 meta_next = Some(Instant::now() + pace::of(REGISTRY_EVERY));
+            }
+            for line in sup.hook_disagreements(vega_herdr::notes::now_ms()) {
+                log(&line);
             }
             for p in sup.ripe(SILENT_AFTER) {
                 turn_ended(&p, &mut d);

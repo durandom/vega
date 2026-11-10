@@ -20,6 +20,7 @@ pub mod mail_grants;
 pub mod notes;
 pub mod otlp;
 pub mod pane;
+pub mod pane_state;
 pub mod project;
 pub mod prompt;
 pub mod resets;

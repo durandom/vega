@@ -78,7 +78,7 @@ enum Cmd {
         #[arg(long)]
         cwd: String,
     },
-    /// Agent hooks: `ask-parent` (PreToolUse) and `install`; run by vega's install
+    /// Agent hooks: question routing, shadow state and config installation
     #[command(hide = true)]
     Hook {
         #[command(subcommand)]
@@ -253,6 +253,8 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum HookCmd {
+    /// Record Claude lifecycle metadata silently (shadow mode)
+    State,
     /// PreToolUse hook: deny in-pane questions of an agent with a parent
     AskParent,
     /// Moved: alias for `vega config apply hooks` (claude, codex and pi)
@@ -396,6 +398,12 @@ fn main() -> ExitCode {
             action: HookCmd::AskParent,
         }) => {
             hook::ask_parent();
+            Ok(())
+        }
+        Some(Cmd::Hook {
+            action: HookCmd::State,
+        }) => {
+            hook::state();
             Ok(())
         }
         // Moved to `vega config apply hooks` (vega-lhc.107); codex is always included.

@@ -199,6 +199,13 @@ skills, prompts or servers. Vega renders a local marketplace under
 `~/.local/share/vega/claude-marketplace/`, registers it with
 `claude plugin marketplace add <directory>`, and uses `claude plugin install` (or `update`)
 `vega-hooks@vega-local --scope user`. A disabled installation is enabled with `claude plugin enable`.
+In addition to AskUserQuestion routing and shell activation, the plugin runs `vega mux hook state`
+on SessionStart, UserPromptSubmit, Stop, Notification and SessionEnd, with no matcher restriction.
+These command hooks are synchronous and silent, have a five-second timeout, and fail open. They
+record metadata only for the shadow comparison described in [vegad.md](vegad.md#claude-hook-shadow-state).
+Applying `claude.hooks` updates the content-versioned marketplace plugin; restart existing sessions.
+Any workspace trust or hook permission prompt must be resolved by the user; vega does not approve it.
+
 Hook content (including the installed mux path) determines the plugin version, so cached installs
 refresh on changes. Local marketplace versions that load directly from their folder also work.
 `vega config apply hooks`, install-cli and deploy use this same unit; no special mux flag is needed.

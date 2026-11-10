@@ -433,6 +433,33 @@ operator pair grant to reach an agent; otherwise they become human notices:
 - `vega post inbox`: TOON table, bodies truncated with `--full` on demand, reply command once per batch.
 - A gather of N answers: one wake-up and one call, instead of N pasted prompts.
 
+## Claude hook shadow state
+
+`vega mux hook state` reads Claude's hook JSON from stdin and records SessionStart,
+UserPromptSubmit, Stop, Notification and SessionEnd in
+`$XDG_STATE_HOME/vega/pane-state/<key>.jsonl` (default `~/.local/state`). The key uses
+`state_file_on`'s local machine and pane encoding, e.g. `local_hc-74317a.jsonl` for `t1z`.
+Each record contains `event`, wall-clock `ts` in milliseconds and `session_id`; Notification
+adds `notification_type`, SessionStart adds `source`, and only Stop adds `question: bool`.
+The question flag uses the same trailing-question-mark heuristic as screen turn-end detection,
+applied to `last_assistant_message`. Prompt, assistant, notification, title and transcript text
+are never stored. Input is limited to 1 MiB and metadata strings to 256 bytes. A nonblocking
+writer lock and atomic replacement retain the latest 200 lines; all errors print nothing and
+exit successfully. A contending writer may drop an event rather than hold up Claude.
+
+In shadow mode vegad periodically reads the newest line for each local supervised hc Claude
+pane, alongside hc status, including panes whose hc status remains unknown. Known spawn session
+IDs must match; missing or malformed records are ignored. SessionStart/Stop imply idle,
+UserPromptSubmit working, SessionEnd gone; Notification permission_prompt/elicitation_dialog
+imply blocked and idle_prompt implies idle. Other notification types give no state evidence.
+A Stop question flag is telemetry only; Stop still compares as idle. `done` and `idle` agree.
+Each changed disagreement logs once, e.g. `hooks: t1z hc=unknown hook=idle (Stop 12 s ago)`;
+age alone never repeats a log. Hook state does not affect mail delivery, supervision, attention
+or wakes. Old events are diagnostic evidence, not proof that a pane still has that state.
+Hooks do not run before Claude workspace trust is accepted; trust and hook permission prompts
+remain user actions. Deploy and apply the `claude.hooks` config unit to collect events, then
+restart Claude sessions. This change does not install or approve hooks by itself.
+
 ## Supervision (from orca orchestration)
 
 Lessons from orca (repos/orca/skill-guides/orchestration*, src/shared/orchestration-fleet-attention.ts):

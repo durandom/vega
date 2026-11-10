@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 160 · 2026-11-10
+
+- unit: `claude.hooks` adds silent Claude lifecycle telemetry through `vega mux hook state`.
+  Apply the unit after deployment and restart Claude sessions; the user handles any trust prompt.
+  Metadata only (including a Stop question flag) stays in the latest 200 pane-state JSONL lines.
+- feature: vegad logs disagreements between hc and hook state for supervised local Claude panes
+  once per change. This is shadow mode: delivery and supervision behavior stay unchanged.
+
 ## 159 · 2026-11-10
 
 - feature: `vega mux spawn` sets `GIT_SSH_COMMAND=ssh -o BatchMode=yes` for the agent: git over

@@ -197,7 +197,23 @@ fn fresh_home_gets_everything_then_nothing_changes() {
         s["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
         "'/opt/vega/bin/vega-mux' hook ask-parent"
     );
-    assert_eq!(s["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+    assert_eq!(s["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+        "Notification",
+        "SessionEnd",
+    ] {
+        assert!(
+            s["hooks"][event].as_array().unwrap().iter().any(|entry| {
+                entry["hooks"][0]["command"]
+                    .as_str()
+                    .is_some_and(|c| c.ends_with("hook state"))
+            }),
+            "missing state hook for {event}"
+        );
+    }
     let c: Value = serde_json::from_str(&read(&ctx, ".codex/hooks.json")).unwrap();
     assert_eq!(
         c["hooks"]["PreToolUse"][0]["matcher"],

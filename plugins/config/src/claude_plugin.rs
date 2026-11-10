@@ -76,7 +76,7 @@ pub(super) fn plan(ctx: &Ctx) -> Result<Plan, String> {
     // Content versioning refreshes Claude's immutable plugin cache after path/hook changes.
     let version = format!("1.0.0-{:x}", Sha256::digest(hooks.as_bytes()));
     let manifest = json!({"name":"vega-hooks", "version":version,
-        "description":"Vega parent questions and shell shim activation"});
+        "description":"Vega parent questions, shell shim activation and shadow pane state"});
     let marketplace = json!({"name":"vega-local", "owner":{"name":"vega"},
         "plugins":[{"name":"vega-hooks", "source":"./plugins/vega-hooks", "version":version}]});
     let list = match listing(ctx) {

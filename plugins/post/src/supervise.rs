@@ -25,6 +25,7 @@ pub type Attentions = BTreeSet<(String, Attention)>;
 #[derive(Default)]
 pub struct Supervisor {
     last: HashMap<String, String>,
+    hooks: HookShadow,
     /// Took a prompt since it was last free.
     busy: HashSet<String>,
     /// Panes herdr knows; meaningful once `synced`.
@@ -38,6 +39,48 @@ pub struct Supervisor {
     suspects: HashMap<String, Instant>,
 }
 
+/// Deduplication excludes age: an unchanged disagreement logs only once.
+#[derive(Default)]
+struct HookShadow {
+    last: HashMap<String, (String, vega_herdr::pane_state::Record)>,
+}
+
+impl HookShadow {
+    fn observe(
+        &mut self,
+        pane: &str,
+        hc: &str,
+        r: &vega_herdr::pane_state::Record,
+        now: u64,
+    ) -> Option<String> {
+        let hook = match r.event.as_str() {
+            "SessionStart" | "Stop" => "idle",
+            "UserPromptSubmit" => "working",
+            "Notification" => match r.notification_type.as_deref() {
+                Some("permission_prompt" | "elicitation_dialog") => "blocked",
+                Some("idle_prompt") => "idle",
+                _ => {
+                    self.last.remove(pane);
+                    return None;
+                }
+            },
+            "SessionEnd" => "gone",
+            _ => return None,
+        };
+        let current = (hc.to_owned(), r.clone());
+        let changed = self.last.get(pane) != Some(&current);
+        self.last.insert(pane.to_owned(), current);
+        if !changed || hc == hook || (hc == "done" && hook == "idle") {
+            return None;
+        }
+        Some(format!(
+            "hooks: {pane} hc={hc} hook={hook} ({} {} s ago)",
+            r.event,
+            now.saturating_sub(r.ts) / 1000
+        ))
+    }
+}
+
 fn is_free(s: &str) -> bool {
     matches!(s, "idle" | "done")
 }
@@ -47,6 +90,44 @@ fn is_busy(s: &str) -> bool {
 }
 
 impl Supervisor {
+    /// Compare local supervised Claude panes periodically, even with no hc event.
+    /// This returns diagnostics only; it never feeds `observe` or attention.
+    pub fn hook_disagreements(&mut self, now: u64) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut live = HashSet::new();
+        for child in vega_herdr::state::children() {
+            if child.machine.is_some() || !crate::terminals::is_hc(&child.pane) {
+                continue;
+            }
+            let Some(spawn) =
+                vega_herdr::state::spawn_of_on(None, &child.pane, &child.name, "claude")
+            else {
+                continue;
+            };
+            let Some(record) = vega_herdr::pane_state::newest(&child.pane) else {
+                continue;
+            };
+            if spawn
+                .session
+                .as_ref()
+                .is_some_and(|s| s != &record.session_id)
+            {
+                continue;
+            }
+            live.insert(child.pane.clone());
+            let hc = self
+                .last
+                .get(&child.pane)
+                .map(String::as_str)
+                .unwrap_or("unknown");
+            if let Some(line) = self.hooks.observe(&child.pane, hc, &record, now) {
+                lines.push(line);
+            }
+        }
+        self.hooks.last.retain(|pane, _| live.contains(pane));
+        lines
+    }
+
     /// Full picture: every live pane.
     pub fn snapshot<'a>(&mut self, panes: impl IntoIterator<Item = &'a String>) {
         self.snapshot_backend(panes, false);
@@ -293,7 +374,7 @@ pub fn read_turn_end(screen: &str) -> Option<Silence> {
         .collect::<Vec<_>>()
         .join(" ");
     Some(Silence {
-        question: (!user && text.ends_with('?')).then_some(text),
+        question: (!user && vega_herdr::pane_state::ends_with_question(&text)).then_some(text),
         last: tail,
         quota: None,
     })
@@ -355,6 +436,90 @@ pub fn short(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hook_shadow_reads_newest_for_supervised_claude_and_checks_session() {
+        const CHILD: &str = "VEGA_HOOK_SHADOW_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "supervise::tests::hook_shadow_reads_newest_for_supervised_claude_and_checks_session"])
+                .env_clear()
+                .env("HOME", dir.path())
+                .env("XDG_STATE_HOME", dir.path())
+                .env(CHILD, "1")
+                .output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            return;
+        }
+        use vega_herdr::{pane_state, state};
+        state::save_parent_on(None, "t1z", "child", "t2");
+        let mut spawn: state::SpawnRecord = serde_json::from_value(serde_json::json!({
+            "backend":"hc", "pane":"t1z", "name":"child", "kind":"claude",
+            "cwd":"/fixture", "parent":null, "mode":"headless", "task":null,
+            "session":"current", "extra":[]
+        }))
+        .unwrap();
+        state::save_spawn(&spawn).unwrap();
+        let path = pane_state::path("t1z").unwrap();
+        let mut record =
+            pane_state::from_input(r#"{"session_id":"old","hook_event_name":"Stop"}"#, 1000)
+                .unwrap();
+        pane_state::append(&path, &record).unwrap();
+        let mut sup = Supervisor::default();
+        assert!(sup.hook_disagreements(13000).is_empty(), "old session");
+        record.session_id = "current".into();
+        pane_state::append(&path, &record).unwrap();
+        assert_eq!(
+            sup.hook_disagreements(13000),
+            ["hooks: t1z hc=unknown hook=idle (Stop 12 s ago)"]
+        );
+        assert!(sup.hook_disagreements(14000).is_empty());
+        spawn.kind = "codex".into();
+        state::save_spawn(&spawn).unwrap();
+        assert!(sup.hook_disagreements(15000).is_empty(), "other harness");
+        assert!(
+            sup.last.is_empty(),
+            "shadow reads never create authoritative status"
+        );
+    }
+
+    #[test]
+    fn hook_shadow_logs_once_per_change_and_never_observes_status() {
+        use vega_herdr::pane_state::from_input;
+        let stop = from_input(
+            r#"{"hook_event_name":"Stop","session_id":"s","last_assistant_message":"Private?"}"#,
+            1000,
+        )
+        .unwrap();
+        let mut sup = Supervisor::default();
+        sup.observe("t1z", "unknown", false);
+        assert_eq!(
+            sup.hooks.observe("t1z", "unknown", &stop, 13000).as_deref(),
+            Some("hooks: t1z hc=unknown hook=idle (Stop 12 s ago)")
+        );
+        assert_eq!(sup.hooks.observe("t1z", "unknown", &stop, 14000), None);
+        assert_eq!(sup.hooks.observe("t1z", "idle", &stop, 15000), None);
+        assert_eq!(sup.hooks.observe("t1z", "done", &stop, 15000), None);
+        assert!(sup.hooks.observe("t1z", "working", &stop, 15000).is_some());
+        let mut newer = stop.clone();
+        newer.ts += 1;
+        assert!(sup.hooks.observe("t1z", "working", &newer, 15000).is_some());
+        let permission = from_input(r#"{"hook_event_name":"Notification","session_id":"s","notification_type":"permission_prompt"}"#, 16000).unwrap();
+        assert_eq!(
+            sup.hooks.observe("t1z", "blocked", &permission, 16000),
+            None
+        );
+        let unknown = from_input(r#"{"hook_event_name":"Notification","session_id":"s","notification_type":"auth_success"}"#, 17000).unwrap();
+        assert_eq!(sup.hooks.observe("t1z", "idle", &unknown, 17000), None);
+        assert_eq!(sup.last["t1z"], "unknown");
+        assert!(sup.busy.is_empty());
+        assert!(sup.suspects.is_empty());
+    }
+
     #[test]
     fn liveness_is_known_independently_for_each_backend() {
         let mut s = super::Supervisor::default();

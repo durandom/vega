@@ -175,6 +175,11 @@ not stop an agent that decides to poll by itself, so the vega skill must say "ma
 
 ## Minimal first step (one bead, small)
 
+Status (2026-11-10, vega-0h4c.59): implemented in shadow mode. The `claude.hooks` plugin
+binds all five events; bounded metadata-only JSONL and deduplicated vegad hc comparisons
+are available. Fleet installation and the observation week remain rollout work; hook state
+changes no delivery or supervision behavior.
+
 `vega-hooks` gains a `vega mux hook state` subcommand (same binary and crate as hook.rs) bound to
 SessionStart, UserPromptSubmit, Stop, Notification, SessionEnd. It appends one JSON line per event to
 `$XDG_STATE_HOME/vega/pane-state/<pane>.jsonl` (pane from `own_terminal()`, as hook.rs does) and prints

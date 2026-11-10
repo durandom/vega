@@ -73,7 +73,7 @@ pub fn upsert_hook(
     }
 }
 
-/// `claude.hooks`: ask-parent and the activation hook.
+/// `claude.hooks`: ask-parent, shim activation and shadow state telemetry.
 pub fn claude_hooks(root: &mut Value, mux: &str) -> Result<bool, String> {
     let a = upsert_hook(
         root,
@@ -82,7 +82,24 @@ pub fn claude_hooks(root: &mut Value, mux: &str) -> Result<bool, String> {
         ask_parent_entry(mux, CLAUDE_TOOL),
     )?;
     let b = upsert_hook(root, "SessionStart", ACTIVATE_MARK, activate_entry())?;
-    Ok(a || b)
+    let mut changed = a || b;
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop",
+        "Notification",
+        "SessionEnd",
+    ] {
+        changed |= upsert_hook(
+            root,
+            event,
+            "hook state",
+            json!({
+                "hooks": [{"type": "command", "command": format!("'{mux}' hook state"), "timeout": 5}]
+            }),
+        )?;
+    }
+    Ok(changed)
 }
 
 /// Remove only commands emitted by vega's legacy Claude installer. Mixed
@@ -212,7 +229,7 @@ mod tests {
             pre[1]["hooks"][0]["command"],
             "'/b/vega-mux' hook ask-parent"
         );
-        assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+        assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
         assert!(root["hooks"]["Stop"].is_array());
         let keys: Vec<&String> = root.as_object().unwrap().keys().collect();
         assert_eq!(keys, ["model", "hooks"]);
