@@ -535,6 +535,45 @@ fn container_pane(panes: &[Value], lineage: &[u32]) -> Option<(Value, Value)> {
     }
 }
 
+/// True if this process runs in a container entered by a `podman exec` (e.g.
+/// `toolbox run`) whose client descends from one of `pids`. The exec'd tree
+/// hangs off `conmon`, so plain ancestry stops there; the client is found by
+/// container name and start time, and must be the only candidate.
+pub(crate) fn reaches_via_container(pids: &[u32]) -> bool {
+    let Ok(table) = process_table() else {
+        return false;
+    };
+    let lineage = ancestors(&table, std::process::id());
+    let names = comm_names(lineage.iter());
+    let Some(conmon) = names.iter().find(|(_, n)| n == "conmon").map(|(p, _)| *p) else {
+        return false;
+    };
+    let (Some(container), Some(conmon_start)) = (
+        proc_cmdline(conmon).and_then(|a| conmon_container(&a)),
+        proc_start(conmon),
+    ) else {
+        return false;
+    };
+    let near: Vec<u32> = table
+        .iter()
+        .map(|(p, _)| *p)
+        .filter(|&p| {
+            let Some(argv) = proc_cmdline(p) else {
+                return false;
+            };
+            let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+            is_exec_of(&argv, &container)
+                && proc_start(p).is_some_and(|s| s.abs_diff(conmon_start) <= EXEC_START_WINDOW)
+        })
+        .collect();
+    match near.as_slice() {
+        [client] => reaches(*client, pids, |pid| {
+            table.iter().find(|(p, _)| *p == pid).map(|&(_, pp)| pp)
+        }),
+        _ => false,
+    }
+}
+
 /// The container name of a conmon command line (`-n <name>`).
 fn conmon_container(argv: &[String]) -> Option<String> {
     let i = argv.iter().position(|a| a == "-n")?;
