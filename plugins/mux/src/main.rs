@@ -691,14 +691,19 @@ fn close(target: &str) -> Result<(), Failure> {
         .count();
     let what = closing(&ws, others);
     // Pane ids are per machine: on another machine nothing is ours.
+    // A caller outside herdr (an hc terminal) owns no herdr pane: nothing to guard.
     if machine().is_none() {
-        let me = me()?;
-        if me.pane == pane || (what == Closing::Workspace && me.workspace == ws_id) {
-            return Err(Failure::new(
-                "usage",
-                format!("{target} is your own pane or workspace"),
-                "close another agent; run `vega mux` to list them",
-            ));
+        match me() {
+            Ok(me) if me.pane == pane || (what == Closing::Workspace && me.workspace == ws_id) => {
+                return Err(Failure::new(
+                    "usage",
+                    format!("{target} is your own pane or workspace"),
+                    "close another agent; run `vega mux` to list them",
+                ));
+            }
+            Ok(_) => {}
+            Err(f) if f.code == "not_in_herdr" => {}
+            Err(f) => return Err(f),
         }
     }
     reopen::snapshot(&a);
