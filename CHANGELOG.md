@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 161 · 2026-11-10
+
+- feature: vegad probes the login keychain on each macOS host every minute and shares its state
+  through the registry. The herdr-app status line shows one green/red/dim lock per Mac. A new
+  lock opens a dedicated unlock terminal window once; click a red lock to reopen it. Press Enter
+  there to start the password prompt. Only the Slayer enters the password; vegad never unlocks.
+  Deploy matching vegad binaries and apply the updated `herdr-app.mods` unit after landing.
+
 ## 160 · 2026-11-10
 
 - unit: `claude.hooks` adds silent Claude lifecycle telemetry through `vega mux hook state`.

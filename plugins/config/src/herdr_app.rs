@@ -169,6 +169,14 @@ pub fn app_error(file: &Path, since: SystemTime, wait: Duration) -> Option<Strin
 
 /// The vega mod owns its entire folder; local overrides resolve per shipped file.
 const MOD_FILES: [&str; 2] = ["main.js", "mod.json"];
+
+fn mod_files(name: &str) -> &[&str] {
+    if name == "vega" {
+        &["main.js", "mod.json", "lock.svg"]
+    } else {
+        &MOD_FILES
+    }
+}
 /// Editor helpers herdr-app (re)writes into every mod folder on start. The app owns
 /// them: they never count as drift and survive a folder replacement.
 const APP_FILES: [&str; 2] = ["gpui-kit.d.ts", "jsconfig.json"];
@@ -194,19 +202,17 @@ pub fn plan(ctx: &crate::Ctx, unit: crate::Unit) -> Result<crate::Plan, String> 
     let mut p = Plan::default();
     if let Some(mod_name) = mod_name(unit) {
         let dir = home(&ctx.env).join("mods").join(mod_name);
-        for name in MOD_FILES {
+        let files = mod_files(mod_name);
+        for name in files {
             let src = sources::get(&ctx.env, &format!("herdr-app/mods/{mod_name}/{name}"))?;
             p.files.push(whole(dir.join(name), src.text.clone())?);
             p.sources.push(src);
         }
         p.herdr_app_pending = fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink())
             || fs::read_dir(&dir).is_ok_and(|entries| {
-                entries.flatten().any(|e| {
-                    !MOD_FILES
-                        .iter()
-                        .chain(&APP_FILES)
-                        .any(|n| e.file_name() == *n)
-                })
+                entries
+                    .flatten()
+                    .any(|e| !files.iter().chain(&APP_FILES).any(|n| e.file_name() == *n))
             });
         if p.herdr_app_pending {
             p.notes.push(

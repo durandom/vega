@@ -944,6 +944,10 @@ fn app_mod_stages_rejects_and_replaces_the_whole_folder() {
         "written"
     );
     assert!(!dir.join("stale.js").exists());
+    assert_eq!(
+        fs::read_to_string(dir.join("lock.svg")).unwrap(),
+        sources::default("herdr-app/mods/vega/lock.svg").unwrap()
+    );
     assert!(!dir.join("gpui-kit.d.ts").exists());
     assert!(!dir.join("jsconfig.json").exists());
     assert!(herdr_app::home(&ctx.env)

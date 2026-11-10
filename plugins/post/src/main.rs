@@ -37,6 +37,7 @@ mod hygiene;
 mod identity;
 mod identity_mappings;
 mod janitor;
+mod keychain;
 mod local_send;
 mod loop_budget;
 mod notes;
@@ -2539,6 +2540,7 @@ impl Jobs {
         let (ctx, ci) = mpsc::unbounded_channel();
         let (btx, bd) = mpsc::unbounded_channel();
         if !once {
+            keychain::spawn();
             history::spawn();
             capacity::spawn();
             agents::spawn(etx.clone());
@@ -6121,6 +6123,9 @@ impl Registry {
         if let Some((k, v)) = theme::registry_entry(host) {
             desired.insert(k, v);
         }
+        if let Some((k, v)) = keychain::registry_entry(host) {
+            desired.insert(k, v);
+        }
         // vega janitor's checkouts; other hosts pull them (pull_janitor).
         if let Some((k, v)) = janitor::registry_entry(host) {
             desired.insert(k, v);
@@ -6165,6 +6170,7 @@ impl Registry {
         slow("registry reconcile", t);
         self.dead_subjects.run(kv, host, &view.keys).await?;
         human::seen(host, &view);
+        keychain::cache(&view, host);
         self.view = Some(view);
         Ok(RegistryUpdate::Synced(n))
     }

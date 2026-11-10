@@ -3,6 +3,30 @@
 Status: design, 2026-10-08. Epic: vega-lhc. Supersedes the separate designs in vega-lhc.4 (idle
 notify) and vega-lhc.12 (registry); both become parts of this daemon.
 
+## Login keychain state (vega-oiwq, 2026-11-10)
+
+`plugins/post/src/keychain.rs` starts one read-only worker on macOS, including while the broker
+is unavailable. Every 60 seconds it executes `/usr/bin/security show-keychain-info` with
+`$HOME/Library/Keychains/login.keychain-db` as a separate argument, without a shell. Exit 0 means
+`unlocked`; exit 36 with stderr containing `User interaction is not allowed` means `locked`;
+all other outcomes mean `unknown`. Only state transitions are logged, without command output.
+
+The worker keeps `{state, since, at}` in `keychain-local.json` under vegad's state directory
+(`$XDG_STATE_HOME/vega`, default `~/.local/state/vega`). `since` changes only when the state changes
+and survives daemon restarts. The registry reconcile publishes that value as `<host>.keychain`,
+like `<host>.theme`; non-macOS hosts never publish a keychain entry. The normal host registry ACL
+covers it. Restricted inbox-only hosts do not reconcile/publish this entry.
+
+After a successful reconcile vegad atomically writes `keychains.json` in the same directory:
+`{at, local, rows: [{host, state, since, at}]}`. This is a small local projection of the registry
+view, used by the app mod without per-host `hc exec` calls. Hosts with stale beats or samples
+older than 180 seconds remain in the projection as `unknown`; the app also ages out a snapshot
+older than 180 seconds when vegad or the broker stops. Cache write errors do not fail reconciliation.
+
+Only the UI offers unlock, in a dedicated hc terminal after the Slayer presses Enter. Neither
+vegad nor an agent runs unlock. No SSH functional probe and no `vega machine unlock` command are
+part of this design. See [herdr-app UI](herdr-app-ui.md#login-keychain-windows-vega-oiwq).
+
 ## Problem
 
 Field reports from a UAC coordinator (spellkave, 2026-10-08) and our own evals:

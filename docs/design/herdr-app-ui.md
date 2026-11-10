@@ -5,6 +5,43 @@ Slayer acts on it. Decided with the Slayer on 2026-11-07. Background: the herdr 
 priority-sorted agents list, vega tokens from `report-metadata`) and the `vega board` Inbox
 ([board-ui](board-ui.md)).
 
+## Login keychain windows (vega-oiwq)
+
+The `vega` status mod reads vegad's local `keychains.json` registry projection every five seconds
+in one local read. It uses the same `XDG_STATE_HOME` as vegad, as for badges. There is no per-host
+exec polling. The right side shows one monochrome lock per macOS host, coloured with theme
+`ansi2` (unlocked), `ansi1` (locked), or `dim` (unknown). Tooltips give host, state, and `since`.
+Stale snapshots and stale probe samples become unknown rather than retaining a red/green claim.
+
+A newly observed lock opens one global non-modal window, deduped across mod copies and restarts
+by `host + since` in shared state. A click on a red lock opens it again. The mod starts an
+unlabelled hc terminal on that host (`hc run --bg --no-parent --no-notify`, `--on` for peers);
+it is never adopted into a tab. An existing live dedicated terminal is reused when reopening.
+The window layout contains a draggable title bar with Close, and that terminal exactly once.
+The title bar is a `vega` copy with `keychainTitle` props and no background pollers. The window
+does not take focus automatically. Closing it leaves the waiting terminal available to reopen;
+the next unlocked observation closes the window and kills only its dedicated terminal.
+
+The terminal prints `Press Enter to unlock the login keychain on <host>`, waits for Enter, then
+runs `security unlock-keychain "$HOME/Library/Keychains/login.keychain-db"`. Echo is disabled
+before that command and restored on exit; security prompts on the tty. The password is never
+in argv (no `-p`), files, logs, mail, notes, agent send/keys, or visible output. Agents never
+press Enter, type a password, or run unlock/lock themselves. Failed launches show a short toast
+and the red lock offers retry. A probe that becomes unlocked during launch suppresses the window.
+
+Development stays in the worktree: run `herdr-app check config/herdr-app/mods/vega` and
+`node --test scripts/herdr-app-mods.test.mjs`. For a live tour use an isolated `HERDR_APP_HOME`
+and scratch hc core as in [slice 5b verification](#slice-5b-verification-2026-11-07), with fake
+keychain data and a harmless terminal script. Never copy mods into the user's app home or apply
+config from a sentinel worktree. The UAC handles deployment/config apply after landing; the app
+reloads applied mod files live. Real unlock validation belongs to the Slayer in the popup.
+
+Verification (2026-11-10): an isolated app home and hc core in the worktree's `target/` rendered
+red/green locks and one popup containing a harmless waiting terminal, with no app errors. A fake
+unlocked cache update closed the popup. The scratch app/core were stopped afterwards; no real
+keychain was locked or unlocked. Unit tests cover repeated locks, click-to-reopen, colours,
+launch/unlock races, and ignoring persisted overlay handles from a previous app session.
+
 ## Decisions
 
 1. **`vega-sidebar` replaces the shipped `agents` mod** in the vega layout (`config/herdr-app/layouts/vega.json`).

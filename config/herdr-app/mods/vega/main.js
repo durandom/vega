@@ -1,9 +1,12 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, home, theme, watchFolder, shared, setShared, openOverlay, notify, nextCommand, run, spaces, agents, terminals, focused } from "herdr";
+import { exec, home, theme, watchFolder, shared, setShared, openOverlay, closeOverlay, notify, nextCommand, run, spaces, agents, terminals, focused, props } from "herdr";
 
 // The capacity provider behind an agent kind (vega lanista lanes: pi runs zai).
 const PROVIDER = { "claude-code": "claude", claude: "claude", codex: "codex", pi: "zai" };
+
+// Shared state survives restarts; overlay ids and in-flight launches do not.
+const KEYCHAIN_SESSION = `${Date.now()}-${Math.random()}`;
 
 // Assumes the same user and XDG_STATE_HOME as vegad; this reads the mod's environment,
 // not the app config home. Both processes must share that state directory.
@@ -17,6 +20,15 @@ for p in root.glob('*.json'):
   if row.get('schema')==2: rows.append(row)
  except (OSError,ValueError): pass
 print(json.dumps({'folder':str(root),'rows':rows}))`;
+
+// One local registry snapshot; no per-host execution from the UI.
+const readKeychains = `import os,json,pathlib
+p=pathlib.Path(os.environ.get('XDG_STATE_HOME') or str(pathlib.Path.home()/'.local/state'))/'vega/keychains.json'
+try: print(p.read_text())
+except OSError: print('{"rows":[]}')`;
+
+// Only the human's Enter reaches security. No password argument or shell history.
+const unlockScript = `printf 'Press Enter to unlock the login keychain on %s\\n' "$1"; IFS= read -r enter || exit; stty -echo || exit; trap 'stty echo' EXIT; security unlock-keychain "$HOME/Library/Keychains/login.keychain-db"`;
 
 // Only saved, connected hc machines are read. No reverse link or registry ACL
 // change is needed; hc's SSH connection already authorizes execution there.
@@ -76,7 +88,12 @@ const START_OK_MS = 300000, START_RETRY_MS = 60000;
 
 export default class Vega extends View {
   init(_props, cx) {
+    const p = _props ?? props() ?? {};
+    if (p.keychainTitle) { this.keychainTitle = p.keychainTitle; this.overlay = p.overlay; return; }
     this.state = "checking";
+    this.keychains = [];
+    cx.spawn(async (cx) => { await this.readKeychains(cx); });
+    cx.timer.every(5000, (cx) => { cx.spawn(async (cx) => { await this.readKeychains(cx); }); });
     this.refreshing = false;
     this.started = new Map(); // machine -> {next: ms, fails}
     this.starting = false;
@@ -100,6 +117,93 @@ export default class Vega extends View {
       }
     });
     cx.timer.every(15000, (cx) => { cx.spawn(async (cx) => { await this.readContext(cx); }); });
+  }
+
+  async readKeychains(cx) {
+    if (this.readingKeychains) return;
+    this.readingKeychains = true;
+    try {
+      const r = await exec("python3", ["-c", readKeychains]);
+      if (r.code !== 0) throw new Error("keychain cache unavailable");
+      const data = JSON.parse(r.stdout);
+      this.localKeychainHost = data.local;
+      this.applyKeychains(data.rows ?? [], data.at, cx);
+    } catch (_) {
+      this.keychains = this.keychains.map(r => ({...r, state: "unknown"}));
+      cx.notify();
+    } finally { this.readingKeychains = false; }
+  }
+
+  applyKeychains(rows, at, cx) {
+    const now = Date.now()/1000;
+    this.keychains = rows.filter(r => /^[a-zA-Z0-9_-]+$/.test(r.host)).map(r => ({...r,
+      state: now-at <= 180 && now-r.at <= 180 && ["locked", "unlocked"].includes(r.state) ? r.state : "unknown"}));
+    setShared("vega.keychains", this.keychains);
+    for (const row of this.keychains) {
+      const key = `${row.host}/${row.since}`;
+      if (row.state === "unlocked") {
+        const popup = (shared("vega.keychain-popups") ?? {})[row.host];
+        if (popup) {
+          if (popup.session === KEYCHAIN_SESSION) closeOverlay(popup.overlay);
+          const popups = {...shared("vega.keychain-popups")}; delete popups[row.host];
+          setShared("vega.keychain-popups", popups);
+          // Only this mod's dedicated terminal; it may still be waiting for Enter.
+          cx.spawn(async () => { try { await exec("hc", ["kill", popup.terminal]); } catch (_) {} });
+        }
+      }
+      if (row.state !== "locked") continue;
+      const seen = shared("vega.keychain-seen") ?? [];
+      if (!seen.includes(key)) {
+        setShared("vega.keychain-seen", [...seen, key]);
+        this.openKeychain(row, cx);
+      }
+    }
+    cx.notify();
+  }
+
+  openKeychain(row, cx) {
+    const pending = (shared("vega.keychain-opening") ?? []).filter(p => p.session === KEYCHAIN_SESSION && Date.now()-p.at < 60000);
+    if (row.state !== "locked" || pending.some(p => p.host === row.host)) return;
+    setShared("vega.keychain-opening", [...pending, {host: row.host, at: Date.now(), session: KEYCHAIN_SESSION}]);
+    cx.spawn(async (cx) => {
+      try {
+        const old = (shared("vega.keychain-popups") ?? {})[row.host];
+        let terminal = terminals().some(t => t.address === old?.terminal && t.state === "live") ? old.terminal : null;
+        if (!terminal) {
+          const args = ["run", "--json", "--bg", "--no-parent", "--no-notify"];
+          if (row.host !== this.localKeychainHost) args.push("--on", row.host);
+          args.push("--", "sh", "-c", unlockScript, "keychain-unlock", row.host);
+          const r = await exec("hc", args);
+          if (r.code !== 0) throw new Error("Could not create unlock terminal");
+          terminal = JSON.parse(r.stdout).address;
+          if (typeof terminal !== "string" || !terminal) throw new Error("Missing unlock terminal address");
+        }
+        const current = (shared("vega.keychains") ?? []).find(r => r.host === row.host);
+        if (current?.state === "unlocked" || current?.since !== row.since) {
+          await exec("hc", ["kill", terminal]); return;
+        }
+        if (old?.session === KEYCHAIN_SESSION) closeOverlay(old.overlay);
+        const overlay = openOverlay({kind: "window", key: `vega-keychain-${row.host}`, width: 680, height: 300,
+          layout: {type: "column", children: [
+            {type: "block", size: {px: 32}, content: {mod: "vega", props: {keychainTitle: row.host}}},
+            {type: "block", content: {terminal}},
+          ]}});
+        setShared("vega.keychain-popups", {...shared("vega.keychain-popups"), [row.host]: {terminal, overlay, session: KEYCHAIN_SESSION}});
+      } catch (_) {
+        notify({title: `${row.host}: unlock terminal unavailable`, body: "Click the red lock to retry.", level: "error"});
+      } finally {
+        setShared("vega.keychain-opening", (shared("vega.keychain-opening") ?? []).filter(p => p.host !== row.host));
+        cx.notify();
+      }
+    });
+  }
+
+  keychainSegments(t) {
+    return (this.keychains ?? []).map(row => div().id(`keychain-${row.host}`).px(4)
+      .text_color(row.state === "locked" ? t.ansi1 : row.state === "unlocked" ? t.ansi2 : t.dim)
+      .tooltip(`${row.host}: ${row.state} since ${new Date(row.since*1000).toLocaleString()}`)
+      .on_click((_e, cx) => { if (row.state === "locked") this.openKeychain(row, cx); })
+      .child(svg("mods/vega/lock.svg").size(13)));
   }
 
   // The focused terminal's project and that project's live UAC (same machine first).
@@ -287,6 +391,11 @@ export default class Vega extends View {
   // work (badges, vegad, inbox) runs in the background and shows nothing here.
   render(_cx) {
     const t = theme();
+    if (this.keychainTitle) return h_flex().size_full().items_center().justify_between().px(10).bg(t.chrome).text_color(t.foreground)
+      .child(`Login keychain · ${this.keychainTitle}`)
+      .child(div().id("keychain-close").cursor_pointer().child("×")
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); closeOverlay(this.overlay); }));
     const space = spaces().find(s => s.active);
     const list = agents();
     const shown = [this.error, this.startError].filter(Boolean).join("; ");
@@ -298,7 +407,9 @@ export default class Vega extends View {
       .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
         .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
       .children(this.contextSegments(t))
+      .child(div().flex_1())
+      .children(this.keychainSegments(t))
       // A failed badge read or remote vegad start (a machine unreachable, a reader error) shows at the right end.
-      .when(Boolean(shown), el => el.child(div().flex_1()).child(div().id("vega-error").truncate().text_color(t.blocked).tooltip(shown).child(`vega: ${shown}`)));
+      .when(Boolean(shown), el => el.child(div().id("vega-error").truncate().text_color(t.blocked).tooltip(shown).child(`vega: ${shown}`)));
   }
 }

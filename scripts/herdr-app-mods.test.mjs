@@ -13,7 +13,7 @@ function load(name, {allowFocus=false}={}) {
       if(k==='child')return c=>{o.items.push(c);return proxy;};
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
-      if(k==='id'||k==='tooltip')return v=>{o[k+'Value']=v;return proxy;};
+      if(k==='id'||k==='tooltip'||k==='text_color')return v=>{o[k+'Value']=v;return proxy;};
       if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down'){o.mouseButton=a[0];o.handlers[`${k}:${a[0]}`]=a.at(-1);}return proxy;};
       return ()=>proxy;
     }});return proxy;
@@ -793,4 +793,89 @@ test('a match-any view shows projects with a chosen label or on a chosen machine
   assert(nodes.some(n=>n.idValue==='space-scratch'),'local spaces match by machine');
   h.storage.set('active-view','Strict');nodes=elements(h.render());
   assert(!nodes.some(n=>n.idValue===`uac-${project}`),'all: label and machine both needed');
+});
+
+test('keychain popup opens once globally per lock, click reopens only its own terminal, unlocked closes',async()=>{
+  const h=load('vega'), now=Date.now()/1000;
+  const row={host:'puck',state:'locked',since:now-10,at:now};
+  h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);return {code:0,stdout:'{"address":"puck/t42"}'};};
+  h.mod.applyKeychains([row],now,h.cx);
+  h.mod.applyKeychains([{...row,at:now+1}],now+1,h.cx);
+  await h.flush();
+  let opens=h.calls.filter(c=>c[0]==='open');
+  assert.equal(opens.length,1);
+  const start=h.calls.find(c=>c[0]==='exec'&&c[2][0]==='run');
+  assert.deepEqual(start[2].slice(0,8),['run','--json','--bg','--no-parent','--no-notify','--on','puck','--']);
+  assert(!start[2].includes('--label'),'unlock terminal is never adopted into a tab');
+  const script=start[2][start[2].indexOf('-c')+1];
+  assert(script.indexOf('read -r')<script.indexOf('security unlock-keychain'));
+  assert(script.includes('stty -echo || exit'));
+  assert(!script.includes('unlock-keychain -p'));
+  assert.equal(opens[0][1].layout.children[1].content.terminal,'puck/t42');
+  assert.equal(opens[0][1].kind,'window');
+  h.api.terminals=()=>[{address:'puck/t42',state:'live'}];
+  // Another copy shares the same dedupe state (as multiple status bars do).
+  const copy=new h.mod.constructor();copy.applyKeychains([row],now,h.cx);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='open').length,1);
+  const red=elements(h.render()).find(e=>e.idValue==='keychain-puck');
+  red.handlers.on_click({},h.cx);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='open').length,2,'click reopens a dismissed popup');
+  assert.equal(h.calls.filter(c=>c[0]==='exec'&&c[2][0]==='run').length,1,'reuse existing dedicated terminal');
+  h.mod.applyKeychains([{...row,state:'unlocked',since:now}],now,h.cx);await h.flush();
+  assert(h.calls.some(c=>c[0]==='close'));
+  assert(h.calls.some(c=>c[0]==='exec'&&c[2][0]==='kill'&&c[2][1]==='puck/t42'));
+  assert(!h.calls.some(c=>c[0]==='exec'&&['send','keys','read'].includes(c[2][0])));
+  h.mod.applyKeychains([{...row,since:now+1}],now,h.cx);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='open').length,3,'new since is a new lock');
+});
+
+test('keychain status uses theme colours, host and since tooltips, and stale data becomes unknown',async()=>{
+  const h=load('vega'), now=Date.now()/1000;
+  const t={ansi1:'theme-red',ansi2:'theme-green',dim:'theme-dim'};h.api.theme=()=>t;
+  h.mod.applyKeychains(['unlocked','locked','unknown'].map((state,i)=>({host:['localmac','puck','offline'][i],state,since:now-30,at:now})),now,h.cx);
+  await h.flush();
+  const nodes=elements(h.render());
+  for(const [host,color] of [['localmac',t.ansi2],['puck',t.ansi1],['offline',t.dim]]) {
+    const n=nodes.find(n=>n.idValue===`keychain-${host}`);
+    assert.equal(n.text_colorValue,color);assert(n.tooltipValue.includes(host));assert(n.tooltipValue.includes('since'));
+  }
+  const opens=h.calls.filter(c=>c[0]==='open').length;
+  nodes.find(n=>n.idValue==='keychain-localmac').handlers.on_click({},h.cx);
+  nodes.find(n=>n.idValue==='keychain-offline').handlers.on_click({},h.cx);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='open').length,opens);
+  h.mod.applyKeychains([{host:'puck',state:'locked',since:1,at:now}],now-181,h.cx);
+  assert.equal(h.mod.keychains[0].state,'unknown','stopped vegad cannot leave a red/green claim');
+});
+
+test('unlock observation during terminal creation suppresses the popup and kills only the created terminal',async()=>{
+  const h=load('vega'), now=Date.now()/1000;let finish;
+  h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);return args[0]==='run'?await new Promise(r=>{finish=r;}):{code:0,stdout:''};};
+  const row={host:'puck',state:'locked',since:now-1,at:now};
+  h.mod.applyKeychains([row],now,h.cx);
+  h.mod.applyKeychains([{...row,state:'unlocked',since:now}],now,h.cx);
+  finish({code:0,stdout:'{"address":"puck/t42"}'});await h.flush();
+  assert(!h.calls.some(c=>c[0]==='open'));
+  assert(h.calls.some(c=>c[0]==='exec'&&c[2][0]==='kill'&&c[2][1]==='puck/t42'));
+});
+
+test('keychain popup titlebar has no pollers, provides close, and never adopts or focuses a terminal',()=>{
+  const h=load('vega');h.setProps({keychainTitle:'puck',overlay:'unlock-window'});
+  h.mod.init(undefined,h.cx);
+  assert(texts(h.render()).includes('Login keychain · puck'));
+  elements(h.render()).find(e=>e.idValue==='keychain-close').handlers.on_click({},h.cx);
+  assert(h.calls.some(c=>c[0]==='close'&&c[1]==='unlock-window'));
+  assert(!h.calls.some(c=>c[0]==='exec'||c[0]==='run'));
+});
+
+test('persisted keychain overlay ids and pending launches cannot affect a new app session',async()=>{
+  const h=load('vega'),now=Date.now()/1000;
+  h.state.set('vega.keychain-popups',{puck:{overlay:'reused-id',terminal:'puck/t42',session:'previous-app'}});
+  h.state.set('vega.keychain-opening',[{host:'puck',at:Date.now(),session:'previous-app'}]);
+  h.api.terminals=()=>[{address:'puck/t42',state:'live'}];
+  h.mod.applyKeychains([{host:'puck',state:'locked',since:now-10,at:now}],now,h.cx);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='open').length,1,'old pending launch does not suppress reopening');
+  assert(!h.calls.some(c=>c[0]==='close'&&c[1]==='reused-id'),'old overlay id may now belong to another window');
+  h.state.set('vega.keychain-popups',{puck:{overlay:'other-reused-id',terminal:'puck/t42',session:'previous-app'}});
+  h.mod.applyKeychains([{host:'puck',state:'unlocked',since:now,at:now}],now,h.cx);await h.flush();
+  assert(!h.calls.some(c=>c[0]==='close'&&c[1]==='other-reused-id'));
 });

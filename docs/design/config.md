@@ -40,7 +40,7 @@ select units on the command line; `hooks` and `instructions` are groups. Sources
 | `herdr-app.keys` | `~/.config/herdr-app/keys.json` | whole file; actions checked against `herdr-app commands` | `herdr-app/keys.json` |
 | `herdr-app.settings` | `~/.config/herdr-app/settings.json` | seeded keys (the app's Settings screen writes the file too) | `herdr-app/settings.json` |
 | `herdr-app.themes` | `~/.config/herdr-app/themes/<name>.json` | whole file each; other themes untouched | `herdr-app/themes/` |
-| `herdr-app.mods` | `~/.config/herdr-app/mods/vega/` | whole folder, staged `herdr-app check` required | `herdr-app/mods/vega/{main.js,mod.json}` |
+| `herdr-app.mods` | `~/.config/herdr-app/mods/vega/` | whole folder, staged `herdr-app check` required | `herdr-app/mods/vega/{main.js,mod.json,lock.svg}` |
 | `herdr-app.layouts` | `~/.config/herdr-app/layouts/vega.json` | whole file; first apply selects it through the app | `herdr-app/layouts/vega.json` |
 | `agentsview` | `LOCAL-SETUP.md` in `~/.claude/skills/agentsview-finding-history/` and `~/.agents/skills/agentsview-finding-history/` | whole file each, only where agentsview generated the skill (`SKILL.md` exists) | `agentsview/LOCAL-SETUP.md` |
 
