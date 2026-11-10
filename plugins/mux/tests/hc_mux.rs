@@ -287,7 +287,7 @@ fn hc_backend_override_and_remote_direction_are_checked_before_run() {
     );
     let o = f
         .cmd()
-        .env("VEGA_POST_HOST", "deimos")
+        .env("VEGA_POST_HOST", "puck")
         .args([
             "spawn",
             "remote",
