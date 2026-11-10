@@ -3367,14 +3367,16 @@ async fn serve(
                 }
                 // No status from the backend for STALE (vega-lhc.257): only into an
                 // input box read as empty; no box or any text keeps it pending.
-                if d.unknown_long(&pane)
-                    && !d.is_urgent(&pane)
-                    && !matches!(
+                // Typing into an unknown terminal needs that empty box.
+                let mut unknown_ok = false;
+                if d.unknown_long(&pane) && !d.is_urgent(&pane) {
+                    if !matches!(
                         screen(&pane).as_deref().map(delivery::draft),
                         Some(Draft::None)
-                    )
-                {
-                    continue;
+                    ) {
+                        continue;
+                    }
+                    unknown_ok = true;
                 }
                 if drafts.holds(&pane) {
                     continue; // stays pending
@@ -3387,7 +3389,7 @@ async fn serve(
                     Some((s, _)) => wake_line(s, count),
                     None => pointer(count),
                 };
-                let typed = match notify_queued(&pane, &line, d.may_queue(&pane)) {
+                let typed = match notify_with(&pane, &line, d.may_queue(&pane), unknown_ok) {
                     Ok(()) => {
                         log(&format!(
                             "pointer: {pane} ({count} pending{}{}, agent {}), {} {} ms",
@@ -4399,6 +4401,11 @@ fn notify(pane: &str, line: &str) -> Result<(), Failure> {
 }
 
 fn notify_queued(pane: &str, line: &str, queued: bool) -> Result<(), Failure> {
+    notify_with(pane, line, queued, false)
+}
+
+/// `unknown_ok`: see `terminals::send_hc_with` (hc only; herdr has its own status).
+fn notify_with(pane: &str, line: &str, queued: bool, unknown_ok: bool) -> Result<(), Failure> {
     // The pane token comes from the sender's subject: never let it reach
     // herdr as anything but a pane id (e.g. `--flag` or an agent name).
     if !valid_pane_id(pane) {
@@ -4409,7 +4416,7 @@ fn notify_queued(pane: &str, line: &str, queued: bool) -> Result<(), Failure> {
         ));
     }
     if terminals::is_hc(pane) {
-        return terminals::send_hc(pane, line, queued);
+        return terminals::send_hc_with(pane, line, queued, unknown_ok);
     }
     herdr(&["agent", "prompt", terminals::bare(pane), line])?;
     Ok(())

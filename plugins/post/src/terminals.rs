@@ -192,8 +192,14 @@ pub fn native_parents(agents: &[Value]) {
 
 /// hc enforces blocked refusal even if status changes after our read. Idle
 /// has an atomic guard; done and authorized queued mail use plain send until
-/// hc offers an atomic free-state guard (vega-0h4c.17).
+/// hc offers an atomic free-state guard (vega-0h4c.17). `unknown_ok`: the
+/// caller saw no status for long and read the input box as empty
+/// (vega-lhc.257), so an `unknown` terminal takes the line too.
 pub fn send_hc(pane: &str, text: &str, queued: bool) -> Result<(), Failure> {
+    send_hc_with(pane, text, queued, false)
+}
+
+pub fn send_hc_with(pane: &str, text: &str, queued: bool, unknown_ok: bool) -> Result<(), Failure> {
     let pane = bare(pane);
     let t = hc_local(&["get", pane])?;
     let status = t["status"]["state"].as_str().unwrap_or("unknown");
@@ -204,19 +210,29 @@ pub fn send_hc(pane: &str, text: &str, queued: bool) -> Result<(), Failure> {
             "mail stays pending until closure is confirmed",
         ));
     }
-    match status {
-        "idle" => hc_local(&["send", "--if", "idle", pane, text])?,
-        "done" => hc_local(&["send", pane, text])?,
-        "working" if queued => hc_local(&["send", pane, text])?,
-        _ => {
-            return Err(Failure::new(
-                "agent_not_idle",
-                format!("{pane} is {status}"),
-                "wait for an idle or done terminal",
-            ))
-        }
+    let Some(guard) = send_guard(status, queued, unknown_ok) else {
+        return Err(Failure::new(
+            "agent_not_idle",
+            format!("{pane} is {status}"),
+            "wait for an idle or done terminal",
+        ));
     };
+    let mut args = vec!["send"];
+    args.extend(guard);
+    args.extend([pane, text]);
+    hc_local(&args)?;
     Ok(())
+}
+
+/// The `hc send` guard flags for a terminal status, or `None` to refuse.
+fn send_guard(status: &str, queued: bool, unknown_ok: bool) -> Option<&'static [&'static str]> {
+    match status {
+        "idle" => Some(&["--if", "idle"]),
+        "done" => Some(&[]),
+        "working" if queued => Some(&[]),
+        "unknown" if unknown_ok => Some(&[]),
+        _ => None,
+    }
 }
 
 pub fn prompt(pane: &str, text: &str) -> Result<(), Failure> {
@@ -264,6 +280,22 @@ pub fn mail_target(
 
 #[cfg(test)]
 mod tests {
+    use super::send_guard;
+
+    #[test]
+    fn unknown_terminals_take_a_line_only_when_the_caller_saw_an_empty_box() {
+        assert_eq!(
+            send_guard("idle", false, false),
+            Some(&["--if", "idle"][..])
+        );
+        assert_eq!(send_guard("done", false, false), Some(&[][..]));
+        assert_eq!(send_guard("working", false, false), None);
+        assert_eq!(send_guard("working", true, false), Some(&[][..]));
+        assert_eq!(send_guard("unknown", true, false), None, "vega-lhc.257");
+        assert_eq!(send_guard("unknown", false, true), Some(&[][..]));
+        assert_eq!(send_guard("blocked", true, true), None);
+    }
+
     use super::*;
     #[test]
     fn local_hc_snapshot_uses_foreground_cwd_and_layout_doc_shape() {
