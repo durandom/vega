@@ -844,6 +844,51 @@ test('same-named repositories have separate config targets and legacy labels can
   const grouping=h.mod.projectGroups(h.api.terminals());assert.equal(grouping.projectOfAgent({address:'t6'}),null);
 });
 
+test('projects survive a missing UAC with orphan sentinels, filters, pins and navigation',async()=>{
+  const h=load('vega-sidebar'),project='github.com/b4arena/spellkave';
+  let all=[
+    {address:'ganymede/t1n',state:'live',labels:{}},
+    {address:'ganymede/t2',state:'live',parent:'ganymede/t1n',labels:{'vega.project-id':project,'herdr.space':'s'}},
+    {address:'ganymede/t3',state:'live',parent:'ganymede/t1n',labels:{'vega.project':'spellkave','herdr.space':'s'}},
+    {address:'gone',state:'exited',labels:{'vega.role':'uac','vega.project-id':project}},
+  ];
+  let status='working';
+  h.api.terminals=()=>all;
+  h.api.agents=()=>all.slice(1,3).map(a=>({...a,space:'ganymede/s',status,program:{}}));
+  h.mod.init({},h.cx);
+  h.mod.preferences={projects:{[project]:{name:'Spellkave',labels:['work']}},views:{Work:{labels:['work'],machines:['ganymede']},Local:{labels:[],machines:['local']}}};
+  h.state.set('vega.view','Work');
+  let tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+  assert(texts(tree).includes('Spellkave'));assert(texts(tree).includes('no UAC'));
+  assert(ids.includes('ag-ganymede/t2'));assert(ids.includes('ag-ganymede/t3'));
+  assert.equal(JSON.stringify(h.calls.filter(c=>c[0]==='order').at(-1)[1]),JSON.stringify(['ganymede/t2','ganymede/t3']));
+  elements(tree).find(n=>n.idValue===`gear-uac-${project}`).handlers.on_click({},h.cx);
+  assert.equal(h.calls.find(c=>c[0]==='open')[1].props.projectConfig,project);
+  h.state.set('vega.view','Local');assert(!projectHeaders(h).length);
+  h.state.set('vega.view','Work');h.state.set('vega.hide-inactive',true);
+  assert(projectHeaders(h).includes(`uac-${project}`));
+  status='idle';assert(!projectHeaders(h).length,'Active hides idle unpinned projects');
+  h.mod.preferences.projects[project].pinned=true;
+  assert(projectHeaders(h).includes(`uac-${project}`),'pin keeps no-UAC header in Active');
+  assert(texts(h.render()).includes('no UAC'));
+  h.state.set('vega.hide-inactive',false);
+  all=[...all,{address:'ganymede/new-uac',state:'live',labels:{'vega.role':'uac','vega.project-id':project}}];
+  assert(!texts(h.render()).includes('no UAC'),'marker clears when a UAC claims the project');
+  assert.equal(h.mod.projectGroups(all).projects.get(project).address,'ganymede/new-uac');
+});
+
+test('legacy-only projects stay visible and no-UAC projects retain manual order',()=>{
+  const h=load('vega-sidebar'),[a,b,otherB,c]=orderedProjectsFixture(h);
+  const all=h.api.terminals();delete all[0].labels['vega.role'];delete all[3].labels['vega.role'];
+  all.push({address:'legacy',state:'live',labels:{'vega.project':'legacy'}});
+  h.api.terminals=()=>all;
+  h.storage.set('project-order',JSON.stringify([c,b,otherB,a,'legacy']));h.mod.init({},h.cx);
+  assert.deepEqual(projectHeaders(h),[c,b,otherB,a,'legacy'].map(id=>`uac-${id}`));
+  h.mod.move([c,b,otherB,a,'legacy'],a,c);
+  assert.deepEqual(projectHeaders(h),[a,c,b,otherB,'legacy'].map(id=>`uac-${id}`));
+  assert.equal(h.mod.projectGroups(all).projectOfAgent({address:'legacy'}),'legacy');
+});
+
 test('view popup selects, saves and deletes CLI-owned views without persisting config in shared state',async()=>{
   const h=load('vega-sidebar');h.setProps({viewMenu:true,overlay:'views'});
   let preferences={projects:{},views:{Work:{labels:['work'],machines:['puck']}}};

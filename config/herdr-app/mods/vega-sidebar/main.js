@@ -1130,25 +1130,40 @@ export default class Agents extends View {
   }
 
   // Full IDs keep same-named repositories separate. Legacy short labels may
-  // join only a unique UAC; new terminals always carry vega.project-id.
+  // join only a unique project; new terminals always carry vega.project-id.
   projectGroups(all) {
     const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
     const live = all.filter(x => x.state === "live");
     const byAddress = new Map(live.map(x => [x.address, x]));
     const labelsOf = address => byAddress.get(address)?.labels ?? {};
-    const uacs = new Map();
+    const projects = new Map();
     for (const x of live) {
-      const l = x.labels ?? {}, id = l["vega.project-id"] || l["vega.project"];
-      if (l["vega.role"] === "uac" && id) uacs.set(id, x);
+      const id = x.labels?.["vega.project-id"];
+      if (id && !projects.has(id)) projects.set(id, x);
+    }
+    // Keep legacy-only projects too, without inventing a third group for an
+    // ambiguous short name shared by multiple full project IDs.
+    for (const x of live) {
+      const legacy = x.labels?.["vega.project"];
+      if (!x.labels?.["vega.project-id"] && legacy && !projects.has(legacy)
+        && ![...projects.keys()].some(id => short(id) === legacy)) projects.set(legacy, x);
     }
     const resolve = l => {
-      if (l["vega.project-id"]) return uacs.has(l["vega.project-id"]) ? l["vega.project-id"] : null;
+      if (l["vega.project-id"]) return l["vega.project-id"];
       const legacy = l["vega.project"];
       if (!legacy) return null;
-      if (uacs.has(legacy)) return legacy;
-      const matches = [...uacs.keys()].filter(id => short(id) === legacy);
+      if (projects.has(legacy)) return legacy;
+      const matches = [...projects.keys()].filter(id => short(id) === legacy);
       return matches.length === 1 ? matches[0] : null;
     };
+    const uacs = new Map();
+    for (const x of live) {
+      const id = resolve(x.labels ?? {});
+      if (x.labels?.["vega.role"] === "uac" && id) {
+        uacs.set(id, x);
+        projects.set(id, x);
+      }
+    }
     const projectOfSpace = new Map();
     // UAC space wins over a sentinel's stale label in the same space.
     for (const x of [...uacs.values(), ...live]) {
@@ -1169,7 +1184,7 @@ export default class Agents extends View {
       const sp = this.spaceOfTerminal(x), p = projectOfAgent(x);
       if (sp && p && !projectOfSpace.has(sp)) projectOfSpace.set(sp, p);
     }
-    return { live, labelsOf, uacs, projectOfSpace, projectOfAgent };
+    return { live, labelsOf, projects, uacs, projectOfSpace, projectOfAgent };
   }
 
   viewFilter() {
@@ -1187,30 +1202,31 @@ export default class Agents extends View {
     return (!view.labels.length || byLabel) && (!view.machines.length || byMachine);
   }
 
-  orderedProjects(uacs) {
+  orderedProjects(projects) {
     const saved = this.order ?? [];
     const orderIndex = id => {
       const exact = saved.indexOf(id);
       if (exact >= 0) return exact;
       // Migrate the old short-name order only for an unambiguous project.
       const short = id.split("/").at(-1);
-      return [...uacs.keys()].filter(p => p.split("/").at(-1) === short).length === 1 ? saved.indexOf(short) : -1;
+      return [...projects.keys()].filter(p => p.split("/").at(-1) === short).length === 1 ? saved.indexOf(short) : -1;
     };
-    return [...uacs.keys()].sort((a, b) => {
+    return [...projects.keys()].sort((a, b) => {
       const i = orderIndex(a), j = orderIndex(b);
       return (i < 0 ? Infinity : i) - (j < 0 ? Infinity : j) || a.localeCompare(b);
     });
   }
 
-  // UAC projects in the Slayer's order: one group per project with a UAC on any machine, holding
-  // that project's agents on every machine (UAC first, its sentinels as branches). Then the
-  // spaces without a UAC. Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
+  // Projects in the Slayer's order, holding agents on every machine (UAC first,
+  // when present, its sentinels as branches). Then the unlabelled spaces.
+  // Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
   projectTree(t, all, list, shown, now) {
-    const { live, labelsOf, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
-    const projects = this.orderedProjects(uacs).filter(p => {
-      const uac = uacs.get(p);
-      return this.matchesView(uac.labels?.["vega.project-id"], machineOf(uac.address))
-        && (!this.visibleSessions || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a)));
+    const { live, labelsOf, projects: groups, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
+    const projects = this.orderedProjects(groups).filter(p => {
+      const representative = groups.get(p);
+      return this.matchesView(p, machineOf(representative.address))
+        && (!this.visibleSessions || this.preferences?.projects?.[p]?.pinned
+          || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a)));
     });
     const C = this.colors();
     const kindOf = (k) => {
@@ -1268,10 +1284,11 @@ export default class Agents extends View {
     for (const p of projects) {
       const gid = `uac-${p}`;
       const uac = uacs.get(p);
-      const ul = uac.labels ?? {};
-      const project = ul["vega.project-id"];
+      const ul = uac?.labels ?? {};
+      const project = p;
+      const address = groups.get(p).address;
       const display = this.preferences?.projects?.[project]?.name || ul["vega.project"]?.split("/").at(-1) || p.split("/").at(-1);
-      const totals = this.vegaTotals(uac.address, project) ?? {};
+      const totals = this.vegaTotals(address, project) ?? {};
       const members = list.filter(a => projectOfAgent(a) === p)
         .sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
       const open = !this.folded.has(gid);
@@ -1290,6 +1307,7 @@ export default class Agents extends View {
         })
         .child(div().flex_none().text_size(12).text_color(t.dim).child("⠿"))
         .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(display))
+        .when(!uac, el => el.child(div().flex_none().text_size(11).text_color(t.blocked).child("no UAC")))
         .when(Boolean(git), el => el.child(div().flex_none().text_size(11.5).text_color(git === "✓" ? C.git_clean : C.git_dirty).child(git)))
         // Label pills: a click filters the sidebar to that label, a second click shows all again.
         .children((this.preferences?.projects?.[project]?.labels ?? []).slice(0, 2).map(l => {
@@ -1310,7 +1328,7 @@ export default class Agents extends View {
             .child(String((totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0)))
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
             .on_click((_e, cx) => totals.decisions ? this.openProject(project, cx, "decisions")
-              : totals.waiting ? (cx.stop_propagation(), run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || uac.address }))
+              : totals.waiting ? (cx.stop_propagation(), run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || address }))
               : this.openProject(project, cx, "notes")));
         })
         .child(div().id(`pin-${gid}`).flex_none().text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim)
@@ -1367,7 +1385,7 @@ export default class Agents extends View {
 
   // Drag one project above another; the order stays across restarts.
   move(projects, from, to) {
-    const all = this.orderedProjects(this.projectGroups(terminals()).uacs);
+    const all = this.orderedProjects(this.projectGroups(terminals()).projects);
     const visible = projects.filter(p => p !== from);
     visible.splice(visible.indexOf(to), 0, from);
     // Reorder only the visible slots, so hidden projects keep their positions.
@@ -1464,8 +1482,8 @@ export default class Agents extends View {
     });
     const membership = this.projectGroups(all);
     list = list.filter(a => {
-      const project = membership.projectOfAgent(a), uac = membership.uacs.get(project);
-      return this.matchesView(uac?.labels?.["vega.project-id"], uac ? machineOf(uac.address) : machineOf(a.address));
+      const project = membership.projectOfAgent(a);
+      return this.matchesView(project, machineOf(membership.projects.get(project)?.address ?? a.address));
     });
     if (shared(INACTIVE_KEY) != null) localStorage.setItem("hide-inactive", String(filtering));
     // Count only this view's sessions, before folds; UACs may remain as context.
@@ -1482,7 +1500,7 @@ export default class Agents extends View {
     }
     const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
     list = list.filter(a => this.hasVisibleTree(all, a));
-    const projectOrder = this.orderedProjects(membership.uacs);
+    const projectOrder = this.orderedProjects(membership.projects);
     list.sort((a, b) => {
       const pa = membership.projectOfAgent(a), pb = membership.projectOfAgent(b);
       const ia = projectOrder.indexOf(pa), ib = projectOrder.indexOf(pb);
