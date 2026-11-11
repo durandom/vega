@@ -105,7 +105,7 @@ test('sidebar copies share history and handle each broadcast key only once',asyn
 test('last navigation keys use mod command argument syntax',()=>{
   const keys=JSON.parse(fs.readFileSync(new URL('../config/herdr-app/keys.json',import.meta.url),'utf8')).global;
   for(const [key,command] of [['ctrl-s l','last-agent'],['cmd-;','last-agent'],['ctrl-s shift-l','last-space'],['ctrl-s ;','last-pane']])
-    assert.equal(keys[key],`vega-sidebar:${command}`);
+    assert.equal(keys[key],`vega-sidebar.${command}`);
 });
 
 test('background sampling catches focus without renders and shares a cheap polling budget',async()=>{

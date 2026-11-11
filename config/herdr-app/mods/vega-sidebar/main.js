@@ -169,6 +169,8 @@ function lastFocus(command) {
   const f = focused();
   if (!f) return;
   let history, live, current, action, argument;
+  // keys.json binds "vega-sidebar.<command>"; accept a delivered prefix too.
+  command = String(command).replace(/^vega-sidebar[.:]/, "");
   if (command === "last-agent") {
     history = navigation.agents; live = new Set(agents().map(a => a.address));
     current = f.terminal; action = "agent.focus"; argument = "terminal";

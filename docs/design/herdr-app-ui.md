@@ -10,8 +10,8 @@ priority-sorted agents list, vega tokens from `report-metadata`) and the former 
 and `ctrl-s ;` the last pane in the current tab. Press again to return (A → B → A).
 Pane history includes mod panes; agent history includes qualified remote addresses
 and ignores shells. Closed targets are skipped; without a previous live target the
-command does nothing. The keys deliver `vega-sidebar:last-agent`,
-`vega-sidebar:last-space` and `vega-sidebar:last-pane` through `nextCommand()`.
+command does nothing. The keys deliver `vega-sidebar.last-agent`,
+`vega-sidebar.last-space` and `vega-sidebar.last-pane` through `nextCommand()`.
 
 History stays in module memory, shared by all sidebar copies on herdr-app 0.1.14+,
 and resets on mod reload or app restart. Renders sample focus; a 300 ms background
