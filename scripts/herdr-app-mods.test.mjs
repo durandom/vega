@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 function load(name, {allowFocus=false}={}) {
   const state = new Map(), storage = new Map(), calls = [], tasks = [], commands = [];
-  let props = {}, rendering = false;
+  let props = {}, rendering = false, background = false;
   function el() {
     const obj={items:[],handlers:{}};let proxy;
     proxy=new Proxy(obj,{get(o,k){
@@ -18,7 +18,7 @@ function load(name, {allowFocus=false}={}) {
       return ()=>proxy;
     }});return proxy;
   }
-  const cx={notify(){},stop_propagation(){calls.push(['stop']);},timer:{every(){}},spawn(f){const p=f(cx);tasks.push(p);return p;}};
+  const cx={notify(){},stop_propagation(){calls.push(['stop']);},timer:{every(){}},sleep(){background=true;return new Promise(()=>{});},spawn(f){background=false;const p=f(cx);if(!background)tasks.push(p);return p;}};
   const api={View:class {},div:el,h_flex:el,v_flex:el,svg:el,image:el,
     InputState:{new(options={}){assert.equal(rendering,false,'input state created in render');let value=options.value??'';return {handlers:{},on(event,f){this.handlers[event]=f;},value:()=>value,set_value:v=>{value=v;},focus(){assert(allowFocus,'focus stolen');calls.push(['focus']);}};}},
     Input:{new:el},theme:()=>({}),shared:k=>state.get(k),setShared:(k,v)=>state.set(k,v),
@@ -27,17 +27,107 @@ function load(name, {allowFocus=false}={}) {
     setAgentOrder:a=>calls.push(['order',a]),
     run:(...a)=>calls.push(['run',...a]),openOverlay:s=>{calls.push(['open',s]);return 'window';},
     closeOverlay:s=>calls.push(['close',s]),notify:s=>calls.push(['toast',s]),
-    nextCommand:()=>new Promise(r=>commands.push(r)),watchFolder:()=>new Promise(()=>{}),
+    nextCommand:()=>{background=true;return new Promise(r=>commands.push(r));},watchFolder:()=>new Promise(()=>{}),
     exec:async (...a)=>{calls.push(['exec',...a]);return {code:0,stdout:'{}'};},
     localStorage:{getItem:k=>storage.get(k)??null,removeItem:k=>storage.delete(k),setItem:(k,v)=>storage.set(k,v)},Date,Map,Set,JSON};
   let code=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
   code=code.replace(/^import .*;\n/gm,'').replace('export default class','globalThis.Mod = class');
   const context=vm.createContext(api);vm.runInContext(code,context);
   const mod=new context.Mod();
-  return {mod,state,storage,calls,cx,api:context,setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
+  return {mod,state,storage,calls,cx,api:context,commands,newCopy:()=>new context.Mod(),setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
 }
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
+
+function navigationFixture() {
+  const h=load('vega-sidebar');
+  let focus=null, liveAgents=['t1','puck/t1','t3'], liveSpaces=['s1','puck/s1','s3'];
+  let livePanes=[{pane:'p1',tab:'tab1'},{pane:'p2',tab:'tab1'},
+    {pane:'mod-pane',tab:'tab1'},{pane:'puck/p1',tab:'puck/tab1'}];
+  const snapshots={t1:{terminal:'t1',space:'s1',tab:'tab1',pane:'p1'},
+    'puck/t1':{terminal:'puck/t1',space:'puck/s1',tab:'puck/tab1',pane:'puck/p1'},
+    t3:{terminal:'t3',space:'s3',tab:'tab3',pane:'p3'}};
+  h.api.focused=()=>focus;
+  h.api.agents=()=>liveAgents.map(address=>({address}));
+  h.api.spaces=()=>liveSpaces.map(id=>({id}));
+  h.api.panes=()=>livePanes;
+  h.api.run=(command,args)=>{
+    h.calls.push(['run',command,args]);
+    if(command==='agent.focus') focus={...snapshots[args.terminal]};
+    if(command==='space.select') focus={...Object.values(snapshots).find(f=>f.space===args.id)};
+    if(command==='pane.focus') focus={...focus,pane:args.pane,terminal:args.pane==='mod-pane'?null:'t1'};
+  };
+  const sample=vm.runInContext('sampleFocus',h.api),last=vm.runInContext('lastFocus',h.api);
+  return {...h,sample,last,focus(f){focus=typeof f==='string'?{...snapshots[f]}:f;sample();},
+    current:()=>focus,gone(){liveAgents=liveAgents.filter(x=>x!=='puck/t1');liveSpaces=liveSpaces.filter(x=>x!=='puck/s1');livePanes=livePanes.filter(x=>x.pane!=='p2');}};
+}
+
+test('navigation MRU updates once per focus, toggles and skips gone agents/spaces',()=>{
+  for(const kind of ['agent','space']) {
+    const h=navigationFixture();
+    h.last(`last-${kind}`);assert.equal(h.calls.length,0,'empty history is a no-op');
+    h.focus('t1');h.sample();h.last(`last-${kind}`);assert.equal(h.calls.length,0,'one entry is a no-op');
+    h.focus('puck/t1');h.last(`last-${kind}`);assert.equal(h.current().terminal,'t1');
+    h.last(`last-${kind}`);assert.equal(h.current().terminal,'puck/t1');
+    h.focus('t3');h.gone();h.last(`last-${kind}`);assert.equal(h.current().terminal,'t1');
+    h.last(`last-${kind}`);assert.equal(h.current().terminal,'t3');
+    h.focus({...h.current(),terminal:'shell'});
+    assert(!vm.runInContext('navigation.agents',h.api).includes('shell'));
+  }
+});
+
+test('last pane remembers each tab, includes mod panes, skips closed panes and toggles',()=>{
+  const h=navigationFixture();h.focus('t1');h.focus({...h.current(),pane:'p2'});
+  h.focus('puck/t1');h.last('last-pane');assert.equal(h.calls.length,0,'no cross-tab jump');
+  h.focus('t1');h.last('last-pane');assert.equal(h.current().pane,'p2');
+  h.last('last-pane');assert.equal(h.current().pane,'p1');
+  h.focus({...h.current(),pane:'mod-pane',terminal:null});h.gone();
+  h.last('last-pane');assert.equal(h.current().pane,'p1');
+  h.last('last-pane');assert.equal(h.current().pane,'mod-pane');
+});
+
+test('sidebar copies share history and handle each broadcast key only once',async()=>{
+  const h=navigationFixture(),other=h.newCopy();
+  h.mod.startNavigation(h.cx);other.startNavigation(h.cx);
+  h.focus('t1');h.focus('puck/t1');
+  for(const resolve of h.commands.splice(0))resolve('last-agent');
+  await new Promise(r=>setImmediate(r));
+  assert.equal(h.calls.length,1);assert.equal(h.current().terminal,'t1');
+  for(const resolve of h.commands.splice(0))resolve('last-agent');
+  await new Promise(r=>setImmediate(r));
+  assert.equal(h.calls.length,2);assert.equal(h.current().terminal,'puck/t1');
+  // If the first copy is hidden/removed, only the other receives the key.
+  const listeners=h.commands.splice(0);listeners[1]('last-agent');
+  await new Promise(r=>setImmediate(r));
+  assert.equal(h.calls.length,3);assert.equal(h.current().terminal,'t1');
+});
+
+test('last navigation keys use mod command argument syntax',()=>{
+  const keys=JSON.parse(fs.readFileSync(new URL('../config/herdr-app/keys.json',import.meta.url),'utf8')).global;
+  for(const [key,command] of [['ctrl-s l','last-agent'],['cmd-;','last-agent'],['ctrl-s shift-l','last-space'],['ctrl-s ;','last-pane']])
+    assert.equal(keys[key],`vega-sidebar:${command}`);
+});
+
+test('background sampling catches focus without renders and shares a cheap polling budget',async()=>{
+  const h=navigationFixture();let now=1000,terminal='t1',reads=0,focusReads=0;
+  const sleeps=[];
+  h.api.Date={now:()=>now};
+  h.api.focused=()=>{focusReads++;return {terminal,space:'s1',tab:'tab1',pane:terminal};};
+  h.api.agents=()=>{reads++;return [{address:'t1'},{address:'puck/t1'}];};
+  const cx={...h.cx,sleep(ms){assert.equal(ms,300);return new Promise(r=>sleeps.push(r));}};
+  cx.spawn=f=>f(cx);
+  h.mod.startNavigation(cx);h.newCopy().startNavigation(cx);
+  assert.equal(focusReads,1,'copies share one poll');assert.equal(reads,1);
+  now+=300;
+  for(const resume of sleeps.splice(0))resume();
+  await new Promise(r=>setImmediate(r));
+  assert.equal(focusReads,2);assert.equal(reads,1,'unchanged focus does not copy inventory');
+  now+=300;terminal='puck/t1';
+  for(const resume of sleeps.splice(0))resume();
+  await new Promise(r=>setImmediate(r));
+  assert.equal(reads,2);
+  assert.deepEqual(Array.from(vm.runInContext('navigation.agents',h.api)),['puck/t1','t1']);
+});
 
 test('new decisions open once, timestamps and waiters do not reopen; stale decisions ignored',async()=>{
   const h=load('vega');const r=row();let rows=[r];

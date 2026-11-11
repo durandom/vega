@@ -4,6 +4,24 @@ Slice 5b of the [hc migration](hc-migration.md) (vega-0h4c.10): what vega shows 
 Slayer acts on it. Decided with the Slayer on 2026-11-07. Background: the herdr TUI sidebar (machines tree,
 priority-sorted agents list, vega tokens from `report-metadata`) and the former dashboard Inbox (preserved at `herdr-tui-final`).
 
+## Last-focus navigation (vega-0h4c.70)
+
+`ctrl-s l` or `cmd-;` toggles the last agent, `ctrl-s shift-l` the last space,
+and `ctrl-s ;` the last pane in the current tab. Press again to return (A → B → A).
+Pane history includes mod panes; agent history includes qualified remote addresses
+and ignores shells. Closed targets are skipped; without a previous live target the
+command does nothing. The keys deliver `vega-sidebar:last-agent`,
+`vega-sidebar:last-space` and `vega-sidebar:last-pane` through `nextCommand()`.
+
+History stays in module memory, shared by all sidebar copies on herdr-app 0.1.14+,
+and resets on mod reload or app restart. Renders sample focus; a 300 ms background
+loop also samples because the API does not guarantee a render for every focus
+change. Copies share the polling budget and only read agent inventory when the
+terminal changes. Broadcast key deliveries are batched for one microtask so only
+one shown sidebar acts; hidden or removed copies cannot strand a retained owner.
+Popup, mail and project-window copies do not participate. Sampling never forces redraws.
+Run `vega config apply herdr-app` to apply the updated mod and keys.
+
 ## Login keychain windows (vega-oiwq)
 
 The `vega` status mod reads vegad's local `keychains.json` registry projection every five seconds

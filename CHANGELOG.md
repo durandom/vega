@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 181 · 2026-11-11
+
+- feature: tmux-style last navigation in the sidebar: `ctrl-s l` or `cmd-;` toggles
+  the last agent, `ctrl-s shift-l` the last space, and `ctrl-s ;` the last pane in
+  the current tab. Run `vega config apply herdr-app` to apply the mod and keys.
+
 ## 180 · 2026-11-10
 
 - migration: deimos is retired and replaced by puck. The built-in inbox-only host default and

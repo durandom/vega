@@ -2,7 +2,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home, nextCommand } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -142,6 +142,52 @@ function duration(ms) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
+// Shared by all copies on herdr-app 0.1.14+. Overlays do not participate.
+const navigation = { agents: [], spaces: [], panes: new Map(), commands: new Map(), sampled: null, polled: 0 };
+function visit(history, id) {
+  if (!id || history[0] === id) return;
+  const index = history.indexOf(id);
+  if (index >= 0) history.splice(index, 1);
+  history.unshift(id);
+}
+function sampleFocus() {
+  const f = focused();
+  if (!f) return;
+  visit(navigation.spaces, f.space);
+  if (f.tab && f.pane) {
+    if (!navigation.panes.has(f.tab)) navigation.panes.set(f.tab, []);
+    visit(navigation.panes.get(f.tab), f.pane);
+  }
+  // The frequent path only reads focused(); copy agent inventory on transitions.
+  if (f.terminal !== navigation.sampled) {
+    navigation.sampled = f.terminal;
+    if (agents().some(a => a.address === f.terminal)) visit(navigation.agents, f.terminal);
+  }
+}
+function lastFocus(command) {
+  sampleFocus();
+  const f = focused();
+  if (!f) return;
+  let history, live, current, action, argument;
+  if (command === "last-agent") {
+    history = navigation.agents; live = new Set(agents().map(a => a.address));
+    current = f.terminal; action = "agent.focus"; argument = "terminal";
+  } else if (command === "last-space") {
+    history = navigation.spaces; live = new Set(spaces().map(s => s.id));
+    current = f.space; action = "space.select"; argument = "id";
+  } else if (command === "last-pane") {
+    history = navigation.panes.get(f.tab) ?? [];
+    live = new Set(panes().filter(p => p.tab === f.tab).map(p => p.pane));
+    current = f.pane; action = "pane.focus"; argument = "pane";
+  } else return;
+  history.splice(0, history.length, ...history.filter(id => live.has(id)));
+  const target = history.find(id => id !== current);
+  if (!target) return;
+  run(action, { [argument]: target });
+  // Capture actual focus, not an optimistic change if the command failed.
+  sampleFocus();
+}
+
 export default class Agents extends View {
   init(_props, cx) {
     if (props()?.mail) {
@@ -204,6 +250,7 @@ export default class Agents extends View {
       return;
     }
     if (props()?.spaceMenu) return;
+    this.startNavigation(cx);
     this.preferences = { projects: {}, views: {} };
     this.activeView = activeView();
     cx.spawn(cx => this.refreshPreferences(cx));
@@ -221,6 +268,36 @@ export default class Agents extends View {
         const r = await exec("cat", [`${home()}/.config/vega/theme.toml`]);
         if (r.code === 0) { this.symbols = parseSymbols(r.stdout); cx.notify(); }
       } catch (_) {}
+    });
+  }
+
+  startNavigation(cx) {
+    // A key is broadcast to shown copies. Collect its promise continuations in
+    // one microtask batch so exactly one acts, even when other copies are hidden
+    // or removed. No retained owner/context can strand command handling.
+    cx.spawn(async cx => {
+      for (;;) {
+        const command = await nextCommand();
+        let delivery = navigation.commands.get(command);
+        if (!delivery) navigation.commands.set(command, delivery = { handled: false });
+        await Promise.resolve();
+        if (!delivery.handled) {
+          delivery.handled = true;
+          navigation.commands.delete(command);
+          lastFocus(command);
+        }
+      }
+    });
+    cx.spawn(async cx => {
+      for (;;) {
+        const now = Date.now();
+        // Share the polling budget across hidden and visible copies. No redraw.
+        if (now - navigation.polled >= 250) {
+          navigation.polled = now;
+          sampleFocus();
+        }
+        await cx.sleep(300);
+      }
     });
   }
 
@@ -1350,6 +1427,7 @@ export default class Agents extends View {
     if (props()?.projectConfig) return this.projectOverlay(t);
     if (props()?.viewMenu) return this.viewMenu(t);
     if (props()?.spaceMenu) return this.spaceMenu(t);
+    sampleFocus();
     const collapsed = narrow();
 
     let list = agents();
