@@ -386,9 +386,35 @@ mod grant_tests {
                 .unwrap();
             receiver.flush().await.unwrap();
             let sender = connect(&url, &sender_seed, "_INBOX_deimos").await;
+            let reply = sender.new_inbox();
+            let mut answers = sender.subscribe(reply.clone()).await.unwrap();
+            // With an active pair grant, a hostile reply must not archive mail.
             sender
-                .publish_with_headers(
+                .publish_with_reply_and_headers(
                     subject("proteus", "w3V:p1", "deimos"),
+                    "_INBOX_proteus.stolen",
+                    headers.clone(),
+                    "hostile".into(),
+                )
+                .await
+                .unwrap();
+            let req = tokio::time::timeout(std::time::Duration::from_secs(2), requests.next())
+                .await
+                .unwrap()
+                .unwrap();
+            crate::respond_quarantined(
+                &receiver,
+                req,
+                "proteus".into(),
+                &async_nats::jetstream::new(receiver.clone()),
+            )
+            .await;
+            let mut check = archive.clone();
+            assert_eq!(check.info().await.unwrap().state.messages, 0);
+            sender
+                .publish_with_reply_and_headers(
+                    subject("proteus", "w3V:p1", "deimos"),
+                    reply,
                     headers.clone(),
                     "answer: 42".into(),
                 )
@@ -399,13 +425,18 @@ mod grant_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let answer = crate::receive_quarantined(
+            crate::respond_quarantined(
+                &receiver,
                 req,
                 "proteus".into(),
-                &async_nats::jetstream::new(receiver),
+                &async_nats::jetstream::new(receiver.clone()),
             )
             .await;
-            let answer: Value = serde_json::from_slice(&answer).unwrap();
+            let answer = tokio::time::timeout(std::time::Duration::from_secs(2), answers.next())
+                .await
+                .unwrap()
+                .unwrap();
+            let answer: Value = serde_json::from_slice(&answer.payload).unwrap();
             assert_eq!(answer["code"], "delivered");
             let consumer = archive
                 .create_consumer(crate::inbox_consumer("proteus", "w3V:p1"))
@@ -440,6 +471,46 @@ mod grant_tests {
                 host: "deimos".into(),
             };
             crate::print_msg(&message, "proteus", Some(&parent), &[], Some(1)).unwrap();
+            // Without a pair grant, validate before writing a human note too.
+            let notes = vega_herdr::notes::Store::local().unwrap();
+            let before = notes.list().len();
+            let reply = sender.new_inbox();
+            let mut answers = sender.subscribe(reply.clone()).await.unwrap();
+            for reply_to in ["_INBOX_proteus.stolen".to_string(), reply] {
+                sender
+                    .publish_with_reply(
+                        subject("proteus", "w9:p9", "deimos"),
+                        reply_to.clone(),
+                        "normal note".into(),
+                    )
+                    .await
+                    .unwrap();
+                let req = tokio::time::timeout(std::time::Duration::from_secs(2), requests.next())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                crate::respond_quarantined(
+                    &receiver,
+                    req,
+                    "proteus".into(),
+                    &async_nats::jetstream::new(receiver.clone()),
+                )
+                .await;
+                if reply_to == "_INBOX_proteus.stolen" {
+                    assert_eq!(notes.list().len(), before);
+                } else {
+                    let answer =
+                        tokio::time::timeout(std::time::Duration::from_secs(2), answers.next())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    assert_eq!(
+                        serde_json::from_slice::<Value>(&answer.payload).unwrap()["code"],
+                        "stored"
+                    );
+                    assert_eq!(notes.list().len(), before + 1);
+                }
+            }
         });
     }
 }

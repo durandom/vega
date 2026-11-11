@@ -28,6 +28,11 @@ fields and extra fields are rejected. A fresh JetStream publish/ack writes only 
 `<sender>.status.keychain` key, without forwarding any caller headers. Replies must be inside the
 sender's `_INBOX_<sender>.>` prefix; arbitrary reply subjects are rejected without publishing.
 Rejections are logged by the command dispatcher, without payloads.
+This reply-prefix check applies to every command kind and to quarantine, before handler
+execution, registry writes, peer delivery or note storage. Missing or foreign reply subjects
+receive no reply: even a denial response could launder the receiver's `allow_responses`
+permission into another inbox, registry key or JetStream API. Supported clients already use
+host-specific inbox prefixes; no rendered authorization change is needed.
 
 After a successful reconcile vegad atomically writes `keychains.json` in the same directory:
 `{at, local, rows: [{host, state, since, at}]}`. This is a small local projection of the registry

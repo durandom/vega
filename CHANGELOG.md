@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 183 · 2026-11-11
+
+- required: upgrade private hosts' vegad to reject command and quarantine replies outside
+  the authenticated sender's inbox. This closes response permission laundering by granted
+  inbox-only hosts; no broker authorization change is required.
+
 ## 182 · 2026-11-11
 
 - feature: `vega post auth-config --retired-host <host>` (repeatable) keeps the admin/viewer

@@ -1405,3 +1405,78 @@ fn lanista_command_relays_host_pins_without_registry_rights() {
             worker.abort();
         });
 }
+
+/// Exercise the daemon response paths with an inbox-only caller's real grants.
+#[test]
+fn response_subjects_cannot_launder_permissions() {
+    use futures_util::StreamExt;
+    let dir = tempfile::tempdir().unwrap();
+    let (admin_seed, admin) = user();
+    let (receiver_seed, receiver) = user();
+    let (corp_seed, corp) = user();
+    let authz = auth::render(
+        &[
+            Entry {
+                host: "proteus".into(),
+                key: receiver,
+            },
+            Entry {
+                host: "puck".into(),
+                key: corp,
+            },
+        ],
+        Some(&admin),
+        &["registry".into()],
+        &["puck".into()],
+        None,
+        &[auth::parse_grant("puck=vega.cmd.proteus.notify.puck").unwrap()],
+        &["puck".into()],
+        &[],
+        None,
+    );
+    let (_server, url) = start(dir.path(), &authz);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let a = connect(&url, &admin_seed, crate::ADMIN_INBOX).await;
+        jetstream::new(a).create_key_value(jetstream::kv::Config {
+            bucket: vega_registry::BUCKET.into(), ..Default::default()
+        }).await.unwrap();
+        let r = connect(&url, &receiver_seed, "_INBOX_proteus").await;
+        let kv = vega_registry::bucket(&r).await.unwrap();
+        kv.put("proteus.beat", "original".into()).await.unwrap();
+        let p = connect(&url, &corp_seed, "_INBOX_puck").await;
+        let mut foreign = r.subscribe("_INBOX_proteus.stolen").await.unwrap();
+        let mut commands = r.subscribe("vega.cmd.proteus.>").await.unwrap();
+        let mut quarantines = r.subscribe("vega.quarantine.proteus.>").await.unwrap();
+        let server = r.clone();
+        let worker = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(req) = commands.next() => { crate::cmd::respond(&server, "proteus", &req).await; }
+                    Some(req) = quarantines.next() => {
+                        crate::respond_quarantined(&server, req, "proteus".into(), &jetstream::new(server.clone())).await;
+                    }
+                    else => break,
+                }
+            }
+        });
+        // Ordered registration barrier on the receiver's connection.
+        r.request("vega.cmd.proteus.shell.proteus", "{}".into()).await.unwrap();
+        for subject in ["vega.cmd.proteus.notify.puck", "vega.quarantine.proteus.invalid.puck"] {
+            // Invalid payload/pane still produces the fixed denial response.
+            p.publish_with_reply(subject, "_INBOX_proteus.stolen", "not-json".into()).await.unwrap();
+            p.publish_with_reply(subject, "$KV.VEGA_REGISTRY.proteus.beat", "not-json".into()).await.unwrap();
+            let normal = p.request(subject, "not-json".into()).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&normal.payload).unwrap()["code"], "denied");
+            assert_eq!(kv.get("proteus.beat").await.unwrap().unwrap().as_ref(), b"original");
+            assert!(tokio::time::timeout(Duration::from_millis(100), foreign.next()).await.is_err());
+            p.publish_with_reply(subject, "$JS.API.STREAM.DELETE.KV_VEGA_REGISTRY", "not-json".into()).await.unwrap();
+            p.request(subject, "not-json".into()).await.unwrap();
+            assert_eq!(kv.get("proteus.beat").await.unwrap().unwrap().as_ref(), b"original");
+        }
+        worker.abort();
+    });
+}

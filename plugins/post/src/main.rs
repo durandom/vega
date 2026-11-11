@@ -1762,6 +1762,26 @@ fn send_quarantine(
     Ok(())
 }
 
+/// Validate before either storing peer mail or publishing an acknowledgement.
+async fn respond_quarantined(
+    client: &async_nats::Client,
+    req: async_nats::Message,
+    host: String,
+    js: &jetstream::Context,
+) {
+    let Some(reply) = req.reply.clone() else {
+        return;
+    };
+    if !quarantine::parse_subject(&req.subject)
+        .is_some_and(|(to, _, from)| to == host && cmd::valid_reply(from, &reply))
+    {
+        log("quarantine: refused reply outside sender inbox");
+        return;
+    }
+    let answer = receive_quarantined(req, host, js).await;
+    let _ = tokio::time::timeout(outage::CALL, client.publish(reply, answer.into())).await;
+}
+
 /// Granted requests use the existing durable inbox archive. The receiver's
 /// publish permission is sufficient; the inbox-only sender gets no new rights.
 async fn receive_quarantined(
@@ -3505,13 +3525,12 @@ async fn serve(
                         None => std::future::pending().await,
                     }
                 } => {
-                    if let Some(reply) = req.reply.clone() {
+                    if req.reply.is_some() {
                         let c = client.clone();
                         let host = host.clone();
                         let js = js.clone();
                         tokio::spawn(async move {
-                            let answer = receive_quarantined(req, host, &js).await;
-                            let _ = tokio::time::timeout(outage::CALL, c.publish(reply, answer.into())).await;
+                            respond_quarantined(&c, req, host, &js).await;
                         });
                     }
                 }

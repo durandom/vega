@@ -56,6 +56,22 @@ fn reply(ok: bool, code: &str, message: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+/// Reply subjects are authority: allow_responses must not delegate a write
+/// outside the authenticated sender's literal inbox namespace.
+pub fn valid_reply(from: &str, reply_to: &str) -> bool {
+    !from.is_empty()
+        && reply_to
+            .strip_prefix(&format!("_INBOX_{from}."))
+            .is_some_and(|tail| {
+                !tail.is_empty()
+                    && tail.split('.').all(|t| {
+                        !t.is_empty()
+                            && t.bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                    })
+            })
+}
+
 /// Daemon command dispatch. Keychain is handled in-process so the trusted
 /// receiver reconstructs the registry write, without forwarding headers.
 pub async fn respond(
@@ -66,20 +82,10 @@ pub async fn respond(
     let Some(reply_to) = request.reply.as_ref() else {
         return reply(false, "denied", "command requires a reply inbox");
     };
-    if let Some((_, "keychain" | "lanista", from)) = parse_subject(&request.subject) {
-        // allow_responses must never turn an attacker-controlled reply
-        // subject into a write elsewhere (including the registry).
-        let prefix = format!("_INBOX_{from}.");
-        if !reply_to.strip_prefix(&prefix).is_some_and(|tail| {
-            !tail.is_empty()
-                && tail.split('.').all(|t| {
-                    !t.is_empty()
-                        && t.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-                })
-        }) {
-            return reply(false, "denied", "relay reply must use the sender inbox");
-        }
+    if !parse_subject(&request.subject)
+        .is_some_and(|(to, _, from)| to == receiver && valid_reply(from, reply_to))
+    {
+        return reply(false, "denied", "relay reply must use the sender inbox");
     }
     let answer = dispatch(client, receiver, &request.subject, &request.payload).await;
     let _ = tokio::time::timeout(
@@ -242,5 +248,30 @@ mod tests {
         assert_eq!(code, 0);
         assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), receipt);
         assert!(HANDLERS.iter().any(|(kind, _)| *kind == "orchestration"));
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    #[test]
+    fn replies_require_literal_tokens_in_the_authenticated_senders_inbox() {
+        for reply in ["_INBOX_puck.nuid", "_INBOX_puck.a_b-C.123"] {
+            assert!(super::valid_reply("puck", reply));
+        }
+        for reply in [
+            "_INBOX_puck",
+            "_INBOX_puck.",
+            "_INBOX_puck..x",
+            "_INBOX_puck.*",
+            "_INBOX_puck.>",
+            "_INBOX_puck.x y",
+            "_INBOX_puck-other.x",
+            "_INBOX_proteus.x",
+            "$KV.VEGA_REGISTRY.puck.beat",
+            "$JS.API.INFO",
+        ] {
+            assert!(!super::valid_reply("puck", reply), "{reply}");
+        }
+        assert!(!super::valid_reply("", "_INBOX_.x"));
     }
 }
