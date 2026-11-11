@@ -77,6 +77,7 @@ fn answers_are_verified_once_and_acknowledged_to_the_uber() {
         &[],
         &[],
         None,
+        &[],
     );
     let (_server, url) = start(dir.path(), &authz);
 

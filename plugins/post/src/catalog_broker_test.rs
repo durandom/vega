@@ -55,6 +55,7 @@ fn catalog_is_put_by_the_writer_and_read_by_direct_get() {
         &[],
         &[],
         Some("ganymede"),
+        &[],
     );
     let (_server, url) = start(dir.path(), &authz);
 

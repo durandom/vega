@@ -363,6 +363,7 @@ mod grant_tests {
             &["deimos".into()],
             &[],
             None,
+            &[],
         );
         let (_server, url) = start(dir.path(), &auth);
         crate::runtime().unwrap().block_on(async {

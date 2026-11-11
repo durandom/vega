@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 182 · 2026-11-11
+
+- feature: `vega post auth-config --retired-host <host>` (repeatable) keeps the admin/viewer
+  read subjects for retired inbox archives without a host key or grants. Remove the host's
+  active key entry and grants; use `--retired-host deimos` to preserve its archive access.
+
 ## 181 · 2026-11-11
 
 - feature: tmux-style last navigation in the sidebar: `ctrl-s l` or `cmd-;` toggles

@@ -197,6 +197,7 @@ mod tests {
                 &[],
                 &[],
                 None,
+                &[],
             );
             let (_server, url) = start(dir.path(), &authz);
             tokio::runtime::Builder::new_current_thread()

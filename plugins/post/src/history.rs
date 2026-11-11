@@ -680,6 +680,7 @@ mod tests {
             &[],
             &[],
             None,
+            &[],
         );
         let (_server, url) = start(&root, &authz);
         // Intercept the real live-loop producer; persist every submitted
@@ -745,6 +746,7 @@ mod tests {
             &[],
             &[],
             None,
+            &[],
         );
         let (_server, url) = start(dir.path(), &authz);
         crate::runtime().unwrap().block_on(async {
@@ -900,6 +902,7 @@ mod tests {
             &[],
             &[],
             None,
+            &[],
         );
         let (_server, url) = start(dir.path(), &authz);
         crate::runtime().unwrap().block_on(async {

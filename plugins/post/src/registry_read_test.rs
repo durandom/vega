@@ -200,6 +200,7 @@ fn registry_read_is_one_key_read_only() {
         &[],
         &reads,
         None,
+        &[],
     );
     let (_server, url) = start(dir.path(), &authz);
 
@@ -389,6 +390,7 @@ fn registry_read_needs_an_inbox_only_host() {
         &[],
         &["deimos=proteus.theme".into()],
         None,
+        &[],
     )
     .unwrap_err();
     assert!(
@@ -407,6 +409,7 @@ fn registry_read_needs_an_inbox_only_host() {
         &[],
         &["deimos=proteus.*".into()],
         None,
+        &[]
     )
     .is_err());
 }
@@ -450,6 +453,7 @@ fn project_pins_cross_hosts_under_rendered_grants() {
         &[],
         &reads,
         None,
+        &[],
     );
     let (_server, url) = start(dir.path(), &authz);
     tokio::runtime::Builder::new_current_thread()
@@ -624,6 +628,7 @@ fn registry_ttl_removal_and_owner_cleanup() {
             &[],
             &[],
             None,
+            &[],
         );
         let (_server, url) = start(dir.path(), &authz);
         tokio::runtime::Builder::new_current_thread()
@@ -870,6 +875,7 @@ fn keychain_command_relays_status_without_registry_rights() {
         &[],
         &[("puck".into(), "proteus.theme".into())],
         None,
+        &[],
     );
     let (_server, url) = start(dir.path(), &authz);
     tokio::runtime::Builder::new_current_thread()
@@ -1152,6 +1158,7 @@ fn lanista_command_relays_host_pins_without_registry_rights() {
         &[],
         &[("puck".into(), "puck.lanista.host".into())],
         None,
+        &[],
     );
     let (_server, url) = start(dir.path(), &authz);
     tokio::runtime::Builder::new_current_thread()

@@ -317,6 +317,9 @@ enum Cmd {
         /// The host that puts the lanista catalog (the builder, e.g. ganymede); every host reads it
         #[arg(long)]
         lanista_writer: Option<String>,
+        /// Retired hosts: retain admin/viewer reads without a host user or grants; repeat
+        #[arg(long)]
+        retired_host: Vec<String>,
     },
     /// Create the archive streams for hosts (needs the admin key)
     #[command(
@@ -493,6 +496,7 @@ fn main() -> ExitCode {
             quarantine,
             registry_read,
             lanista_writer,
+            retired_host,
         }) => auth_config(
             &entries,
             file.as_deref(),
@@ -504,6 +508,7 @@ fn main() -> ExitCode {
             &quarantine,
             &registry_read,
             lanista_writer.as_deref(),
+            &retired_host,
         ),
         Some(Cmd::Provision {
             hosts,
@@ -1120,8 +1125,10 @@ fn auth_config(
     quarantine: &[String],
     registry_read: &[String],
     lanista_writer: Option<&str>,
+    retired_host: &[String],
 ) -> Result<(), Failure> {
     let entries = auth::read_entries(entries, file)?;
+    auth::validate_retired_hosts(&entries, retired_host)?;
     if let Some(h) = quarantine.iter().find(|h| !inbox_only.contains(h)) {
         return Err(Failure::new(
             "usage",
@@ -1207,11 +1214,12 @@ fn auth_config(
             ));
         }
     }
-    if entries.len() > auth::MAX_HOSTS_100GB {
+    let stream_hosts = entries.len() + retired_host.len();
+    if stream_hosts > auth::MAX_HOSTS_100GB {
         eprintln!(
             "warning: {} hosts reserve {} GiB; 100 GiB with history reserves room for at most {} hosts (plus other streams)",
-            entries.len(),
-            entries.len() as i64 * ARCHIVE_MAX_BYTES / (1 << 30),
+            stream_hosts,
+            stream_hosts as i64 * ARCHIVE_MAX_BYTES / (1 << 30),
             auth::MAX_HOSTS_100GB
         );
     }
@@ -1237,6 +1245,7 @@ fn auth_config(
             quarantine,
             &reads,
             lanista_writer,
+            retired_host,
         )
     );
     Ok(())

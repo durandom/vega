@@ -224,6 +224,7 @@ mod tests {
             &[],
             &[],
             None,
+            &[],
         );
         let (_server, url) = start(dir.path(), &authz);
         crate::runtime().unwrap().block_on(async {

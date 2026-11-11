@@ -7,6 +7,14 @@ The admin user may list consumers and read stream info of all hosts, and create 
 Keep --create empty in steady state: a create right on a missing stream lets the admin make it a mirror of
 another host's stream that republishes all mail to the admin.
 
+--retired-host <host> (repeatable): retain exactly the existing admin/viewer read subjects for a retired
+host's VEGA_INBOX_<host> archive, without a host user/nkey or host grants. Remove its host=U... entry
+(including from --file), --inbox-only and all its grants. A host cannot be both active and retired.
+The admin keeps stream info and consumer list; the viewer keeps stream info/message get/direct get
+and consumer list/names/info. Shared VEGA_HISTORY reads stay unchanged. Neither role gains fetch/ack,
+consumer create or write rights. --create archive updates active inboxes only, never retired ones.
+Retired inbox archives still reserve storage; include them in the broker's capacity planning.
+
 Adding a host: config with --create <host>, reload, `vega post provision <host>`, config without --create, reload.
 
 --quarantine <host> (inbox-only hosts only): may publish vega.quarantine.*.*.<host>, request/reply, no stream; the
@@ -31,7 +39,8 @@ Examples:
   vega post auth-config --file hosts.txt --admin UXYZ... --create ganymede
   vega post auth-config --file hosts.txt --admin UXYZ... --inbox-only puck --quarantine puck \
       --registry-read puck=proteus.theme
-  (hosts.txt: host=U... lines, # comments)
+  vega post auth-config --file hosts.txt --admin UXYZ... --viewer UVIEW... --retired-host deimos
+  (hosts.txt: active host=U... lines, # comments)
 
 One-time registry TTL migration: `--create registry-ttl` grants the admin only
 `STREAM.UPDATE.KV_VEGA_REGISTRY`. Run `vega post provision registry --ttl`, then
