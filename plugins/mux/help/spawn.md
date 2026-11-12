@@ -40,6 +40,9 @@ Examples:
 
 --env K=V (repeatable) sets env through herdr's env flags or hc's API environment. Tool shells also
 require the harness's environment policy to pass the variable through.
+On a local host with the toolbox launcher (~/.local/bin/hc-toolbox-shell) the spawn env, --env
+values included, is passed as `env K=V` argv words and shows in `ps`; spawn warns once, naming the
+keys. Keep secrets out of --env there.
 An --env BEADS_ACTOR replaces the lane's. The `env:` line lists the keys, never the values.
 
 A local spawn runs at nice 10 so vegad keeps its pace on a loaded host. TUI renices

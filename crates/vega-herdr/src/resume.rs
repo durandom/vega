@@ -206,8 +206,18 @@ fn quote(s: &str) -> String {
     }
 }
 
-/// `cd <cwd> && K=V ... <harness> <args> <resume>`, typed into the shell.
+/// `cd <cwd> && K=V ... <harness> <args> <resume>`, typed into the shell. The recorded argv is
+/// the harness argv; on a host with the toolbox launcher the line is wrapped here, as spawn does
+/// (`<launcher> env K=V ... <harness> ...`), so the resumed agent runs in the toolbox too.
 pub fn command_line(r: &SpawnRecord, session: &str) -> Result<String, Failure> {
+    command_line_with(r, session, crate::launch::toolbox_launcher().as_deref())
+}
+
+fn command_line_with(
+    r: &SpawnRecord,
+    session: &str,
+    launcher: Option<&str>,
+) -> Result<String, Failure> {
     let mut argv = if r.argv.is_empty() {
         let mut a = vec![r.kind.clone()];
         a.extend(
@@ -222,6 +232,9 @@ pub fn command_line(r: &SpawnRecord, session: &str) -> Result<String, Failure> {
     };
     argv.extend(resume_args(&r.kind, Some(session))?);
     let mut words = vec![];
+    if let Some(l) = launcher {
+        words.extend([quote(l), "env".into()]);
+    }
     for var in &r.env {
         if let Some((k, v)) = var.split_once('=') {
             if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -521,12 +534,12 @@ mod tests {
         let mut r = record("claude", "t1", Some("s1"));
         r.env = vec!["BEADS_ACTOR=proteus/fix".into(), "BAD-KEY=x".into()];
         assert_eq!(
-            command_line(&r, "s1").unwrap(),
+            command_line_with(&r, "s1", None).unwrap(),
             "cd '/work tree' && BEADS_ACTOR=proteus/fix claude --dangerously-skip-permissions --model m1 --resume s1"
         );
         let r = record("codex", "t1", None);
         assert_eq!(
-            command_line(&r, "c1").unwrap(),
+            command_line_with(&r, "c1", None).unwrap(),
             "cd '/work tree' && codex --no-daemon --dangerously-bypass-approvals-and-sandbox -c check_for_update_on_startup=false --model m1 resume c1"
         );
         let mut r = record("pi", "t1", None);
@@ -537,7 +550,7 @@ mod tests {
             "glm".into(),
         ];
         assert_eq!(
-            command_line(&r, "p1").unwrap(),
+            command_line_with(&r, "p1", None).unwrap(),
             "cd '/work tree' && pi --approve --provider zai --model glm --session p1"
         );
         // A recorded launch argv wins over defaults + extra.
@@ -548,9 +561,26 @@ mod tests {
             "shell_environment_policy.inherit=\"all\"".into(),
         ];
         assert_eq!(
-            command_line(&r, "c1").unwrap(),
+            command_line_with(&r, "c1", None).unwrap(),
             r#"cd '/work tree' && codex -c 'shell_environment_policy.inherit="all"' resume c1"#
         );
+    }
+
+    #[test]
+    fn launcher_wraps_the_resume_line_and_leaves_the_record_alone() {
+        let mut r = record("claude", "t1", Some("s1"));
+        r.env = vec!["BEADS_ACTOR=proteus/fix".into()];
+        r.argv = vec!["claude".into(), "--x".into()];
+        assert_eq!(
+            command_line_with(&r, "s1", Some("/h/.local/bin/hc-toolbox-shell")).unwrap(),
+            "cd '/work tree' && /h/.local/bin/hc-toolbox-shell env BEADS_ACTOR=proteus/fix claude --x --resume s1"
+        );
+        assert_eq!(
+            command_line_with(&r, "s1", None).unwrap(),
+            "cd '/work tree' && BEADS_ACTOR=proteus/fix claude --x --resume s1"
+        );
+        // The record keeps the harness argv: no launcher in it.
+        assert_eq!(r.argv, ["claude", "--x"]);
     }
 
     #[test]

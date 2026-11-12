@@ -338,6 +338,26 @@ main session owns the harness upgrade and post-deploy idle-pointer verification.
 Core startup/launchd remains vega-0h4c.25; macOS privacy prompts are documented in
 [onboarding](onboarding.md#first-herdr-core-use-on-macos).
 
+### Toolbox launch of local hc spawns (vega-alc)
+
+The vega binaries are built in the `code` toolbox and can need a newer glibc than the host has, so
+an agent started by `vega mux spawn` or `reopen` in the host's login shell cannot run `vega`,
+`bd` or `git` shims (`GLIBC_2.45 not found`). On a local hc spawn, `hc_spawn::spawn` prefixes the
+agent argv with `~/.local/bin/hc-toolbox-shell` (provisioned by the host, not by this tree) when
+the file exists and is executable; otherwise the argv is unchanged. Remote spawns are unchanged:
+the target host decides its own launch.
+
+`toolbox run` drops everything but a fixed env allowlist, and the launcher only re-injects
+`HC_*`. The spawn environment therefore goes in as `env K=V ...` between the launcher and the
+agent, with empty values kept as `K=`, so `--env K=` still overrides a value the toolbox would inherit. Spawn and reopen share this path. The spawn record keeps the unwrapped harness argv; an in-place
+resume (`vega_herdr::resume::command_line`) wraps its typed line the same way at resume time.
+Consequence: the environment, including any `--env` value, shows in the process argv. No new transport: `vega mux spawn` prints one stderr warning naming
+the `--env` keys (never the values) when the launcher is used.
+Gate reviewers (`plugins/gate/src/start.rs`, `hc_spawn_args`) are local hc spawns too and get the same
+prefix when the launcher exists.
+The nice-10 renice is skipped for a wrapped spawn: `terminal.run`'s `pid` is then the `toolbox` client
+on the host, not the agent in the container.
+
 ### Pinned hc wire contract (vega-0h4c.31)
 
 `crates/vega-herdr/schema/hc-0.1.19.openrpc.json` is a byte-for-byte copy of

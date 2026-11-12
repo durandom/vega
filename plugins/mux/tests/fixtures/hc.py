@@ -59,8 +59,8 @@ if cmd=='run':
  (root/'counter').write_text(i[1:])
  if p.get('on'): i=p['on']+'/'+i
  labels=p['labels']
- assert p['argv'][0]==labels['vega.kind']
- t=terminal({'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':p['argv'][0],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0})
+ assert p['argv'][0]==labels['vega.kind'] or p['argv'][0].endswith('hc-toolbox-shell')
+ t=terminal({'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':labels['vega.kind'],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0})
  ts[i]=t;save()
  if os.environ.get('TEST_UNDELIVERED'): t['first_message']={'sent':False,'reason':'blocked'}
  emit(t)

@@ -915,3 +915,41 @@ fn empty_tui_identity_still_binds_hc_session_before_dispatch() {
     let child = records.iter().find(|v| v["pane"] == "t8").unwrap();
     assert_eq!(child["session"], "eager-session");
 }
+#[test]
+fn spawn_and_reopen_run_the_agent_through_the_toolbox_launcher() {
+    let f = Fixture::new();
+    let dir = f.root().join(".local/bin");
+    fs::create_dir_all(&dir).unwrap();
+    let launcher = dir.join("hc-toolbox-shell");
+    fs::write(&launcher, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+    f.spawn();
+    f.run(&["send", "hc:t8", "hello", "--now"]);
+    success(
+        f.cmd()
+            .env("HC_TERMINAL_ID", "t8")
+            .env("CODEX_THREAD_ID", "session-8")
+            .args(["show", "t8"])
+            .output()
+            .unwrap(),
+    );
+    f.run(&["close", "worker"]);
+    f.run(&["close", "hc:t8"]);
+    f.run(&["reopen", "worker"]);
+    let calls = f.calls();
+    let runs: Vec<_> = calls.iter().filter(|v| v[0] == "run").collect();
+    assert_eq!(runs.len(), 2);
+    for (n, run) in runs.into_iter().enumerate() {
+        let a = run[1]["argv"].as_array().unwrap();
+        assert_eq!(a[0], launcher.to_str().unwrap());
+        assert_eq!(a[1], "env");
+        let agent = a.iter().position(|v| v == "codex").unwrap();
+        // A reopen starts without the original --env.
+        assert_eq!(
+            a[2..agent].iter().any(|v| v == "SPECIAL=a b $literal"),
+            n == 0
+        );
+        // An empty value still overrides what the toolbox would inherit.
+        assert!(a[2..agent].iter().any(|v| v == "HERDR_PANE_ID="));
+    }
+}

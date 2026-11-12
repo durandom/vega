@@ -854,7 +854,9 @@ pub fn spawn_args(
     a
 }
 
-/// hc owns the terminal lifecycle; the task is argv, never shell text.
+/// hc owns the terminal lifecycle; the task is argv, never shell text. With a toolbox
+/// `launcher` (local hosts that have one, vega-alc) the reviewer's `env VEGA_GATE_ROLE=...
+/// <kind>` command runs inside the toolbox: `<launcher> env ...`.
 #[allow(clippy::too_many_arguments)]
 pub fn hc_spawn_args(
     tab: &str,
@@ -864,6 +866,7 @@ pub fn hc_spawn_args(
     task: &str,
     model: &[String],
     space: Option<&str>,
+    launcher: Option<&str>,
 ) -> Vec<String> {
     let mut args: Vec<String> = [
         "run",
@@ -885,12 +888,9 @@ pub fn hc_spawn_args(
     if let Some(space) = space {
         args.extend(["--label".into(), format!("herdr.space={space}")]);
     }
-    args.extend([
-        "--".into(),
-        "env".into(),
-        "VEGA_GATE_ROLE=reviewer".into(),
-        kind.into(),
-    ]);
+    args.push("--".into());
+    args.extend(launcher.map(String::from));
+    args.extend(["env".into(), "VEGA_GATE_ROLE=reviewer".into(), kind.into()]);
     args.extend(
         vega_herdr::launch::default_args(kind)
             .iter()
@@ -1020,6 +1020,8 @@ fn spawn_review(
             &task,
             &model_args(cand, model),
             info["labels"]["herdr.space"].as_str(),
+            // hc_on(None, ..) below starts the reviewer on this host.
+            vega_herdr::launch::toolbox_launcher().as_deref(),
         );
         match vega_herdr::hc_on(
             None,
@@ -1262,6 +1264,7 @@ mod tests {
                 "glm-5.3".into(),
             ],
             None,
+            None,
         );
         assert!(args.ends_with(
             &[
@@ -1284,10 +1287,23 @@ mod tests {
             "task",
             &[],
             None,
+            None,
         );
         assert!(args
             .windows(2)
             .any(|a| a == ["-c", "check_for_update_on_startup=false"]));
+    }
+
+    #[test]
+    fn hc_spawn_wraps_the_reviewer_in_the_toolbox_launcher_when_given() {
+        let args = |l| hc_spawn_args("gate-r", "r", "pi", Path::new("/clone"), "t", &[], None, l);
+        let plain = args(None);
+        let at = plain.iter().position(|a| a == "--").unwrap();
+        assert_eq!(plain[at + 1], "env");
+        let wrapped = args(Some("/h/.local/bin/hc-toolbox-shell"));
+        assert_eq!(wrapped[..=at], plain[..=at]);
+        assert_eq!(wrapped[at + 1], "/h/.local/bin/hc-toolbox-shell");
+        assert_eq!(wrapped[at + 2..], plain[at + 1..]);
     }
 
     #[test]

@@ -210,6 +210,10 @@ pub fn spawn(
         .filter_map(|(k, v)| v.as_str().map(|v| format!("{k}={v}")))
         .filter(|kv| !user.contains(kv))
         .collect();
+    let launcher = machine()
+        .is_none()
+        .then(vega_herdr::launch::toolbox_launcher)
+        .flatten();
     if let Some(p) = prompt {
         args.push(if no_parent && own.is_none() {
             p.into()
@@ -217,6 +221,19 @@ pub fn spawn(
             backend::body(p, handoff(no_parent, mode).0, machine().is_some())?
         });
     }
+    if let Some(w) = visible_env_warning(user, launcher.is_some()) {
+        eprintln!("{w}");
+    }
+    let args = match &launcher {
+        Some(l) => vega_herdr::launch::toolbox_argv(
+            l,
+            launch_env
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|v| (k.as_str(), v))),
+            args,
+        ),
+        None => args,
+    };
     let v = vega_herdr::hc::rpc(
         "terminal.run",
         serde_json::json!({
@@ -229,7 +246,9 @@ pub fn spawn(
         std::time::Duration::from_secs(30),
     )?;
     // Keep the harness as argv[0]. A nice/env wrapper hides its identity.
-    if machine().is_none() {
+    // With the toolbox launcher `pid` is the `toolbox` client on the host, not the agent (that
+    // runs in the container), so renicing it would not slow the agent: skip it.
+    if renice_pid(machine().is_some(), launcher.is_some()) {
         if let Some(pid) = v["pid"].as_u64().filter(|p| *p > 1) {
             let _ = Command::new("renice")
                 .args([AGENT_NICE, "-p", &pid.to_string()])
@@ -414,6 +433,26 @@ fn local_shown_space() -> Result<Option<String>, Failure> {
     shown_space()
 }
 
+/// The launcher forwards the spawn env as `env K=V` argv words, so `--env` values show in `ps`
+/// and `/proc/<pid>/cmdline`. One warning naming the keys (never the values) when that applies.
+fn visible_env_warning(user: &[String], wrapped: bool) -> Option<String> {
+    let keys: Vec<&str> = user
+        .iter()
+        .filter_map(|v| v.split_once('=').map(|(k, _)| k))
+        .collect();
+    (wrapped && !keys.is_empty()).then(|| {
+        format!(
+            "warning: --env values are visible in the process list (the toolbox launcher passes them as argv): {}",
+            keys.join(", ")
+        )
+    })
+}
+
+/// Whether `terminal.run`'s `pid` is the agent: a local spawn the launcher did not wrap.
+fn renice_pid(remote: bool, wrapped: bool) -> bool {
+    !remote && !wrapped
+}
+
 /// `machine.exec` wraps the program's output: base64 `stdout`, its exit `code`.
 fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
     use base64::Engine;
@@ -568,4 +607,26 @@ pub fn resume(pane: &str) -> Result<(), Failure> {
     drop_kept_brief(pane);
     println!("prompt: sent");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_warning_names_keys_not_values_and_only_with_the_launcher() {
+        let user = ["TOKEN=s3cret".to_string(), "EMPTY=".to_string()];
+        let w = visible_env_warning(&user, true).unwrap();
+        assert!(w.contains("TOKEN, EMPTY"), "{w}");
+        assert!(!w.contains("s3cret"));
+        assert_eq!(visible_env_warning(&user, false), None);
+        assert_eq!(visible_env_warning(&[], true), None);
+    }
+
+    #[test]
+    fn renice_skips_remote_and_launcher_wrapped_spawns() {
+        assert!(renice_pid(false, false));
+        assert!(!renice_pid(false, true));
+        assert!(!renice_pid(true, false));
+    }
 }
