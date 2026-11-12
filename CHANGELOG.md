@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 191 · 2026-11-12
+
+- feature: the sidebar hides a project without a UAC when none of its agents or terminals
+  render in its own group and it is not pinned (no more empty "no UAC" headers).
+
 ## 190 · 2026-11-12
 
 - feature: the sidebar lists a sentinel from another project in that project's group only

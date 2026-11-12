@@ -1238,7 +1238,11 @@ export default class Agents extends View {
     const { live, labelsOf, projects: groups, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
     const projects = this.orderedProjects(groups).filter(p => {
       const representative = groups.get(p);
-      return this.matchesView(p, machineOf(representative.address))
+      // A project without a UAC whose agents all render under a parent elsewhere has no rows (vega-0h4c.80).
+      const empty = !uacs.has(p) && !this.preferences?.projects?.[p]?.pinned
+        && !list.some(a => projectOfAgent(a) === p)
+        && !(this.plainTerminals ?? []).some(x => projectOfAgent(x) === p);
+      return !empty && this.matchesView(p, machineOf(representative.address))
         && (!this.visibleSessions || this.preferences?.projects?.[p]?.pinned
           || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a)));
     });

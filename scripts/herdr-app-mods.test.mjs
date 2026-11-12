@@ -940,6 +940,9 @@ test('a child of a project without a UAC stays under its parent',()=>{
   assert(ids.includes('sub-io/gdemo'),'child stays a branch of its parent');
   assert(!ids.includes('ag-io/gdemo'));
   assert(!texts(tree).includes('↑ m'));
+  assert(!projectHeaders(h).includes(`uac-${app}`),'no empty no-UAC group for the child project');
+  h.mod.preferences={projects:{[app]:{pinned:true}}};
+  assert(projectHeaders(h).includes(`uac-${app}`),'a pinned project keeps its header');
 });
 
 test('legacy-only projects stay visible and no-UAC projects retain manual order',()=>{
@@ -947,6 +950,7 @@ test('legacy-only projects stay visible and no-UAC projects retain manual order'
   const all=h.api.terminals();delete all[0].labels['vega.role'];delete all[3].labels['vega.role'];
   all.push({address:'legacy',state:'live',labels:{'vega.project':'legacy'}});
   h.api.terminals=()=>all;
+  const agents=h.api.agents;h.api.agents=()=>[...agents(),{address:'legacy',space:'s',tab:'tb',pane:'legacy',status:'idle',program:{}}];
   h.storage.set('project-order',JSON.stringify([c,b,otherB,a,'legacy']));h.mod.init({},h.cx);
   assert.deepEqual(projectHeaders(h),[c,b,otherB,a,'legacy'].map(id=>`uac-${id}`));
   h.mod.move([c,b,otherB,a,'legacy'],a,c);
