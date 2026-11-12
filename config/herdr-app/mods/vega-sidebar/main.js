@@ -1089,12 +1089,25 @@ export default class Agents extends View {
     run("terminal.peek", { terminal: addr });
   }
 
+  // The vega.project-id of `addr` or its nearest labelled live ancestor.
+  projectLabelOf(addr, seen = new Set()) {
+    const x = this.vegaTerminals?.get(addr);
+    if (!x || seen.has(addr)) return null;
+    return x.labels?.["vega.project-id"] || this.projectLabelOf(x.parent, new Set([...seen, addr]));
+  }
+
+  // A child labelled with another project than its parent leaves the parent's tree (vega-0h4c.75).
+  foreignChild(k) {
+    const own = k.labels?.["vega.project-id"], parent = this.projectLabelOf(k.parent);
+    return Boolean(own && parent && own !== parent);
+  }
+
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
   tree(all, addr, lead = [], visible = null, seen = new Set()) {
     if (seen.has(addr)) return [];
     seen = new Set([...seen, addr]);
     const children = parent => all.filter(k => k.parent === parent && k.state === "live"
-      && !seen.has(k.address) && !k.labels?.["vega.worktree-owner"]);
+      && !seen.has(k.address) && !k.labels?.["vega.worktree-owner"] && !this.foreignChild(k));
     // Promote active grandchildren past hidden idle parents, preserving tree connectors.
     const frontier = (parent, path) => children(parent).flatMap(k => {
       if (path.has(k.address)) return [];
@@ -1263,6 +1276,8 @@ export default class Agents extends View {
         .child(this.status(t, st, true))
         .when(uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(l["vega.uac"] || "u▲c")))
         .child(div().flex_none().text_color(color).child(glyph))
+        .when(!depth && this.foreignChild(this.vegaTerminals.get(a.address) ?? {}), el => el.child(div().flex_none().text_size(11).text_color(t.dim)
+          .tooltip(`Spawned by ${this.vegaTerminals.get(a.address).parent}`).child(`↑ ${this.vegaTerminals.get(a.address).parent.split("/").at(-1)}`)))
         .when(Boolean(name), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(a.status === "idle" ? t.muted : t.foreground).child(name)))
         .child(tokens(a.address, uac))
         .child(div().flex_1())
@@ -1501,7 +1516,7 @@ export default class Agents extends View {
       const seen = new Set([a.address]);
       let parent = this.vegaTerminals.get(a.address)?.parent;
       while (parent && !seen.has(parent) && this.vegaTerminals.get(parent)?.state === "live") {
-        if (listed.has(parent)) return false;
+        if (listed.has(parent) && !this.foreignChild(this.vegaTerminals.get(a.address))) return false;
         seen.add(parent); parent = this.vegaTerminals.get(parent)?.parent;
       }
       return true;

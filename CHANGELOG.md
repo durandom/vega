@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 188 · 2026-11-12
+
+- feature: in the project sidebar a child whose own project differs from its parent's now shows in
+  its own project group with a "↑ parent" hint, not as a branch of the foreign parent. Run
+  `vega config apply herdr-app` to apply the mod.
+
 ## 187 · 2026-11-12
 
 - feature: the project sidebar lists live terminals without an agent (token-burn tui, pdc, a dev

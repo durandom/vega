@@ -908,6 +908,25 @@ test('terminals without an agent list under their project; placeholders, exited 
   assert(ids.includes('term-ganymede/t2t')&&ids.includes('term-ganymede/t2s'),'pinned project keeps them');
 });
 
+test('a child of another project renders in its own project group with a parent hint',()=>{
+  const h=load('vega-sidebar'),vega='github.com/durandom/vega',spell='github.com/b4arena/spellkave';
+  const all=[
+    {address:'proteus/t6p',state:'live',labels:{'vega.role':'uac','vega.project-id':vega,'herdr.space':'s'}},
+    {address:'proteus/t7',state:'live',parent:'proteus/t6p',labels:{'vega.role':'sentinel','vega.project-id':vega,'herdr.space':'s'}},
+    {address:'proteus/t11v',state:'live',parent:'proteus/t6p',labels:{'vega.role':'sentinel','vega.project-id':spell,'herdr.space':'s'}},
+    {address:'ganymede/u',state:'live',labels:{'vega.role':'uac','vega.project-id':spell,'herdr.space':'g'}},
+  ];
+  h.api.terminals=()=>all;
+  h.api.agents=()=>all.map(a=>({...a,space:a.address.startsWith('ganymede')?'ganymede/g':'proteus/s',status:'working',program:{key:'claude'}}));
+  h.mod.init({},h.cx);
+  const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+  assert(ids.includes('sub-proteus/t7'),'same-project child stays a branch');
+  assert(!ids.includes('sub-proteus/t11v'));
+  const order=ids.filter(i=>typeof i==='string'&&/^(uac-|ag-|sub-)/.test(i));
+  assert(order.indexOf('ag-proteus/t11v')>order.indexOf(`uac-${spell}`)&&order.indexOf('ag-proteus/t11v')<order.indexOf(`uac-${vega}`)&&order.indexOf('sub-proteus/t7')>order.indexOf(`uac-${vega}`),'t11v is under spellkave, not vega');
+  assert(texts(tree).includes('↑ t6p'));
+});
+
 test('legacy-only projects stay visible and no-UAC projects retain manual order',()=>{
   const h=load('vega-sidebar'),[a,b,otherB,c]=orderedProjectsFixture(h);
   const all=h.api.terminals();delete all[0].labels['vega.role'];delete all[3].labels['vega.role'];
