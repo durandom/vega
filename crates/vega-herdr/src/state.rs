@@ -979,7 +979,7 @@ pub fn drop_kept_brief(pane: &str) {
 }
 
 /// Durable spawn identity, retained when supervision records are forgotten.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SpawnRecord {
     #[serde(default = "legacy_backend")]
     pub backend: String,
@@ -996,6 +996,15 @@ pub struct SpawnRecord {
     pub tier: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Launch argv without the task (harness first), for an in-place resume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub argv: Vec<String>,
+    /// `K=V` variables vega set at launch, repeated on an in-place resume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<String>,
+    /// Launch time (Unix ms): finds a pi session file started after it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_ms: Option<u64>,
 }
 
 fn legacy_backend() -> String {
@@ -1181,6 +1190,7 @@ mod tests {
             extra: vec!["--model".into(), "chosen".into()],
             tier: Some("budget".into()),
             model: Some("chosen".into()),
+            ..Default::default()
         };
         write(
             &state_file_on("spawns", None, pane),

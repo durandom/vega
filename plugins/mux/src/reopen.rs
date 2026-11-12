@@ -43,6 +43,10 @@ pub fn capture(record: &mut SpawnRecord) {
         {
             record.session = saved.session;
         }
+        // pi exports no session id: its session file names it.
+        if record.session.is_none() && machine().is_none() {
+            record.session = vega_herdr::resume::session_of(record);
+        }
         return;
     }
     if let Ok(v) = herdr(&["pane", "get", &record.pane]) {
@@ -72,25 +76,7 @@ pub fn snapshot(agent: &Value) {
     }
 }
 
-fn resume_args(kind: &str, session: Option<&str>) -> Result<Vec<String>, Failure> {
-    let command = match kind {
-        "codex" => "resume",
-        "claude" => "--resume",
-        _ => return Err(Failure::new(
-            "unsupported_kind",
-            format!("reopen does not support {kind}"),
-            "start a new agent with `vega mux spawn <name> --kind claude|codex --tier balanced`",
-        )),
-    };
-    let session = session.filter(|s| !s.is_empty()).ok_or_else(|| {
-        Failure::new(
-            "no_session",
-            "no agent session was recorded before the pane closed",
-            "start a new agent with `vega mux spawn <name> --kind claude|codex --tier balanced`",
-        )
-    })?;
-    Ok(vec![command.into(), session.into()])
-}
+use vega_herdr::resume::resume_args;
 
 fn find(target: &str, records: Vec<SpawnRecord>) -> Result<SpawnRecord, Failure> {
     // An exact pane takes precedence over a name; names may have been reused.
@@ -115,6 +101,14 @@ fn find(target: &str, records: Vec<SpawnRecord>) -> Result<SpawnRecord, Failure>
     Ok(r)
 }
 
+/// `vega mux reopen <target>...`: each in turn; the first failure stops.
+pub fn run_all(targets: &[String]) -> Result<(), Failure> {
+    for t in targets {
+        run(t)?;
+    }
+    Ok(())
+}
+
 pub fn run(target: &str) -> Result<(), Failure> {
     if machine().is_some() {
         return Err(Failure::new(
@@ -124,6 +118,17 @@ pub fn run(target: &str) -> Result<(), Failure> {
         ));
     }
     let r = find(target, spawn_records())?;
+    // A kept terminal whose agent was lost (reboot) shows a shell: resume in place.
+    if r.backend == "hc" {
+        if let Some((r, session)) = vega_herdr::resume::lost(&r.pane) {
+            vega_herdr::resume::resume_in_place(&r, &session)?;
+            println!(
+                "resumed: {} ({}, session {session}) in place\nhelp: vega mux show {}",
+                r.pane, r.kind, r.pane
+            );
+            return Ok(());
+        }
+    }
     let mut extra = r.extra.clone();
     extra.extend(resume_args(&r.kind, r.session.as_deref())?);
     if !Path::new(&r.cwd).is_dir() {
@@ -444,7 +449,7 @@ mod tests {
             ["--resume", "uuid"]
         );
         assert_eq!(
-            resume_args("pi", Some("uuid")).unwrap_err().code,
+            resume_args("agy", Some("uuid")).unwrap_err().code,
             "unsupported_kind"
         );
         assert_eq!(resume_args("codex", None).unwrap_err().code, "no_session");

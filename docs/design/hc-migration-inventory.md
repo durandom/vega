@@ -353,7 +353,7 @@ Detection caveat: env alone can mislead. If the herdr TUI server is started from
 | sidebar status / tokens (`report-metadata`, TTL, display-agent, title, UAC badge) | `hc label` (no TTL, no title override); rendering only via a herdr-app mod reading `terminals()` labels | gap: needs a vega mod; vegad writes `vega.*` labels (and an hc doc for space-level items like `$upgrade`) |
 | pane metadata (kind, status, cwd, turns) | `hc get/ls`: `status.app/state`, `turn`, `foreground.cwd`, `labels` | covered; repo_key/checkout path: derive from cwd via git |
 | harness session id (`agent_session.value`) for reopen, transcript, gate verdict | not exposed (unknown if `records` ids relate) | gap: take it from the agent's own env (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`) and record it in vega state at first contact |
-| reopen (`vega mux reopen`) | `hc keep` recovers a shell on loss but never reruns the command | gap for harness resume: keep vega's reopen, needs the session id above |
+| reopen (`vega mux reopen`) | `hc keep` recovers a shell on loss but never reruns the command | covered by vega: in-place resume of kept terminals (see "Resume after a reboot" below); closed terminals still respawn |
 | dialog inspect/answer (`mux dialog`, `answer`) | `blocked` status, `hc read`, `hc keys`, `hc send --force` | partly: detection native (`blocked`), classification (which dialog, options) stays vega's `dialog::classify` on `hc read` text |
 | show screen/history | `hc read --lines N` | covered (history reads return screen only while working/blocked/error) |
 | direct paste with footer (`mux send --now`) | `hc send`; hc tags `<hc from="t3 name">` itself unless `notes=false` | covered; footer becomes optional |
@@ -366,6 +366,36 @@ Detection caveat: env alone can mislead. If the herdr TUI server is started from
 | focus / human input events | none in `hc events`; app-side only | gap: a mod that writes focus into an hc doc (`doc.set`, emits `doc` events) |
 | Legacy vegad startup hook | herdr hook retained for active panes; herdr-app mod starts vegad on hc hosts | TUI dashboard/path-menu actions are retired |
 | status stream for vegad | `events.subscribe` (one subscription, status/turn/labels/doc, `missed` resnapshot) | covered (simpler than herdr's per-pane subscriptions) |
+
+### Resume after a reboot (vega-0h4c.72)
+
+After a reboot (or `hc server stop`) hc restores every kept terminal with a login shell: same
+address, name, labels and parent, but the agent is gone. vega resumes it in place.
+
+1. **Record.** A spawn record (`~/.local/state/vega/spawns`) holds `kind`, `cwd`, `session`, and now
+   `argv` (the launch argv without the task) and `env` (the vars vega set: `BEADS_ACTOR`,
+   `SSH_AUTH_SOCK`, ...) plus `started_ms`. `vega uac claim` writes one for the UAC's own hc terminal
+   (hand-started UACs had none): kind from `status.app`, cwd and model/provider flags from the
+   foreground argv, session from `CLAUDE_CODE_SESSION_ID`/`CODEX_THREAD_ID`, for pi the session file
+   the running pi writes (newest in `~/.pi/agent/sessions/--<cwd>--/` whose header `cwd` matches).
+   A pi spawn's session is found later: the first file in that folder started after `started_ms`
+   (later files are other pi runs in that cwd, e.g. game sims). `own_terminal()` keeps refreshing
+   claude/codex ids, so `/clear` or a resume does not leave a stale id.
+2. **Detect.** vegad runs one resume pass per boot (epoch: `kern.boottime` / `/proc/stat btime`,
+   done marker `~/.local/state/vega/resume/epoch`), retried every 30 s until `terminal.list` answers.
+   A candidate is a local live `keep` terminal with a spawn record of the same address and name
+   (backend hc) and a session, whose foreground is a plain idle shell: foreground program is
+   zsh/bash/sh/dash/ksh/fish, its pid is the terminal pid (no child), no harness status.
+3. **Act** per `~/.config/vega/resume.toml` `mode = "offer" | "auto" | "off"` (default offer):
+   - offer: one note for the Slayer (kind `resume`, `cmd = vega mux reopen <t> ...`).
+   - auto: vegad types into each terminal, after re-checking it is still an idle shell:
+     `cd <cwd> && K=V... <argv> <resume>`; resume is `--resume <id>` (claude), `resume <id>` (codex),
+     `--session <id>` (pi). Records without `argv` use `<kind> <default_args> <extra>`.
+4. **By hand.** `vega mux reopen <t>...` resumes a kept terminal whose foreground is an idle shell in
+   place (same command line); a closed terminal still respawns as before.
+
+Limits: an hc core restart without a reboot is not detected (the pinned hc RPC schema has no core
+start time); use `vega mux reopen`. Only the local core; remote machines' vegad resume their own.
 
 ### 3. Suggested slice order (proteus keeps working after each slice)
 

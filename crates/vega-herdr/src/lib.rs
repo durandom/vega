@@ -24,6 +24,7 @@ pub mod pane_state;
 pub mod project;
 pub mod prompt;
 pub mod resets;
+pub mod resume;
 pub mod service_config;
 pub mod socket;
 pub mod state;

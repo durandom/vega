@@ -199,11 +199,12 @@ enum Cmd {
         /// Child: pane id (e.g. hc:t1w, w4C:p1) or its recorded agent name
         target: String,
     },
-    /// Respawn a closed agent in its recorded cwd, resuming its session
+    /// Resume a lost agent in its kept terminal, or respawn a closed one
     #[command(after_help = include_str!("../help/reopen.md"))]
     Reopen {
-        /// Recorded pane id or unique agent name
-        target: String,
+        /// Recorded pane ids or unique agent names
+        #[arg(required = true)]
+        targets: Vec<String>,
     },
     /// Start an agent in the caller's terminal world, without approval prompts
     #[command(
@@ -455,7 +456,7 @@ fn main() -> ExitCode {
         }
         Some(Cmd::Close { target }) => close(&target),
         Some(Cmd::Dismiss { target }) => dismiss(&target),
-        Some(Cmd::Reopen { target }) => reopen::run(&target),
+        Some(Cmd::Reopen { targets }) => reopen::run_all(&targets),
         Some(Cmd::Next { status }) => next::run(&status),
         Some(Cmd::Mode { target, mode }) => set_mode(&target, mode),
         Some(Cmd::Spawn {
@@ -1610,6 +1611,7 @@ fn spawn_inner(
             extra: extra.to_vec(),
             tier: tier.map(String::from),
             model: selection.model.clone(),
+            ..Default::default()
         });
     lineage.pane = pane.clone();
     let saved = reopen::save_best_effort(&lineage);

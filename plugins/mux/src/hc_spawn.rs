@@ -201,6 +201,15 @@ pub fn spawn(
     }
     agent_args.extend(selection.args.clone());
     args.extend(agent_args);
+    // An in-place resume after a reboot repeats this launch (resume.rs).
+    let launch_argv = args.clone();
+    // Only what vega set: explicit --env values are never stored (reopen.md).
+    let resume_env: Vec<String> = launch_env
+        .iter()
+        .filter(|(k, _)| !k.starts_with("TERM") && *k != "COLORTERM")
+        .filter_map(|(k, v)| v.as_str().map(|v| format!("{k}={v}")))
+        .filter(|kv| !user.contains(kv))
+        .collect();
     if let Some(p) = prompt {
         args.push(if no_parent && own.is_none() {
             p.into()
@@ -271,8 +280,12 @@ pub fn spawn(
         extra: selection.args.clone(),
         tier: tier.map(String::from),
         model: selection.model,
+        ..Default::default()
     });
     record.pane = pane.clone();
+    record.argv = launch_argv;
+    record.env = resume_env;
+    record.started_ms = Some(vega_herdr::notes::now_ms());
     let saved = reopen::save_best_effort(&record);
     if let Some(old) = old.filter(|o| saved && o.pane != pane) {
         if let Some(p) = state_file("spawns", &old.pane) {

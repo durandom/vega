@@ -57,6 +57,7 @@ mod reach;
 #[cfg(test)]
 mod registry_read_test;
 mod registry_ttl;
+mod resume;
 mod service;
 mod sidebar;
 mod supervise;
@@ -2596,6 +2597,8 @@ impl Jobs {
             catalog::spawn();
             // PagerDuty: one configured host, independent of the mail relay.
             pagerduty::spawn();
+            // Lost agents after a boot (resume.rs): once per boot.
+            resume::spawn();
             match service::state_dir() {
                 Ok(dir) => upstream::spawn(utx, dir),
                 Err(f) => log(&format!("upgrade check: off ({})", f.message)),
