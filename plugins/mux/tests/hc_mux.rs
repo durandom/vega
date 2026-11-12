@@ -949,8 +949,7 @@ fn spawn_and_reopen_run_the_agent_through_the_toolbox_launcher() {
             a[2..agent].iter().any(|v| v == "SPECIAL=a b $literal"),
             n == 0
         );
-        assert!(a[2..agent]
-            .iter()
-            .all(|v| !v.as_str().unwrap().starts_with("HERDR_PANE_ID")));
+        // An empty value still overrides what the toolbox would inherit.
+        assert!(a[2..agent].iter().any(|v| v == "HERDR_PANE_ID="));
     }
 }

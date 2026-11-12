@@ -103,8 +103,8 @@ Local hc spawns and reopens start the agent through the toolbox launcher
 `~/.local/bin/hc-toolbox-shell` when that file exists and is executable (a host without it, for
 example macOS, starts the agent directly). The host's glibc can be older than the vega binaries
 need, so the agent and its tool shells must run in the toolbox. `toolbox run` passes only a fixed
-environment allowlist, so the spawn environment (including `--env K=V` values; empty values stay
-masks and are not set) is forwarded as `env K=V ...` after the launcher, which re-injects the
+environment allowlist, so the spawn environment (including `--env K=V` values; empty values are
+passed as `K=` and still override) is forwarded as `env K=V ...` after the launcher, which re-injects the
 terminal's `HC_*` identity itself. That environment is therefore part of the agent's process
 argv and visible to other users of the host; keep secrets out of `--env`. Remote (`--machine`)
 spawns are unchanged.

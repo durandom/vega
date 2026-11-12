@@ -343,13 +343,13 @@ Core startup/launchd remains vega-0h4c.25; macOS privacy prompts are documented 
 The vega binaries are built in the `code` toolbox and can need a newer glibc than the host has, so
 an agent started by `vega mux spawn` or `reopen` in the host's login shell cannot run `vega`,
 `bd` or `git` shims (`GLIBC_2.45 not found`). On a local hc spawn, `hc_spawn::spawn` prefixes the
-agent argv with `~/.local/bin/hc-toolbox-shell` (installed by the hc toolbox shell installer) when
+agent argv with `~/.local/bin/hc-toolbox-shell` (provisioned by the host, not by this tree) when
 the file exists and is executable; otherwise the argv is unchanged. Remote spawns are unchanged:
 the target host decides its own launch.
 
 `toolbox run` drops everything but a fixed env allowlist, and the launcher only re-injects
 `HC_*`. The spawn environment therefore goes in as `env K=V ...` between the launcher and the
-agent, with empty values dropped (they mask, not set). Spawn and reopen share this path.
+agent, with empty values kept as `K=`, so `--env K=` still overrides a value the toolbox would inherit. Spawn and reopen share this path.
 Consequences: the environment, including any `--env` value, shows in the process argv; and
 gate reviewers (`plugins/gate/src/start.rs`) still start unwrapped on the host.
 
