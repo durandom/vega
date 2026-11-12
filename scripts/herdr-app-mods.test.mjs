@@ -877,6 +877,37 @@ test('projects survive a missing UAC with orphan sentinels, filters, pins and na
   assert.equal(h.mod.projectGroups(all).projects.get(project).address,'ganymede/new-uac');
 });
 
+test('terminals without an agent list under their project; placeholders, exited and sub-agents stay out',()=>{
+  const h=load('vega-sidebar'),project='github.com/durandom/rally-ng-meta';
+  const fg=(name,argv)=>({name,argv,cwd:'/work/rally'});
+  const lab={'vega.project-id':project,'herdr.space':'s'};
+  const all=[
+    {address:'ganymede/t1',state:'live',labels:{...lab,'vega.role':'uac'}},
+    {address:'ganymede/t2s',state:'live',labels:lab,foreground:fg('token-burn',['token-burn','tui'])},
+    {address:'ganymede/t2t',state:'live',labels:lab,foreground:fg('zsh',['-zsh'])},
+    {address:'ganymede/t3',state:'live',labels:{...lab,'vega.worktree-owner':'t1'},foreground:fg('zsh',['-zsh'])},
+    {address:'ganymede/t4',state:'exited',labels:lab,foreground:fg('pdc',['pdc'])},
+    {address:'ganymede/t5',state:'live',parent:'ganymede/t1',labels:{},foreground:fg('node',['node'])},
+    {address:'ganymede/t6',state:'live',labels:{'herdr.space':'free'},foreground:fg('vite',['vite'])},
+  ];
+  h.api.terminals=()=>all;
+  h.api.agents=()=>[{...all[0],space:'ganymede/s',status:'idle',program:{key:'claude'}}];
+  h.mod.init({},h.cx);
+  let ids=elements(h.render()).map(n=>n.idValue);
+  assert(ids.includes('term-ganymede/t2s'));assert(ids.includes('term-ganymede/t2t'));
+  for(const hidden of ['t3','t4','t5','t1'])assert(!ids.includes(`term-ganymede/${hidden}`),hidden);
+  assert(ids.indexOf('ag-ganymede/t1')<ids.indexOf('term-ganymede/t2s'),'agents come first');
+  assert(texts(h.render()).includes('token-burn'));
+  assert(!JSON.stringify(h.calls.filter(c=>c[0]==='order').at(-1)?.[1]??[]).includes('t2s'),'navigation order stays agents only');
+  elements(h.render()).find(n=>n.idValue==='term-ganymede/t2s').handlers.on_click({},h.cx);
+  h.state.set('vega.hide-inactive',true);
+  ids=elements(h.render()).map(n=>n.idValue);
+  assert(!ids.includes('term-ganymede/t2t'),'Active hides idle shells');
+  h.mod.preferences={projects:{[project]:{pinned:true}}};
+  ids=elements(h.render()).map(n=>n.idValue);
+  assert(ids.includes('term-ganymede/t2t')&&ids.includes('term-ganymede/t2s'),'pinned project keeps them');
+});
+
 test('legacy-only projects stay visible and no-UAC projects retain manual order',()=>{
   const h=load('vega-sidebar'),[a,b,otherB,c]=orderedProjectsFixture(h);
   const all=h.api.terminals();delete all[0].labels['vega.role'];delete all[3].labels['vega.role'];

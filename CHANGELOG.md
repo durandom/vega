@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 187 · 2026-11-12
+
+- feature: the project sidebar lists live terminals without an agent (token-burn tui, pdc, a dev
+  server, a shell) under their project as dim `◇` rows. Active hides idle shells unless the
+  project is pinned. Run `vega config apply herdr-app` to apply the mod.
+
 ## 186 · 2026-11-12
 
 - feature: `vega mux spawn --worktree` leaves one terminal in the new herdr-app space, the agent.

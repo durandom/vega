@@ -1280,6 +1280,28 @@ export default class Agents extends View {
       .tooltip(`Project ${key}`).child(`${glyph} ${n}`)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); action(); });
+    const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "nu", "ksh", "tcsh", "login"]);
+    const programOf = x => {
+      const base = v => v?.split("/").at(-1)?.replace(/^-/, "");
+      return base(x.foreground?.name) || base(x.foreground?.argv?.[0]) || x.program?.key || "terminal";
+    };
+    // Plain shells are noise: under Active only a focused one or one in a pinned project stays.
+    const plainRows = (members, pinned) => members.filter(x => !this.visibleSessions || !SHELLS.has(programOf(x))
+      || x.address === shown || pinned).map(x => {
+      const cwd = x.foreground?.cwd?.split("/").at(-1);
+      const argv = x.foreground?.argv?.join(" ");
+      return h_flex().id(`term-${x.address}`).pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
+        .when(x.address === shown, el => el.bg(t.selected))
+        .cursor_pointer().hover(s => s.bg(t.hover))
+        .tooltip([argv, x.foreground?.cwd].filter(Boolean).join(" · ") || x.address)
+        .on_click(() => x.pane ? run("pane.focus", { pane: x.pane }) : this.peek(x.address))
+        .child(div().flex_none().text_color(C.other_agent).child("◇"))
+        .child(div().min_w(0).flex_shrink_1().truncate().text_color(t.dim).child(programOf(x)))
+        .when(Boolean(cwd) && !SHELLS.has(programOf(x)), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_size(11).text_color(t.dim).child(cwd)))
+        .child(div().flex_1())
+        .child(host(x.address));
+    });
+    const plainOf = (p) => (this.plainTerminals ?? []).filter(x => projectOfAgent(x) === p);
     const out = [];
     for (const p of projects) {
       const gid = `uac-${p}`;
@@ -1342,7 +1364,10 @@ export default class Agents extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => this.openProject(project, cx)))
         .when(!open, el => el.child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim))));
-      if (open) for (const a of members) out.push(...withTree(a));
+      if (open) {
+        for (const a of members) out.push(...withTree(a));
+        out.push(...plainRows(plainOf(p), Boolean(this.preferences?.projects?.[project]?.pinned)));
+      }
     }
     const all_spaces = spaces();
     const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && this.matchesView(null, s.machine || "local")
@@ -1360,6 +1385,7 @@ export default class Agents extends View {
           .child(div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live)] ?? t.dim)
             .child(sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live))));
         for (const a of list.filter(a => a.space === sp.id && !projectOfAgent(a))) out.push(...withTree(a));
+        out.push(...plainRows((this.plainTerminals ?? []).filter(x => x.space === sp.id && !projectOfAgent(x)), false));
       }
     }
     // Agents whose space this window doesn't know yet still show.
@@ -1498,6 +1524,14 @@ export default class Agents extends View {
       if (this.preferences?.projects?.[uac.labels?.["vega.project-id"]]?.pinned
         || this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
     }
+    // Live terminals without an agent (token-burn tui, pdc, a dev server, a shell) list under their
+    // project or space as dim rows. Sub-agent rows, UACs and worktree placeholders are not among them.
+    const agentAddresses = new Set(agents().map(x => x.address));
+    this.plainTerminals = all.filter(x => x.state === "live" && x.foreground && !agentAddresses.has(x.address)
+      && !kids.has(x.address) && !placeholder(x.address) && x.labels?.["vega.role"] !== "uac"
+      && !(list.some(a => a.address === x.address)))
+      .map(x => ({ ...x, space: this.spaceOfTerminal(x) }))
+      .filter(x => this.matchesView(membership.projectOfAgent(x), machineOf(x.address)));
     const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
     list = list.filter(a => this.hasVisibleTree(all, a));
     const projectOrder = this.orderedProjects(membership.projects);
