@@ -234,7 +234,9 @@ pub fn spawn(
         std::time::Duration::from_secs(30),
     )?;
     // Keep the harness as argv[0]. A nice/env wrapper hides its identity.
-    if machine().is_none() {
+    // With the toolbox launcher `pid` is the `toolbox` client on the host, not the agent (that
+    // runs in the container), so renicing it would not slow the agent: skip it.
+    if renice_pid(machine().is_some(), launcher.is_some()) {
         if let Some(pid) = v["pid"].as_u64().filter(|p| *p > 1) {
             let _ = Command::new("renice")
                 .args([AGENT_NICE, "-p", &pid.to_string()])
@@ -431,6 +433,11 @@ fn toolbox_launcher() -> Option<String> {
         .then(|| path.to_string_lossy().into_owned())
 }
 
+/// Whether `terminal.run`'s `pid` is the agent: a local spawn the launcher did not wrap.
+fn renice_pid(remote: bool, wrapped: bool) -> bool {
+    !remote && !wrapped
+}
+
 /// `toolbox run` passes only a fixed env allowlist (the launcher re-injects `HC_*`), so the
 /// spawn env goes in through `env` inside the toolbox. An empty value stays `K=`, so it still
 /// overrides a value the toolbox would inherit.
@@ -608,6 +615,13 @@ pub fn resume(pane: &str) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renice_skips_remote_and_launcher_wrapped_spawns() {
+        assert!(renice_pid(false, false));
+        assert!(!renice_pid(false, true));
+        assert!(!renice_pid(true, false));
+    }
 
     #[test]
     fn toolbox_argv_prefixes_launcher_and_carries_env() {

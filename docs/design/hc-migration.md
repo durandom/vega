@@ -352,6 +352,8 @@ the target host decides its own launch.
 agent, with empty values kept as `K=`, so `--env K=` still overrides a value the toolbox would inherit. Spawn and reopen share this path.
 Consequences: the environment, including any `--env` value, shows in the process argv; and
 gate reviewers (`plugins/gate/src/start.rs`) still start unwrapped on the host.
+The nice-10 renice is skipped for a wrapped spawn: `terminal.run`'s `pid` is then the `toolbox` client
+on the host, not the agent in the container.
 
 ### Pinned hc wire contract (vega-0h4c.31)
 
