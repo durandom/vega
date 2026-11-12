@@ -267,7 +267,9 @@ children remain under their visible parent regardless of those labels.
 
 vegad first resolves the foreground cwd. If no project resolves, it uses that
 terminal's space folder from the local core's `herdr-app` document (`doc.get`),
-without asking the desktop app or inspecting remote paths. Project
+without asking the desktop app or inspecting remote paths; never for a terminal
+whose foreground is its own launch shell (hc keep's recovery shell after a reboot).
+A UAC claim's pane takes the claim's project over either. Project
 attribution never replaces a resolved foreground project with the launch or space
 folder: an agent in rally-coach launched from a vega shell stays in rally-coach.
 Own-terminal metadata likewise prefers `foreground.cwd`, falling back to `cwd`.

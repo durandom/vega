@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 185 · 2026-11-12
+
+- feature: after a reboot, hc terminal labels follow the UAC claims: a UAC terminal keeps its
+  claimed project, and a bare login shell (hc keep's recovery shell) no longer takes a project
+  from its space folder. Upgrade vegad; stale labels clear on the next refresh.
+
 ## 184 · 2026-11-11
 
 - feature: the project sidebar keeps live agents visible after their UAC exits, with a

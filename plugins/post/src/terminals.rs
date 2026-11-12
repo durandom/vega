@@ -51,7 +51,9 @@ pub fn hc_agents(v: &Value) -> Result<Vec<Value>, Failure> {
                 "name": t["name"], "agent": kind, "labels": t["labels"],
                 "agent_status": t["status"]["state"].as_str().unwrap_or("unknown"),
                 "completion_seq": t["turn"], "parent": t["parent"],
-                "cwd": t["foreground"]["cwd"].as_str().or(t["cwd"].as_str()).unwrap_or("")
+                "cwd": t["foreground"]["cwd"].as_str().or(t["cwd"].as_str()).unwrap_or(""),
+                // Its own launch shell in front (also hc keep's recovery shell).
+                "launch_shell": t["pid"].is_u64() && t["foreground"]["pid"] == t["pid"]
             })
         })
         .collect())

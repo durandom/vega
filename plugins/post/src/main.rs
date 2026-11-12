@@ -5196,7 +5196,12 @@ impl Layout {
                 .find(|w| w["workspace_id"] == p["workspace_id"]);
             let cwd = p["cwd"].as_str().unwrap_or_default();
             let mut id = resolve(ws, cwd);
-            if id.is_none() && terminals::is_hc(p["pane_id"].as_str().unwrap_or_default()) {
+            // A bare launch shell names no project of its own: after hc keep's
+            // recovery the space folder is not evidence (vega-0h4c.73).
+            if id.is_none()
+                && p["launch_shell"] != true
+                && terminals::is_hc(p["pane_id"].as_str().unwrap_or_default())
+            {
                 if let Some(folder) = p["space_folder"].as_str().filter(|s| !s.is_empty()) {
                     id = resolve(None, folder);
                     if id.is_some() {
@@ -5214,6 +5219,23 @@ impl Layout {
             let id = resolve(Some(w), "");
             w["schema"] = 2.into();
             w["project"] = id.into();
+        }
+        self
+    }
+
+    /// A UAC claim names its pane's project, whatever the pane's cwd or
+    /// space folder resolves to (vega-0h4c.73).
+    fn apply_claims(mut self, uacs: &[(String, String, i64)]) -> Self {
+        for (key, pane, _) in uacs {
+            if let Some(p) = self
+                .panes
+                .iter_mut()
+                .find(|p| p["pane_id"] == pane.as_str())
+            {
+                p["schema"] = 2.into();
+                p["project"] = key.as_str().into();
+                p["project_name"] = project_display_name(key).into();
+            }
         }
         self
     }
@@ -5664,6 +5686,7 @@ fn report_metadata(
     let live: Vec<String> = d.panes();
     phases.mark("notes");
     let (layout, hc_available) = Layout::read();
+    let layout = layout.apply_claims(&uacs);
     phases.mark("layout");
     log_theme_errors(&sym.errors);
     let projects = vega_bd_sync::store::projects();
@@ -7418,6 +7441,69 @@ mod tests {
         assert!(cmd.contains(&"vega.project=rally-coach".into()));
         assert!(cmd.contains(&"vega.project-id=github.com/team/rally-coach".into()));
         assert!(!cmd.iter().any(|s| s.contains("team/vega")));
+    }
+
+    #[test]
+    fn hc_labels_after_reboot_follow_claims_not_shifted_space_folders() {
+        // ganymede 2026-11-12: hc keep recovered every terminal as a login
+        // shell in ~, and the herdr-app space folders were shifted by one
+        // space, so t2b (spellkave UAC) got rally-ng-meta (vega-0h4c.73).
+        let home = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(other.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(other.path())
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/team/rally-ng-meta.git"
+            ])
+            .status()
+            .unwrap()
+            .success());
+        let shell = |t: &str, pid: u64| {
+            serde_json::json!({"address":t,"state":"live","pid":pid,"cwd":home.path(),
+                "foreground":{"pid":pid,"cwd":home.path(),"argv":["/bin/zsh","-l"]},
+                "status":null,"labels":{"herdr.space":"sp1"}})
+        };
+        let mut panes = terminals::hc_agents(
+            &serde_json::json!({"terminals":[shell("t2b", 10), shell("t28", 11)]}),
+        )
+        .unwrap();
+        for p in &mut panes {
+            p["space_folder"] = serde_json::json!(other.path());
+        }
+        let uacs = vec![(
+            "github.com/team/spellkave".to_string(),
+            "t2b".to_string(),
+            0,
+        )];
+        let layout = Layout {
+            panes,
+            workspaces: vec![],
+            tabs: vec![],
+        }
+        .resolve_projects()
+        .apply_claims(&uacs);
+        let cmd = |pane: &str, uac: bool| {
+            let args = layout.project_token(pane, None).to_vec();
+            hc_metadata_cmd(&layout, &Delivery::default(), pane, uac, args).unwrap()
+        };
+        let uac = cmd("t2b", true);
+        assert!(uac.contains(&"vega.project-id=github.com/team/spellkave".into()));
+        assert!(uac.contains(&"vega.project=spellkave".into()));
+        assert!(uac.contains(&"vega.role=uac".into()));
+        let plain = cmd("t28", false);
+        assert!(plain.contains(&"vega.project-id=".into()), "{plain:?}");
+        assert!(plain.contains(&"vega.project=".into()), "{plain:?}");
+        assert!(plain.contains(&"vega.role=".into()), "{plain:?}");
     }
 
     #[test]
