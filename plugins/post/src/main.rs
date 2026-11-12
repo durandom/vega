@@ -5690,6 +5690,13 @@ fn report_metadata(
     phases.mark("notes");
     let (layout, hc_available) = Layout::read();
     let layout = layout.apply_claims(&uacs);
+    let uber = local_uber_pane();
+    // The Uber row says "engaged" while the claim's window is open (vega.engaged).
+    let uber_engaged = view.is_some_and(|view| {
+        view.live_uber()
+            .filter(|c| Some(&c.pane) == uber.as_ref() && c.host == st::post_host())
+            .is_some_and(|c| view.uber_engaged(&c, vega_ci_watch::unix_now()).on())
+    });
     phases.mark("layout");
     log_theme_errors(&sym.errors);
     let projects = vega_bd_sync::store::projects();
@@ -5832,11 +5839,20 @@ fn report_metadata(
             args.extend(["--clear-token".into(), "mail_since".into()]);
         }
         if terminals::is_hc(&pane) {
+            if uber_engaged && uber.as_deref() == Some(pane.as_str()) {
+                args.extend(["--token".into(), "engaged=yes".into()]);
+            }
             if let Some(cmd) = hc_metadata_cmd(
                 &layout,
                 d,
                 &pane,
-                uacs.iter().any(|(_, p, _)| p == &pane),
+                if uacs.iter().any(|(_, p, _)| p == &pane) {
+                    Some("uac")
+                } else if uber.as_deref() == Some(pane.as_str()) {
+                    Some("uber")
+                } else {
+                    None
+                },
                 args,
             ) {
                 cmds.push(cmd);
@@ -5871,22 +5887,31 @@ fn report_metadata(
     due
 }
 
+/// The pane of this host's own Uber-UAC claim (its claim file is the truth,
+/// docs/design/uber-uac.md §2), if it claims one.
+fn local_uber_pane() -> Option<String> {
+    let file = vega_registry::uber_state::file()?;
+    let claim = vega_registry::uber_state::local(&file, &st::post_host())?;
+    claim["pane"].as_str().map(String::from)
+}
+
 /// Build one hc report from the same snapshot used for project membership.
 /// A failed snapshot is not evidence for clearing metadata. Gate and mux also
-/// own role labels: only an old uac role is ours to clear, and a current claim wins.
+/// own role labels: only an old uac or uber role is ours to clear, and a current
+/// claim (`uac`, `uber`) wins.
 fn hc_metadata_cmd(
     layout: &Layout,
     delivery: &Delivery,
     pane: &str,
-    uac: bool,
+    claim: Option<&str>,
     mut args: Vec<String>,
 ) -> Option<Vec<String>> {
     let metadata = layout.pane(pane)?;
-    if uac {
-        args.extend(["--token".into(), "role=uac".into()]);
+    if let Some(role) = claim {
+        args.extend(["--token".into(), format!("role={role}")]);
     } else if let Some(role) = metadata["labels"]["vega.role"]
         .as_str()
-        .filter(|r| *r != "uac")
+        .filter(|r| !matches!(*r, "uac" | "uber"))
     {
         args.extend(["--token".into(), format!("role={role}")]);
     }
@@ -7440,7 +7465,7 @@ mod tests {
         assert_eq!(layout.panes[0]["cwd"], active.path().to_str().unwrap());
         assert_eq!(layout.panes[0]["project"], "github.com/team/rally-coach");
         let args = layout.project_token("t34", None).to_vec();
-        let cmd = hc_metadata_cmd(&layout, &Delivery::default(), "t34", false, args).unwrap();
+        let cmd = hc_metadata_cmd(&layout, &Delivery::default(), "t34", None, args).unwrap();
         assert!(cmd.contains(&"vega.project=rally-coach".into()));
         assert!(cmd.contains(&"vega.project-id=github.com/team/rally-coach".into()));
         assert!(!cmd.iter().any(|s| s.contains("team/vega")));
@@ -7495,15 +7520,15 @@ mod tests {
         }
         .resolve_projects()
         .apply_claims(&uacs);
-        let cmd = |pane: &str, uac: bool| {
+        let cmd = |pane: &str, role: Option<&str>| {
             let args = layout.project_token(pane, None).to_vec();
-            hc_metadata_cmd(&layout, &Delivery::default(), pane, uac, args).unwrap()
+            hc_metadata_cmd(&layout, &Delivery::default(), pane, role, args).unwrap()
         };
-        let uac = cmd("t2b", true);
+        let uac = cmd("t2b", Some("uac"));
         assert!(uac.contains(&"vega.project-id=github.com/team/spellkave".into()));
         assert!(uac.contains(&"vega.project=spellkave".into()));
         assert!(uac.contains(&"vega.role=uac".into()));
-        let plain = cmd("t28", false);
+        let plain = cmd("t28", None);
         assert!(plain.contains(&"vega.project-id=".into()), "{plain:?}");
         assert!(plain.contains(&"vega.project=".into()), "{plain:?}");
         assert!(plain.contains(&"vega.role=".into()), "{plain:?}");
@@ -7585,22 +7610,26 @@ mod tests {
         let mut delivery = Delivery::default();
         delivery.mail("t7", delivery::Sender::Other);
         delivery.mail("t7", delivery::Sender::Other);
-        let report = |layout: &Layout, uac| {
-            hc_metadata_cmd(layout, &delivery, "t7", uac, project.to_vec()).unwrap()
+        let report = |layout: &Layout, role| {
+            hc_metadata_cmd(layout, &delivery, "t7", role, project.to_vec()).unwrap()
         };
-        let foreign = report(&layout, false);
+        let foreign = report(&layout, None);
         assert!(foreign.contains(&"vega.role=gate-reviewer".into()));
         assert!(foreign.contains(&"vega.project-id=git:own-project".into()));
         assert!(foreign.contains(&"vega.project=own-project".into()));
         assert!(foreign.contains(&"vega.mail=✉ 2".into()));
-        let current = report(&layout, true);
+        let current = report(&layout, Some("uac"));
         assert!(current.contains(&"vega.role=uac".into()));
         assert!(!current.contains(&"vega.role=gate-reviewer".into()));
         layout.panes[0]["labels"]["vega.role"] = "sentinel".into();
-        assert!(report(&layout, false).contains(&"vega.role=sentinel".into()));
+        assert!(report(&layout, None).contains(&"vega.role=sentinel".into()));
         layout.panes[0]["labels"]["vega.role"] = "uac".into();
-        assert!(report(&layout, false).contains(&"vega.role=".into()));
-        assert!(hc_metadata_cmd(&layout, &delivery, "t8", false, vec![]).is_none());
+        assert!(report(&layout, None).contains(&"vega.role=".into()));
+        // The Uber claim writes role=uber; a stale uber role is cleared.
+        assert!(report(&layout, Some("uber")).contains(&"vega.role=uber".into()));
+        layout.panes[0]["labels"]["vega.role"] = "uber".into();
+        assert!(report(&layout, None).contains(&"vega.role=".into()));
+        assert!(hc_metadata_cmd(&layout, &delivery, "t8", None, vec![]).is_none());
     }
 
     #[test]

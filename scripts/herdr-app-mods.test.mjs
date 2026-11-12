@@ -354,6 +354,31 @@ test('UAC projects hold their agents across machines in dragged order; other spa
   assert(h.calls.some(c=>c[0]==='run'&&c[1]==='space.select'&&c[2].id==='sp3'),'a space row selects that space');
 });
 
+test('the Uber-UAC is one row at the top, outside every project group and without a "no UAC" marker',()=>{
+  const h=load('vega-sidebar');
+  const agent=(address,space)=>({address,space_name:'x',space,tab:'tb',pane:address,status:'idle',program:{key:'claude'},seq:1});
+  h.api.spaces=()=>[
+    {id:'sp1',name:'vega',machine:null,branch:null,active:false,tabs:[]},
+    {id:'sp9',name:'uber',machine:null,branch:null,active:false,tabs:[]},
+  ];
+  h.api.agents=()=>[agent('t7','sp1'),agent('t9','sp9')];
+  const uber={'herdr.space':'sp9','vega.host':'♆₈','vega.role':'uber','vega.engaged':'yes','vega.project-id':'github.com/durandom/vega-uber-uac','vega.project':'vega-uber-uac'};
+  h.api.terminals=()=>[
+    {address:'t7',state:'live',labels:{'herdr.space':'sp1','vega.host':'♆₈','vega.role':'uac','vega.project-id':'github.com/team/vega','vega.project':'vega'}},
+    {address:'t9',state:'live',labels:uber},
+  ];
+  h.mod.init({},h.cx);
+  let tree=h.render(),ids=elements(tree).map(n=>n.idValue).filter(i=>typeof i==='string'),text=texts(tree);
+  assert(ids.indexOf('uber-t9')>=0&&ids.indexOf('uber-t9')<ids.indexOf('uac-github.com/team/vega'),'the Uber row leads the project list');
+  assert(!ids.includes('ag-t9')&&!ids.includes('uac-github.com/durandom/vega-uber-uac'),'no agent row and no project group for the Uber');
+  assert(!text.includes('vega-uber-uac')&&!text.includes('no UAC'),'no project name and no marker');
+  assert(text.includes('Über')&&text.includes('engaged'));
+  elements(tree).find(n=>n.idValue==='uber-t9').handlers.on_click({},h.cx);
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='pane.focus'&&c[2].pane==='t9'),'a click focuses the Uber pane');
+  uber['vega.engaged']='';
+  assert(!texts(h.render()).includes('engaged'),'idle Uber shows no engaged marker');
+});
+
 test('mail archive and notification JSON render readable cards and empty/error states',async()=>{
   for(const notes of [false,true]) {
     const h=load('vega-sidebar');h.setProps({mail:'ganymede/t7',notes,overlay:'mail-window'});

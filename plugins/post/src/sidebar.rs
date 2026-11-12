@@ -206,6 +206,7 @@ pub fn hc_labels(pane: &str, args: &[String]) -> Cmd {
         "parent",
         "attention",
         "role",
+        "engaged",
         "uac",
         "notes",
         "decisions",

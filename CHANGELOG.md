@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 192 · 2026-11-12
+
+- feature: the Uber-UAC has its own hc role label (`vega.role=uber`, plus `vega.engaged=yes`
+  while its window is open), kept by vegad from the claim file like the UAC role. The sidebar
+  lists it as one "Über" row at the top; its project label no longer creates a project group
+  or a "no UAC" marker.
+
 ## 191 · 2026-11-12
 
 - feature: the sidebar hides a project without a UAC when none of its agents or terminals

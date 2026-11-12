@@ -64,6 +64,10 @@ serialize on `$XDG_STATE_HOME/vega/uber/claim.lock`; contention returns retryabl
   on its host, the source of truth: `vega uber claim` writes the file and the key, and vegad keeps the key
   equal to the file plus `engaged_at`, the last Slayer capture at or after the claim (`uber_state::published`,
   Engaged window below).
+- **Label and row** (vega-0h4c.81): vegad labels the claimed hc terminal `vega.role=uber` (and
+  `vega.engaged=yes` while engaged) through the UAC role writer, from the host's claim file; a stale
+  `uber` role elsewhere is cleared. The herdr-app sidebar lists it as one row at the top, outside
+  every project group.
 - **Live** = the host's beat is fresh and the pane is alive (as for `remote_uac`). A live claim elsewhere
   refuses with `uber_exists` and the hint `vega uber release in <pane> on <host>`.
 - **Takeover**: a claim whose pane or host is gone is replaced, and the output prints `took_over: <pane> on <host> (gone)`.

@@ -1147,7 +1147,8 @@ export default class Agents extends View {
   // join only a unique project; new terminals always carry vega.project-id.
   projectGroups(all) {
     const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
-    const live = all.filter(x => x.state === "live");
+    // The Uber-UAC is no project's member: its project label opens no group and no "no UAC" marker.
+    const live = all.filter(x => x.state === "live" && x.labels?.["vega.role"] !== "uber");
     const byAddress = new Map(live.map(x => [x.address, x]));
     const labelsOf = address => byAddress.get(address)?.labels ?? {};
     const projects = new Map();
@@ -1323,6 +1324,7 @@ export default class Agents extends View {
     });
     const plainOf = (p) => (this.plainTerminals ?? []).filter(x => projectOfAgent(x) === p);
     const out = [];
+    if (this.uberRow) out.push(this.uberRowView(t, C, host, shown, now));
     for (const p of projects) {
       const gid = `uac-${p}`;
       const uac = uacs.get(p);
@@ -1414,6 +1416,27 @@ export default class Agents extends View {
     return out;
   }
 
+  // The Uber-UAC's row: marker, status, name, "engaged" while its window is open, host. A click
+  // focuses its pane like an agent row (peek without a pane).
+  uberRowView(t, C, host, shown, now) {
+    const { term, agent } = this.uberRow;
+    const l = term.labels ?? {};
+    const a = { ...(agent ?? {}), address: term.address, status: agent ? this.topStatus(agent) : "idle" };
+    const when = agent ? this.since(agent) : 0;
+    const pane = agent?.pane ?? term.pane;
+    return h_flex().id(`uber-${term.address}`).pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
+      .when(term.address === shown, el => el.bg(t.selected))
+      .cursor_pointer().hover(s => s.bg(t.hover))
+      .tooltip(["Uber-UAC", agent?.title].filter(Boolean).join(" · "))
+      .on_click(() => pane ? run("pane.focus", { pane }) : this.peek(term.address))
+      .child(this.status(t, a, true))
+      .child(div().flex_none().font_semibold().text_color(C.uac).child("Über"))
+      .when(l["vega.engaged"] === "yes", el => el.child(div().flex_none().text_size(11).text_color(t.accent).child("engaged")))
+      .child(div().flex_1())
+      .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
+      .child(host(term.address));
+  }
+
   // A top-level row's status: its agent report, done only while unread (seenDone).
   topStatus(a) {
     return seenDone(this.vegaTerminals?.get(a.address), this.listed.get(a.address) ?? a.status);
@@ -1501,6 +1524,10 @@ export default class Agents extends View {
     const all = terminals();
     this.vegaTerminals = new Map(all.map(t => [t.address, t]));
     this.projectUacs = this.projectGroups(all).uacs;
+    // The Uber-UAC lists as one row at the top, outside every project (docs/design/uber-uac.md).
+    const uberTerm = all.find(x => x.state === "live" && x.labels?.["vega.role"] === "uber");
+    this.uberRow = uberTerm ? { term: uberTerm, agent: list.find(a => a.address === uberTerm.address) } : null;
+    list = list.filter(a => a.address !== uberTerm?.address);
     // A worktree's placeholder shell holds the checkout for its sentinel; the TUI never listed it.
     const placeholder = (address) => Boolean(this.vegaTerminals.get(address)?.labels?.["vega.worktree-owner"]);
     list = list.filter(a => !placeholder(a.address));
@@ -1549,7 +1576,7 @@ export default class Agents extends View {
     // project or space as dim rows. Sub-agent rows, UACs and worktree placeholders are not among them.
     const agentAddresses = new Set(agents().map(x => x.address));
     this.plainTerminals = all.filter(x => x.state === "live" && x.foreground && !agentAddresses.has(x.address)
-      && !kids.has(x.address) && !placeholder(x.address) && x.labels?.["vega.role"] !== "uac"
+      && !kids.has(x.address) && !placeholder(x.address) && !["uac", "uber"].includes(x.labels?.["vega.role"])
       && !(list.some(a => a.address === x.address)))
       .map(x => ({ ...x, space: this.spaceOfTerminal(x) }))
       .filter(x => this.matchesView(membership.projectOfAgent(x), machineOf(x.address)));
