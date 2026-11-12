@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 190 · 2026-11-12
+
+- feature: the sidebar lists a sentinel from another project in that project's group only
+  when the project has a UAC; otherwise it stays a branch under the agent that spawned it.
+
 ## 189 · 2026-11-12
 
 - feature: agents lost in a reboot resume in place. hc restores kept terminals with a

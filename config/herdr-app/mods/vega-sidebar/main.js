@@ -1096,10 +1096,11 @@ export default class Agents extends View {
     return x.labels?.["vega.project-id"] || this.projectLabelOf(x.parent, new Set([...seen, addr]));
   }
 
-  // A child labelled with another project than its parent leaves the parent's tree (vega-0h4c.75).
+  // A child labelled with another project than its parent leaves the parent's tree (vega-0h4c.75),
+  // but only into a project with a UAC (the signal behind the "no UAC" marker, vega-0h4c.79).
   foreignChild(k) {
     const own = k.labels?.["vega.project-id"], parent = this.projectLabelOf(k.parent);
-    return Boolean(own && parent && own !== parent);
+    return Boolean(own && parent && own !== parent && this.projectUacs?.has(own));
   }
 
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
@@ -1495,6 +1496,7 @@ export default class Agents extends View {
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     this.vegaTerminals = new Map(all.map(t => [t.address, t]));
+    this.projectUacs = this.projectGroups(all).uacs;
     // A worktree's placeholder shell holds the checkout for its sentinel; the TUI never listed it.
     const placeholder = (address) => Boolean(this.vegaTerminals.get(address)?.labels?.["vega.worktree-owner"]);
     list = list.filter(a => !placeholder(a.address));

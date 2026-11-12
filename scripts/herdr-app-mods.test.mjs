@@ -927,6 +927,21 @@ test('a child of another project renders in its own project group with a parent 
   assert(texts(tree).includes('↑ t6p'));
 });
 
+test('a child of a project without a UAC stays under its parent',()=>{
+  const h=load('vega-sidebar'),meta='github.com/b4arena/rally-ng-meta',app='github.com/b4arena/rally-ng-app';
+  const all=[
+    {address:'io/m',state:'live',labels:{'vega.role':'uac','vega.project-id':meta,'herdr.space':'s'}},
+    {address:'io/gdemo',state:'live',parent:'io/m',labels:{'vega.role':'sentinel','vega.project-id':app,'herdr.space':'s'}},
+  ];
+  h.api.terminals=()=>all;
+  h.api.agents=()=>all.map(a=>({...a,space:'io/s',status:'working',program:{key:'claude'}}));
+  h.mod.init({},h.cx);
+  const tree=h.render(),ids=elements(tree).map(n=>n.idValue);
+  assert(ids.includes('sub-io/gdemo'),'child stays a branch of its parent');
+  assert(!ids.includes('ag-io/gdemo'));
+  assert(!texts(tree).includes('↑ m'));
+});
+
 test('legacy-only projects stay visible and no-UAC projects retain manual order',()=>{
   const h=load('vega-sidebar'),[a,b,otherB,c]=orderedProjectsFixture(h);
   const all=h.api.terminals();delete all[0].labels['vega.role'];delete all[3].labels['vega.role'];
