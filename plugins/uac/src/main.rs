@@ -26,8 +26,8 @@ use serde_json::Value;
 use vega_herdr::lanes;
 use vega_herdr::state::{self as st, parent_of_on, Attention};
 use vega_herdr::{
-    agent_name, cell, collapse_home, herdr, herdr_on, me_line, print_failure, status_counts,
-    status_rank, str_of, Failure, Me,
+    agent_name, cell, collapse_home, herdr_on, me_line, print_failure, status_counts, status_rank,
+    str_of, Failure, Me,
 };
 
 const ROLE: &str = include_str!("../../../docs/design/uac-role.md");
@@ -218,9 +218,9 @@ fn snapshot(machine: Option<&str>) -> Result<Snapshot, Failure> {
     })
 }
 
-/// Labels of the enabled herdr machines; none if the list cannot be read.
+/// Labels of the enabled machines (hc's fleet, else herdr's); none if the list cannot be read.
 fn machines() -> Vec<String> {
-    herdr(&["machine", "list", "--json"])
+    vega_herdr::hc::machines()
         .ok()
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default()
@@ -272,7 +272,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
         .map(|m| {
             let handle = thread::spawn({
                 let m = m.clone();
-                move || snapshot(Some(&m))
+                move || terminal::remote(&m)
             });
             (m, handle)
         })
