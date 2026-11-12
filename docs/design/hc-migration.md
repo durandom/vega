@@ -338,6 +338,21 @@ main session owns the harness upgrade and post-deploy idle-pointer verification.
 Core startup/launchd remains vega-0h4c.25; macOS privacy prompts are documented in
 [onboarding](onboarding.md#first-herdr-core-use-on-macos).
 
+### Toolbox launch of local hc spawns (vega-alc)
+
+The vega binaries are built in the `code` toolbox and can need a newer glibc than the host has, so
+an agent started by `vega mux spawn` or `reopen` in the host's login shell cannot run `vega`,
+`bd` or `git` shims (`GLIBC_2.45 not found`). On a local hc spawn, `hc_spawn::spawn` prefixes the
+agent argv with `~/.local/bin/hc-toolbox-shell` (installed by the hc toolbox shell installer) when
+the file exists and is executable; otherwise the argv is unchanged. Remote spawns are unchanged:
+the target host decides its own launch.
+
+`toolbox run` drops everything but a fixed env allowlist, and the launcher only re-injects
+`HC_*`. The spawn environment therefore goes in as `env K=V ...` between the launcher and the
+agent, with empty values dropped (they mask, not set). Spawn and reopen share this path.
+Consequences: the environment, including any `--env` value, shows in the process argv; and
+gate reviewers (`plugins/gate/src/start.rs`) still start unwrapped on the host.
+
 ### Pinned hc wire contract (vega-0h4c.31)
 
 `crates/vega-herdr/schema/hc-0.1.19.openrpc.json` is a byte-for-byte copy of
