@@ -37,6 +37,36 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{json, Value};
 
+/// The toolbox launcher a host provisions at `~/.local/bin/hc-toolbox-shell` (see
+/// docs/design/hc-migration.md, "Toolbox launch of local hc spawns"), when this host has one
+/// that is executable. The host's glibc can be older than the vega shims need (vega-alc), so
+/// local agents must start inside the toolbox. Shared by spawn, resume and gate reviewers.
+pub fn toolbox_launcher() -> Option<String> {
+    toolbox_launcher_in(Path::new(&env::var("HOME").ok()?))
+}
+
+fn toolbox_launcher_in(home: &Path) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = home.join(".local/bin/hc-toolbox-shell");
+    let meta = fs::metadata(&path).ok()?;
+    (meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .then(|| path.to_string_lossy().into_owned())
+}
+
+/// `toolbox run` passes only a fixed env allowlist (the launcher re-injects `HC_*`), so the
+/// env goes in through `env K=V ...` inside the toolbox, between the launcher and the agent.
+/// An empty value stays `K=`, so it still overrides a value the toolbox would inherit.
+pub fn toolbox_argv<'a>(
+    launcher: &str,
+    env: impl IntoIterator<Item = (&'a str, &'a str)>,
+    agent: Vec<String>,
+) -> Vec<String> {
+    let mut out = vec![launcher.to_string(), "env".to_string()];
+    out.extend(env.into_iter().map(|(k, v)| format!("{k}={v}")));
+    out.extend(agent);
+    out
+}
+
 /// Agent args added by `spawn`, per herdr kind. Spawned agents run without
 /// approval prompts; codex also needs `--no-daemon`, because its shared daemon
 /// keeps the `HERDR_*` env of the pane it first started in, and skips its
@@ -482,6 +512,43 @@ fn git(dir: &str, args: &[&str]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn toolbox_launcher_needs_an_executable_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(super::toolbox_launcher_in(home.path()), None);
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let f = bin.join("hc-toolbox-shell");
+        std::fs::write(&f, "#!/bin/sh\n").unwrap();
+        assert_eq!(super::toolbox_launcher_in(home.path()), None);
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            super::toolbox_launcher_in(home.path()),
+            Some(f.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn toolbox_argv_prefixes_launcher_and_carries_env() {
+        let argv = super::toolbox_argv(
+            "/h/hc-toolbox-shell",
+            [("A", "b c"), ("HERDR_PANE_ID", "")],
+            vec!["claude".into(), "--x".into()],
+        );
+        assert_eq!(
+            argv,
+            [
+                "/h/hc-toolbox-shell",
+                "env",
+                "A=b c",
+                "HERDR_PANE_ID=",
+                "claude",
+                "--x"
+            ]
+        );
+    }
+
     use super::*;
 
     const CONFIG: &str = include_str!("../testdata/codex-config.toml");

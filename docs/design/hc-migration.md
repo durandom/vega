@@ -349,7 +349,8 @@ the target host decides its own launch.
 
 `toolbox run` drops everything but a fixed env allowlist, and the launcher only re-injects
 `HC_*`. The spawn environment therefore goes in as `env K=V ...` between the launcher and the
-agent, with empty values kept as `K=`, so `--env K=` still overrides a value the toolbox would inherit. Spawn and reopen share this path.
+agent, with empty values kept as `K=`, so `--env K=` still overrides a value the toolbox would inherit. Spawn and reopen share this path. The spawn record keeps the unwrapped harness argv; an in-place
+resume (`vega_herdr::resume::command_line`) wraps its typed line the same way at resume time.
 Consequences: the environment, including any `--env` value, shows in the process argv; and
 gate reviewers (`plugins/gate/src/start.rs`) still start unwrapped on the host.
 The nice-10 renice is skipped for a wrapped spawn: `terminal.run`'s `pid` is then the `toolbox` client
