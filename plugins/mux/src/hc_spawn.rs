@@ -221,6 +221,9 @@ pub fn spawn(
             backend::body(p, handoff(no_parent, mode).0, machine().is_some())?
         });
     }
+    if let Some(w) = visible_env_warning(user, launcher.is_some()) {
+        eprintln!("{w}");
+    }
     let args = match &launcher {
         Some(l) => vega_herdr::launch::toolbox_argv(
             l,
@@ -430,6 +433,21 @@ fn local_shown_space() -> Result<Option<String>, Failure> {
     shown_space()
 }
 
+/// The launcher forwards the spawn env as `env K=V` argv words, so `--env` values show in `ps`
+/// and `/proc/<pid>/cmdline`. One warning naming the keys (never the values) when that applies.
+fn visible_env_warning(user: &[String], wrapped: bool) -> Option<String> {
+    let keys: Vec<&str> = user
+        .iter()
+        .filter_map(|v| v.split_once('=').map(|(k, _)| k))
+        .collect();
+    (wrapped && !keys.is_empty()).then(|| {
+        format!(
+            "warning: --env values are visible in the process list (the toolbox launcher passes them as argv): {}",
+            keys.join(", ")
+        )
+    })
+}
+
 /// Whether `terminal.run`'s `pid` is the agent: a local spawn the launcher did not wrap.
 fn renice_pid(remote: bool, wrapped: bool) -> bool {
     !remote && !wrapped
@@ -594,6 +612,16 @@ pub fn resume(pane: &str) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn env_warning_names_keys_not_values_and_only_with_the_launcher() {
+        let user = ["TOKEN=s3cret".to_string(), "EMPTY=".to_string()];
+        let w = visible_env_warning(&user, true).unwrap();
+        assert!(w.contains("TOKEN, EMPTY"), "{w}");
+        assert!(!w.contains("s3cret"));
+        assert_eq!(visible_env_warning(&user, false), None);
+        assert_eq!(visible_env_warning(&[], true), None);
+    }
 
     #[test]
     fn renice_skips_remote_and_launcher_wrapped_spawns() {

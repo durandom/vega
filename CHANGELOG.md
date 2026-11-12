@@ -11,7 +11,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   when that executable exists, so agents and their tool shells run in the toolbox whose glibc the vega
   binaries need (vega-alc). Hosts without the launcher, and remote `--machine` spawns, are unchanged.
   The spawn environment, including `--env` values, is forwarded as `env K=V` and therefore shows in the
-  agent's process argv: keep secrets out of `--env`. Resumed agents and local gate reviewers start through the launcher too.
+  agent's process argv: keep secrets out of `--env`; spawn warns once with the keys. Resumed agents and local gate reviewers start through the launcher too.
 
 ## 189 · 2026-11-12
 

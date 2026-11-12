@@ -53,6 +53,7 @@ Every CLI follows AXI (agent-ergonomic output, TOON on stdout) with the deviatio
 socket and the herdr pane identity (`HERDR_PANE_ID`, `HERDR_SOCKET_PATH`) in the tool shell
 environment policy, including with project `inherit = "core"`.
 `--env SSH_AUTH_SOCK=...` and explicit Codex config arguments override the default;
+with the toolbox launcher on a local host, `--env` values show in the process list and spawn warns once;
 see [spawn help](plugins/mux/help/spawn.md) for policy filters and remote paths.
 
 ## Install

@@ -351,7 +351,8 @@ the target host decides its own launch.
 `HC_*`. The spawn environment therefore goes in as `env K=V ...` between the launcher and the
 agent, with empty values kept as `K=`, so `--env K=` still overrides a value the toolbox would inherit. Spawn and reopen share this path. The spawn record keeps the unwrapped harness argv; an in-place
 resume (`vega_herdr::resume::command_line`) wraps its typed line the same way at resume time.
-Consequence: the environment, including any `--env` value, shows in the process argv.
+Consequence: the environment, including any `--env` value, shows in the process argv. No new transport: `vega mux spawn` prints one stderr warning naming
+the `--env` keys (never the values) when the launcher is used.
 Gate reviewers (`plugins/gate/src/start.rs`, `hc_spawn_args`) are local hc spawns too and get the same
 prefix when the launcher exists.
 The nice-10 renice is skipped for a wrapped spawn: `terminal.run`'s `pid` is then the `toolbox` client
