@@ -173,9 +173,6 @@ pub fn spawn(
     let mut labels = serde_json::json!({
         "vega.kind":kind, "vega.harness":kind, "vega.mode":mode.as_str(), "vega.role":"sentinel"
     });
-    if let Some(p) = &placeholder {
-        labels["vega.worktree-placeholder"] = p.clone().into();
-    }
     if let Some(s) = space {
         labels["herdr.space"] = s.into();
     }
@@ -241,8 +238,19 @@ pub fn spawn(
             )
         })?
         .to_string();
+    // The agent is now in the space, so the shell that space.new made is
+    // surplus: remove it so the agent is the space's only terminal. Removing
+    // it earlier would close the space. Failure leaves a harmless extra shell.
     if let Some(p) = &placeholder {
-        hc_local(&["label", p, &format!("vega.worktree-owner={pane}")])?;
+        for verb in ["kill", "rm"] {
+            if let Err(f) = hc_local(&[verb, p]) {
+                eprintln!(
+                    "warning: cannot {verb} the space's placeholder shell {p} ({})",
+                    f.message
+                );
+                break;
+            }
+        }
     }
     let mut record = old.cloned().unwrap_or_else(|| SpawnRecord {
         backend: "hc".into(),

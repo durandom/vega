@@ -623,9 +623,19 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
     let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
     assert_eq!(run["cwd"], tree.to_str().unwrap());
     assert_eq!(run["labels"]["herdr.space"], "s2");
-    assert_eq!(run["labels"]["vega.worktree-placeholder"], "t0");
+    assert!(run["labels"].get("vega.worktree-placeholder").is_none());
     assert_eq!(run["labels"]["vega.harness"], "codex");
     let worker = run["name"].as_str().unwrap();
+    // The space.new shell goes once the agent is in the space: one terminal left.
+    let verbs: Vec<_> = calls.iter().map(|v| v[0].as_str().unwrap()).collect();
+    let at = |verb: &str, t: &str| calls.iter().position(|v| v[0] == verb && v[1] == t);
+    let (killed, removed) = (at("kill", "t0").unwrap(), at("rm", "t0").unwrap());
+    let ran = verbs.iter().position(|v| *v == "run").unwrap();
+    assert!(ran < killed && killed < removed, "{verbs:?}");
+    let left: Value =
+        serde_json::from_str(&fs::read_to_string(f.root().join("terminals.json")).unwrap())
+            .unwrap();
+    assert_eq!(left.as_object().unwrap().len(), 1, "{left}");
     f.run(&["close", worker]);
     let terminals: Value =
         serde_json::from_str(&fs::read_to_string(f.root().join("terminals.json")).unwrap())

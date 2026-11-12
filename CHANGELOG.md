@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 186 · 2026-11-12
+
+- feature: `vega mux spawn --worktree` leaves one terminal in the new herdr-app space, the agent.
+  The shell herdr-app makes for the space is removed once the agent runs; no migration needed.
+
 ## 185 · 2026-11-12
 
 - feature: after a reboot, hc terminal labels follow the UAC claims: a UAC terminal keeps its
