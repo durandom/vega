@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 204 · 2026-11-13
+
+- feature: the vega tab bar and pane headers use stock 0.1.15 forks with static working dots.
+- unit: apply `herdr-app.vega-tabs` and `herdr-app.vega-pane` before `herdr-app.layouts`
+  (or apply the `herdr-app` group) to load the forks. `herdr-app.profiles` now skips hosts
+  without a herdr-app home.
+
 ## 203 · 2026-11-13
 
 - feature: working agents in the vega sidebar use a static orange status dot, including child and

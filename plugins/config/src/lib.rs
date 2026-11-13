@@ -92,12 +92,14 @@ pub enum Unit {
     HerdrAppMods,
     HerdrAppSidebar,
     HerdrAppInbox,
+    HerdrAppTabs,
+    HerdrAppPane,
     HerdrAppLayouts,
     HerdrAppProfiles,
 }
 
 impl Unit {
-    pub const ALL: [Unit; 22] = [
+    pub const ALL: [Unit; 24] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -120,6 +122,8 @@ impl Unit {
         Unit::HerdrAppInbox,
         Unit::HerdrAppSidebar,
         Unit::HerdrAppMods,
+        Unit::HerdrAppTabs,
+        Unit::HerdrAppPane,
         Unit::HerdrAppLayouts,
         Unit::HerdrAppProfiles,
         Unit::HerdrAppSettings,
@@ -147,6 +151,8 @@ impl Unit {
             Unit::HerdrAppMods => "herdr-app.mods",
             Unit::HerdrAppSidebar => "herdr-app.vega-sidebar",
             Unit::HerdrAppInbox => "herdr-app.vega-inbox",
+            Unit::HerdrAppTabs => "herdr-app.vega-tabs",
+            Unit::HerdrAppPane => "herdr-app.vega-pane",
             Unit::HerdrAppLayouts => "herdr-app.layouts",
             Unit::HerdrAppProfiles => "herdr-app.profiles",
         }
@@ -175,6 +181,8 @@ impl Unit {
             Unit::HerdrAppMods => "~/.config/herdr-app/mods/vega/",
             Unit::HerdrAppSidebar => "~/.config/herdr-app/mods/vega-sidebar/",
             Unit::HerdrAppInbox => "~/.config/herdr-app/mods/vega-inbox/",
+            Unit::HerdrAppTabs => "~/.config/herdr-app/mods/vega-tabs/",
+            Unit::HerdrAppPane => "~/.config/herdr-app/mods/vega-pane/",
             Unit::HerdrAppLayouts => "~/.config/herdr-app/layouts/vega.json",
             Unit::HerdrAppProfiles => "~/.config/herdr-app-<name>/",
         }
@@ -188,7 +196,11 @@ impl Unit {
             | Unit::HerdrAppKeys
             | Unit::HerdrAppLayouts
             | Unit::HerdrAppProfiles => "whole file",
-            Unit::HerdrAppMods | Unit::HerdrAppSidebar | Unit::HerdrAppInbox => "whole folder",
+            Unit::HerdrAppMods
+            | Unit::HerdrAppSidebar
+            | Unit::HerdrAppInbox
+            | Unit::HerdrAppTabs
+            | Unit::HerdrAppPane => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
             Unit::ClaudeHooks => "plugin + legacy hook migration",
@@ -215,6 +227,8 @@ impl Unit {
                 | Unit::HerdrAppMods
                 | Unit::HerdrAppSidebar
                 | Unit::HerdrAppInbox
+                | Unit::HerdrAppTabs
+                | Unit::HerdrAppPane
                 | Unit::HerdrAppLayouts
                 | Unit::HerdrAppProfiles
         )
@@ -243,6 +257,8 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
             Unit::HerdrAppMods,
             Unit::HerdrAppSidebar,
             Unit::HerdrAppInbox,
+            Unit::HerdrAppTabs,
+            Unit::HerdrAppPane,
             Unit::HerdrAppLayouts,
             Unit::HerdrAppProfiles,
         ],
@@ -663,6 +679,8 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
         Unit::HerdrAppMods
         | Unit::HerdrAppSidebar
         | Unit::HerdrAppInbox
+        | Unit::HerdrAppTabs
+        | Unit::HerdrAppPane
         | Unit::HerdrAppLayouts => herdr_app::plan(ctx, unit),
         Unit::HerdrAppKeys => {
             if let Some(p) = need_herdr_app(env) {
@@ -1033,7 +1051,12 @@ fn apply_inner(
     }
     if matches!(
         unit,
-        Unit::HerdrAppMods | Unit::HerdrAppSidebar | Unit::HerdrAppInbox | Unit::HerdrAppLayouts
+        Unit::HerdrAppMods
+            | Unit::HerdrAppSidebar
+            | Unit::HerdrAppInbox
+            | Unit::HerdrAppTabs
+            | Unit::HerdrAppPane
+            | Unit::HerdrAppLayouts
     ) {
         return herdr_app::apply(ctx, unit, &plan, evidence);
     }

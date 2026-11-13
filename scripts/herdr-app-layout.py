@@ -67,6 +67,18 @@ def generate(app_home, version):
     # The vega mod draws the status line itself (the shipped one minus the palette hint).
     children, index = anchors[0]
     children[index]["content"] = {"mod": "vega"}
+    # Also covers the pane header nested inside the active-tab content.
+    def static_status_mods(value):
+        if isinstance(value, dict):
+            if value.get("mod") in ("tabs", "pane"):
+                value["mod"] = "vega-" + value["mod"]
+            for child in value.values():
+                static_status_mods(child)
+        elif isinstance(value, list):
+            for child in value:
+                static_status_mods(child)
+
+    static_status_mods(tree)
     tree["cloned_from"] = {"name": "main", "version": version}
     tree["vega_source"] = {
         "installed_hash": fingerprint,

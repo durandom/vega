@@ -47,6 +47,33 @@ function load(name, {allowFocus=false}={}) {
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
 
+test('stock tabs and pane forks render static themed working dots and keep actions',()=>{
+  const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
+  for(const name of ['vega-tabs','vega-pane']) {
+    const h=load(name);
+    h.api.theme=()=>({working:'#ffaa00',blocked:'#ff0000',done:'#00ff00'});
+    h.api.panes=()=>[{pane:'p1',tab:'tb1',cwd:'/scratch',status:'working',program:{name:'Agent',agent:true}}];
+    h.api.spaces=()=>[{id:'s1',active:true,tabs:[{id:'tb1',name:'Work',active:true,status:'working'}]}];
+    h.setProps({pane:'p1'});
+    h.mod.init();
+    const tree=h.render(),all=nodes(tree);
+    assert(all.some(n=>n.bgValue==='#ffaa00'),'working dot uses theme.working');
+    assert(!all.some(n=>Object.hasOwn(n,'spinValue')),'no status animation');
+    if(name==='vega-tabs') {
+      all.find(n=>n.idValue==='close-tb1').handlers.on_click({},h.cx);
+      assert(h.calls.some(c=>c[0]==='run'&&c[1]==='tab.close'&&c[2].id==='tb1'));
+    } else {
+      tree.handlers.on_click();
+      assert(h.calls.some(c=>c[0]==='run'&&c[1]==='pane.focus'&&c[2].pane==='p1'));
+      h.mod.hovered=true;
+      nodes(h.render()).find(n=>n.idValue==='ph-r-p1').handlers.on_click({},h.cx);
+      assert(h.calls.some(c=>c[0]==='run'&&c[1]==='pane.split'&&c[2].pane==='p1'));
+    }
+    const source=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
+    assert(!/\.(spin|frames|loop)\(/.test(source));
+  }
+});
+
 function navigationFixture() {
   const h=load('vega-sidebar');
   let focus=null, liveAgents=['t1','puck/t1','t3'], liveSpaces=['s1','puck/s1','s3'];

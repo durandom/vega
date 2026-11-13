@@ -60,6 +60,17 @@ else:
         );
         String::from_utf8(out.stdout).unwrap()
     };
+    let skipped = command(
+        env!("CARGO_BIN_EXE_vega-config"),
+        &["apply", "herdr-app.profiles"],
+    );
+    assert!(skipped.contains("skipped"));
+    assert!(
+        !d.path().join("calls").exists(),
+        "skip must not invoke the app"
+    );
+    assert!(!config.join("herdr-app-status").exists());
+    fs::create_dir_all(config.join("herdr-app")).unwrap();
     command(
         env!("CARGO_BIN_EXE_vega-config"),
         &["apply", "herdr-app.profiles"],

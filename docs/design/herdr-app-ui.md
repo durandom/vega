@@ -13,6 +13,8 @@ names are unique across groups. Legacy flat `[[terminals]]` remains supported;
 a profile cannot mix flat terminals and groups. The personal
 `herdr-app.profiles` config unit resolves embedded defaults and local overrides
 under `$XDG_CONFIG_HOME/vega/config`, and writes `$XDG_CONFIG_HOME/herdr-app-<name>`.
+Like the other herdr-app units, it skips hosts without `$XDG_CONFIG_HOME/herdr-app`
+before reading profile sources or running mod checks (only proteus uses the app).
 Mod folders come from the same sources (local third-party folders are supported).
 Settings overrides merge into the main settings source. Only a missing `shared.json`
 is seeded with the selected layout and `frame.welcomed = "finished"`; running app

@@ -202,6 +202,9 @@ pub fn build_tabs(
 }
 
 pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
+    if let Some(p) = crate::need_herdr_app(&ctx.env) {
+        return Ok(p);
+    }
     let mut plan = Plan::default();
     for (file, src) in list(&ctx.env)? {
         let name = file.trim_end_matches(".toml");
@@ -403,6 +406,26 @@ mod tests {
         }
     }
     #[test]
+    fn profiles_skip_without_app_home_before_reading_sources_or_checking_mods() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = ctx(temp.path());
+        let local = sources::local_dir(&ctx.env).join("herdr-app/profiles");
+        fs::create_dir_all(&local).unwrap();
+        fs::write(local.join("status.toml"), "invalid profile").unwrap();
+        let p = plan(&ctx).unwrap();
+        assert!(p.skip.as_ref().unwrap().contains("herdr-app not set up"));
+        assert!(p.files.is_empty());
+        assert!(matches!(
+            crate::apply(&ctx, Unit::HerdrAppProfiles, &BTreeSet::new()),
+            Outcome::Skipped(_)
+        ));
+        assert!(!home(&ctx.env, "status").unwrap().exists());
+        // A configured app still reports invalid sources rather than hiding them.
+        fs::create_dir_all(crate::herdr_app::home(&ctx.env)).unwrap();
+        assert!(plan(&ctx).is_err());
+    }
+
+    #[test]
     fn profile_apply_is_isolated_idempotent_and_preserves_shared_state() {
         let temp = tempfile::tempdir().unwrap();
         let ctx = ctx(temp.path());
@@ -533,6 +556,7 @@ optional = true
         use std::os::unix::fs::PermissionsExt;
         let temp = tempfile::tempdir().unwrap();
         let mut ctx = ctx(temp.path());
+        fs::create_dir_all(crate::herdr_app::home(&ctx.env)).unwrap();
         let local = sources::local_dir(&ctx.env);
         fs::create_dir_all(local.join("herdr-app/profiles")).unwrap();
         fs::create_dir_all(local.join("herdr-app/mods/third-party")).unwrap();

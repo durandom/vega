@@ -45,6 +45,23 @@ class GeneratorTest(unittest.TestCase):
             self.assertIn("anchor", reply.stdout)
             self.assertEqual(output.read_text(), "previous reviewed output")
 
+    def test_tab_and_nested_pane_header_use_static_forks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "layouts").mkdir()
+            main = {"type": "column", "children": [
+                {"id": "status", "content": {"mod": "workspace-status"}},
+                {"id": "agents", "content": {"mod": "agents"}},
+                {"id": "spaces", "content": {"mod": "spaces"}},
+                {"id": "sidebar-footer"},
+                {"id": "tabs", "content": {"mod": "tabs"}},
+                {"content": {"tab": "active", "pane": {"header": {"content": {"mod": "pane"}}}}}]}
+            (home / "layouts/main.json").write_text(json.dumps(main))
+            (home / "installed.json").write_text('{"layout:main":{"json":"hash"}}')
+            result = json.loads(generator.generate(home, "0.1.15"))
+            self.assertEqual(result["children"][2]["content"]["mod"], "vega-tabs")
+            self.assertEqual(result["children"][3]["content"]["pane"]["header"]["content"]["mod"], "vega-pane")
+
 
 if __name__ == "__main__":
     unittest.main()

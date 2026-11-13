@@ -73,9 +73,9 @@ reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units
 
 ### Vega layout and startup mod (vega-0h4c.13)
 
-`herdr-app.mods`, `herdr-app.vega-sidebar` and `herdr-app.vega-inbox` each replace their
-whole mod folder from two source files; local overrides
-resolve per file. It stages both files together and requires the installed `herdr-app check` to pass
+`herdr-app.mods`, `herdr-app.vega-sidebar`, `herdr-app.vega-inbox`, `herdr-app.vega-tabs`
+and `herdr-app.vega-pane` each replace their whole mod folder, including owned assets; local overrides
+resolve per file. It stages the files together and requires the installed `herdr-app check` to pass
 before touching the target. A missing checker or a failed check reports `rejected`. Replacement moves
 the old folder, including stale files, to `~/.config/herdr-app/.vega-mod.<name>-bak`; other mods stay
 untouched. `gpui-kit.d.ts` and `jsconfig.json` (editor typings the app writes into every mod folder) are app-owned:
@@ -87,19 +87,22 @@ Shipped layouts are replaced on every app start and reject structural changes, s
 maintained by vega. `vega config` compares its `cloned_from.version` with `herdr-app --version` and
 its `vega_source.installed_hash` with `installed.json["layout:main"]["json"]`. A changed or
 missing fingerprint reports drift, even within the same app version. The agents block uses
-the vega-owned clone; other shipped mod references remain upstream-owned.
+the vega-owned clone. Tabs and pane headers use `vega-tabs` and `vega-pane`, minimal forks of
+stock 0.1.15 with static `theme.working` dots instead of animated spinners. Each fork's `UPSTREAM.md`
+records source hashes for later rebases; other shipped mod references remain upstream-owned.
 
 For explicit maintenance, run `python3 scripts/herdr-app-layout.py --write`, review the generated
 diff and commit `config/herdr-app/layouts/vega.json`. Without `--write`, the script previews provenance.
 It reads the installed `layouts/main.json`, puts the vega mod into the unique `status` block, replaces
-the unique agents reference with vega-sidebar, removes the `spaces` list and the `sidebar-footer`, and records app version,
+the unique agents reference with vega-sidebar, replaces tabs and pane header references with the
+static forks, removes the `spaces` list and the `sidebar-footer`, and records app version,
 the installed fingerprint and a SHA-256 of the source bytes.
 A missing, duplicated or changed anchor refuses without touching the old output. `--app-home`,
 `--app-version` and `--output` support isolated maintenance/tests. Config apply only writes the
 reviewed source; it never runs the generator. There is no automatic rebase.
 
 Layout selection is **not a settings key** in 0.1.14: `layout.switch` persists `shared("layout")` in
-app-owned `shared.json`. First apply requires a running app and all three vega mods, writes the
+app-owned `shared.json`. First apply requires a running app and all five vega mods, writes the
 layout, calls `layout.switch --name vega`, then verifies the selected name and empty error list.
 A `no mod folder` activation error is retried for up to five seconds while the app discovers
 freshly installed mod folders; other errors fail immediately. A failed activation restores the

@@ -70,7 +70,7 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "tabs"
+            "mod": "vega-tabs"
           }
         },
         {
@@ -99,7 +99,7 @@
                   },
                   "header": {
                     "content": {
-                      "mod": "pane"
+                  "mod": "vega-pane"
                     },
                     "height": 30,
                     "position": "top",

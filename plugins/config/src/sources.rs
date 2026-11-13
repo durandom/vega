@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 43] = [
+pub const DEFAULTS: [(&str, &str); 58] = [
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
     default!("instructions/reasoning.md"),
@@ -41,6 +41,21 @@ pub const DEFAULTS: [(&str, &str); 43] = [
     default!("herdr-app/mods/vega-sidebar/pin.svg"),
     default!("herdr-app/mods/vega-inbox/main.js"),
     default!("herdr-app/mods/vega-inbox/mod.json"),
+    default!("herdr-app/mods/vega-tabs/UPSTREAM.md"),
+    default!("herdr-app/mods/vega-tabs/main.js"),
+    default!("herdr-app/mods/vega-tabs/mod.json"),
+    default!("herdr-app/mods/vega-tabs/win-close.svg"),
+    default!("herdr-app/mods/vega-tabs/win-max.svg"),
+    default!("herdr-app/mods/vega-tabs/win-min.svg"),
+    default!("herdr-app/mods/vega-tabs/win-restore.svg"),
+    default!("herdr-app/mods/vega-pane/UPSTREAM.md"),
+    default!("herdr-app/mods/vega-pane/close.svg"),
+    default!("herdr-app/mods/vega-pane/main.js"),
+    default!("herdr-app/mods/vega-pane/mod.json"),
+    default!("herdr-app/mods/vega-pane/split-down.svg"),
+    default!("herdr-app/mods/vega-pane/split-right.svg"),
+    default!("herdr-app/mods/vega-pane/unzoom.svg"),
+    default!("herdr-app/mods/vega-pane/zoom.svg"),
     default!("herdr-app/layouts/vega.json"),
     default!("herdr-app/layouts/status.json"),
     default!("herdr-app/mods/vega-window-tabs/main.js"),
@@ -243,6 +258,8 @@ mod tests {
             "herdr-app/mods/vega-sidebar",
             "herdr-app/mods/vega-inbox",
             "herdr-app/mods/vega-window-tabs",
+            "herdr-app/mods/vega-tabs",
+            "herdr-app/mods/vega-pane",
             "herdr-app/layouts",
         ] {
             for f in repo_files(dir) {
