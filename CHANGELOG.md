@@ -9,6 +9,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: `scripts/check-mods.sh` checks every herdr-app mod and cleans its generated type files, including on failure.
 
+- unit: dcg.config allows safe `git branch -d` / `--delete`; force deletion stays blocked.
+
 ## 193 · 2026-11-13
 
 - feature: the sidebar shows a headless sentinel's unread done as a filled grey dot when its

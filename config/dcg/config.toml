@@ -156,6 +156,8 @@ custom_paths = [
 # "core.git:reset-hard" = "deny"     # keep critical rules as hard blocks
 #
 # Safety: Critical rules are only loosened via explicit per-rule overrides.
+# Git checks merge safety for plain -d/--delete; forced forms retain their own deny rule.
+"core.git:branch-delete" = "log"
 "core.git:stash-drop" = "log"        # single stash, recoverable via git fsck — allow, just log it
 
 #─────────────────────────────────────────────────────────────
@@ -286,13 +288,21 @@ block = [
   | (?:--(?:no-pager|paginate|bare|no-optional-locks|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-replace-objects|no-lazy-fetch)|-[pP]) \s+
 )*
 branch \s+
-# Consume branch arguments as complete words. Capture 1 pairs option quotes.
+# Require a real force flag as well as deletion, in either argument order.
+(?=
 (?:
   ([\x27"]?) (?:--(?:format|sort|points-at|set-upstream-to)|-u) \1 \s+ (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
   | (?![\x27"]?(?:--(?:format|sort|points-at|set-upstream-to)|-u)[\x27"]?(?:\s|$)) (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
 )*
-# Capture 2 pairs flag quotes. An attached -u value is not a delete flag.
-([\x27"]?) (?:-[A-TV-Za-tv-z]*[dD][A-Za-z]*|--delete) \2 (?=\s|=|$)
+([\x27"]?) (?:-[A-TV-Za-tv-z]*[Df][A-Za-z]*|--force) \2 (?=\s|=|$)
+)
+# Consume branch arguments as complete words. Capture 3 pairs option quotes.
+(?:
+  ([\x27"]?) (?:--(?:format|sort|points-at|set-upstream-to)|-u) \3 \s+ (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
+  | (?![\x27"]?(?:--(?:format|sort|points-at|set-upstream-to)|-u)[\x27"]?(?:\s|$)) (?!\x23)(?:[^\s\x27"\\;&|<>()\x24\x60]|\\[^\n]|\x27[^\x27\n]*\x27|"(?:\\.|[^"\\\n])*"|\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}))+ \s+
+)*
+# Capture 4 pairs flag quotes. An attached -u value is not a delete flag.
+([\x27"]?) (?:-[A-TV-Za-tv-z]*[dD][A-Za-z]*|--delete) \4 (?=\s|=|$)
 ''', reason = "Branch deletion: use vega uac prune for reviewed merged branches, or wt remove <branch> for a worktree. Force deletion (-D) remains blocked; review the branch instead." },
     # Example: Block a custom dangerous script
     # { pattern = "deploy-to-prod\\.sh.*--force", reason = "Never force-deploy to production" },

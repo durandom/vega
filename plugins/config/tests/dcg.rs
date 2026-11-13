@@ -3,6 +3,42 @@ use std::{fs, path::Path, process::Command};
 use vega_config::sources;
 
 #[test]
+fn branch_deletion_test_verdicts_allow_only_merge_checked_forms() {
+    let Some(dcg) = vega_plugin::find_on_path("dcg") else {
+        return;
+    };
+    let d = tempfile::tempdir().unwrap();
+    let config = d.path().join("config.toml");
+    fs::write(&config, sources::default("dcg/config.toml").unwrap()).unwrap();
+    for (command, allowed) in [
+        ("git branch -d x", true),
+        ("git branch --delete x", true),
+        ("git branch -D x", false),
+        ("git branch -d -f x", false),
+        ("git branch -df x", false),
+        ("git branch -fd x", false),
+        ("git branch --force --delete x", false),
+        ("git branch --delete x --force", false),
+    ] {
+        let output = Command::new(&dcg)
+            .args(["test", "--robot", command])
+            .current_dir(d.path())
+            .env("HOME", d.path())
+            .env("XDG_CONFIG_HOME", d.path().join(".config"))
+            .env("DCG_CONFIG", &config)
+            .env("DCG_NO_SELF_HEAL", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if allowed { 0 } else { 1 }),
+            "{command}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
 fn explain_keeps_core_blocks_and_shows_prune_hint() {
     let Some(dcg) = vega_plugin::find_on_path("dcg") else {
         eprintln!("dcg not installed; skipping external explain fixture");
