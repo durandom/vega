@@ -261,6 +261,9 @@ export default class Agents extends View {
         cx.spawn(cx => this.readNotes(cx));
         if (props()?.follow) cx.timer.every(1000, () => this.followFocus());
         this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
+        // InputState cannot be created during render: make one per open decision here and on a timer.
+        this.syncDecisionInputs();
+        cx.timer.every(1000, cx => { if (this.syncDecisionInputs()) cx.notify(); });
         this.askBusy = new Set(); this.askResults = new Map();
         this.expanded = new Set(); this.readyLimit = 12;
       }
@@ -854,6 +857,17 @@ export default class Agents extends View {
   currentTab() { return this.projectTab ?? props()?.tab ?? PROJECT_TABS[0].id; }
 
   // The badge row of this project (machine, checkout, decision texts), written by the vega mod.
+  // Creates an answer input for each open decision that has none; true when one was added.
+  syncDecisionInputs() {
+    let added = false;
+    for (const d of this.badgeRow().row?.decision_texts ?? []) {
+      if (this.decisionInputs.has(d.id)) continue;
+      this.decisionInputs.set(d.id, InputState.new({ placeholder: "Your answer (or dismissal reason)…" }));
+      added = true;
+    }
+    return added;
+  }
+
   badgeRow() {
     const uac = visibleTerminals().find(x => x.address === props()?.uac);
     const machine = uac?.address?.includes("/") ? uac.address.split("/")[0] : "";
@@ -950,15 +964,11 @@ export default class Agents extends View {
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); action(cx); });
     return v_flex().id("decisions-body").gap(10).children(list.map(d => {
-      if (!this.decisionInputs.has(d.id)) {
-        const input = InputState.new({ placeholder: "Your answer (or dismissal reason)…" });
-        this.decisionInputs.set(d.id, input);
-      }
       return v_flex().id(`decision-${d.id}`).gap(6).p(10).rounded(8).bg(t.surface)
         .child(div().text_size(11).text_color(t.dim).child(d.id))
         .child(div().font_semibold().child(d.title ?? ""))
         .child(div().child(d.question || "No question text provided."))
-        .child(inputBox(t, this.decisionInputs.get(d.id)))
+        .child(this.decisionInputs.has(d.id) ? inputBox(t, this.decisionInputs.get(d.id)) : div().text_size(11).text_color(t.dim).child("…"))
         .child(h_flex().gap(8)
           .child(button(`answer-${d.id}`, this.decisionBusy.has(d.id) ? "Sending…" : "Answer", cx => this.decide(d, false, cx)))
           .child(button(`dismiss-${d.id}`, "Dismiss", cx => this.decide(d, true, cx))))

@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 206 · 2026-11-13
+
+- feature: the project window's Decisions tab renders again: answer inputs are created outside render
+  (herdr-app rejected `InputState.new` during render and left a window that could not close).
+
 ## 205 · 2026-11-13
 
 - feature: live Claude theme sends retry with bounded backoff and resume after vegad restarts.
