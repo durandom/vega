@@ -13,6 +13,7 @@ pub mod fleet;
 pub mod herdr_app;
 pub mod infra;
 pub mod merge;
+pub mod profiles;
 pub mod sources;
 
 use std::collections::BTreeSet;
@@ -91,10 +92,11 @@ pub enum Unit {
     HerdrAppSidebar,
     HerdrAppInbox,
     HerdrAppLayouts,
+    HerdrAppProfiles,
 }
 
 impl Unit {
-    pub const ALL: [Unit; 21] = [
+    pub const ALL: [Unit; 22] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -118,6 +120,7 @@ impl Unit {
         Unit::HerdrAppSidebar,
         Unit::HerdrAppMods,
         Unit::HerdrAppLayouts,
+        Unit::HerdrAppProfiles,
         Unit::HerdrAppSettings,
     ];
 
@@ -144,6 +147,7 @@ impl Unit {
             Unit::HerdrAppSidebar => "herdr-app.vega-sidebar",
             Unit::HerdrAppInbox => "herdr-app.vega-inbox",
             Unit::HerdrAppLayouts => "herdr-app.layouts",
+            Unit::HerdrAppProfiles => "herdr-app.profiles",
         }
     }
 
@@ -171,15 +175,18 @@ impl Unit {
             Unit::HerdrAppSidebar => "~/.config/herdr-app/mods/vega-sidebar/",
             Unit::HerdrAppInbox => "~/.config/herdr-app/mods/vega-inbox/",
             Unit::HerdrAppLayouts => "~/.config/herdr-app/layouts/vega.json",
+            Unit::HerdrAppProfiles => "~/.config/herdr-app-<name>/",
         }
     }
 
     pub fn ownership(self) -> &'static str {
         match self {
             Unit::ClaudeMd | Unit::CodexMd | Unit::PiMd | Unit::Agentsview => "whole file",
-            Unit::DcgConfig | Unit::PiDcg | Unit::HerdrAppKeys | Unit::HerdrAppLayouts => {
-                "whole file"
-            }
+            Unit::DcgConfig
+            | Unit::PiDcg
+            | Unit::HerdrAppKeys
+            | Unit::HerdrAppLayouts
+            | Unit::HerdrAppProfiles => "whole file",
             Unit::HerdrAppMods | Unit::HerdrAppSidebar | Unit::HerdrAppInbox => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
@@ -208,6 +215,7 @@ impl Unit {
                 | Unit::HerdrAppSidebar
                 | Unit::HerdrAppInbox
                 | Unit::HerdrAppLayouts
+                | Unit::HerdrAppProfiles
         )
     }
 }
@@ -235,6 +243,7 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
             Unit::HerdrAppSidebar,
             Unit::HerdrAppInbox,
             Unit::HerdrAppLayouts,
+            Unit::HerdrAppProfiles,
         ],
     ),
 ];
@@ -649,6 +658,7 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
             plan.sources.push(src);
             Ok(plan)
         }
+        Unit::HerdrAppProfiles => profiles::plan(ctx),
         Unit::HerdrAppMods
         | Unit::HerdrAppSidebar
         | Unit::HerdrAppInbox
@@ -1025,6 +1035,9 @@ fn apply_inner(
         Unit::HerdrAppMods | Unit::HerdrAppSidebar | Unit::HerdrAppInbox | Unit::HerdrAppLayouts
     ) {
         return herdr_app::apply(ctx, unit, &plan, evidence);
+    }
+    if unit == Unit::HerdrAppProfiles {
+        return profiles::apply(ctx, &plan, evidence);
     }
     if unit == Unit::ClaudeHooks {
         return claude_plugin::apply(ctx, &plan, evidence);

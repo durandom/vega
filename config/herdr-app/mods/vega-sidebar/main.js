@@ -4,6 +4,11 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home, nextCommand } from "herdr";
 
+// Profile windows share hc inventory, but own their terminal rows and subtrees.
+function visibleTerminals() {
+  return terminals().filter(t => !Object.hasOwn(t.labels ?? {}, "vega.window"));
+}
+
 function find(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children ?? []) {
@@ -376,7 +381,7 @@ export default class Agents extends View {
   openProject(project, cx, tab = null, follow = false) {
     cx?.stop_propagation?.();
     if (!project) return;
-    const uac = terminals().find(x => x.state === "live" && x.labels?.["vega.role"] === "uac"
+    const uac = visibleTerminals().find(x => x.state === "live" && x.labels?.["vega.role"] === "uac"
       && x.labels?.["vega.project-id"] === project);
     openOverlay({ kind: "window", key: follow ? "vega-project-follow" : `vega-project-${project}`, width: 640, height: 0.7,
       mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null, tab, follow } });
@@ -599,7 +604,7 @@ export default class Agents extends View {
   // Overview data the terminal labels do not carry. Beads counts come from `bd status --json`
   // in the UAC's checkout; remote projects wait for the corp-host check (vega-0h4c.50.2).
   async readOverview(cx) {
-    const uac = terminals().find(x => x.address === props()?.uac);
+    const uac = visibleTerminals().find(x => x.address === props()?.uac);
     if (!uac || this.readingOverview) return;
     if (uac.address.includes("/")) { this.beads = "remote"; cx.notify(); return; }
     this.readingOverview = true;
@@ -628,7 +633,7 @@ export default class Agents extends View {
   }
 
   overviewTab(t) {
-    const all = terminals();
+    const all = visibleTerminals();
     const uac = all.find(x => x.address === props().uac);
     if (!uac) return div().text_color(t.dim).child("No live UAC for this project.");
     const kids = all.filter(x => x.parent === uac.address && x.state === "live");
@@ -732,7 +737,7 @@ export default class Agents extends View {
 
   // The badge row of this project (machine, checkout, decision texts), written by the vega mod.
   badgeRow() {
-    const uac = terminals().find(x => x.address === props()?.uac);
+    const uac = visibleTerminals().find(x => x.address === props()?.uac);
     const machine = uac?.address?.includes("/") ? uac.address.split("/")[0] : "";
     const row = (shared("vega.badges") ?? []).find(r => r.project === props()?.projectConfig && (r.machine || "") === machine);
     return { machine: machine || null, checkout: row?.checkout ?? uac?.cwd ?? null, row };
@@ -844,7 +849,7 @@ export default class Agents extends View {
   }
 
   uacTab(t) {
-    const all = terminals();
+    const all = visibleTerminals();
     const uac = all.find(x => x.address === props().uac);
     if (!uac) return div().text_color(t.dim).child("No live UAC for this project.");
     const kids = all.filter(x => x.parent === uac.address && x.state === "live");
@@ -929,7 +934,7 @@ export default class Agents extends View {
   // focused terminal's project. Pinned: one window per project (key vega-project-<id>).
   followFocus() {
     if (!props()?.follow) return;
-    const all = terminals().filter(x => x.state === "live");
+    const all = visibleTerminals().filter(x => x.state === "live");
     const term = all.find(x => x.address === focused()?.terminal);
     const project = term?.labels?.["vega.project-id"];
     if (project && project !== props().projectConfig) this.openProject(project, null, this.currentTab(), true);
@@ -943,7 +948,7 @@ export default class Agents extends View {
 
   projectOverlay(t) {
     const tab = PROJECT_TABS.find(tab => tab.id === (this.projectTab ?? props()?.tab)) ?? PROJECT_TABS[0];
-    const uac = terminals().find(x => x.address === props().uac);
+    const uac = visibleTerminals().find(x => x.address === props().uac);
     const name = this.preferences?.projects?.[props().projectConfig]?.name || uac?.labels?.["vega.project"] || props().projectConfig.split("/").pop();
     const stop = el => el.on_mouse_down("left", (_e, cx) => cx.stop_propagation());
     return v_flex().size_full().p(12).gap(10).bg(t.popover).text_color(t.foreground).text_size(12.8)
@@ -1014,7 +1019,7 @@ export default class Agents extends View {
       .child(h_flex().flex_1().min_w(0).gap(4).flex_wrap().children(detail));
     // Every label on any project and every machine with a terminal, offered as toggles.
     const labels = [...new Set(Object.values(this.preferences.projects ?? {}).flatMap(p => p.labels ?? []))].sort();
-    const machines = [...new Set(["local", ...terminals().map(x => machineOf(x.address))])].sort();
+    const machines = [...new Set(["local", ...visibleTerminals().map(x => machineOf(x.address))])].sort();
     const chosenLabels = values(this.viewLabels.value()), chosenMachines = values(this.viewMachines.value());
     const toggles = (kind, all, chosen, state) => h_flex().gap(6).flex_wrap().items_center()
       .children(all.length ? all.map(v => pill(t, `pick-${kind}-${v}`, v, { on: chosen.includes(v), action: () => toggleValue(state, v) }))
@@ -1154,7 +1159,7 @@ export default class Agents extends View {
   projectGroups(all) {
     const short = value => value?.replace(/\/$/, "").split("/").at(-1)?.replace(/\.git$/, "");
     // The Uber-UAC is no project's member: its project label opens no group and no "no UAC" marker.
-    const live = all.filter(x => x.state === "live" && x.labels?.["vega.role"] !== "uber");
+    const live = all.filter(x => !Object.hasOwn(x.labels ?? {}, "vega.window") && x.state === "live" && x.labels?.["vega.role"] !== "uber");
     const byAddress = new Map(live.map(x => [x.address, x]));
     const labelsOf = address => byAddress.get(address)?.labels ?? {};
     const projects = new Map();
@@ -1460,7 +1465,7 @@ export default class Agents extends View {
 
   // Drag one project above another; the order stays across restarts.
   move(projects, from, to) {
-    const all = this.orderedProjects(this.projectGroups(terminals()).projects);
+    const all = this.orderedProjects(this.projectGroups(visibleTerminals()).projects);
     const visible = projects.filter(p => p !== from);
     visible.splice(visible.indexOf(to), 0, from);
     // Reorder only the visible slots, so hidden projects keep their positions.
@@ -1525,9 +1530,10 @@ export default class Agents extends View {
     sampleFocus();
     const collapsed = narrow();
 
-    let list = agents();
+    const windowAddresses = new Set(terminals().filter(t => Object.hasOwn(t.labels ?? {}, "vega.window")).map(t => t.address));
+    let list = agents().filter(a => !windowAddresses.has(a.address));
     this.listed = new Map(list.map((a) => [a.address, a.status]));
-    const all = terminals();
+    const all = visibleTerminals();
     this.vegaTerminals = new Map(all.map(t => [t.address, t]));
     this.projectUacs = this.projectGroups(all).uacs;
     // The Uber-UAC lists as one row at the top, outside every project (docs/design/uber-uac.md).

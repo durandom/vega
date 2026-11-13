@@ -4,6 +4,32 @@ Slice 5b of the [hc migration](hc-migration.md) (vega-0h4c.10): what vega shows 
 Slayer acts on it. Decided with the Slayer on 2026-11-07. Background: the herdr TUI sidebar (machines tree,
 priority-sorted agents list, vega tokens from `report-metadata`) and the former dashboard Inbox (preserved at `herdr-tui-final`).
 
+## Profile windows POC (vega-0h4c.85)
+
+`config/herdr-app/profiles/<name>.toml` declares `layout`, `mods`, `[settings]`,
+`[shared]` seeds and `[[terminals]]` (`name`, `machine`, `argv`). The personal
+`herdr-app.profiles` config unit resolves embedded defaults and local overrides
+under `$XDG_CONFIG_HOME/vega/config`, and writes `$XDG_CONFIG_HOME/herdr-app-<name>`.
+Mod folders come from the same sources (local third-party folders are supported).
+Settings overrides merge into the main settings source. Only a missing `shared.json`
+is seeded with the selected layout and `frame.welcomed = "finished"`; running app
+state is never edited. An existing manual home may still need its welcome dismissed.
+
+`vega window <name>` is a `vega-window` binary in `plugins/config`. It reuses live
+hc terminals by `vega.window=<name>` and `vega.window.slot=<terminal-name>`, starts
+missing entries with `hc run --bg --no-parent --no-notify --on <machine>` and explicit
+argv, then resolves `{ "terminal": "profile:<terminal-name>" }` layout slots to
+terminal addresses. It opens/raises `herdr-app` with the profile's `HERDR_APP_HOME`
+and selects that layout. Direct terminal blocks need no `herdr.space`/`herdr.tab`
+labels: all homes still share hc inventory, but this window creates no shared spaces.
+The main sidebar excludes terminals labelled `vega.window` from its lists and trees.
+
+The shipped `status` profile is three plain terminal blocks: proteus btop, ganymede
+btop and ganymede token-burn tui. A dedicated status layout/sidebar/navigation is
+later work. Tests use temporary homes and fakes; live validation belongs to the UAC.
+Closing a window leaves its terminals running; reopening reuses them. Failed starts
+leave successfully created terminals available for the next invocation.
+
 ## Last-focus navigation (vega-0h4c.70)
 
 `ctrl-s l` or `cmd-;` toggles the last agent, `ctrl-s shift-l` the last space,

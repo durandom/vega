@@ -1432,3 +1432,18 @@ test('handed-done colour requires a live parent and excludes headed sessions and
   const blocked=h.mod.status(t,{address:child.address,status:'blocked'},true);
   assert.deepEqual(blocked.items,['!']);assert.equal(blocked.text_colorValue,'red');
 });
+
+test('profile window terminals never enter sidebar agent, plain or child rows',()=>{
+  const h=load('vega-sidebar');
+  h.mod.init({},h.cx);
+  const regular={address:'t1',state:'live',foreground:{},labels:{'vega.project-id':'repo','vega.role':'uac'}};
+  const status={address:'ganymede/t2',state:'live',parent:'t1',foreground:{},labels:{'vega.window':'status','vega.project-id':'repo'}};
+  h.api.terminals=()=>[regular,status];
+  h.api.agents=()=>[{address:'t1',status:'working'}, {address:'ganymede/t2',status:'working'}];
+  h.render();
+  assert(!h.mod.vegaTerminals.has('ganymede/t2'));
+  assert(!h.mod.plainTerminals.some(t=>t.address==='ganymede/t2'));
+  assert(!h.mod.listed.has('ganymede/t2'));
+  assert.deepEqual(Array.from(vm.runInContext('visibleTerminals()',h.api),t=>t.address),['t1']);
+  assert(!h.calls.filter(c=>c[0]==='order').flatMap(c=>c[1]).includes('ganymede/t2'));
+});

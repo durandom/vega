@@ -60,3 +60,9 @@ in [Service endpoints](../../docs/design/config.md#service-endpoints).
 Design: [config.md](../../docs/design/config.md).
 
 Agent guide: `vega skills config`
+
+`vega-window` opens applied profiles (`vega window status`). The personal
+`herdr-app.profiles` unit writes independent homes from TOML under
+`config/herdr-app/profiles/`, including layout, mods, settings and terminal argv.
+Local overrides use the same source tree as the main home. See
+[profile windows](../../docs/design/herdr-app-ui.md#profile-windows-poc-vega-0h4c85).

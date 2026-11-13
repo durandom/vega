@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 30] = [
+pub const DEFAULTS: [(&str, &str); 32] = [
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
     default!("instructions/reasoning.md"),
@@ -42,6 +42,8 @@ pub const DEFAULTS: [(&str, &str); 30] = [
     default!("herdr-app/mods/vega-inbox/main.js"),
     default!("herdr-app/mods/vega-inbox/mod.json"),
     default!("herdr-app/layouts/vega.json"),
+    default!("herdr-app/layouts/status.json"),
+    default!("herdr-app/profiles/status.toml"),
     default!("herdr-app/keys.json"),
     default!("herdr-app/settings.json"),
     default!("herdr-app/themes/catppuccin-latte.json"),
@@ -127,7 +129,11 @@ pub fn packs(env: &Env) -> Result<Vec<(String, Source)>, String> {
     directory(env, "dcg/packs", &[".yaml", ".yml"])
 }
 
-fn directory(env: &Env, dir: &str, extensions: &[&str]) -> Result<Vec<(String, Source)>, String> {
+pub(crate) fn directory(
+    env: &Env,
+    dir: &str,
+    extensions: &[&str],
+) -> Result<Vec<(String, Source)>, String> {
     let prefix = format!("{dir}/");
     let mut names: Vec<String> = DEFAULTS
         .iter()

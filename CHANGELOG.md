@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 196 · 2026-11-13
+
+- feature: `vega window status` opens a separate herdr-app home with proteus/ganymede btop and ganymede token-burn tui. Reopening reuses live terminals; the main sidebar hides profile terminals.
+- unit: `herdr-app.profiles` writes TOML-defined profile homes, layouts, selected mods and settings. Run `vega config apply herdr-app.profiles` before opening a profile. Fresh homes skip welcome; existing shared state is preserved.
+
 ## 195 · 2026-11-13
 
 - feature: the git shim hints at Worktrunk commands for branch deletion, worktree housekeeping and new-branch checkouts in wt-managed repos, preserving git's stdout and exit code.

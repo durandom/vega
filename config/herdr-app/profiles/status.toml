@@ -1,0 +1,23 @@
+layout = "status"
+mods = []
+
+[settings.sounds]
+enabled = false
+
+[shared]
+"frame.welcomed" = "finished"
+
+[[terminals]]
+name = "proteus-btop"
+machine = "proteus"
+argv = ["btop"]
+
+[[terminals]]
+name = "ganymede-btop"
+machine = "ganymede"
+argv = ["btop"]
+
+[[terminals]]
+name = "ganymede-tokens"
+machine = "ganymede"
+argv = ["token-burn", "tui"]

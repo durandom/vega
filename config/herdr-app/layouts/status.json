@@ -1,0 +1,10 @@
+{
+  "id": "root",
+  "type": "row",
+  "gap": 4,
+  "children": [
+    { "id": "proteus", "type": "block", "content": { "terminal": "profile:proteus-btop" } },
+    { "id": "ganymede", "type": "block", "content": { "terminal": "profile:ganymede-btop" } },
+    { "id": "tokens", "type": "block", "content": { "terminal": "profile:ganymede-tokens" } }
+  ]
+}

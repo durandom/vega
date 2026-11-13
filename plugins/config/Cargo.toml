@@ -18,12 +18,17 @@ path = "src/main.rs"
 name = "vega-project"
 path = "src/project.rs"
 
+[[bin]]
+name = "vega-window"
+path = "src/window.rs"
+
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 vega-build = { path = "../../crates/vega-build" }
 clap = { version = "4", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-toml_edit = "0.25"
+toml_edit = { version = "0.25", features = ["serde"] }
 vega-registry = { path = "../../crates/vega-registry" }
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-theme-sync = { path = "../../crates/vega-theme-sync" }
