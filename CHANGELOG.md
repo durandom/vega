@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 203 · 2026-11-13
+
+- feature: working agents in the vega sidebar use a static orange status dot, including child and
+  collapsed rail rows, avoiding continuous spinner animation.
+
 ## 202 · 2026-11-13
 
 - feature: the vega sidebar reconciles waiting hands only when their state changes. The Needs you

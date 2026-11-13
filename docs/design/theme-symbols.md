@@ -125,7 +125,8 @@ In the herdr-app vega sidebar, unread done is a filled blue dot until the Slayer
 (`herdr.seen`). A headless sentinel (`vega.mode=headless`) with a live parent instead shows a
 filled grey dot (`theme.dim`): done, handed to the UAC. This applies to child, top-level and rail
 rows. Headed sessions, UACs and headless sessions without a live parent keep the blue unread dot.
-Seen done still reads as an idle ring; working keeps its spinner. The colour does not change the
+Seen done still reads as an idle ring; working is a static filled dot in `theme.working` (orange:
+Latte `#df8e1d`, Mocha `#ffb224`), including child, top-level and rail rows. The colour does not change the
 status word used by the Active filter or navigation.
 
 The herdr-app project header has one summed badge for decisions, waiting panes and unread notes

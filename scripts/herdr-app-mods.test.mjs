@@ -1579,7 +1579,7 @@ test('handed-done colour requires a live parent and excludes headed sessions and
   const idle=h.mod.status(t,{address:child.address,status:'idle'},true);
   assert.equal(idle.border_colorValue,'idle-grey');assert(!Object.hasOwn(idle,'bgValue'));
   const working=h.mod.status(t,{address:child.address,status:'working'},true);
-  assert.equal(working.text_colorValue,'amber');assert.equal(working.spinValue,900);
+  assert.equal(working.bgValue,'amber');assert(!Object.hasOwn(working,'spinValue'));
   const blocked=h.mod.status(t,{address:child.address,status:'blocked'},true);
   assert.deepEqual(blocked.items,['!']);assert.equal(blocked.text_colorValue,'red');
 });
