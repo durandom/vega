@@ -201,6 +201,7 @@ pub fn save_decisions(
                 .map(|d| {
                     json!({
                         "id": d.id, "title": d.title, "question": d.question, "project": key,
+                        "created": d.created,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -419,7 +420,7 @@ mod tests {
             id: "v-1".into(),
             title: "Choice".into(),
             question: "Full question\nwith another line".into(),
-            ..Default::default()
+            created: 123,
         };
         let b = Badges {
             decisions: 1,
@@ -433,6 +434,7 @@ mod tests {
         let saved = read();
         assert_eq!(saved["decision_texts"][0]["question"], d.question);
         assert_eq!(saved["decision_texts"][0]["project"], key);
+        assert_eq!(saved["decision_texts"][0]["created"], 123);
         assert_eq!(load(key, 10).unwrap().0, b);
         save_decisions(key, &b, &[], None, 11);
         assert_eq!(read()["decision_texts"], saved["decision_texts"]);

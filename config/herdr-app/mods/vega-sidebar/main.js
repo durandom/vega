@@ -128,6 +128,7 @@ const LABEL_VIEW = "label:";
 // A waiting pane from a badge row as `vega mux dismiss` on that row's machine knows it: the
 // vega mod qualifies remote panes as hc:<machine>/<pane>, the machine's records say hc:<pane>.
 const dismissArgs = (row, pane) => ["mux", "dismiss", row?.machine ? pane.replace(`hc:${row.machine}/`, "hc:") : pane];
+const waitingKey = (row, w) => JSON.stringify([row.project, row.machine || "", w.pane]);
 // The active view lives in shared state: localStorage is per mod copy, so the filter popup
 // could not reach the sidebar through it. The sidebar copies it to its own localStorage to
 // keep it across restarts; shared state is empty after a restart, so that copy is the fallback.
@@ -197,6 +198,7 @@ function lastFocus(command) {
 
 export default class Agents extends View {
   init(_props, cx) {
+    this.dismissBusy = new Set(); this.dismissResults = new Map();
     if (props()?.mail) {
       this.mail = "Loading mail…";
       cx.spawn(async (cx) => {
@@ -214,6 +216,12 @@ export default class Agents extends View {
         } catch (e) { this.mail = String(e); }
         cx.notify();
       });
+      return;
+    }
+    if (props()?.attentionProject) {
+      cx.spawn(cx => this.readNotes(cx));
+      cx.timer.every(1000, cx => cx.notify());
+      cx.timer.every(15000, cx => this.readNotes(cx));
       return;
     }
     if (props()?.projectConfig || props()?.viewMenu) {
@@ -251,13 +259,13 @@ export default class Agents extends View {
         if (props()?.follow) cx.timer.every(1000, () => this.followFocus());
         this.decisionInputs = new Map(); this.decisionBusy = new Set(); this.decisionResults = new Map(); this.decisionDone = new Set();
         this.askBusy = new Set(); this.askResults = new Map();
-        this.dismissBusy = new Set(); this.dismissResults = new Map();
         this.expanded = new Set(); this.readyLimit = 12;
       }
       return;
     }
     if (props()?.spaceMenu) return;
     this.startNavigation(cx);
+    cx.timer.every(1000, cx => this.reconcileWaiting(cx));
     this.preferences = { projects: {}, views: {} };
     this.activeView = activeView();
     cx.spawn(cx => this.refreshPreferences(cx));
@@ -397,15 +405,14 @@ export default class Agents extends View {
       const r = await exec("vega", ["post", "notes", "--json"], { timeout: 10000 });
       if (r.code !== 0) throw new Error((r.stderr || r.stdout || "notes failed").trim());
       notes = r.stdout.split("\n").filter(l => l.trim().startsWith("{")).map(l => JSON.parse(l))
-        .filter(n => n.project === props().projectConfig || (!n.project && n.pane === props().uac));
+        .filter(n => n.project === (props().projectConfig ?? props().attentionProject) || (!n.project && n.pane === props().uac));
     } catch (e) { notes = String(e.message ?? e); }
     this.readingNotes = false;
     const sig = JSON.stringify(notes);
     if (sig !== this.notesSig) { this.notesSig = sig; this.notes = notes; cx.notify(); }
   }
 
-  async markNotes(action, cx) {
-    const list = Array.isArray(this.notes) ? this.notes : [];
+  async markNotes(action, cx, list = Array.isArray(this.notes) ? this.notes : []) {
     const upto = {};
     for (const n of list) if (!upto[n.host] || n.id > upto[n.host]) upto[n.host] = n.id;
     const args = ["post", "notes", action];
@@ -552,10 +559,97 @@ export default class Agents extends View {
     this.dismissBusy.add(w.pane); this.dismissResults.delete(w.pane); cx.notify();
     try {
       const r = await inCheckout(row?.machine || null, row?.checkout || "/", "vega", dismissArgs(row, w.pane));
+      if (r.code === 0) {
+        const state = shared("vega.waiting-state") ?? {};
+        const key = waitingKey(row, w);
+        state[key] = { ...(state[key] ?? {}), cleared: true };
+        setShared("vega.waiting-state", state);
+      }
       this.dismissResults.set(w.pane, r.code === 0 ? "Dismissed; the hand goes with the next refresh."
         : (r.stderr || r.stdout || `Failed (${r.code})`).trim().split("\n")[0]);
     } catch (e) { this.dismissResults.set(w.pane, String(e)); }
     finally { this.dismissBusy.delete(w.pane); cx.notify(); }
+  }
+
+  // Shared episodes prevent multiple sidebar copies from dismissing the same viewed turn.
+  // A failure stays visible for explicit retry rather than retrying every poll.
+  reconcileWaiting(cx) {
+    const state = shared("vega.waiting-state") ?? {};
+    const active = new Set();
+    const all = new Map(visibleTerminals().map(t => [t.address, t]));
+    for (const row of shared("vega.badges") ?? []) {
+      if (Date.now()/1000 - row.at > 60) continue;
+      for (const w of row.waiting_panes ?? []) {
+        const key = waitingKey(row, w); active.add(key);
+        const term = all.get(w.pane.replace(/^hc:/, ""));
+        const seen = Number(term?.labels?.["herdr.seen"]);
+        const e = state[key] ??= { since: Date.now(), initialSeen: Number.isFinite(seen) ? seen : null, initialTurn: term?.turn };
+        if (e.cleared || e.busy || !term || !["silent", "asking"].includes(w.attention)) continue;
+        e.initialTurn ??= term.turn;
+        if (e.viewed == null && Number.isFinite(seen) && term.turn != null
+          && seen >= e.initialTurn
+          && ((focused()?.terminal === term.address && seen >= term.turn)
+            || (e.initialSeen == null || seen > e.initialSeen))) e.viewed = seen;
+        if (e.viewed != null && term.turn > e.viewed && !e.failed) {
+          e.busy = true;
+          cx.spawn(async cx => {
+            await this.dismissWaiting(row, w, cx);
+            const latest = shared("vega.waiting-state") ?? {};
+            if (latest[key]) { latest[key].busy = false; latest[key].failed = !latest[key].cleared; }
+            setShared("vega.waiting-state", latest);
+          });
+        }
+      }
+    }
+    for (const key of Object.keys(state)) if (!active.has(key)) delete state[key];
+    setShared("vega.waiting-state", state);
+    cx.notify();
+  }
+
+  openAttention(project, uac, cx) {
+    cx.stop_propagation();
+    openOverlay({ mod: "vega-sidebar", kind: "popup", width: 480, height: 360,
+      props: { attentionProject: project, uac } });
+  }
+
+  attentionPopover(t) {
+    const project = props().attentionProject;
+    const row = this.vegaTotals(props().uac, project) ?? {};
+    const button = (id, label, action, tooltip = null) => pill(t, id, label, { action, tooltip });
+    const go = (tab, cx) => {
+      closeOverlay(props().overlay);
+      this.openProject(project, cx, tab);
+    };
+    const since = at => at ? `${duration(Date.now() - at)} ago` : "time unknown";
+    const item = (id, text, detail, open, done, doneLabel = "Done", doneTip = null) => v_flex().id(id).gap(4).p(8).rounded(6).bg(t.surface)
+      .child(div().text_size(12).child(text))
+      .child(div().text_size(11).text_color(t.dim).child(detail))
+      .child(h_flex().gap(8).child(button(`${id}-open`, "Open", open))
+        .when(Boolean(done), el => el.child(button(`${id}-done`, doneLabel, done, doneTip))));
+    const waiting = (row.waiting_panes ?? []).map(w => {
+      const term = visibleTerminals().find(x => x.address === w.pane.replace(/^hc:/, ""));
+      const episode = shared("vega.waiting-state")?.[waitingKey(row, w)];
+      return item(`attention-wait-${w.pane}`, `${w.name || w.pane} · waiting · ${since(term?.status_ms || episode?.since)}`,
+        [w.title || w.attention, w.pane, this.dismissResults.get(w.pane)].filter(Boolean).join(" · "),
+        () => run("pane.focus", { terminal: w.pane.replace(/^hc:/, "") }),
+        ["silent", "asking"].includes(w.attention) ? cx => cx.spawn(cx => this.dismissWaiting(row, w, cx)) : null,
+        this.dismissBusy.has(w.pane) ? "…" : "Done");
+    });
+    const decisions = (row.decision_texts ?? []).map(d => item(`attention-decision-${d.id}`,
+      `${d.id} · decision · ${since(d.created * 1000)}`, d.title, cx => go("decisions", cx), cx => go("decisions", cx), "Decisions"));
+    const notes = (Array.isArray(this.notes) ? this.notes : []).filter(n => n.unread).map(n => item(`attention-note-${n.host}-${n.id}`,
+      `${n.host} · note · ${since(n.id)}`, n.title || n.body || "Note", cx => go("notes", cx),
+      cx => cx.spawn(cx => this.markNotes("clear", cx, [n])), "Done", `Clear this and earlier notes from ${n.host}`));
+    return v_flex().size_full().p(10).gap(8).bg(t.popover).text_color(t.foreground)
+      .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
+      .child(div().font_semibold().child("Needs you"))
+      .child(v_flex().id("attention-items").flex_1().overflow_y_scrollbar().gap(6).children([...waiting, ...decisions, ...notes])
+        .when(!waiting.length && !decisions.length && !notes.length, el => el.child(div().text_color(t.dim).child("No items.")))
+        .when(this.notes === undefined, el => el.child(div().child("Reading notes…")))
+        .when(typeof this.notes === "string", el => el.child(div().text_color(t.blocked).child(this.notes))))
+      .child(h_flex().gap(8).child(button("attention-decisions", "Decisions", cx => go("decisions", cx)))
+        .child(button("attention-notes", "Notes", cx => go("notes", cx))))
+      .when(Boolean(this.notesResult), el => el.child(div().text_size(11).child(this.notesResult)));
   }
 
   // Ack keeps the ask open and stops escalation; resolve closes it. argv only, no shell.
@@ -1374,7 +1468,7 @@ export default class Agents extends View {
           `+${this.preferences.projects[project].labels.length - 2}`, { tooltip: this.preferences.projects[project].labels.join(", ") })))
         .child(div().flex_1())
         // One summary badge per project (decisions, waiting, notes), coloured by the most urgent;
-        // details live in the project window and the status line (vega-0h4c.50).
+        // the popover names each item and offers its next action.
         .when((totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0) >= 1, el => {
           const urgent = (totals.decisions ?? 0) + (totals.waiting ?? 0);
           return el.child(div().id(`total-${gid}`).flex_none().px(5).rounded(8).text_size(11).font_semibold()
@@ -1382,9 +1476,7 @@ export default class Agents extends View {
             .tooltip(`⚖ ${totals.decisions ?? 0} decisions · ✋ ${totals.waiting ?? 0} waiting · ✉ ${totals.notes ?? 0} notes`)
             .child(String((totals.decisions ?? 0) + (totals.waiting ?? 0) + (totals.notes ?? 0)))
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-            .on_click((_e, cx) => totals.decisions ? this.openProject(project, cx, "decisions")
-              : totals.waiting ? (cx.stop_propagation(), run("pane.focus", { terminal: totals.waiting_panes?.[0]?.pane?.replace(/^hc:/, "") || address }))
-              : this.openProject(project, cx, "notes")));
+            .cursor_pointer().on_click((_e, cx) => this.openAttention(project, address, cx)));
         })
         .child(div().id(`pin-${gid}`).flex_none().text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim)
           .cursor_pointer().tooltip(this.preferences?.projects?.[project]?.pinned ? "Unpin project" : "Pin project in Active view")
@@ -1486,14 +1578,17 @@ export default class Agents extends View {
 
   vegaTotals(address, project) {
     const machine = address?.includes("/") ? address.split("/")[0] : "";
-    return (shared("vega.badges") ?? []).find(r => r.project === project &&
+    const row = (shared("vega.badges") ?? []).find(r => r.project === project &&
       (r.machine || "") === machine && Date.now()/1000-r.at <= 60);
+    if (!row) return;
+    const waiting_panes = (row.waiting_panes ?? []).filter(w => !shared("vega.waiting-state")?.[waitingKey(row, w)]?.cleared);
+    return { ...row, waiting_panes, waiting: waiting_panes.length };
   }
 
   // uac and kind are drawn before the name, as in the TUI row.
   // Per-agent signals only; project-wide notes and decisions sit in the project badge.
   vegaIcons(address, t, skip = ["uac", "kind"]) {
-    skip = [...skip, "notes", "decisions"];
+    skip = [...skip, "notes", "decisions", "waiting"];
     const labels = this.vegaTerminals?.get(address)?.labels ?? {};
     const focus = () => run("agent.focus", {terminal: address});
     const inbox = () => openOverlay({mod: "vega-inbox", kind: "window", key: "vega-inbox", keep: true,
@@ -1507,7 +1602,13 @@ export default class Agents extends View {
       ["waiting", "Waiting panes", focus], ["decisions", "Decisions", inbox],
       ["git", "Git changes", () => { focus(); run("layout.show", {id:"panel"}); run("layout.select", {stack:"panel-body", child:"changes"}); }],
     ];
-    return h_flex().gap(4).flex_none().children(controls.filter(([key]) => !skip.includes(key) && /[^\s\u2800]/u.test(labels[`vega.${key}`] ?? "")).map(([key, tip, action]) =>
+    const waiting = (shared("vega.badges") ?? []).flatMap(row => Date.now()/1000-row.at <= 60
+      ? (row.waiting_panes ?? []).filter(w => w.pane.replace(/^hc:/, "") === address
+        && !shared("vega.waiting-state")?.[waitingKey(row, w)]?.cleared) : []);
+    return h_flex().gap(4).flex_none()
+      .when(waiting.length > 0, el => el.child(div().id(`vega-${address}-waiting`).text_size(11).text_color(this.colors().waiting)
+        .tooltip(waiting.map(w => w.title || w.attention || "Waiting on you").join(" · ")).child(labels["vega.waiting"]?.trim() || "✋")))
+      .children(controls.filter(([key]) => !skip.includes(key) && /[^\s\u2800]/u.test(labels[`vega.${key}`] ?? "")).map(([key, tip, action]) =>
       div().id(`vega-${address}-${key}`).text_size(11).text_color(t.muted).cursor_pointer().tooltip(tip)
         .child(key === "attention" ? "✋" : labels[`vega.${key}`])
         .on_mouse_down("left", (_e,cx) => cx.stop_propagation())
@@ -1524,6 +1625,7 @@ export default class Agents extends View {
           .child(div().text_size(11).text_color(t.muted).child(`${m.from || m.host || ""} · ${m.time || ""} · ${m.read === false || m.unread ? "Unread" : "Read"}`))
           .when(Boolean(m.title), el => el.child(div().font_semibold().child(m.title)))
           .child(div().child(m.text ?? m.body ?? ""))) : [div().child("No mail.")]) : [div().child(this.mail)]));
+    if (props()?.attentionProject) return this.attentionPopover(t);
     if (props()?.projectConfig) return this.projectOverlay(t);
     if (props()?.viewMenu) return this.viewMenu(t);
     if (props()?.spaceMenu) return this.spaceMenu(t);
@@ -1577,8 +1679,10 @@ export default class Agents extends View {
     const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)]).map(a => [a.address, a]));
     // Judge the status the row shows, including unread done sub-agents.
     const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : this.topStatus(a);
+    const waitingAddresses = new Set((shared("vega.badges") ?? []).flatMap(r => Date.now()/1000-r.at <= 60
+      ? (r.waiting_panes ?? []).filter(w => !shared("vega.waiting-state")?.[waitingKey(r, w)]?.cleared).map(w => w.pane.replace(/^hc:/, "")) : []));
     this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
-      a.address === shown || ["working", "blocked", "done", "error"].includes(rowStatus(a))
+      a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
     ).map(a => a.address)) : null;
     if (filtering) for (const uac of membership.uacs.values()) {
       if (this.preferences?.projects?.[uac.labels?.["vega.project-id"]]?.pinned

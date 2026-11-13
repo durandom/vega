@@ -167,13 +167,123 @@ test('answer and dismiss use argv and the recorded project cwd; inputs never aut
   assert.equal(h.mod.results.get('project-a/b-1'),'failure');
 });
 
+test('waiting child owns the hand and header badge opens a popover without focusing or folding',()=>{
+  const h=load('vega-sidebar');
+  const project='project-a';
+  const uac={address:'t1',state:'live',space:'s1',labels:{'vega.role':'uac','vega.project-id':project,'vega.waiting':'✋1'}};
+  const child={address:'ganymede/t2',state:'live',space:'s1',parent:'t1',status:'idle',turn:3,
+    labels:{'vega.project-id':project,'herdr.seen':'3'}};
+  h.api.terminals=()=>[uac,child];
+  h.api.agents=()=>[{address:'t1',space:'s1',status:'idle'}];
+  h.state.set('vega.badges',[{...row(),notes:0,decisions:0,decision_texts:[],waiting:1,
+    waiting_panes:[{pane:'hc:ganymede/t2',name:'Worker',attention:'asking',title:'Need a choice'}]}]);
+  h.state.set('vega.hide-inactive',true);
+  h.mod.init({},h.cx);
+  const tree=h.render(),nodes=elements(tree);
+  assert(nodes.some(n=>n.idValue==='vega-ganymede/t2-waiting'),'waiting idle child survives Active');
+  assert(!nodes.some(n=>n.idValue==='vega-t1-waiting'),'no aggregate hand on UAC');
+  const badge=nodes.find(n=>n.idValue==='total-uac-project-a');
+  assert.deepEqual(texts(badge),['1']);
+  h.calls.length=0;badge.handlers.on_mouse_down({},h.cx);badge.handlers.on_click({},h.cx);
+  const popup=h.calls.find(c=>c[0]==='open')[1];
+  assert.equal(popup.kind,'popup');assert.equal(popup.props.attentionProject,project);assert.equal(popup.props.uac,'t1');
+  assert(!h.calls.some(c=>c[0]==='run'),'header opens detail without focusing a pane');
+  assert.equal(h.mod.folded.size,0);
+});
+
+test('attention popover routes remote Open and Done, decisions and project-scoped notes through fakes',async()=>{
+  const h=load('vega-sidebar');const now=Date.now();
+  const r={...row(),machine:'ganymede',notes:1,waiting:2,checkout:'/remote repo',
+    decision_texts:[{id:'d1',title:'Choose model',created:Math.floor(now/1000)-60}],
+    waiting_panes:[{pane:'hc:io/t2',name:'Worker',attention:'asking',title:'Question?'},
+      {pane:'hc:ganymede/t3',name:'Dialog',attention:'input',title:'Permission'}]};
+  const notes=[{host:'proteus',id:now-1,project:'project-a',unread:true,title:'A note'},
+    {host:'proteus',id:now,project:'other',unread:true,title:'Unrelated'}];
+  h.api.terminals=()=>[{address:'ganymede/t1',state:'live',labels:{'vega.role':'uac','vega.project-id':'project-a'}}];
+  h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);
+    return bin==='python3'?{code:0,stdout:JSON.stringify({code:0,stdout:'dismissed',stderr:''})}
+      :{code:0,stdout:args.includes('clear')?'':notes.map(n=>JSON.stringify(n)).join('\n')};};
+  h.state.set('vega.badges',[r]);h.setProps({attentionProject:'project-a',uac:'ganymede/t1',overlay:'popup'});
+  h.mod.init({},h.cx);await h.flush();
+  const click=id=>elements(h.render()).find(n=>n.idValue===id).handlers.on_click({},h.cx);
+  assert(texts(h.render()).some(s=>s.includes('Worker · waiting')));
+  assert(texts(h.render()).some(s=>s.includes('d1 · decision · 1m ago')));
+  assert(!texts(h.render()).includes('Unrelated'));
+  assert(!elements(h.render()).some(n=>n.idValue==='attention-wait-hc:ganymede/t3-done'),'live dialog has no dismiss');
+  click('attention-wait-hc:io/t2-open');
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='pane.focus'&&c[2].terminal==='io/t2'));
+  click('attention-wait-hc:io/t2-done');await h.flush();
+  const dismiss=h.calls.find(c=>c[0]==='exec'&&c[2].includes('dismiss'));
+  assert.deepEqual(dismiss[2].slice(2),['ganymede','/remote repo','vega','mux','dismiss','hc:io/t2']);
+  assert(!elements(h.render()).some(n=>n.idValue==='attention-wait-hc:io/t2'));
+  click('attention-decision-d1-done');
+  assert(h.calls.some(c=>c[0]==='open'&&c[1].props?.tab==='decisions'));
+  click(`attention-note-proteus-${now-1}-done`);await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec'&&JSON.stringify(c[2])===JSON.stringify(['post','notes','clear','--upto',`proteus=${now-1}`])));
+  click('attention-notes');assert(h.calls.some(c=>c[0]==='open'&&c[1].props?.tab==='notes'));
+});
+
+test('waiting auto-clears only after a viewed turn advances, once across copies; a new episode can wait again',async()=>{
+  for(const remote of [false,true]) {
+    const h=load('vega-sidebar');const address=remote?'ganymede/t2':'t2';
+    const term={address,state:'live',turn:4,labels:{'herdr.seen':'3'}};
+    const w={pane:`hc:${address}`,name:'Worker',attention:'silent',title:''};
+    const r={...row(),machine:remote?'ganymede':'',waiting:1,waiting_panes:[w]};
+    let focus=null;
+    h.api.terminals=()=>[term];h.api.focused=()=>focus;
+    h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);return {code:0,stdout:bin==='python3'?JSON.stringify({code:0,stdout:'ok',stderr:''}):'ok'};};
+    h.state.set('vega.badges',[r]);h.mod.init({},h.cx);await h.flush();h.calls.length=0;
+    const reconcile=()=>h.mod.reconcileWaiting(h.cx);
+    reconcile();term.turn=5;reconcile();await h.flush();
+    assert(!h.calls.some(c=>c[0]==='exec'),'advancing unseen turns leaves the hand');
+    term.labels['herdr.seen']='5';focus={terminal:address};reconcile();await h.flush();
+    assert(!h.calls.some(c=>c[0]==='exec'),'focus alone leaves the hand');
+    focus=null;term.turn=6;reconcile();
+    const copy=h.newCopy();copy.dismissBusy=new Set();copy.dismissResults=new Map();copy.reconcileWaiting(h.cx);
+    await h.flush();
+    assert.equal(h.calls.filter(c=>c[0]==='exec').length,1,'one dismiss across copies');
+    assert.equal(h.mod.vegaTotals(remote?'ganymede/t1':'t1','project-a').waiting,0);
+    r.waiting_panes=[];reconcile();r.waiting_panes=[w];reconcile();
+    assert.equal(h.mod.vegaTotals(remote?'ganymede/t1':'t1','project-a').waiting,1,'new briefing restores waiting');
+  }
+});
+
+test('waiting sees focus between polls and keeps failed dismiss visible for explicit retry',async()=>{
+  const h=load('vega-sidebar');const term={address:'t2',state:'live',turn:4,labels:{'herdr.seen':'3'}};
+  const w={pane:'hc:t2',attention:'asking',title:'Choice'},r={...row(),waiting:1,waiting_panes:[w]};
+  h.api.terminals=()=>[term];h.state.set('vega.badges',[r]);h.mod.init({},h.cx);await h.flush();h.calls.length=0;
+  let code=1;h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,[...args]]);return {code,stdout:'failed'};};
+  h.mod.reconcileWaiting(h.cx);
+  term.labels['herdr.seen']='4';term.turn=5;w.title='New output';w.attention='silent';h.mod.reconcileWaiting(h.cx);await h.flush();
+  assert.equal(h.mod.vegaTotals('t1','project-a').waiting,1);
+  h.mod.reconcileWaiting(h.cx);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='exec').length,1,'no repeated background retries');
+  code=0;await h.mod.dismissWaiting(r,w,h.cx);
+  assert.equal(h.mod.vegaTotals('t1','project-a').waiting,0);
+  r.at=Date.now()/1000-61;assert.equal(h.mod.vegaIcons('t2',{}).items.length,0,'stale row has no hand');
+});
+
+test('auto-dismiss ignores stale waiters, live input dialogs and seen labels from before the waiting turn',async()=>{
+  const h=load('vega-sidebar');const term={address:'t2',state:'live',turn:6,labels:{}};
+  const w={pane:'hc:t2',attention:'asking'},r={...row(),waiting:1,waiting_panes:[w]};
+  h.api.terminals=()=>[term];h.state.set('vega.badges',[r]);h.mod.init({},h.cx);await h.flush();h.calls.length=0;
+  h.mod.reconcileWaiting(h.cx);
+  term.labels['herdr.seen']='4';term.turn=7;h.mod.reconcileWaiting(h.cx);await h.flush();
+  assert(!h.calls.some(c=>c[0]==='exec'),'old seen label cannot handle the new waiter');
+  term.labels['herdr.seen']='7';h.mod.reconcileWaiting(h.cx);
+  term.turn=8;w.attention='input';h.mod.reconcileWaiting(h.cx);await h.flush();
+  assert(!h.calls.some(c=>c[0]==='exec'),'live dialog cannot auto-dismiss');
+  w.attention='silent';r.at=Date.now()/1000-61;h.mod.reconcileWaiting(h.cx);await h.flush();
+  assert(!h.calls.some(c=>c[0]==='exec'),'stale row cannot auto-dismiss');
+});
+
 test('each agent icon stops row propagation and routes its own action',()=>{
   const h=load('vega-sidebar');
   h.mod.vegaTerminals=new Map([['t7',{labels:{'vega.mail':'2','vega.decisions':'1','vega.waiting':'1','vega.kind':'C','vega.uac':'UAC','vega.git':'dirty'}}]]);
   const icons=h.mod.vegaIcons('t7',{}).items;
-  assert.equal(icons.length,3,'uac and kind sit before the name; project decisions sit in the project badge');
+  assert.equal(icons.length,2,'uac and kind sit before the name; aggregate waiting and decisions stay off the UAC row');
   for(const icon of icons)icon.handlers.on_click({},h.cx);
-  assert.equal(h.calls.filter(c=>c[0]==='stop').length,3);
+  assert.equal(h.calls.filter(c=>c[0]==='stop').length,2);
   h.mod.vegaTerminals.set('t8',{labels:{'vega.git':'\u2800'}});
   assert.equal(h.mod.vegaIcons('t8',{}).items.length,0,'a blank token draws nothing');
   assert(!h.calls.some(c=>c[0]==='open'&&c[1].mod==='vega-inbox'),'agent rows no longer open the inbox');
@@ -1144,7 +1254,7 @@ test('waiting panes offer Dismiss for silent and asking only, run vega mux dismi
   const call=w.calls.find(c=>c[0]==='exec'&&c[2].includes('dismiss'));
   assert.equal(call[1],'python3');
   assert.deepEqual(call[2].slice(2),['ganymede','/remote/a','vega','mux','dismiss','hc:t1w'],'machine-local pane id on the parent machine');
-  assert(texts(w.render()).some(s=>s.startsWith('Dismissed')));
+  assert(!elements(w.render()).some(n=>n.idValue==='ov-wait-hc:ganymede/t1w'),'successful dismissal removes the item immediately');
 
   const i=load('vega-inbox');i.setProps({project});i.api.terminals=()=>[{address:'t5',state:'live'}];
   i.state.set('vega.badges',[{project,at:Date.now()/1000,checkout:'/repo',decision_texts:[],waiting_panes:[{pane:'hc:t5',name:'chat',attention:'asking',title:'asks: ok?'}]}]);

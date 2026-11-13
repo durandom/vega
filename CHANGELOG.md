@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 198 · 2026-11-13
+
+- feature: the sidebar project badge opens a Needs you popover with waiting panes, decisions and notes, including Open and resolution actions. Waiting hands appear on the child's row and clear after viewing its turn and a later turn advance; Done dismisses them immediately. UAC rows no longer repeat project counts.
+
 ## 197 · 2026-11-13
 
 - feature: `vega window status` gives proteus, ganymede, optional io btop, and ganymede tokens their own top tabs, preserving tab-switching keys and reusing live terminals. io is skipped with a warning when btop is unavailable.

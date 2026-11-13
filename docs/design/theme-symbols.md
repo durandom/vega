@@ -128,6 +128,25 @@ rows. Headed sessions, UACs and headless sessions without a live parent keep the
 Seen done still reads as an idle ring; working keeps its spinner. The colour does not change the
 status word used by the Active filter or navigation.
 
+The herdr-app project header has one summed badge for decisions, waiting panes and unread notes
+(urgent red for decisions or waiting). The UAC row does not repeat these counts. A waiting hand
+appears on the waiting child's own row, from fresh `waiting_panes` badge data, including children
+on other machines; the Active view keeps that child visible. Its colour is `symbols.colors.waiting`.
+The header badge opens a small Needs you popover with each item's identity, reason and age.
+Waiting age uses the terminal's status time, falling back to when the sidebar first observed it;
+decision age uses the bead's creation time, and note age its notification time. Missing times read
+as unknown. Open focuses a waiting pane on its machine, or opens the project's Decisions/Notes tab.
+Done dismisses a silent/asking child's hand on the badge row's machine; live input dialogs must
+be handled in their pane. Decisions links to the Decisions tab for resolution. A note's Done uses
+the same per-host clear watermark as the project window: it clears that note and earlier notes
+from that host. Other hosts and newer notes remain untouched.
+
+A waiting hand also clears after the Slayer views that pane's turn (`herdr.seen`) and its turn
+subsequently advances. Focus alone and unseen new turns keep the hand. Sidebar copies share the
+viewed episode and successful dismissal, so the marker and header count clear together. Failed
+dismissal keeps the item visible for explicit retry; a later waiting episode can show a new hand.
+Legacy herdr TUI tokens described above retain their aggregate UAC counts.
+
 ## Host identity
 
 herdr's combined multi-machine sidebar marks remote panes with its `machine` token, which can be
