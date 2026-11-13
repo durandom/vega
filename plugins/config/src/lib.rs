@@ -92,6 +92,7 @@ pub enum Unit {
     HerdrAppMods,
     HerdrAppSidebar,
     HerdrAppInbox,
+    HerdrAppWindowTabs,
     HerdrAppTabs,
     HerdrAppPane,
     HerdrAppLayouts,
@@ -99,7 +100,7 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub const ALL: [Unit; 24] = [
+    pub const ALL: [Unit; 25] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -120,6 +121,7 @@ impl Unit {
         Unit::HerdrAppThemes,
         // Install overlay and sidebar before the status mod can open them.
         Unit::HerdrAppInbox,
+        Unit::HerdrAppWindowTabs,
         Unit::HerdrAppSidebar,
         Unit::HerdrAppMods,
         Unit::HerdrAppTabs,
@@ -151,6 +153,7 @@ impl Unit {
             Unit::HerdrAppMods => "herdr-app.mods",
             Unit::HerdrAppSidebar => "herdr-app.vega-sidebar",
             Unit::HerdrAppInbox => "herdr-app.vega-inbox",
+            Unit::HerdrAppWindowTabs => "herdr-app.vega-window-tabs",
             Unit::HerdrAppTabs => "herdr-app.vega-tabs",
             Unit::HerdrAppPane => "herdr-app.vega-pane",
             Unit::HerdrAppLayouts => "herdr-app.layouts",
@@ -181,6 +184,7 @@ impl Unit {
             Unit::HerdrAppMods => "~/.config/herdr-app/mods/vega/",
             Unit::HerdrAppSidebar => "~/.config/herdr-app/mods/vega-sidebar/",
             Unit::HerdrAppInbox => "~/.config/herdr-app/mods/vega-inbox/",
+            Unit::HerdrAppWindowTabs => "~/.config/herdr-app/mods/vega-window-tabs/",
             Unit::HerdrAppTabs => "~/.config/herdr-app/mods/vega-tabs/",
             Unit::HerdrAppPane => "~/.config/herdr-app/mods/vega-pane/",
             Unit::HerdrAppLayouts => "~/.config/herdr-app/layouts/vega.json",
@@ -199,6 +203,7 @@ impl Unit {
             Unit::HerdrAppMods
             | Unit::HerdrAppSidebar
             | Unit::HerdrAppInbox
+            | Unit::HerdrAppWindowTabs
             | Unit::HerdrAppTabs
             | Unit::HerdrAppPane => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
@@ -227,6 +232,7 @@ impl Unit {
                 | Unit::HerdrAppMods
                 | Unit::HerdrAppSidebar
                 | Unit::HerdrAppInbox
+                | Unit::HerdrAppWindowTabs
                 | Unit::HerdrAppTabs
                 | Unit::HerdrAppPane
                 | Unit::HerdrAppLayouts
@@ -257,6 +263,7 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
             Unit::HerdrAppMods,
             Unit::HerdrAppSidebar,
             Unit::HerdrAppInbox,
+            Unit::HerdrAppWindowTabs,
             Unit::HerdrAppTabs,
             Unit::HerdrAppPane,
             Unit::HerdrAppLayouts,
@@ -679,6 +686,7 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
         Unit::HerdrAppMods
         | Unit::HerdrAppSidebar
         | Unit::HerdrAppInbox
+        | Unit::HerdrAppWindowTabs
         | Unit::HerdrAppTabs
         | Unit::HerdrAppPane
         | Unit::HerdrAppLayouts => herdr_app::plan(ctx, unit),
@@ -1054,6 +1062,7 @@ fn apply_inner(
         Unit::HerdrAppMods
             | Unit::HerdrAppSidebar
             | Unit::HerdrAppInbox
+            | Unit::HerdrAppWindowTabs
             | Unit::HerdrAppTabs
             | Unit::HerdrAppPane
             | Unit::HerdrAppLayouts

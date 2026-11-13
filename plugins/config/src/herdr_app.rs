@@ -175,6 +175,20 @@ fn mod_files(name: &str) -> &[&str] {
         &["main.js", "mod.json", "lock.svg"]
     } else if name == "vega-sidebar" {
         &["main.js", "mod.json", "pin.svg"]
+    } else if name == "vega-window-tabs" {
+        &[
+            "main.js",
+            "mod.json",
+            "navigation.js",
+            "tabs.js",
+            "diff.js",
+            "UPSTREAM.md",
+            "changes.svg",
+            "win-min.svg",
+            "win-max.svg",
+            "win-close.svg",
+            "win-restore.svg",
+        ]
     } else if name == "vega-tabs" {
         &[
             "main.js",
@@ -209,6 +223,7 @@ fn mod_name(unit: crate::Unit) -> Option<&'static str> {
         crate::Unit::HerdrAppMods => Some("vega"),
         crate::Unit::HerdrAppSidebar => Some("vega-sidebar"),
         crate::Unit::HerdrAppInbox => Some("vega-inbox"),
+        crate::Unit::HerdrAppWindowTabs => Some("vega-window-tabs"),
         crate::Unit::HerdrAppTabs => Some("vega-tabs"),
         crate::Unit::HerdrAppPane => Some("vega-pane"),
         _ => None,

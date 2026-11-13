@@ -761,6 +761,7 @@ fn herdr_app_units_skip_write_seed_and_reject() {
         Unit::HerdrAppSettings,
         Unit::HerdrAppThemes,
         Unit::HerdrAppProfiles,
+        Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
     ] {
@@ -988,6 +989,7 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
         Unit::HerdrAppMods,
         Unit::HerdrAppSidebar,
         Unit::HerdrAppInbox,
+        Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
     ] {
@@ -997,6 +999,19 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
         fs::read_to_string(home.join("mods/vega-sidebar/pin.svg")).unwrap(),
         sources::default("herdr-app/mods/vega-sidebar/pin.svg").unwrap()
     );
+    for file in [
+        "main.js",
+        "mod.json",
+        "navigation.js",
+        "tabs.js",
+        "diff.js",
+        "changes.svg",
+    ] {
+        assert_eq!(
+            fs::read_to_string(home.join("mods/vega-window-tabs").join(file)).unwrap(),
+            sources::default(&format!("herdr-app/mods/vega-window-tabs/{file}")).unwrap()
+        );
+    }
     fs::write(home.join("offline"), "").unwrap();
     assert!(matches!(
         apply(&ctx, Unit::HerdrAppLayouts, &managed),
@@ -1044,6 +1059,7 @@ fn app_selected_layout_update_reverifies_and_restores_on_false_success() {
         Unit::HerdrAppMods,
         Unit::HerdrAppSidebar,
         Unit::HerdrAppInbox,
+        Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
     ] {
@@ -1135,6 +1151,7 @@ fn app_layout_drift_and_unit_dependency_order_are_visible() {
     let selected = select(&["herdr-app".into()]).unwrap();
     let index = |u| selected.iter().position(|v| *v == u).unwrap();
     assert!(index(Unit::HerdrAppMods) < index(Unit::HerdrAppLayouts));
+    assert!(index(Unit::HerdrAppWindowTabs) < index(Unit::HerdrAppSidebar));
     assert!(index(Unit::HerdrAppTabs) < index(Unit::HerdrAppLayouts));
     assert!(index(Unit::HerdrAppPane) < index(Unit::HerdrAppLayouts));
     assert!(index(Unit::HerdrAppLayouts) < index(Unit::HerdrAppSettings));
@@ -1152,6 +1169,7 @@ fn app_first_layout_apply_retries_fresh_mod_discovery() {
         Unit::HerdrAppMods,
         Unit::HerdrAppSidebar,
         Unit::HerdrAppInbox,
+        Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
     ] {
@@ -1178,6 +1196,7 @@ fn app_layout_mod_discovery_retry_is_bounded_and_rolls_back() {
         Unit::HerdrAppMods,
         Unit::HerdrAppSidebar,
         Unit::HerdrAppInbox,
+        Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
     ] {

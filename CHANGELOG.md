@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 207 · 2026-11-13
+
+- feature: the gear beside VEGA opens settings for estate model defaults and host tiers,
+  profile windows (Open and Edit tabs), and current theme delivery status. The project
+  window's Models tab now edits only project pins; Reset restores inheritance.
+- unit: apply `herdr-app.vega-window-tabs` alongside `herdr-app.vega-sidebar` (or the
+  `herdr-app` group) to make the existing profile tab editor available in settings.
+
 ## 206 · 2026-11-13
 
 - feature: the project window's Decisions tab renders again: answer inputs are created outside render

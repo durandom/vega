@@ -73,8 +73,8 @@ reloads live; `HERDR_APP_HOME` is not followed. Without that directory the units
 
 ### Vega layout and startup mod (vega-0h4c.13)
 
-`herdr-app.mods`, `herdr-app.vega-sidebar`, `herdr-app.vega-inbox`, `herdr-app.vega-tabs`
-and `herdr-app.vega-pane` each replace their whole mod folder, including owned assets; local overrides
+`herdr-app.mods`, `herdr-app.vega-sidebar`, `herdr-app.vega-inbox`, `herdr-app.vega-tabs`,
+`herdr-app.vega-window-tabs` and `herdr-app.vega-pane` each replace their whole mod folder, including owned assets; local overrides
 resolve per file. It stages the files together and requires the installed `herdr-app check` to pass
 before touching the target. A missing checker or a failed check reports `rejected`. Replacement moves
 the old folder, including stale files, to `~/.config/herdr-app/.vega-mod.<name>-bak`; other mods stay

@@ -468,15 +468,40 @@ context, the project window holds details and actions.
   refocuses its own handle on every press (for Esc) and would take the focus from the input.
 - Colours come from theme tokens only (working, blocked, done, idle), for light and dark.
 
-## Models tab (vega-aysa.2)
+## Vega settings window (vega-idc8)
 
-The project/config window's descriptor list in `mods/vega-sidebar/main.js` includes
-Models; `mods/vega/main.js` opens that same window. Models is fleet-wide, read and
+The gear beside **VEGA** in the expanded sidebar header opens a keyed
+`vega-sidebar` window (`vega-settings`, `globalConfig: true`), even with no project
+or terminal selected. It has Models, Windows and Theme sections. Its own title bar
+has a close button that stops mouse-down propagation; Escape closes it too.
+The title bar drags the window, and content controls keep their presses.
+The settings copy creates no inputs and starts no polling timers. Each section
+loads on selection and has an explicit Refresh control; mutations refresh Models.
+
+Windows reads the profile list from `vega window` (named text rows with applied
+status), including unapplied profiles. Applied rows offer Open, invoking
+`vega window <name>`, and Edit tabs, opening the existing `vega-window-tabs`
+config dialog with that profile. The dialog retains its diff, Promote and Reset
+behavior; opening the settings section itself starts no windows or terminals.
+Unapplied profiles are labelled and have no live actions. The
+`herdr-app.vega-window-tabs` config unit installs the existing tab mod and its
+assets into the main app home too, so its dialog can open from settings.
+Apply that unit alongside `herdr-app.vega-sidebar`, or apply the herdr-app group.
+
+Theme displays the full read-only `vega theme` status (there is no JSON form),
+including OS/preference/due/applied mode, tool drift and every Claude pane's
+applied, pending or failed delivery with its reason. Reads and action errors
+appear inline, retaining the last successful snapshot. Refresh requests new data;
+there is no background theme polling or automatic theme mutation.
+
+### Estate and project Models (vega-aysa.2, vega-idc8)
+
+The settings window owns the fleet-wide Default and per-host groups, read and
 edited on the app host. It consumes `vega lanista hosts --json` (`{rows: [...]}`),
+from the app host home (avoiding the sidebar process checkout's project pins),
 without filtering by connected hc machines: inbox-only hosts such as puck remain
 visible. Each host group lists seat, lane and tier, effective model, source
-(project/host/default/global) and expiry. A project source can continue to mask a
-successful host/default edit; the refreshed source makes that explicit.
+(host/default/global) and expiry.
 
 The Default group is independent of host/project overrides: one read-only
 `vega lanista pin <lane> --tier <tier> --default` per unique seat/lane/tier reads
@@ -493,11 +518,23 @@ stop left mouse-down like `inputBox`, preserving the window's focus handling.
 All colours use theme tokens. CLI stdout errors, stderr errors, launch failures,
 and parse failures appear inline; failed host reads retain the last good snapshot.
 
-The snapshot and mutation guard use `shared()`/`setShared()` so separate mod copies
-see the latest values and cannot submit simultaneous edits. Reads run when Models
-is selected, every 15 seconds while selected, on Refresh, and after each action.
+The project window's Models tab contains only Project overrides. It deduplicates
+seat/lane/tier cells, reads effective project resolution and edits pins with
+`vega lanista pin` without `--host` or `--default`, in the project's recorded
+checkout (through the existing remote checkout helper when necessary). It shows
+the inherited source until a project pin is set. New project pins explicitly use
+`--until never`; Reset clears only the project pin and restores inheritance.
+A missing checkout produces an inline error rather than falling back to the app
+process directory.
+
+The estate snapshot and project snapshots use separate shared keys (`vega.models`
+and `vega.models.<project-id>`). The mutation guard uses `shared()`/`setShared()`
+so copies cannot submit simultaneous edits. Reads run when Models is selected,
+on Refresh, and after each action; the existing project-only 15-second refresh
+also reads project pins while that tab is selected.
 `node --test scripts/herdr-app-mods.test.mjs` covers rendering, independent defaults,
-puck, allowlists, exact set/clear argv, pi omission, refresh and inline errors.
+puck, allowlists, exact estate/project set/clear argv, pi omission, refresh,
+inline errors, the gear/close controls, profile actions and theme delivery status.
 
 ### Status tab management (vega-0h4c.87)
 

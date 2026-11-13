@@ -516,7 +516,7 @@ test('UAC projects hold their agents across machines in dragged order; other spa
   assert.equal(ids.filter(i=>i.startsWith('uac-')).length,2,'one group per UAC project');
   assert(at('uac-github.com/team/lanista')<at('ag-ganymede/t2')&&at('ag-ganymede/t2')<at('ag-t5')&&at('ag-t5')<at('uac-github.com/team/vega'),'UAC first, then the project\'s agents on other machines');
   assert(at('sub-ganymede/t3')>at('ag-ganymede/t2'),'sentinel is a branch of its UAC');
-  assert(text.includes('feat/x')&&!text.some(s=>s.includes('⚙')),'sentinel name without the cog');
+  assert(text.includes('feat/x')&&!texts(nodes.find(n=>n.idValue==='sub-ganymede/t3')).some(s=>s.includes('⚙')),'sentinel name without the cog');
   assert(text.includes('♃₃')&&text.includes('♆₈'),'machine symbol on every row');
   assert(text.includes('Spaces')&&at('space-sp3')>at('uac-github.com/team/vega'),'a space without a UAC follows under Spaces');
   assert(!ids.includes('space-sp1'),'no folder rows inside a UAC project');
@@ -1466,7 +1466,7 @@ test('an open unlock window probes its host directly and turns the lock green be
 });
 
 test('Models tab reads host cells including inbox-only hosts and independent defaults; exact set/clear argv and inline errors',async()=>{
-  const h=load('vega-sidebar');h.setProps({projectConfig:'github.com/team/a',tab:'models'});
+  const h=load('vega-sidebar');h.setProps({globalConfig:true});
   const cell={seat:'herdr-agents',lane:'codex',tier:'budget',model:'project-model',source:'project',until:1234567890,allowed:['gpt-6-luna','gpt-6.1-terra']};
   let rows=[{...cell,host:'proteus'},{...cell,host:'puck',model:'gpt-6.1-terra',source:'host'},
     {...cell,host:'puck',lane:'pi',model:'glm-4.7',source:'global',allowed:['google/gemini-4-argon']}];
@@ -1480,7 +1480,7 @@ test('Models tab reads host cells including inbox-only hosts and independent def
   };
   h.mod.init({},h.cx);await h.flush();
   let nodes=elements(h.render()), text=texts(h.render());
-  assert(nodes.some(n=>n.idValue==='project-tab-models'));
+  assert(nodes.some(n=>n.idValue==='settings-tab-models'));
   assert(nodes.some(n=>n.idValue==='models-group-puck'),'host list is independent of connected hc machines');
   assert(text.includes('project-model · project'));assert(text.includes('gpt-6-luna · default'));
   assert(text.includes('glm-4.7 · global'),'pi can show its zai fallback outside the pi allowlist');
@@ -1516,10 +1516,84 @@ test('Models tab reads host cells including inbox-only hosts and independent def
   assert(elements(h.render()).some(n=>n.idValue==='models-group-puck'),'failed reads retain last snapshot');
   h.api.exec=async()=>{throw new Error('exec failed');};await h.mod.readModels(h.cx);
   assert(texts(h.render()).includes('exec failed'));
-  const other=load('vega-sidebar');other.state.set('vega.models',h.state.get('vega.models'));
+  const other=load('vega-sidebar');other.setProps({globalConfig:true});other.state.set('vega.models',h.state.get('vega.models'));
   assert(texts(other.mod.modelsTab({})).includes('gpt-6-luna · host'),'other mod copies use shared data');
   readError=null;rows=[];h.api.exec=async()=>({code:0,stdout:JSON.stringify({rows})});await h.mod.readModels(h.cx);
   assert(texts(h.render()).includes('No known hosts'));
+});
+
+test('vega settings gear works without a project, closes from its titlebar and adds no timers',async()=>{
+  const h=load('vega-sidebar');h.mod.init({},h.cx);
+  elements(h.render()).find(n=>n.idValue==='vega-settings').handlers.on_click({},h.cx);
+  const spec=h.calls.find(c=>c[0]==='open')[1];
+  assert.equal(spec.kind,'window');assert.equal(spec.key,'vega-settings');assert.equal(spec.props.globalConfig,true);
+  const popup=load('vega-sidebar');popup.setProps({...spec.props,overlay:'settings'});
+  let timers=0;popup.cx.timer.every=()=>timers++;
+  popup.mod.init({},popup.cx);await popup.flush();
+  assert.equal(timers,0);
+  let tree=popup.render();
+  const close=elements(tree).find(n=>n.idValue==='close-settings');
+  close.handlers.on_mouse_down({},popup.cx);close.handlers.on_click({},popup.cx);
+  assert(popup.calls.some(c=>c[0]==='stop'));
+  assert(popup.calls.some(c=>c[0]==='close'&&c[1]==='settings'));
+  tree.handlers.on_key_down({keystroke:'escape'},popup.cx);
+  assert.equal(popup.calls.filter(c=>c[0]==='close').length,2);
+});
+
+test('settings lists profiles, routes Open and existing Edit tabs dialog, and preserves theme delivery status',async()=>{
+  const h=load('vega-sidebar');h.setProps({globalConfig:true,overlay:'settings'});
+  let error=false;
+  const status='os: dark\nmode: auto (theme.toml)\napplied: dark\nclaude_panes[3]{pane,mode,wanted,status}:\n  t1,dark,dark,applied\n  t2,light,dark,pending\n  t3,unknown,dark,failed: hc_timeout\n';
+  h.api.exec=async(bin,args)=>{
+    h.calls.push(['exec',bin,[...args]]);
+    if(error) return {code:1,stdout:'error: unavailable'};
+    return {code:0,stdout:args[0]==='theme'?status:args.length===1?'profiles[2]{name,applied}:\n  status,true\n  spare,false\n':'window: status'};
+  };
+  h.mod.settingsTab='windows';await h.mod.readSettings('windows',h.cx);
+  let nodes=elements(h.render());
+  assert(texts(h.render()).includes('spare · not applied'));
+  assert(!nodes.some(n=>n.idValue==='profile-open-spare'));
+  nodes.find(n=>n.idValue==='profile-edit-status').handlers.on_click({},h.cx);
+  const edit=h.calls.find(c=>c[0]==='open')[1];
+  assert.equal(edit.mod,'vega-window-tabs');assert.equal(edit.props.mode,'config');assert.equal(edit.props.profile,'status');
+  nodes.find(n=>n.idValue==='profile-open-status').handlers.on_click({},h.cx);await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec'&&JSON.stringify(c[2])==='["window","status"]'));
+  assert(texts(h.render()).includes('Opened status'));
+  nodes=elements(h.render());nodes.find(n=>n.idValue==='settings-tab-theme').handlers.on_click({},h.cx);await h.flush();
+  for(const line of status.trimEnd().split('\n')) assert(texts(h.render()).includes(line));
+  error=true;
+  elements(h.render()).find(n=>n.idValue==='settings-refresh').handlers.on_click({},h.cx);await h.flush();
+  assert(texts(h.render()).includes('error: unavailable'));
+  assert(texts(h.render()).includes('  t3,unknown,dark,failed: hc_timeout'),'last successful theme snapshot survives errors');
+  h.api.exec=async()=>({code:0,stdout:'profiles[0]{name,applied}:\n'});
+  h.mod.settingsTab='windows';await h.mod.readSettings('windows',h.cx);
+  assert(texts(h.render()).includes('No profiles available.'));
+});
+
+test('project Models edits only project pins in its recorded checkout and keeps estate data separate',async()=>{
+  const h=load('vega-sidebar');h.setProps({projectConfig:'project-a',tab:'models'});
+  h.state.set('vega.badges',[row()]);
+  const cell={host:'puck',seat:'herdr-agents',lane:'codex',tier:'budget',allowed:['gpt-6-luna']};
+  h.api.exec=async(bin,args,opts)=>{
+    h.calls.push(['exec',bin,[...args],opts]);
+    return {code:0,stdout:args[1]==='hosts'?JSON.stringify({rows:[cell]}):'project: project-a\nmodel: gpt-6-luna\nsource: project (proteus)\nexpires: never\n'};
+  };
+  await h.mod.readModels(h.cx);
+  let nodes=elements(h.render());
+  assert(nodes.some(n=>n.idValue==='project-tab-models'));
+  assert(nodes.some(n=>n.idValue==='models-group-Project overrides'));
+  assert(!nodes.some(n=>n.idValue==='models-group-Default'||n.idValue==='models-group-puck'));
+  assert.equal(h.state.get('vega.models'),undefined);
+  assert(h.state.has('vega.models.project-a'));
+  await h.mod.changeModel(cell,false,'gpt-6-luna',h.cx);
+  await h.mod.changeModel(cell,false,null,h.cx);
+  const pins=h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='pin');
+  assert(pins.every(c=>c[3].cwd==='/repo with spaces'));
+  assert(pins.every(c=>!c[2].includes('--host')&&!c[2].includes('--default')));
+  assert(pins.some(c=>JSON.stringify(c[2])==='["lanista","pin","codex","--tier","budget","--set","gpt-6-luna","--until","never"]'));
+  assert(pins.some(c=>JSON.stringify(c[2])==='["lanista","pin","codex","--tier","budget","--clear"]'));
+  h.state.set('vega.badges',[]);await h.mod.readModels(h.cx);
+  assert(texts(h.render()).includes('Project checkout unavailable.'));
 });
 
 test('context and overview read beads in the registry checkout, not the drifted terminal cwd',async()=>{

@@ -199,6 +199,13 @@ function lastFocus(command) {
 export default class Agents extends View {
   init(_props, cx) {
     this.dismissBusy = new Set(); this.dismissResults = new Map();
+    if (props()?.globalConfig) {
+      this.settingsTab = "models";
+      this.focusHandle = cx.focus_handle?.();
+      this.focusHandle?.focus();
+      cx.spawn(cx => this.readModels(cx));
+      return;
+    }
     if (props()?.mail) {
       this.mail = "Loading mail…";
       cx.spawn(async (cx) => {
@@ -452,6 +459,86 @@ export default class Agents extends View {
         .child(div().text_size(11.5).text_color(t.foreground).child((n.body ?? "").slice(0, 800)))));
   }
 
+  settingsButton(t, id, label, action) {
+    return div().id(id).px(8).py(5).rounded(5).bg(t.raised).cursor_pointer()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); action(cx); }).child(label);
+  }
+
+  async readSettings(section, cx) {
+    if (section === "models") return this.readModels(cx);
+    this.settingsReads ??= new Set();
+    if (this.settingsReads.has(section)) return;
+    this.settingsReads.add(section);
+    this.settingsError = null; cx.notify();
+    try {
+      // Theme has no JSON form: preserve the full status, including delivery failures.
+      const r = await exec("vega", section === "windows" ? ["window"] : ["theme"], { timeout: 15000 });
+      if (r.code !== 0) throw new Error(r.stdout || r.stderr || "Settings unavailable");
+      if (section === "theme") this.themeStatus = r.stdout;
+      else {
+        if (!/^profiles\[\d+\]\{name,applied\}:/m.test(r.stdout)) throw new Error("Invalid profile list");
+        this.profiles = r.stdout.split("\n").flatMap(line => {
+          const match = line.match(/^  ([a-z0-9_-]{1,32}),(true|false)$/);
+          return match ? [{ name: match[1], applied: match[2] === "true" }] : [];
+        });
+      }
+    } catch (e) { this.settingsError = String(e.message ?? e); }
+    finally { this.settingsReads.delete(section); cx.notify(); }
+  }
+
+  async openProfile(name, cx) {
+    if (this.openingProfile) return;
+    this.openingProfile = name; this.settingsError = null; this.settingsMessage = null; cx.notify();
+    try {
+      const r = await exec("vega", ["window", name], { timeout: 60000 });
+      if (r.code !== 0) throw new Error(r.stdout || r.stderr || "Could not open profile");
+      this.settingsMessage = `Opened ${name}`;
+    } catch (e) { this.settingsError = String(e.message ?? e); }
+    finally { this.openingProfile = null; cx.notify(); }
+  }
+
+  settingsOverlay(t) {
+    const tab = this.settingsTab ?? "models";
+    const button = (id, label, action) => this.settingsButton(t, id, label, action);
+    const body = v_flex().size_full().p(12).gap(10).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .when(Boolean(this.focusHandle), el => el.track_focus(this.focusHandle)
+        .on_mouse_down("left", () => this.focusHandle.focus()))
+      .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
+      // Only the title bar drags; its close control stops the press before it bubbles.
+      .child(h_flex().id("settings-titlebar").h(28).gap(8).items_center().bg(t.surface)
+        .child(div().px(6).font_semibold().child("⠿  Vega settings"))
+        .child(div().flex_1())
+        .child(button("close-settings", "✕", () => closeOverlay(props().overlay))))
+      .child(h_flex().gap(8).children(["models", "windows", "theme"].map(section =>
+        button(`settings-tab-${section}`, section[0].toUpperCase() + section.slice(1), cx => {
+          this.settingsTab = section; this.settingsError = null; this.settingsMessage = null;
+          cx.spawn(cx => this.readSettings(section, cx)); cx.notify();
+        }).when(tab === section, el => el.bg(t.selected)))));
+    const content = v_flex().id(`settings-body-${tab}`).flex_1().min_h(0).overflow_y_scrollbar().gap(8)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation());
+    if (tab === "models") content.child(this.modelsTab(t));
+    else {
+      content.child(button("settings-refresh", "Refresh", cx => cx.spawn(cx => this.readSettings(tab, cx))));
+      if (tab === "theme") content.child(v_flex().gap(3)
+        .children((this.themeStatus ?? "Reading theme…").trimEnd().split("\n").map(line => div().child(line || " "))));
+      else {
+        content.child(div().text_color(t.dim).child("Applied profiles open independent windows. Edit tabs reviews local changes, with Promote and Reset."));
+        if (!this.profiles) content.child("Reading profiles…");
+        else if (!this.profiles.length) content.child("No profiles available.");
+        else content.children(this.profiles.map(profile => h_flex().gap(8).items_center()
+          .child(div().flex_1().child(`${profile.name} · ${profile.applied ? "applied" : "not applied"}`))
+          .when(profile.applied, el => el
+            .child(button(`profile-open-${profile.name}`, this.openingProfile === profile.name ? "Opening…" : "Open", cx => cx.spawn(cx => this.openProfile(profile.name, cx))))
+            .child(button(`profile-edit-${profile.name}`, "Edit tabs", () => openOverlay({ mod: "vega-window-tabs", kind: "dialog", width: 700, height: 540, props: { profile: profile.name, mode: "config" } }))))));
+      }
+      if (this.settingsReads?.has(tab)) content.child("Refreshing…");
+      if (this.settingsError) content.child(div().text_color(t.blocked).child(this.settingsError));
+      if (this.settingsMessage) content.child(this.settingsMessage);
+    }
+    return body.child(content);
+  }
+
   // Shared across project/config windows; never infer a default from a host's effective
   // row: host and project pins can mask it. The default reader is the CLI's pin view.
   async readModels(cx) {
@@ -460,24 +547,33 @@ export default class Agents extends View {
     try { await this.modelsRead; } finally { this.modelsRead = null; }
   }
 
+  modelsKey() { return props()?.globalConfig ? "vega.models" : `vega.models.${props()?.projectConfig}`; }
+
+  async modelCommand(args) {
+    if (props()?.globalConfig) return exec("vega", args, { timeout: 10000 });
+    const { machine, checkout } = this.badgeRow();
+    if (!checkout) throw new Error("Project checkout unavailable.");
+    return inCheckout(machine, checkout, "vega", args);
+  }
+
   async loadModels(cx) {
     try {
-      const r = await exec("vega", ["lanista", "hosts", "--json"], { timeout: 10000 });
+      const r = await exec("vega", ["lanista", "hosts", "--json"], { cwd: home(), timeout: 10000 });
       if (r.code !== 0) throw new Error((r.stdout || r.stderr || `hosts failed (${r.code})`).trim());
       const data = JSON.parse(r.stdout);
       if (!Array.isArray(data.rows)) throw new Error("Invalid lanista hosts response: rows missing");
-      const cells = [...new Map(data.rows.filter(r => r.lane !== "pi").map(r => [`${r.seat}/${r.lane}/${r.tier}`, r])).values()];
+      const cells = [...new Map(data.rows.filter(r => !props()?.globalConfig || r.lane !== "pi").map(r => [`${r.seat}/${r.lane}/${r.tier}`, r])).values()];
       const defaults = await Promise.all(cells.map(async row => {
         try {
-          const r = await exec("vega", this.modelArgs(row, true), { timeout: 10000 });
+          const r = await this.modelCommand(this.modelArgs(row, true));
           if (r.code !== 0) throw new Error((r.stdout || r.stderr || `default read failed (${r.code})`).trim());
           const field = name => r.stdout.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1];
-          const model = field("model"), source = field("source"), expires = field("expires");
+          const model = field("model"), source = field("source"), expires = field("expires") ?? (props()?.globalConfig ? null : "never");
           if (!model || !source || !expires) throw new Error("Invalid lanista default response");
           return {...row, model, source: source === "global seats" ? "global" : source, until: expires === "never" ? null : Number(expires)};
         } catch (e) { return {...row, model: "Unknown", source: "unknown", error: String(e.message ?? e)}; }
       }));
-      setShared("vega.models", { rows: data.rows, defaults });
+      setShared(this.modelsKey(), { rows: data.rows, defaults });
       this.modelsError = null;
     } catch (e) { this.modelsError = String(e.message ?? e); }
     finally { cx.notify(); }
@@ -486,17 +582,18 @@ export default class Agents extends View {
   modelArgs(row, defaults) {
     const args = ["lanista", "pin", row.lane, "--tier", row.tier];
     if (row.seat !== "herdr-agents") args.push("--seat", row.seat);
+    if (!props()?.globalConfig) return args;
     return args.concat(defaults ? ["--default"] : ["--host", row.host]);
   }
 
   async changeModel(row, defaults, model, cx) {
     if (shared("vega.models-busy")) return;
-    if (defaults && row.lane === "pi") return;
+    if (props()?.globalConfig && defaults && row.lane === "pi") return;
     if (model !== null && !row.allowed.includes(model)) return;
     setShared("vega.models-busy", true);
     this.modelResult = null; this.modelActionError = false; this.modelMenu = null; cx.notify();
     try {
-      const r = await exec("vega", [...this.modelArgs(row, defaults), ...(model === null ? ["--clear"] : ["--set", model])], { timeout: 10000 });
+      const r = await this.modelCommand([...this.modelArgs(row, defaults), ...(model === null ? ["--clear"] : ["--set", model, ...(!props()?.globalConfig ? ["--until", "never"] : [])])]);
       if (r.code !== 0) throw new Error((r.stdout || r.stderr || `pin failed (${r.code})`).trim());
       this.modelResult = model === null ? "Pin cleared." : "Model saved.";
     } catch (e) { this.modelResult = String(e.message ?? e); this.modelActionError = true; }
@@ -510,7 +607,7 @@ export default class Agents extends View {
   }
 
   modelsTab(t) {
-    const data = shared("vega.models");
+    const data = shared(this.modelsKey());
     const button = (id, label, action) => div().id(id).px(6).py(3).rounded(4).bg(t.raised).cursor_pointer()
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); action(cx); cx.notify(); }).child(label);
@@ -520,8 +617,10 @@ export default class Agents extends View {
       .when(Boolean(this.modelResult), el => el.child(div().text_color(this.modelActionError ? t.blocked : t.done).child(this.modelResult)));
     if (!data) return body.child(div().text_color(t.dim).child(this.modelsError ? "Models unavailable" : "Reading models…"));
     if (!data.rows.length) return body.child(div().text_color(t.dim).child("No known hosts"));
-    const groups = [{ name: "Default", rows: data.defaults, defaults: true },
-      ...[...new Set(data.rows.map(r => r.host))].sort().map(host => ({ name: host, rows: data.rows.filter(r => r.host === host), defaults: false }))];
+    const groups = props()?.globalConfig ? [{ name: "Default", rows: data.defaults, defaults: true },
+      ...[...new Set(data.rows.map(r => r.host))].sort().map(host => ({ name: host, rows: data.rows.filter(r => r.host === host), defaults: false }))]
+      : [{ name: "Project overrides", rows: data.defaults, defaults: false }];
+    if (!props()?.globalConfig) body.child(div().text_color(t.dim).child("Project pins override inherited models. New pins do not expire; Reset restores inheritance."));
     return body.children(groups.map(group => v_flex().id(`models-group-${group.name}`).gap(6).p(8).rounded(6).bg(t.surface)
       .child(div().font_semibold().child(group.name))
       .when(group.defaults, el => el.child(div().text_size(11).text_color(t.dim).child("Pi inherits zai defaults.")))
@@ -1660,6 +1759,7 @@ export default class Agents extends View {
           .when(Boolean(m.title), el => el.child(div().font_semibold().child(m.title)))
           .child(div().child(m.text ?? m.body ?? ""))) : [div().child("No mail.")]) : [div().child(this.mail)]));
     if (props()?.attentionProject) return this.attentionPopover(t);
+    if (props()?.globalConfig) return this.settingsOverlay(t);
     if (props()?.projectConfig) return this.projectOverlay(t);
     if (props()?.viewMenu) return this.viewMenu(t);
     if (props()?.spaceMenu) return this.spaceMenu(t);
@@ -1789,7 +1889,10 @@ export default class Agents extends View {
             .flex_none()
             .items_center()
             .justify_between()
-            .child(div().text_size(11.5).font_medium().text_color(t.dim).child("VEGA"))
+            .child(h_flex().gap(6).items_center()
+              .child(div().text_size(11.5).font_medium().text_color(t.dim).child("VEGA"))
+              .child(div().id("vega-settings").cursor_pointer().tooltip("Vega settings")
+                .on_click(() => openOverlay({ mod: "vega-sidebar", kind: "window", key: "vega-settings", width: 760, height: 620, props: { globalConfig: true } })).child("⚙")))
             .child(h_flex().gap(8).items_center()
               .child(pill(t, "ag-hide-inactive", "Active", { on: filtering,
                 tooltip: filtering ? "Show inactive sessions" : "Hide inactive sessions",
