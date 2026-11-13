@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 200 · 2026-11-13
+
+- feature: status windows use a fork of herdr-app's stock pill tab bar, with program icons, active-tab close, scrolling and window controls. Double-click a tab to rename inline; drag it onto another tab to persist its order, including when optional groups are unavailable.
+- feature: the right-side Config button shows a colored, numbered diff from the applied repo profile to the effective local profile, with Promote and Reset actions.
+- unit: after upgrading, run `vega config apply herdr-app.profiles`, then `vega window status` to load the updated bar and diff viewer.
+
 ## 199 · 2026-11-13
 
 - feature: status tabs support + / leader-c machine selection, inline rename, drag reorder and close. Local edits persist in `~/.config/vega/windows/<profile>.toml`; closing hides a tab without killing its terminal.

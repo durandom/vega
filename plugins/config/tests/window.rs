@@ -80,12 +80,36 @@ else:
     assert_eq!(fs::read(&layout_path).unwrap(), first_layout);
     assert!(second.contains("started: 0"));
     assert!(second.contains("reused: 3"));
+    let generated: serde_json::Value = serde_json::from_slice(&first_layout).unwrap();
+    assert_eq!(
+        generated["children"][0]["content"]["props"]["order"],
+        serde_json::json!(["proteus", "ganymede", "io", "tokens"])
+    );
+    assert_eq!(
+        generated["children"][1]["children"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
     assert!(!d.path().join("must-not-touch").exists());
     let terms: serde_json::Value =
         serde_json::from_slice(&fs::read(d.path().join("terminals.json")).unwrap()).unwrap();
     assert_eq!(terms.as_array().unwrap().len(), 3);
     assert_eq!(terms[2]["argv"], serde_json::json!(["token-burn", "tui"]));
     let exe = env!("CARGO_BIN_EXE_vega-window");
+    let clean: serde_json::Value =
+        serde_json::from_str(&command(exe, &["show", "status"])).unwrap();
+    assert_eq!(clean["diff"], "");
+    command(exe, &["move", "status", "proteus", "4"]);
+    command(exe, &["status"]);
+    let reordered: serde_json::Value =
+        serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
+    assert_eq!(
+        reordered["children"][1]["children"][2]["id"], "proteus",
+        "drop onto last visible group survives reopen despite missing optional io"
+    );
+    command(exe, &["move", "status", "proteus", "1"]);
     let calls_before = fs::read_to_string(d.path().join("calls")).unwrap();
     command(exe, &["add", "status", "--machine", "local"]);
     let added: serde_json::Value =
@@ -97,6 +121,10 @@ else:
     let show: serde_json::Value = serde_json::from_str(&command(exe, &["show", "status"])).unwrap();
     assert_eq!(show["profile"]["tab"][0]["title"], "My shell");
     assert_eq!(show["profile"]["tab"][0]["name"], id);
+    let diff = show["diff"].as_str().unwrap();
+    assert!(diff.starts_with("--- repo profile (applied)\n+++ effective profile\n@@"));
+    assert!(diff.contains("+title = \"My shell\""));
+    assert!(diff.contains("-name = \"proteus\""));
     let calls_after = fs::read_to_string(d.path().join("calls")).unwrap();
     assert!(
         !calls_after[calls_before.len()..].contains("herdr-app"),
@@ -127,6 +155,9 @@ else:
         serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
     assert_eq!(layout["children"][1]["children"], serde_json::json!([]));
     command(exe, &["reset", "status"]);
+    let reset: serde_json::Value =
+        serde_json::from_str(&command(exe, &["show", "status"])).unwrap();
+    assert_eq!(reset["diff"], "");
     assert!(command(exe, &["status"]).contains("reused: 3"));
     let terms: serde_json::Value =
         serde_json::from_slice(&fs::read(d.path().join("terminals.json")).unwrap()).unwrap();

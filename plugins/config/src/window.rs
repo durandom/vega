@@ -294,7 +294,7 @@ fn launch(
     profiles::resolve_layout(&mut layout, &addresses)?;
     fn configure(node: &mut Value, name: &str, p: &Profile) {
         if node["content"]["mod"] == "vega-window-tabs" {
-            node["content"]["props"] = serde_json::json!({"profile":name, "titles":p.tabs.iter().map(|t| (t.name.clone(), t.title.clone().unwrap_or_else(|| t.name.clone()))).collect::<BTreeMap<_,_>>()});
+            node["content"]["props"] = serde_json::json!({"profile":name, "order":p.tabs.iter().map(|t| &t.name).collect::<Vec<_>>(), "titles":p.tabs.iter().map(|t| (t.name.clone(), t.title.clone().unwrap_or_else(|| t.name.clone()))).collect::<BTreeMap<_,_>>()});
         }
         if let Some(children) = node["children"].as_array_mut() {
             for child in children {
@@ -390,7 +390,7 @@ fn manage(env: &Env, action: Action) -> Result<(), String> {
     if matches!(action, Action::Show { .. }) {
         println!(
             "{}",
-            serde_json::json!({"profile":before,"overlay":local,"config":overlay::text(&before)?})
+            serde_json::json!({"profile":before,"overlay":local,"config":overlay::text(&before)?,"diff":overlay::diff(&base, &before)?})
         );
         return Ok(());
     }

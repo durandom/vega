@@ -21,7 +21,9 @@ function load(name, {allowFocus=false}={}) {
   const cx={notify(){},stop_propagation(){calls.push(['stop']);},timer:{every(){}},sleep(){background=true;return new Promise(()=>{});},spawn(f){background=false;const p=f(cx);if(!background)tasks.push(p);return p;}};
   const api={View:class {},div:el,h_flex:el,v_flex:el,svg:el,image:el,
     InputState:{new(options={}){assert.equal(rendering,false,'input state created in render');let value=options.value??'';return {handlers:{},on(event,f){this.handlers[event]=f;},value:()=>value,set_value:v=>{value=v;},focus(){assert(allowFocus,'focus stolen');calls.push(['focus']);}};}},
-    Input:{new:el},theme:()=>({}),shared:k=>state.get(k),setShared:(k,v)=>state.set(k,v),
+    Input:{new:el},ScrollHandle:{new:()=>({scroll_to_item:i=>calls.push(['scroll',i])})},
+    Scrollbar:{vertical:el},v_virtual_list:(id,count,height,key,render)=>el().id(id).children(render({start:0,end:count})),
+    settings:()=>({zoom:1}),theme:()=>({}),shared:k=>state.get(k),setShared:(k,v)=>state.set(k,v),
     props:()=>props,home:()=>'/scratch',terminals:()=>[{address:'t7',state:'live'}],
     agents:()=>[],panes:()=>[],spaces:()=>[],focused:()=>null,layout:()=>null,window:()=>null,
     setAgentOrder:a=>calls.push(['order',a]),
@@ -32,7 +34,13 @@ function load(name, {allowFocus=false}={}) {
     localStorage:{getItem:k=>storage.get(k)??null,removeItem:k=>storage.delete(k),setItem:(k,v)=>storage.set(k,v)},Date,Map,Set,JSON};
   let code=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
   code=code.replace(/^import .*;\n/gm,'').replace('export default class','globalThis.Mod = class');
-  const context=vm.createContext(api);vm.runInContext(code,context);
+  const context=vm.createContext(api);
+  if(name==='vega-window-tabs') for(const file of ['navigation.js','tabs.js','diff.js']) {
+    const helper=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/${file}`,import.meta.url),'utf8')
+      .replace(/^import .*;\n/gm,'').replaceAll('export function','function');
+    vm.runInContext(helper,context);
+  }
+  vm.runInContext(code,context);
   const mod=new context.Mod();
   return {mod,state,storage,calls,cx,api:context,commands,newCopy:()=>new context.Mod(),setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
 }
@@ -1596,7 +1604,8 @@ test('profile tabs rename inline, reorder, close and choose a machine through ar
   h.api.layout=()=>({id:'profile:tabs',active:'a',children:[{id:'a'},{id:'b'}]});
   h.mod.init({},h.cx);
   let tabs=h.render().items[0].items;
-  tabs[0].items[0].handlers.on_click({},h.cx);
+  assert.equal(tabs[0].items[0].handlers.on_click,undefined,'passive title must not create a nested click hit target');
+  tabs[0].handlers.on_mouse_down({click_count:2},h.cx);
   assert.equal(h.mod.input.value(),'Alpha');
   h.mod.input.set_value('My tab');
   h.mod.input.handlers.submit({},h.cx); await h.flush();
@@ -1605,7 +1614,7 @@ test('profile tabs rename inline, reorder, close and choose a machine through ar
   tabs[0].handlers.on_mouse_down({},h.cx);
   tabs[1].handlers.on_mouse_up({},h.cx); await h.flush();
   assert(h.calls.some(c=>c[0]==='exec' && JSON.stringify(c[2])===JSON.stringify(['window','move','status','a','2'])));
-  tabs[1].items[1].handlers.on_click({},h.cx); await h.flush();
+  tabs[0].items[1].handlers.on_click({},h.cx); await h.flush();
   assert(h.calls.some(c=>c[0]==='exec' && c[2][1]==='close'));
   h.render().items[1].handlers.on_click({},h.cx);
   assert.equal(h.calls.find(c=>c[0]==='open')[1].props.mode,'add');
@@ -1620,17 +1629,80 @@ test('profile tabs rename inline, reorder, close and choose a machine through ar
   assert(picker.calls.some(c=>c[0]==='close' && c[1]==='picker'));
 });
 
-test('profile config dialog displays effective config, promotes to a selected checkout and reports failures', async () => {
+test('profile config dialog displays a diff, promotes to a selected checkout and reports failures', async () => {
   const h=load('vega-window-tabs');
   h.setProps({profile:'status',mode:'config',overlay:'config'});
-  h.api.exec=async (_bin,args)=>{h.calls.push(['exec',args]);return {code:0,stdout:JSON.stringify({config:'layout = "status"'})};};
+  h.api.exec=async (_bin,args)=>{h.calls.push(['exec',args]);return {code:0,stdout:JSON.stringify({diff:'--- repo\n+++ effective\n@@ -1 +1 @@\n-title = "Old"\n+title = "New"\n'})};};
   h.api.pickFolder=async ()=>'/checkout with spaces';
   h.mod.init({},h.cx); await h.flush();
-  assert.equal(h.render().items[1].items[0],'layout = "status"');
+  assert.equal(h.mod.rows.length,3);
+  assert.equal(h.mod.rows[1].kind,'-');
+  assert.equal(h.mod.rows[2].text,'title = "New"');
+  assert(elements(h.render()).some(n=>n.idValue==='changes-diff'),'stock virtualized diff viewport');
   h.render().items[2].items[0].handlers.on_click({},h.cx); await h.flush(); await h.flush();
   assert(h.calls.some(c=>JSON.stringify(c[1])===JSON.stringify(['window','promote','status','--repo','/checkout with spaces'])));
   h.api.exec=async ()=>({code:1,stdout:'error: profile busy'});
   h.render().items[2].items[1].handlers.on_click({},h.cx); await h.flush();
   assert(h.mod.error.includes('profile busy'));
   assert.equal(h.mod.busy,false);
+});
+
+test('stock profile tab gestures use full order, survive renders and cancel on the bar', async () => {
+  const h=load('vega-window-tabs');
+  const stack={id:'profile:tabs',active:'a',children:[{id:'a'},{id:'b'},{id:'c'}]};
+  h.setProps({profile:'status',order:['a','missing','b','c']});
+  h.api.layout=()=>stack;
+  h.mod.init({},h.cx);
+  let bar=h.render();
+  bar.items[0].items[0].handlers.on_mouse_down({click_count:1},h.cx);
+  assert.equal(h.mod.editing,null,'single press is selection/drag, not rename');
+  bar=h.render();
+  bar.items[0].items[2].handlers.on_mouse_up({},h.cx);
+  bar.handlers.on_mouse_up({},h.cx);
+  await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec' && JSON.stringify(c[2])===JSON.stringify(['window','move','status','a','4'])));
+  bar.items[0].items[2].handlers.on_mouse_down({},h.cx);
+  bar.items[0].items[0].handlers.on_mouse_up({},h.cx); await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec' && JSON.stringify(c[2])===JSON.stringify(['window','move','status','c','1'])));
+  const moves=h.calls.filter(c=>c[0]==='exec').length;
+  bar.items[0].items[0].handlers.on_mouse_down({},h.cx);
+  bar.handlers.on_mouse_up({},h.cx);
+  bar.items[0].items[1].handlers.on_mouse_up({},h.cx); await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==='exec').length,moves,'release on background cancels drag');
+  assert.equal(h.calls.at(-1)[1],'layout.select');
+  assert(h.calls.some(c=>c[0]==='scroll' && c[1]===0));
+  stack.children=[];
+  assert(elements(h.render()).some(n=>n.idValue==='tab-new'));
+  assert(elements(h.render()).some(n=>n.idValue==='config'));
+});
+
+test('profile bar keeps stock window controls and reads program icons from slot terminals', () => {
+  const h=load('vega-window-tabs');
+  h.api.window=()=>({buttons:true,platform:'windows',maximized:true});
+  h.api.layout=()=>({id:'profile:tabs',active:'a',children:[{id:'a',children:[{content:{terminal:'remote/t7'}}]}]});
+  h.api.terminals=()=>[{address:'remote/t7',program:{name:'Shell',icon:'shell.svg',tint:true}}];
+  h.mod.init({},h.cx);
+  const nodes=elements(h.render());
+  for(const id of ['minimize','maximize','close-window']) nodes.find(n=>n.idValue===id).handlers.on_click({},h.cx);
+  assert.deepEqual(h.calls.filter(c=>c[0]==='run').map(c=>c[1]),['window.minimize','window.maximize','window.close']);
+  assert.equal(nodes.find(n=>n.idValue==='tab-a').items.length,3,'icon, title, active close');
+});
+
+test('stock diff rows number hunks and config reset refreshes to a definitive empty state', async () => {
+  const h=load('vega-window-tabs');
+  const rows=h.api.diffRows(['@@ -3,2 +7,2 @@','-old','+new',' context','@@ -20 +30 @@','+\tvalue']);
+  assert.deepEqual(Array.from(rows,r=>r.number),[undefined,3,7,8,undefined,30]);
+  assert.equal(rows[5].text,'    value');
+  h.setProps({profile:'status',mode:'config'});
+  let changed=true;
+  h.api.exec=async (_bin,args)=>{
+    if(args[1]==='reset') changed=false;
+    return {code:0,stdout:JSON.stringify({diff:changed?'@@ -1 +1 @@\n-old\n+new\n':''})};
+  };
+  h.mod.init({},h.cx); await h.flush();
+  assert.equal(h.mod.rows.length,3);
+  elements(h.render()).find(n=>n.idValue==='reset').handlers.on_click({},h.cx);
+  await h.flush(); await h.flush();
+  assert.equal(h.mod.rows.length,0);
+  assert(elements(h.render()).some(n=>n.items.includes('No local changes')));
 });

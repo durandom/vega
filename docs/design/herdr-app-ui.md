@@ -510,3 +510,21 @@ display titles, ordered stable IDs and hidden repo tabs. Closing hides a tab and
 leaves its terminal alive for reuse. Reset discards this overlay. Promote writes
 the effective profile into an explicitly selected vega checkout as an uncommitted
 change; it does not apply, install or commit it.
+
+### Stock tab bar fork and profile diff (vega-0h4c.89)
+
+The status bar now forks herdr-app 0.1.15's stock `tabs` mod render tree in
+`vega-window-tabs/tabs.js`; `UPSTREAM.md` records source hashes and adapter
+differences for rebasing. Keep stock pill dimensions, active close, program icons,
+scroll tracking, window controls and pill-level double-click rename. The old
+label's nested click handler competed with the enclosing press/release gesture;
+the fork uses stock's passive title. Drag state uses stable group IDs, and drop
+positions use the full effective profile order, since an optional group without
+a running terminal is missing from the visible layout but still in the profile.
+
+Config uses the stock `changes` line-numbering and virtualized diff viewport,
+extracted into `diff.js`. `vega window show` adds a unified `diff` from canonical
+applied repo profile to effective profile, so formatting alone is not a change.
+This is the same applied base checked by Promote, not a read of an arbitrary
+checkout. Reset refreshes the view to “No local changes”; Promote keeps the diff
+until the reviewed profile is installed/applied and the local overlay reset.

@@ -32,6 +32,38 @@ pub fn read(path: &Path) -> Result<Overlay, String> {
 pub fn text(p: &Profile) -> Result<String, String> {
     toml_edit::ser::to_string_pretty(p).map_err(|e| e.to_string())
 }
+/// Compare canonical profiles, so formatting-only base differences are invisible.
+pub fn diff(base: &Profile, effective: &Profile) -> Result<String, String> {
+    let old = text(base)?;
+    let new = text(effective)?;
+    if old == new {
+        return Ok(String::new());
+    }
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let a = dir.path().join("repo");
+    let b = dir.path().join("effective");
+    fs::write(&a, old).map_err(|e| e.to_string())?;
+    fs::write(&b, new).map_err(|e| e.to_string())?;
+    let output = std::process::Command::new("diff")
+        .args([
+            "-u",
+            "--label",
+            "repo profile (applied)",
+            "--label",
+            "effective profile",
+        ])
+        .arg(a)
+        .arg(b)
+        .output()
+        .map_err(|e| format!("profile diff: {e}"))?;
+    match output.status.code() {
+        Some(0 | 1) => String::from_utf8(output.stdout).map_err(|e| e.to_string()),
+        _ => Err(format!(
+            "profile diff: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
+    }
+}
 pub fn write(path: &Path, text: &str) -> Result<(), String> {
     let parent = path.parent().ok_or("missing parent directory")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;

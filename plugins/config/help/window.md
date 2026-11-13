@@ -9,6 +9,6 @@ No arguments lists profiles. --skill prints the guide; -v/-V/--version prints ve
 
 Manage tabs: add <name> --machine <machine|local>; rename <name> <id> <title>;
 move <name> <id> <1-based-index>; close <name> <id>; reset <name>.
-show <name> prints effective config and overlay JSON.
+show <name> prints effective config, overlay and applied repo → effective diff JSON.
 promote <name> [--repo <checkout>] writes a working-tree edit (default: current directory).
 Example: vega window promote status --repo ~/src/vega
