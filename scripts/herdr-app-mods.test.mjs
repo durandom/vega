@@ -1447,3 +1447,34 @@ test('profile window terminals never enter sidebar agent, plain or child rows',(
   assert.deepEqual(Array.from(vm.runInContext('visibleTerminals()',h.api),t=>t.address),['t1']);
   assert(!h.calls.filter(c=>c[0]==='order').flatMap(c=>c[1]).includes('ganymede/t2'));
 });
+
+test('profile tab bar clicks and keyboard navigate layout groups without touching core tabs', async () => {
+  // Load the small local helper into the same fake host as the view.
+  const helper = fs.readFileSync(new URL('../config/herdr-app/mods/vega-window-tabs/navigation.js', import.meta.url), 'utf8').replaceAll('export function', 'function');
+  const h = load('vega-window-tabs');
+  vm.runInContext(helper, h.api);
+  const stack = {id:'profile:tabs', active:'proteus', children:[{id:'proteus'}, {id:'ganymede'}, {id:'tokens'}]};
+  h.api.layout = () => ({id:'root', children:[stack]});
+  h.api.run = (command, args) => {
+    h.calls.push(['run',command,args]);
+    assert.equal(command,'layout.select');
+    assert.equal(args.stack,'profile:tabs');
+    stack.active=args.child;
+  };
+  h.mod.init({},h.cx);
+  const key = async command => {
+    assert.equal(h.commands.length,1);
+    h.commands.shift()(command);
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await key('prev'); assert.equal(stack.active,'tokens');
+  await key('next'); assert.equal(stack.active,'proteus');
+  await key('select-2'); assert.equal(stack.active,'ganymede');
+  await key('select-9'); assert.equal(stack.active,'ganymede');
+  const bar=h.render();
+  assert.equal(bar.items.length,3);
+  bar.items[2].handlers.on_click(); assert.equal(stack.active,'tokens');
+  assert.equal(bar.items[2].items[0],'tokens');
+  stack.children=[];
+  await key('next'); assert.equal(stack.active,'tokens');
+});

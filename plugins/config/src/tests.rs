@@ -148,7 +148,9 @@ fn select_takes_units_and_groups_in_order() {
 
 #[test]
 fn fresh_home_gets_everything_then_nothing_changes() {
-    let (_d, ctx) = setup();
+    let (d, mut ctx) = setup();
+    // Profile homes now include a navigation mod; validate only through a fake.
+    ctx.herdr_app = fake_app(d.path());
     fs::write(
         ctx.env.home.join(".pi/agent/settings.json"),
         "{\"theme\": \"x\"}",

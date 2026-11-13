@@ -1,5 +1,5 @@
 layout = "status"
-mods = []
+mods = ["vega-window-tabs"]
 
 [settings.sounds]
 enabled = false
@@ -7,17 +7,31 @@ enabled = false
 [shared]
 "frame.welcomed" = "finished"
 
-[[terminals]]
+[[tab]]
+name = "proteus"
+[[tab.terminals]]
 name = "proteus-btop"
 machine = "proteus"
 argv = ["btop"]
 
-[[terminals]]
+[[tab]]
+name = "ganymede"
+[[tab.terminals]]
 name = "ganymede-btop"
 machine = "ganymede"
 argv = ["btop"]
 
-[[terminals]]
+[[tab]]
+name = "io"
+[[tab.terminals]]
+name = "io-btop"
+machine = "io"
+argv = ["btop"]
+optional = true
+
+[[tab]]
+name = "tokens"
+[[tab.terminals]]
 name = "ganymede-tokens"
 machine = "ganymede"
 argv = ["token-burn", "tui"]

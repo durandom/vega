@@ -13,6 +13,12 @@ Profiles live in `config/herdr-app/profiles/<name>.toml`; local overrides use
 (or under XDG_CONFIG_HOME). HERDR_APP_HOME in the calling shell is ignored.
 Live terminals are reused by window and slot labels; closing the window leaves
 programs running. Changing argv/machine does not replace an already-live slot.
-The status POC uses three direct terminal blocks, with no spaces or sidebar.
+The status window has top tabs: proteus, ganymede, optional io (btop), and tokens
+(token-burn tui on ganymede). Missing io btop is skipped with a warning.
+Profiles use [[tab]] name and one or two [[tab.terminals]] entries; two split
+horizontally. Include vega-window-tabs in mods and a profile:tabs stack in the
+layout. Flat [[terminals]] profiles remain supported. Tab switching keeps the
+usual Ctrl-Tab, Cmd-Shift-[ / ], Cmd-1..9 and ctrl-s n/p/1..9 keys.
+Tabs are layout groups, without shared core spaces or a sidebar.
 New homes skip welcome; existing shared state is preserved. No terminal cleanup
 is automatic. A partial launch can be retried without replacing successful slots.

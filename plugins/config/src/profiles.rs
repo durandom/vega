@@ -19,7 +19,25 @@ pub struct Profile {
     pub settings: BTreeMap<String, Value>,
     #[serde(default)]
     pub shared: BTreeMap<String, Value>,
+    #[serde(default)]
     pub terminals: Vec<Terminal>,
+    #[serde(default, rename = "tab")]
+    pub tabs: Vec<Tab>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tab {
+    pub name: String,
+    pub terminals: Vec<Terminal>,
+}
+
+impl Profile {
+    pub fn terminals(&self) -> impl Iterator<Item = &Terminal> {
+        self.terminals
+            .iter()
+            .chain(self.tabs.iter().flat_map(|tab| &tab.terminals))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +46,8 @@ pub struct Terminal {
     pub name: String,
     pub machine: String,
     pub argv: Vec<String>,
+    #[serde(default)]
+    pub optional: bool,
 }
 
 pub fn valid_name(name: &str) -> bool {
@@ -49,10 +69,30 @@ pub fn parse(text: &str) -> Result<Profile, String> {
     if p.shared.contains_key("layout") {
         return Err("profile shared.layout is reserved for the generated window layout".into());
     }
-    if p.terminals.is_empty() {
+    if !p.tabs.is_empty() && !p.terminals.is_empty() {
+        return Err("profile cannot mix tab groups and flat terminals".into());
+    }
+    if p.terminals.iter().any(|t| t.optional) {
+        return Err("optional terminals require tab groups".into());
+    }
+    if !p.tabs.is_empty() && !p.mods.iter().any(|m| m == "vega-window-tabs") {
+        return Err(
+            "tab profiles require mods = [\"vega-window-tabs\"] (plus any other mods)".into(),
+        );
+    }
+    let mut tabs = BTreeSet::new();
+    for tab in &p.tabs {
+        if !valid_name(&tab.name)
+            || !tabs.insert(&tab.name)
+            || !(1..=2).contains(&tab.terminals.len())
+        {
+            return Err("profile tabs need unique valid names and one or two terminals".into());
+        }
+    }
+    if p.terminals().next().is_none() {
         return Err("profile needs at least one terminal".into());
     }
-    for t in &p.terminals {
+    for t in p.terminals() {
         if !valid_name(&t.name)
             || !names.insert(&t.name)
             || t.machine.is_empty()
@@ -121,6 +161,43 @@ pub fn resolve_layout(
     Ok(())
 }
 
+/// A layout-owned stack keeps cross-machine terminals out of shared hc spaces.
+pub fn build_tabs(
+    layout: &mut Value,
+    profile: &Profile,
+    addresses: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    if profile.tabs.is_empty() {
+        return Ok(());
+    }
+    fn replace(node: &mut Value, children: &[Value]) -> usize {
+        if node["id"] == "profile:tabs" {
+            node["type"] = "stack".into();
+            node["children"] = children.to_vec().into();
+            node["active"] = children[0]["id"].clone();
+            return 1;
+        }
+        node.get_mut("children")
+            .and_then(Value::as_array_mut)
+            .map(|nodes| nodes.iter_mut().map(|n| replace(n, children)).sum())
+            .unwrap_or(0)
+    }
+    let children: Vec<_> = profile.tabs.iter().filter_map(|tab| {
+        let blocks: Vec<_> = tab.terminals.iter().filter_map(|t| addresses.get(&t.name).map(|address|
+            json!({"id": format!("slot-{}", t.name), "type":"block", "content":{"terminal":address}})
+        )).collect();
+        if blocks.is_empty() { return None; }
+        Some(json!({"id":tab.name, "type":"row", "gap":4, "children":blocks}))
+    }).collect();
+    if children.is_empty() {
+        return Err("profile has no available tab terminals".into());
+    }
+    if replace(layout, &children) != 1 {
+        return Err("tab profile layout needs exactly one profile:tabs node".into());
+    }
+    Ok(())
+}
+
 pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
     let mut plan = Plan::default();
     for (file, src) in list(&ctx.env)? {
@@ -139,11 +216,15 @@ pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
         ) {
             return Err("profile layout needs a valid root type".into());
         }
+        let placeholders = profile
+            .terminals()
+            .map(|t| (t.name.clone(), "t0".into()))
+            .collect();
+        build_tabs(&mut layout, &profile, &placeholders)?;
         resolve_layout(
             &mut layout,
             &profile
-                .terminals
-                .iter()
+                .terminals()
                 .map(|t| (t.name.clone(), "t0".into()))
                 .collect(),
         )?;
@@ -163,6 +244,30 @@ pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
             serde_json::to_string_pretty(&settings).unwrap() + "\n",
         )?);
         plan.sources.push(settings_src);
+        if !profile.tabs.is_empty() {
+            let keys_src = sources::get(&ctx.env, "herdr-app/keys.json")?;
+            let mut keys: Value =
+                serde_json::from_str(&keys_src.text).map_err(|e| e.to_string())?;
+            if let Some(global) = keys["global"].as_object_mut() {
+                for binding in global.values_mut() {
+                    if let Some(command) = binding.as_str() {
+                        if let Some(action) = command.strip_prefix("tab.") {
+                            if action == "next" || action == "prev" || action.starts_with("select:")
+                            {
+                                *binding =
+                                    format!("vega-window-tabs.{}", action.replace(':', "-")).into();
+                            }
+                        }
+                    }
+                }
+            }
+            plan.files.push(crate::whole(
+                target.join("keys.json"),
+                serde_json::to_string_pretty(&keys).unwrap() + "\n",
+            )?);
+            plan.sources.push(keys_src);
+        }
+
         for (name, src) in sources::herdr_app_themes(&ctx.env)? {
             plan.files.push(crate::whole(
                 target.join("themes").join(name),
@@ -286,7 +391,7 @@ mod tests {
                 state: dir.join("state"),
                 pi_package: None,
             },
-            herdr_app: "/usr/bin/false".into(),
+            herdr_app: "/usr/bin/true".into(),
             chezmoi: "false".into(),
             mux: "false".into(),
             skills: "false".into(),
@@ -304,7 +409,14 @@ mod tests {
         assert!(matches!(apply(&ctx, &p, &mut vec![]), Outcome::Written(_)));
         let target = home(&ctx.env, "status").unwrap();
         let (profile, _) = read_applied(&target).unwrap();
-        assert_eq!(profile.terminals.len(), 3);
+        assert_eq!(profile.terminals().count(), 4);
+        assert_eq!(profile.tabs.len(), 4);
+        let keys: Value =
+            serde_json::from_slice(&fs::read(target.join("keys.json")).unwrap()).unwrap();
+        assert_eq!(keys["global"]["ctrl-tab"], "vega-window-tabs.next");
+        assert_eq!(keys["global"]["cmd-2"], "vega-window-tabs.select-2");
+        assert_eq!(keys["global"]["ctrl-s p"], "vega-window-tabs.prev");
+        assert_eq!(keys["terminal"]["cmd-c"], "terminal.copy");
         let shared: Value =
             serde_json::from_slice(&fs::read(target.join("shared.json")).unwrap()).unwrap();
         assert_eq!(shared["frame.welcomed"], "finished");
@@ -324,6 +436,76 @@ mod tests {
         );
         assert!(!target.join("herdr-app.sock").exists());
     }
+    #[test]
+    fn grouped_profile_validation_and_split_building() {
+        let source = sources::default("herdr-app/profiles/status.toml").unwrap();
+        for bad in [
+            source.replace("name = \"io\"", "name = \"proteus\""),
+            source.replace("name = \"io\"", "name = \"../io\""),
+            source.replace(
+                "[[tab.terminals]]\nname = \"io-btop\"",
+                "[[terminals]]\nname = \"io-btop\"",
+            ),
+            source.replace("mods = [\"vega-window-tabs\"]", "mods = []"),
+        ] {
+            assert!(parse(&bad).is_err(), "accepted {bad}");
+        }
+        // inline-md: allow (TOML parser test fixture, not guide/help)
+        let p = parse(
+            r#"
+layout = "status"
+mods = ["vega-window-tabs"]
+[[tab]]
+name = "pair"
+[[tab.terminals]]
+name = "a"
+machine = "one"
+argv = ["btop"]
+[[tab.terminals]]
+name = "b"
+machine = "two"
+argv = ["btop"]
+[[tab]]
+name = "optional"
+[[tab.terminals]]
+name = "c"
+machine = "three"
+argv = ["btop"]
+optional = true
+"#,
+        )
+        .unwrap();
+        let mut layout = json!({"id":"profile:tabs"});
+        build_tabs(
+            &mut layout,
+            &p,
+            &BTreeMap::from([("a".into(), "one/t1".into()), ("b".into(), "two/t2".into())]),
+        )
+        .unwrap();
+        assert_eq!(layout["type"], "stack");
+        assert_eq!(layout["active"], "pair");
+        assert_eq!(layout["children"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            layout["children"][0]["children"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(
+            layout["children"][0]["children"][1]["content"]["terminal"],
+            "two/t2"
+        );
+        assert!(build_tabs(
+            &mut json!({"id":"wrong"}),
+            &p,
+            &BTreeMap::from([("a".into(), "t1".into())])
+        )
+        .is_err());
+        assert!(build_tabs(&mut layout, &p, &BTreeMap::new()).is_err());
+        assert!(parse("layout = \"status\"\n[[tab]]\nname = \"empty\"\nterminals = []").is_err());
+        let flat = parse("layout = \"status\"\n[[terminals]]\nname = \"legacy\"\nmachine = \"local\"\nargv = [\"btop\"]").unwrap();
+        assert_eq!(flat.terminals().count(), 1);
+        assert!(flat.tabs.is_empty());
+    }
+
     #[test]
     fn invalid_profiles_fail_before_writes() {
         let source = sources::default("herdr-app/profiles/status.toml").unwrap();
@@ -349,7 +531,10 @@ mod tests {
         fs::create_dir_all(local.join("herdr-app/mods/third-party")).unwrap();
         let source = sources::default("herdr-app/profiles/status.toml")
             .unwrap()
-            .replace("mods = []", "mods = [\"third-party\"]");
+            .replace(
+                "mods = [\"vega-window-tabs\"]",
+                "mods = [\"vega-window-tabs\", \"third-party\"]",
+            );
         fs::write(local.join("herdr-app/profiles/status.toml"), source).unwrap();
         fs::write(
             local.join("herdr-app/mods/third-party/main.js"),
@@ -358,6 +543,7 @@ mod tests {
         .unwrap();
         fs::write(local.join("herdr-app/mods/third-party/mod.json"), "{}").unwrap();
         let p = plan(&ctx).unwrap();
+        ctx.herdr_app = "/usr/bin/false".into();
         assert!(matches!(apply(&ctx, &p, &mut vec![]), Outcome::Rejected(_)));
         assert!(!home(&ctx.env, "status").unwrap().exists());
         let fake = temp.path().join("fake-app");

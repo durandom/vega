@@ -37,6 +37,7 @@ fn profile_name(s: &str) -> Result<String, String> {
 
 trait Backend {
     fn inventory(&mut self) -> Result<Value, String>;
+    fn available(&mut self, terminal: &Terminal) -> Result<bool, String>;
     fn start(&mut self, window: &str, terminal: &Terminal) -> Result<String, String>;
     fn open(&mut self, home: &Path) -> Result<(), String>;
 }
@@ -45,6 +46,25 @@ struct Live;
 impl Backend for Live {
     fn inventory(&mut self) -> Result<Value, String> {
         vega_herdr::hc::terminal_list().map_err(|e| e.message)
+    }
+    fn available(&mut self, t: &Terminal) -> Result<bool, String> {
+        let out = Command::new("hc")
+            .args([
+                "exec",
+                "--on",
+                &t.machine,
+                "--timeout",
+                "10",
+                "--",
+                "sh",
+                "-lc",
+                r#"command -v -- "$1" >/dev/null"#,
+                "vega-window",
+                &t.argv[0],
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(out.status.success())
     }
     fn start(&mut self, window: &str, t: &Terminal) -> Result<String, String> {
         let out = Command::new("hc")
@@ -136,28 +156,36 @@ fn start_args(window: &str, t: &Terminal) -> Vec<String> {
     args
 }
 
+#[derive(Debug, Default)]
+struct Launch {
+    started: usize,
+    reused: usize,
+    skipped: usize,
+    warnings: Vec<String>,
+}
+
 fn launch(
     home: &Path,
     name: &str,
     p: &Profile,
     mut layout: Value,
     backend: &mut impl Backend,
-) -> Result<usize, String> {
+) -> Result<Launch, String> {
     // Validate slots before terminal side effects, including hand-edited applied profiles.
-    profiles::resolve_layout(
-        &mut layout.clone(),
-        &p.terminals
-            .iter()
-            .map(|t| (t.name.clone(), "t0".into()))
-            .collect(),
-    )?;
+    let placeholders = p
+        .terminals()
+        .map(|t| (t.name.clone(), "t0".into()))
+        .collect();
+    let mut validated = layout.clone();
+    profiles::build_tabs(&mut validated, p, &placeholders)?;
+    profiles::resolve_layout(&mut validated, &placeholders)?;
     let inventory = backend.inventory()?;
     let all = inventory["terminals"]
         .as_array()
         .ok_or("terminal inventory has no terminals array")?;
     let mut addresses = BTreeMap::new();
-    let mut started = 0;
-    for t in &p.terminals {
+    let mut result = Launch::default();
+    for t in p.terminals() {
         let matches: Vec<_> = all
             .iter()
             .filter(|x| {
@@ -179,11 +207,32 @@ fn launch(
                 .ok_or("existing terminal has no address")?
                 .to_string()
         } else {
-            started += 1;
-            backend.start(name, t)?
+            if t.optional {
+                match backend.available(t) {
+                    Ok(true) => {}
+                    outcome => {
+                        let detail = outcome.err().unwrap_or_else(|| {
+                            format!(
+                                "{} is not installed or {} is unavailable",
+                                t.argv[0], t.machine
+                            )
+                        });
+                        result
+                            .warnings
+                            .push(format!("skipping {}: {detail}", t.name));
+                        result.skipped += 1;
+                        continue;
+                    }
+                }
+            }
+            let address = backend.start(name, t)?;
+            result.started += 1;
+            address
         };
         addresses.insert(t.name.clone(), address);
     }
+    result.reused = addresses.len() - result.started;
+    profiles::build_tabs(&mut layout, p, &addresses)?;
     profiles::resolve_layout(&mut layout, &addresses)?;
     fs::create_dir_all(home.join("layouts")).map_err(|e| e.to_string())?;
     let mut tmp =
@@ -192,7 +241,7 @@ fn launch(
     tmp.persist(home.join("layouts/vega-window.json"))
         .map_err(|e| e.to_string())?;
     backend.open(home)?;
-    Ok(started)
+    Ok(result)
 }
 
 fn run(cli: Cli) -> Result<(), String> {
@@ -232,10 +281,14 @@ fn run(cli: Cli) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     lock.try_lock()
         .map_err(|_| "this profile is already opening; retry vega window after it finishes")?;
-    let started = launch(&home, &name, &profile, layout, &mut Live)?;
+    let result = launch(&home, &name, &profile, layout, &mut Live)?;
     println!("window: {}", cell(&name));
-    println!("started: {started}");
-    println!("reused: {}", profile.terminals.len() - started);
+    println!("started: {}", result.started);
+    println!("reused: {}", result.reused);
+    println!("skipped: {}", result.skipped);
+    for warning in result.warnings {
+        println!("warning: {}", cell(&warning));
+    }
     Ok(())
 }
 
@@ -287,10 +340,16 @@ mod tests {
         starts: usize,
         opens: usize,
         fail: bool,
+        available: bool,
+        probes: usize,
     }
     impl Backend for Fake {
         fn inventory(&mut self) -> Result<Value, String> {
             Ok(json!({"terminals": self.terminals}))
+        }
+        fn available(&mut self, _: &Terminal) -> Result<bool, String> {
+            self.probes += 1;
+            Ok(self.available)
         }
         fn start(&mut self, window: &str, t: &Terminal) -> Result<String, String> {
             if self.fail && self.starts == 1 {
@@ -328,26 +387,63 @@ mod tests {
         let (p, l) = fixture();
         let mut fake = Fake::default();
         assert_eq!(
-            launch(dir.path(), "status", &p, l.clone(), &mut fake).unwrap(),
+            launch(dir.path(), "status", &p, l.clone(), &mut fake)
+                .unwrap()
+                .started,
             3
         );
         assert_eq!(
-            launch(dir.path(), "status", &p, l.clone(), &mut fake).unwrap(),
+            launch(dir.path(), "status", &p, l.clone(), &mut fake)
+                .unwrap()
+                .started,
             0
         );
         assert_eq!(fake.opens, 2);
         let rendered = fs::read_to_string(dir.path().join("layouts/vega-window.json")).unwrap();
         assert!(rendered.contains("ganymede/t3"));
-        assert!(!rendered.contains("profile:"));
+        assert!(!rendered.contains("\"terminal\": \"profile:"));
         fake.terminals[0]["state"] = "finished".into();
-        assert_eq!(launch(dir.path(), "status", &p, l, &mut fake).unwrap(), 1);
-        let args = start_args("status", &p.terminals[2]);
+        assert_eq!(
+            launch(dir.path(), "status", &p, l, &mut fake)
+                .unwrap()
+                .started,
+            1
+        );
+        let args = start_args("status", p.terminals().last().unwrap());
         assert!(args.windows(2).any(|a| a == ["--on", "ganymede"]));
         assert!(args.windows(3).any(|a| a == ["--", "token-burn", "tui"]));
         assert!(!args
             .iter()
             .any(|a| a.contains("herdr.space") || a.contains("herdr.tab")));
     }
+    #[test]
+    fn optional_group_is_skipped_then_added_and_live_slot_avoids_probes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (p, l) = fixture();
+        let mut fake = Fake::default();
+        let first = launch(dir.path(), "status", &p, l.clone(), &mut fake).unwrap();
+        assert_eq!((first.started, first.reused, first.skipped), (3, 0, 1));
+        assert_eq!(first.warnings.len(), 1);
+        let before: Value =
+            serde_json::from_slice(&fs::read(dir.path().join("layouts/vega-window.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            before["children"][1]["children"].as_array().unwrap().len(),
+            3
+        );
+        fake.available = true;
+        let second = launch(dir.path(), "status", &p, l.clone(), &mut fake).unwrap();
+        assert_eq!((second.started, second.reused, second.skipped), (1, 3, 0));
+        let after: Value =
+            serde_json::from_slice(&fs::read(dir.path().join("layouts/vega-window.json")).unwrap())
+                .unwrap();
+        assert_eq!(after["children"][1]["children"][2]["id"], "io");
+        fake.available = false;
+        let third = launch(dir.path(), "status", &p, l, &mut fake).unwrap();
+        assert_eq!((third.started, third.reused, third.skipped), (0, 4, 0));
+        assert_eq!(fake.probes, 2);
+    }
+
     #[test]
     fn partial_failure_retries_without_duplicating_and_bad_slots_do_nothing() {
         let dir = tempfile::tempdir().unwrap();
@@ -360,7 +456,12 @@ mod tests {
         assert_eq!(fake.starts, 1);
         assert_eq!(fake.opens, 0);
         fake.fail = false;
-        assert_eq!(launch(dir.path(), "status", &p, l, &mut fake).unwrap(), 2);
+        assert_eq!(
+            launch(dir.path(), "status", &p, l, &mut fake)
+                .unwrap()
+                .started,
+            2
+        );
         assert!(launch(
             dir.path(),
             "status",

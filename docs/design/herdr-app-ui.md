@@ -4,10 +4,13 @@ Slice 5b of the [hc migration](hc-migration.md) (vega-0h4c.10): what vega shows 
 Slayer acts on it. Decided with the Slayer on 2026-11-07. Background: the herdr TUI sidebar (machines tree,
 priority-sorted agents list, vega tokens from `report-metadata`) and the former dashboard Inbox (preserved at `herdr-tui-final`).
 
-## Profile windows POC (vega-0h4c.85)
+## Profile windows (vega-0h4c.85, vega-0h4c.86)
 
 `config/herdr-app/profiles/<name>.toml` declares `layout`, `mods`, `[settings]`,
-`[shared]` seeds and `[[terminals]]` (`name`, `machine`, `argv`). The personal
+`[shared]` seeds and `[[tab]]` groups (`name`, one or two `[[tab.terminals]]`
+entries with `name`, `machine`, `argv`, optional `optional = true`). Terminal slot
+names are unique across groups. Legacy flat `[[terminals]]` remains supported;
+a profile cannot mix flat terminals and groups. The personal
 `herdr-app.profiles` config unit resolves embedded defaults and local overrides
 under `$XDG_CONFIG_HOME/vega/config`, and writes `$XDG_CONFIG_HOME/herdr-app-<name>`.
 Mod folders come from the same sources (local third-party folders are supported).
@@ -24,9 +27,25 @@ and selects that layout. Direct terminal blocks need no `herdr.space`/`herdr.tab
 labels: all homes still share hc inventory, but this window creates no shared spaces.
 The main sidebar excludes terminals labelled `vega.window` from its lists and trees.
 
-The shipped `status` profile is three plain terminal blocks: proteus btop, ganymede
-btop and ganymede token-burn tui. A dedicated status layout/sidebar/navigation is
-later work. Tests use temporary homes and fakes; live validation belongs to the UAC.
+The shipped `status` profile has top tabs proteus, ganymede, io (btop), and tokens
+(ganymede token-burn tui), giving each TUI the full body below the bar. io is optional:
+when its labelled live slot is absent, `hc exec --on io` checks btop in its login
+shell before starting; absence or an unavailable machine warns and omits that group.
+Other start failures remain errors. Live slots skip the availability check.
+
+Grouped layouts contain exactly one `id: "profile:tabs"` node. The launcher fills
+that stack with stable group IDs, using one direct terminal block per slot (two
+split horizontally). `vega-window-tabs` is a small top-nav mod included in the
+profile's mods; it draws groups from the live layout and calls `layout.select`.
+Model tabs (`tab.new`) belong to one machine's space, so layout tabs avoid shared
+spaces, placeholder shells, and adopting cross-machine terminals into the wrong
+core. No duplicate model tabs are created on rerun. Herdr owns active stack click
+state; regenerating the same tree preserves it. The profile's keys.json derives
+from the configured main keys source, remapping tab.next/prev/select bindings to
+mod commands (Ctrl-Tab, Cmd-Shift-[ / ], Cmd-1..9 and ctrl-s n/p/1..9); terminal
+bindings are retained. App-owned shared state is never rewritten.
+
+Tests use temporary homes and fakes; live validation belongs to the UAC.
 Closing a window leaves its terminals running; reopening reuses them. Failed starts
 leave successfully created terminals available for the next invocation.
 

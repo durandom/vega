@@ -20,12 +20,18 @@ if pathlib.Path(sys.argv[0]).name == 'hc':
         req = json.loads(sys.stdin.readline())
         assert req['method'] == 'terminal.list'
         print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':{'terminals':terms,'hidden_finished':0}}))
+    elif a[0] == 'exec':
+        assert a == ['exec','--on','io','--timeout','10','--','sh','-lc','command -v -- "$1" >/dev/null','vega-window','btop']
+        sys.exit(1)
     else:
         assert a[0] == 'run' and '--no-parent' in a and '--bg' in a
         labels = dict(a[i+1].split('=',1) for i,x in enumerate(a) if x == '--label')
         t = dict(address=a[a.index('--on')+1]+'/t'+str(len(terms)+1), labels=labels, argv=a[a.index('--')+1:], cwd='/', state='live', created_ms=0, screen='exact', cols=80, rows=24)
         terms.append(t); state.write_text(json.dumps(terms)); print(json.dumps(t))
 else:
+    if a and a[0] == 'check':
+        assert pathlib.Path(a[1], 'main.js').is_file()
+        sys.exit(0)
     assert os.environ['HERDR_APP_HOME'] == str(root/'config/herdr-app-status')
     if a: assert a == ['do','layout.switch','--name','vega-window'] or a == ['status']
     print(json.dumps({'layout':'vega-window','errors':[]}))
@@ -58,13 +64,20 @@ else:
         env!("CARGO_BIN_EXE_vega-config"),
         &["apply", "herdr-app.profiles"],
     );
-    assert!(
-        !d.path().join("calls").exists(),
-        "apply must not open the app or run hc"
-    );
+    let calls = fs::read_to_string(d.path().join("calls")).unwrap();
+    for line in calls.lines() {
+        let call: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(call[0], "herdr-app");
+        assert_eq!(call[1][0], "check", "apply must only validate staged mods");
+    }
     let first = command(env!("CARGO_BIN_EXE_vega-window"), &["status"]);
     assert!(first.contains("started: 3"));
+    assert!(first.contains("skipped: 1"));
+    assert!(first.contains("skipping io-btop"));
+    let layout_path = config.join("herdr-app-status/layouts/vega-window.json");
+    let first_layout = fs::read(&layout_path).unwrap();
     let second = command(env!("CARGO_BIN_EXE_vega-window"), &["status"]);
+    assert_eq!(fs::read(&layout_path).unwrap(), first_layout);
     assert!(second.contains("started: 0"));
     assert!(second.contains("reused: 3"));
     assert!(!d.path().join("must-not-touch").exists());
