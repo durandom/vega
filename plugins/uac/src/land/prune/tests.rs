@@ -71,6 +71,7 @@ struct Fake {
     agents: Vec<Value>,
     unavailable: bool,
     remove_fail: bool,
+    real_wt: bool,
     removed: Vec<String>,
 }
 impl Cleanup for Fake {
@@ -83,8 +84,14 @@ impl Cleanup for Fake {
         }
         check_paneless(&self.panes, &self.agents, path)
     }
-    fn remove(&mut self, dir: &Path, tree: &Tree) -> Result<()> {
-        self.removed.push(tree.branch.clone().unwrap());
+    fn remove(
+        &mut self,
+        dir: &Path,
+        branch: &str,
+        tree: Option<&Tree>,
+        target: &str,
+    ) -> Result<()> {
+        self.removed.push(branch.into());
         if self.remove_fail {
             return Err(Fault {
                 message: "wt failed".into(),
@@ -92,9 +99,19 @@ impl Cleanup for Fake {
                 output: String::new(),
             });
         }
-        // The owner is mocked, not Git: use real worktree lifecycle in disposable fixtures.
-        git(dir, &["worktree", "remove", tree.path.to_str().unwrap()])?;
-        Ok(())
+        if !self.real_wt {
+            if let Some(tree) = tree {
+                git(dir, &["worktree", "remove", tree.path.to_str().unwrap()])?;
+            }
+            git(dir, &["branch", "-d", "--", branch])?;
+            return Ok(());
+        }
+        // Only disposable repositories reach real Worktrunk. Skip personal hooks/config.
+        let mut args = vec!["--config", "/dev/null", "remove", "--no-hooks"];
+        let removal = remove_args(branch, tree)?;
+        args.extend(&removal[1..]);
+        let output = worktrunk(dir, target, &args)?;
+        removal_outcome(&output, branch)
     }
 }
 #[test]
@@ -142,7 +159,11 @@ fn dry_run_preserves_refs_trees_dirty_files_and_stashes() {
     assert!(!git(&f.repo, &["stash", "list"]).unwrap().is_empty());
 }
 #[test]
-fn unmerged_and_squash_merged_branches_and_trees_stay_residue() {
+fn squash_merged_branches_and_trees_are_removed_but_unmerged_stays() {
+    if vega_plugin::find_on_path("wt").is_none() {
+        eprintln!("wt not installed; skipping real Worktrunk squash integration fixture");
+        return;
+    }
     let f = Fixture::new();
     let path = f.tree("squashed");
     fs::write(path.join("feature"), "feature").unwrap();
@@ -165,12 +186,85 @@ fn unmerged_and_squash_merged_branches_and_trees_stay_residue() {
     fs::write(f.repo.join("unmerged"), "unique").unwrap();
     commit(&f.repo);
     git(&f.repo, &["switch", "-q", "main"]).unwrap();
-    let r = f.run(false, &mut Fake::default());
-    assert_eq!(r.residue.len(), 2);
-    assert!(r.actions.is_empty());
-    assert!(f.exists("unmerged"));
-    assert!(f.exists("squashed"));
+    let unmerged_tree = f.root.path().join("unmerged-tree");
+    git(
+        &f.repo,
+        &[
+            "worktree",
+            "add",
+            unmerged_tree.to_str().unwrap(),
+            "unmerged",
+        ],
+    )
+    .unwrap();
+    git(&f.repo, &["branch", "unmerged-no-tree", "unmerged"]).unwrap();
+    // Saved Worktrunk defaults/upstreams must not broaden the committed policy target.
+    git(&f.repo, &["config", "worktrunk.default-branch", "unmerged"]).unwrap();
+    git(&f.repo, &["config", "branch.main.remote", "origin"]).unwrap();
+    git(
+        &f.repo,
+        &["config", "branch.main.merge", "refs/heads/unmerged"],
+    )
+    .unwrap();
+    git(&f.repo, &["branch", "squashed-no-tree", "squashed"]).unwrap();
+    // An unrelated local upstream must fail closed, even when it contains the feature.
+    git(&f.repo, &["config", "branch.main.remote", "."]).unwrap();
+    let unsafe_preview = f.run(true, &mut Fake::default());
+    assert!(unsafe_preview.actions.is_empty(), "{unsafe_preview:?}");
+    assert_eq!(unsafe_preview.residue.len(), 4, "{unsafe_preview:?}");
+    git(&f.repo, &["config", "branch.main.remote", "origin"]).unwrap();
+    git(&f.repo, &["config", "branch.main.merge", "refs/heads/main"]).unwrap();
+    let preview = f.run(true, &mut Fake::default());
+    assert_eq!(preview.residue.len(), 2, "{preview:?}");
+    assert_eq!(preview.actions.len(), 3, "{preview:?}");
     assert!(path.exists());
+    assert!(f.exists("squashed-no-tree"));
+    let r = f.run(
+        false,
+        &mut Fake {
+            real_wt: true,
+            ..Default::default()
+        },
+    );
+    assert!(!r.failed, "{r:?}");
+    assert_eq!(r.residue.len(), 2, "{r:?}");
+    assert_eq!(r.actions.len(), 3);
+    assert!(f.exists("unmerged"));
+    assert!(unmerged_tree.exists());
+    assert!(f.exists("unmerged-no-tree"));
+    assert!(!f.exists("squashed"));
+    assert!(!f.exists("squashed-no-tree"));
+    assert!(!path.exists());
+    assert_eq!(
+        git(&f.repo, &["config", "worktrunk.default-branch"]).unwrap(),
+        "unmerged"
+    );
+    assert_eq!(
+        git(&f.repo, &["config", "branch.main.merge"]).unwrap(),
+        "refs/heads/main"
+    );
+}
+
+#[test]
+fn worktrunk_result_requires_explicit_deletion_of_the_requested_branch() {
+    for output in [
+        r#"[{"branch":"topic","branch_deleted":true}]"#,
+        r#"{"branch":"topic","branch_outcome":"deleted"}"#,
+    ] {
+        assert!(removal_outcome(output, "topic").is_ok());
+    }
+    for output in [
+        "",
+        "[]",
+        "{}",
+        r#"[{"branch":"topic","branch_deleted":false}]"#,
+        r#"{"branch":"other","branch_outcome":"deleted"}"#,
+        r#"{"branch":"topic","branch_outcome":"retained_unmerged"}"#,
+        r#"{"branch":"topic","branch_outcome":"retained_raced"}"#,
+        r#"{"branch":"topic","branch_outcome":"deferred"}"#,
+    ] {
+        assert!(removal_outcome(output, "topic").is_err(), "{output}");
+    }
 }
 #[test]
 fn dirty_untracked_staged_locked_and_active_operation_trees_stay() {
@@ -335,7 +429,7 @@ fn linked_sentinel_checkout_is_not_authorized_and_usage_is_strict() {
 }
 
 #[test]
-fn fetched_remote_ahead_does_not_bypass_git_safe_deletion() {
+fn fetched_remote_ahead_requires_local_target_fast_forward() {
     let f = Fixture::new();
     let old = sha(&f.repo, "HEAD").unwrap();
     git(&f.repo, &["switch", "-c", "remote-only"]).unwrap();
@@ -345,7 +439,7 @@ fn fetched_remote_ahead_does_not_bypass_git_safe_deletion() {
     git(&f.repo, &["switch", "main"]).unwrap();
     assert_eq!(sha(&f.repo, "HEAD").unwrap(), old);
     let r = f.run(false, &mut Fake::default());
-    assert!(r.failed); // git branch -d refuses: local target is still behind.
+    assert!(!r.failed); // Eligibility refuses: local target is still behind.
     assert!(r.actions.is_empty());
     assert_eq!(r.residue.len(), 1);
     assert!(f.exists("remote-only"));
@@ -373,12 +467,22 @@ fn emit_refusal_in_child() {
     let Some(path) = env::var_os("VEGA_PRUNE_TEST_REFUSAL_REPO") else {
         return;
     };
-    let r = prune(Path::new(&path), false, &mut Fake::default()).unwrap();
+    let dir = Path::new(&path);
+    git(dir, &["merge", "--ff-only", "FETCH_HEAD"]).unwrap();
+    let r = prune(
+        dir,
+        false,
+        &mut Fake {
+            remove_fail: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert_eq!(display(r, false), ExitCode::from(1));
 }
 
 #[test]
-fn production_worktrunk_argv_preserves_branches_and_never_forces() {
+fn production_worktrunk_argv_deletes_integrated_branches_and_never_forces() {
     for branch in [
         "merged/topic",
         "--force",
@@ -393,13 +497,13 @@ fn production_worktrunk_argv_preserves_branches_and_never_forces() {
             branch: Some(branch.into()),
             locked: false,
         };
-        let args = remove_args(&tree).unwrap();
+        let args = remove_args(branch, Some(&tree)).unwrap();
         assert_eq!(
             args,
             [
                 "remove",
                 "--foreground",
-                "--no-delete-branch",
+                "--format=json",
                 "--",
                 "/fixture/merged topic"
             ]
@@ -409,13 +513,17 @@ fn production_worktrunk_argv_preserves_branches_and_never_forces() {
         }
         assert_eq!(args[args.len() - 2], "--");
         assert!(!args.contains(&branch));
+        assert_eq!(
+            remove_args(branch, None).unwrap(),
+            ["remove", "--foreground", "--format=json", "--", branch]
+        );
     }
     let relative = Tree {
         path: "--force".into(),
         branch: Some("--force".into()),
         locked: false,
     };
-    assert!(remove_args(&relative).is_err());
+    assert!(remove_args("--force", Some(&relative)).is_err());
 }
 
 #[test]

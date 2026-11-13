@@ -1,4 +1,4 @@
-//! Conservative ancestry-only cleanup. Git fixtures are real; mux and wt stay owned services.
+//! Cleanup using Worktrunk integration evidence; authority and worktree safety stay local.
 use super::*;
 
 const HELP: &str = include_str!("../../help/prune.md");
@@ -6,7 +6,8 @@ const HELP: &str = include_str!("../../help/prune.md");
 trait Cleanup {
     fn authority(&mut self, dir: &Path, target: &str) -> Result<()>;
     fn paneless(&mut self, path: &Path) -> Result<()>;
-    fn remove(&mut self, dir: &Path, tree: &Tree) -> Result<()>;
+    fn remove(&mut self, dir: &Path, branch: &str, tree: Option<&Tree>, target: &str)
+        -> Result<()>;
 }
 struct Live;
 impl Cleanup for Live {
@@ -22,20 +23,141 @@ impl Cleanup for Live {
         // including idle/done agents: prune never closes a pane.
         check_paneless(panes, &live::agents()?, path)
     }
-    fn remove(&mut self, dir: &Path, tree: &Tree) -> Result<()> {
-        command(dir, "wt", &remove_args(tree)?)?;
-        Ok(())
+    fn remove(
+        &mut self,
+        dir: &Path,
+        branch: &str,
+        tree: Option<&Tree>,
+        target: &str,
+    ) -> Result<()> {
+        let output = worktrunk(dir, target, &remove_args(branch, tree)?)?;
+        removal_outcome(&output, branch)
     }
 }
-fn remove_args(tree: &Tree) -> Result<[&str; 5]> {
-    if !tree.path.is_absolute() {
-        return Err(Fault::new("worktree path is not absolute; retain it"));
+fn remove_args<'a>(branch: &'a str, tree: Option<&'a Tree>) -> Result<Vec<&'a str>> {
+    let name = if let Some(tree) = tree {
+        if !tree.path.is_absolute() {
+            return Err(Fault::new("worktree path is not absolute; retain it"));
+        }
+        tree.path
+            .to_str()
+            .ok_or_else(|| Fault::new("worktree path is not UTF-8; retain it"))?
+    } else {
+        branch
+    };
+    Ok(vec!["remove", "--foreground", "--format=json", "--", name])
+}
+// Scope target selection to this subprocess; never rewrite repository/user configuration.
+fn worktrunk(dir: &Path, target: &str, args: &[&str]) -> Result<String> {
+    let count = env::var("GIT_CONFIG_COUNT")
+        .unwrap_or_else(|_| "0".into())
+        .parse::<usize>()
+        .map_err(|_| Fault::new("invalid GIT_CONFIG_COUNT"))?;
+    let mut cmd = Command::new("wt");
+    cmd.args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env(
+        format!("GIT_CONFIG_KEY_{count}"),
+        "worktrunk.default-branch",
+    )
+    .env(format!("GIT_CONFIG_VALUE_{count}"), target);
+    let out = cmd
+        .env("GIT_CONFIG_COUNT", (count + 1).to_string())
+        .output()?;
+    if !out.status.success() {
+        return Err(Fault::new(
+            "Worktrunk refused cleanup; inspect the branch and hook approvals",
+        ));
     }
-    let path = tree
-        .path
-        .to_str()
-        .ok_or_else(|| Fault::new("worktree path is not UTF-8; retain it"))?;
-    Ok(["remove", "--foreground", "--no-delete-branch", "--", path])
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+fn removal_outcome(output: &str, branch: &str) -> Result<()> {
+    let row: Value = serde_json::from_str(output)
+        .map_err(|_| Fault::new("Worktrunk removal result unavailable; inspect residue"))?;
+    // Older wt emits a single-element array with branch_deleted; newer versions
+    // expose a more precise branch_outcome. Unknown/retained results fail closed.
+    let row = match row.as_array() {
+        Some(rows) if rows.len() == 1 => &rows[0],
+        Some(_) => return Err(Fault::new("unexpected Worktrunk removal rows")),
+        None => &row,
+    };
+    if row["branch"] != branch {
+        return Err(Fault::new(
+            "Worktrunk removal branch mismatch; inspect residue",
+        ));
+    }
+    if row.get("branch_outcome").is_none() && row["branch_deleted"] == true {
+        return Ok(());
+    }
+    match row["branch_outcome"].as_str() {
+        Some("deleted") => Ok(()),
+        Some("retained_unmerged") => Err(Fault::new("Worktrunk retained unmerged branch")),
+        _ => Err(Fault::new(
+            "Worktrunk retained branch or removal incomplete; inspect residue",
+        )),
+    }
+}
+fn integrated(dir: &Path, branch: &str, head: &str, target: &str, frozen: &str) -> Result<bool> {
+    if branch_tip(dir, target)? != frozen {
+        return Err(Fault::new(
+            "local target differs from fetched target; fast-forward it before pruning",
+        ));
+    }
+    // Worktrunk also considers the target's upstream. It must add no commits
+    // beyond the frozen policy target; otherwise retain rather than broaden it.
+    let upstream_ref = git(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(upstream)",
+            "--",
+            &format!("refs/heads/{target}"),
+        ],
+    )?;
+    if !upstream_ref.is_empty() {
+        let upstream = sha(dir, &upstream_ref)?;
+        if !ancestor(dir, &upstream, frozen)? {
+            return Err(Fault::new(
+                "target upstream differs from fetched target; reconcile it before pruning",
+            ));
+        }
+    }
+    if ancestor(dir, head, frozen)? {
+        return Ok(true);
+    }
+    let output = worktrunk(
+        dir,
+        target,
+        &[
+            "list",
+            "--branches",
+            "--format=json",
+            "--config-set",
+            "list.json-schema=2",
+            "--config-set",
+            "list.full=false",
+        ],
+    )?;
+    let list: Value = serde_json::from_str(&output)
+        .map_err(|_| Fault::new("Worktrunk integration inventory unavailable; retain branch"))?;
+    if list["schema"] != 2 || list["repo"]["default_branch"] != target {
+        return Err(Fault::new(
+            "Worktrunk integration target unavailable; retain branch",
+        ));
+    }
+    let items = list["items"]
+        .as_array()
+        .ok_or_else(|| Fault::new("Worktrunk integration rows unavailable; retain branch"))?;
+    Ok(items.iter().any(|row| {
+        row["branch"] == branch
+            && row["head"]["sha"] == head
+            && row.get("remote").is_none()
+            && row["default_branch"]["integration"]["reason"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+    }))
 }
 fn check_paneless(panes: &[Value], agents: &[Value], path: &Path) -> Result<()> {
     // Missing cwd means absence cannot be established. Fail closed.
@@ -105,24 +227,6 @@ struct Report {
 fn branch_tip(dir: &Path, branch: &str) -> Result<String> {
     sha(dir, &format!("refs/heads/{branch}"))
 }
-// Capture Git's refusal rather than forwarding its force-delete suggestion.
-fn delete_branch(dir: &Path, branch: &str) -> Result<()> {
-    let out = Command::new("git")
-        .args(["branch", "-d", "--", branch])
-        .current_dir(dir)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .output()?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(Fault {
-            message: "safe branch deletion refused; inspect residue and reconcile the local target/upstream".into(),
-            status: out.status.code(),
-            output: String::new(),
-        })
-    }
-}
 fn incomplete_failure() -> Failure {
     Failure::new(
         "prune_incomplete",
@@ -178,12 +282,21 @@ fn prune(dir: &Path, dry: bool, svc: &mut impl Cleanup) -> Result<Report> {
             continue;
         }
         let head = branch_tip(dir, branch)?;
-        if !ancestor(dir, &head, &target)? {
-            report.residue.push((
-                "unmerged_branch".into(),
-                format!("{branch}: unmerged or squash-merged; ancestry required"),
-            ));
-            continue;
+        match integrated(dir, branch, &head, &p.target, &target) {
+            Ok(true) => {}
+            Ok(false) => {
+                report.residue.push((
+                    "unmerged_branch".into(),
+                    format!("{branch}: not integrated into target"),
+                ));
+                continue;
+            }
+            Err(e) => {
+                report
+                    .residue
+                    .push(("retained_branch".into(), format!("{branch}: {}", e.message)));
+                continue;
+            }
         }
         let checked = trees(dir)?;
         let checked: Vec<_> = checked
@@ -205,8 +318,13 @@ fn prune(dir: &Path, dry: bool, svc: &mut impl Cleanup) -> Result<Report> {
                     svc.authority(dir, &p.target)?;
                     validate_tree(dir, branch, &head, tree)?;
                     svc.paneless(&tree.path)?;
+                    if !integrated(dir, branch, &head, &p.target, &target)? {
+                        return Err(Fault::new(
+                            "integration changed; retain branch and worktree",
+                        ));
+                    }
                     mutation_started = true;
-                    svc.remove(dir, tree)?;
+                    svc.remove(dir, branch, Some(tree), &p.target)?;
                     if tree.path.exists() || trees(dir)?.iter().any(|t| t.path == tree.path) {
                         return Err(Fault::new("worktree removal incomplete; retain branch"));
                     }
@@ -215,11 +333,10 @@ fn prune(dir: &Path, dry: bool, svc: &mut impl Cleanup) -> Result<Report> {
                     .actions
                     .push(("worktree".into(), tree.path.display().to_string()));
             }
-            // Never let wt's squash equivalence policy decide branch deletion.
-            if !dry {
+            if !dry && checked.is_empty() {
                 svc.authority(dir, &p.target)?;
                 if branch_tip(dir, branch)? != head
-                    || !ancestor(dir, &head, &target)?
+                    || !integrated(dir, branch, &head, &p.target, &target)?
                     || trees(dir)?
                         .iter()
                         .any(|t| t.branch.as_deref() == Some(branch))
@@ -227,7 +344,10 @@ fn prune(dir: &Path, dry: bool, svc: &mut impl Cleanup) -> Result<Report> {
                     return Err(Fault::new("branch changed or checked out; retain it"));
                 }
                 mutation_started = true;
-                delete_branch(dir, branch)?;
+                svc.remove(dir, branch, None, &p.target)?;
+            }
+            if !dry && branch_tip(dir, branch).is_ok() {
+                return Err(Fault::new("branch deletion incomplete; retain residue"));
             }
             report.actions.push(("branch".into(), branch.into()));
             Ok(())

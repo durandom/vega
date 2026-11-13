@@ -11,6 +11,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - unit: dcg.config allows safe `git branch -d` / `--delete`; force deletion stays blocked.
 
+- feature: `vega uac prune` delegates integrated branch deletion to Worktrunk, including squash merges. Unmerged work remains residue; fast-forward the local target before pruning.
+
 ## 193 · 2026-11-13
 
 - feature: the sidebar shows a headless sentinel's unread done as a filled grey dot when its
