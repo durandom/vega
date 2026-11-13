@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 205 · 2026-11-13
+
+- feature: live Claude theme sends retry with bounded backoff and resume after vegad restarts.
+  `vega theme` shows each pane's last sent mode and pending or failed delivery status.
+- feature: pi's native `system` and automatic light/dark pairs stay native; vega no longer tries
+  to copy generated system themes or replace native pair settings.
+
 ## 204 · 2026-11-13
 
 - feature: the vega tab bar and pane headers use stock 0.1.15 forks with static working dots.

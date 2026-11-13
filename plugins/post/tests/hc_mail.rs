@@ -645,9 +645,8 @@ fn inbox_only_ambiguous_backend_name_requires_an_explicit_terminal_id() {
     assert!(f.prompts("w1:p2").is_empty());
 }
 
-#[test]
-fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
-    let mut f = Fixture::new();
+fn theme_fixture() -> Fixture {
+    let f = Fixture::new();
     let home = f.home.path();
     fs::create_dir_all(home.join("config/vega")).unwrap();
     fs::write(
@@ -665,6 +664,12 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
         "answer\n────────\n❯ \n────────\n  status\n",
     )
     .unwrap();
+    f
+}
+
+#[test]
+fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
+    let mut f = theme_fixture();
     f.start();
     wait(f.home.path(), "hc theme command", || {
         f.prompts("t2")
@@ -680,10 +685,55 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
         theme["args"],
         json!(["send", "--if", "idle", "t2", "/config theme=light"])
     );
-    assert!(f
-        .log()
-        .contains("claude pane(s) get /config theme=light now"));
+    assert!(f.log().contains("durable live request for light"));
     assert!(f.prompts("w1:p2").is_empty());
+}
+
+#[test]
+fn failed_theme_send_is_retried_after_fixture_relay_restart() {
+    let mut f = theme_fixture();
+    fs::write(f.home.path().join("theme-timeout-t2"), "").unwrap();
+    let env = vega_theme_sync::Env::at(f.home.path());
+    // Match Fixture::command's XDG paths rather than Env::at's defaults.
+    let env = vega_theme_sync::Env {
+        state: f.home.path().join("state"),
+        config: f.home.path().join("config"),
+        ..env
+    };
+    f.start();
+    wait(f.home.path(), "persisted failed theme send", || {
+        vega_theme_sync::live::Journal::load(&env)
+            .ok()
+            .and_then(|j| j.panes.get("t2").cloned())
+            .is_some_and(|p| {
+                p.pending && p.error.as_deref().is_some_and(|e| e.contains("hc_timeout"))
+            })
+    });
+    // Stop only the test relay (both terminal backends and HOME are fakes).
+    drop(f.relay.take());
+    assert!(f.prompts("t2").is_empty());
+    let before = f.prompts("t1").len();
+    assert_eq!(before, 1);
+    assert_eq!(
+        vega_theme_sync::state::read(&env).unwrap().mode,
+        vega_theme_sync::Mode::Light
+    );
+    f.start();
+    wait(f.home.path(), "resumed theme send", || {
+        vega_theme_sync::live::Journal::load(&env)
+            .ok()
+            .and_then(|j| j.panes.get("t2").cloned())
+            .is_some_and(|p| !p.pending && p.applied == Some(vega_theme_sync::Mode::Light))
+    });
+    assert_eq!(f.prompts("t2").len(), 1);
+    assert_eq!(
+        f.prompts("t1").len(),
+        before,
+        "successful receipt was replayed"
+    );
+    let journal = vega_theme_sync::live::Journal::load(&env).unwrap();
+    assert_eq!(journal.panes["t2"].attempts, 2);
+    assert!(journal.panes["t2"].error.is_none());
 }
 
 #[test]

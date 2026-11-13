@@ -14,9 +14,11 @@ vega theme apply        # apply the due mode again (idempotent)
 
 - vegad watches the OS appearance and applies every change itself, and types
   `/config theme=<mode>` into Claude panes once they are idle with an empty input.
-  There is nothing to poll.
+  Failed sends retry with backoff and survive vegad restarts. Status lists each pane's last
+  successfully sent mode, wanted mode and applied/pending/failed reason (unknown before the first send).
+  Receipts confirm transport delivery; Claude does not acknowledge application. There is nothing to poll.
 - Adapters change only their own key and skip tools that are not set up.
-  `native` means the tool follows the terminal by itself (pi with a `light/dark` pair,
+  `native` means the tool follows the terminal by itself (pi with `system`, an unset theme or a `light/dark` pair,
   herdr with `auto_switch`).
 - Legacy herdr theme status is read-only; hosts still using that backend manage
   `~/.config/herdr/config.toml` themselves (native `auto_switch` is supported).

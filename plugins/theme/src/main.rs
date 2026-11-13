@@ -199,6 +199,14 @@ fn home(env: &Env) -> Result<(), Failure> {
             "off (theme.toml live_claude = false)"
         }
     );
+    let journal = vega_theme_sync::live::Journal::load(env).map_err(|e| {
+        Failure::new(
+            "live_state",
+            e,
+            "check $XDG_STATE_HOME/vega/theme-live.json",
+        )
+    })?;
+    print!("{}", pane_status(&journal));
     let due = h.due.as_ref().map(|(m, _)| *m);
     let all = adapters::status_all(env, &p);
     println!("tools[{}]{{tool,value,mode,status}}:", all.len());
@@ -236,6 +244,24 @@ fn home(env: &Env) -> Result<(), Failure> {
         println!("help: vega theme apply fixes the drift vega owns");
     }
     Ok(())
+}
+
+fn pane_status(journal: &vega_theme_sync::live::Journal) -> String {
+    let mut out = format!(
+        "claude_panes[{}]{{pane,mode,wanted,status}}:\n",
+        journal.panes.len()
+    );
+    let wanted = journal.request.as_ref().map_or("-", |r| r.mode.as_str());
+    for (id, pane) in &journal.panes {
+        out.push_str(&format!(
+            "  {},{},{},{}\n",
+            cell(id),
+            pane.applied.map_or("unknown", Mode::as_str),
+            wanted,
+            cell(&pane.status())
+        ));
+    }
+    out
 }
 
 fn set(env: &Env, pref: Pref) -> Result<(), Failure> {
@@ -283,6 +309,24 @@ fn apply(env: &Env) -> Result<(), Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pane_status_shows_last_sent_mode_pending_and_failure_reason() {
+        use vega_theme_sync::live::{Journal, Request};
+        let mut journal = Journal::default();
+        journal.accept(Request {
+            id: "1".into(),
+            mode: Mode::Light,
+        });
+        journal.inventory("hc", ["t1".into(), "t2".into(), "t3".into()]);
+        journal.result("t1", 0, Ok(()));
+        journal.result("t2", 0, Err("hc_timeout deadline".into()));
+        let output = pane_status(&journal);
+        assert!(output.contains("t1,light,light,applied"));
+        assert!(output.contains("t2,unknown,light,failed: hc_timeout deadline"));
+        assert!(output.contains("t3,unknown,light,pending"));
+        assert!(pane_status(&Journal::default()).contains("claude_panes[0]"));
+    }
 
     #[test]
     fn skill_has_valid_frontmatter() {

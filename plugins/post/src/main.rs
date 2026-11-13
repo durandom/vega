@@ -2763,17 +2763,11 @@ impl Jobs {
 }
 
 /// A theme event: logged, or the Claude panes to switch when idle.
-fn theme_event(e: theme::Event, live_theme: &mut theme::Live, next: &mut Instant) {
+fn theme_event(e: theme::Event, next: &mut Instant) {
     match e {
         theme::Event::Log(l) => log(&l),
         theme::Event::Live(m) => {
-            let panes = theme::claude_panes(&local_agents());
-            log(&format!(
-                "theme: {} claude pane(s) get /config theme={} now",
-                panes.len(),
-                m.as_str()
-            ));
-            live_theme.start(m, panes.into_keys());
+            log(&format!("theme: durable live request for {}", m.as_str()));
             *next = Instant::now();
         }
     }
@@ -2938,16 +2932,14 @@ async fn local(
     let mut hygiene = hygiene::Pass::new(service::state_dir().ok().as_deref());
     let mut meta_next: Option<Instant> = None;
     let mut park_failing: HashSet<String> = HashSet::new();
-    let mut live_theme = theme::Live::default();
     let mut live_theme_next = Instant::now();
     let mut probe_at = Instant::now() + jobs.backoff.next();
     let mut probe: Option<tokio::task::JoinHandle<bool>> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
         let started = Instant::now();
-        if !live_theme.pending.is_empty() && Instant::now() >= live_theme_next {
-            live_theme_next = Instant::now() + LIVE_THEME_EVERY;
-            type_theme(&mut live_theme, &drafts);
+        if Instant::now() >= live_theme_next {
+            live_theme_next = Instant::now() + type_theme(&drafts);
         }
         let changed = notes_store.as_ref().and_then(|s| s.changed());
         if changed != notes_at {
@@ -3023,7 +3015,7 @@ async fn local(
                     mail.push((upstream::AGENT.to_string(), pane, text));
                 }
             },
-            Some(e) = jobs.theme.recv() => theme_event(e, &mut live_theme, &mut live_theme_next),
+            Some(e) = jobs.theme.recv() => theme_event(e, &mut live_theme_next),
             // Started by an earlier broker loop: their mail is typed here.
             Some(e) = jobs.ci.recv() => match e {
                 ci::Event::Log(l) => log(&l),
@@ -3179,7 +3171,6 @@ async fn serve(
         // UAC.
         jobs.start_broker_jobs();
         let theme_remote = jobs.theme_remote.clone();
-        let mut live_theme = theme::Live::default();
         let mut live_theme_next = Instant::now();
         let Carry {
             mut d,
@@ -3288,10 +3279,9 @@ async fn serve(
                 }
                 slow("registry", t);
             }
-            if !live_theme.pending.is_empty() && Instant::now() >= live_theme_next {
-                live_theme_next = Instant::now() + LIVE_THEME_EVERY;
+            if Instant::now() >= live_theme_next {
                 let t = Instant::now();
-                type_theme(&mut live_theme, &drafts);
+                live_theme_next = Instant::now() + type_theme(&drafts);
                 slow("live theme", t);
             }
             // A new note or a read one (the inbox) redraws the badge now.
@@ -3577,7 +3567,7 @@ async fn serve(
                         }
                     }
                 },
-                Some(e) = jobs.theme.recv() => theme_event(e, &mut live_theme, &mut live_theme_next),
+                Some(e) = jobs.theme.recv() => theme_event(e, &mut live_theme_next),
                 Some(e) = jobs.bd.recv() => match e {
                     bdsync::Event::Log(l) => log(&l),
                     bdsync::Event::Mail(pane, text) => {
@@ -3619,43 +3609,80 @@ async fn serve(
 }
 
 /// How often vegad looks at the Claude panes still waiting for a theme
-/// switch (a fresh inventory of both terminal backends, only while some wait).
+/// switch and refreshes persisted pane status from both terminal backends.
 const LIVE_THEME_EVERY: Duration = Duration::from_secs(2);
-
-/// This host's agents from both terminal backends; unavailable sources are omitted.
-fn local_agents() -> Vec<serde_json::Value> {
-    terminals::Inventory::read().agents()
-}
 
 /// Types `/config theme=<mode>` into each waiting Claude pane that is idle,
 /// done or working with an empty input and no dialog (theme::decide); a
-/// working pane gets it queued, a closed one is dropped. Once per pane.
-fn type_theme(live: &mut theme::Live, drafts: &Drafts) {
-    let Some(line) = live.line() else { return };
-    let now = theme::claude_panes(&local_agents());
-    for pane in live.pending.clone() {
-        let status = now.get(&pane).map(String::as_str);
-        let working = status == Some("working");
-        let held = drafts.stashed.contains_key(&pane);
-        match theme::decide(status, held, || screen(&pane)) {
-            theme::Action::Wait => {}
-            theme::Action::Drop => {
-                live.pending.remove(&pane);
-            }
-            theme::Action::Send => {
-                live.pending.remove(&pane);
-                match notify_queued(&pane, &line, working) {
-                    Ok(()) => {
-                        log(&format!("theme: typed {line} into {pane}"));
-                        if working {
-                            submit_slash_menu(&pane, &line);
-                        }
-                    }
-                    Err(f) => log(&format!("theme: {pane}: {} {}", f.code, f.message)),
-                }
-            }
+/// working pane gets it queued. Failed sends remain pending with backoff;
+/// successful inventory snapshots remove closed panes.
+fn type_theme(drafts: &Drafts) -> Duration {
+    let Some(env) = vega_theme_sync::Env::from_env() else {
+        return REGISTRY_EVERY;
+    };
+    match type_theme_in(&env, drafts) {
+        Ok(true) => LIVE_THEME_EVERY,
+        Ok(false) => REGISTRY_EVERY,
+        Err(e) => {
+            log(&format!("theme: live journal: {e}"));
+            REGISTRY_EVERY
         }
     }
+}
+
+fn type_theme_in(env: &vega_theme_sync::Env, drafts: &Drafts) -> Result<bool, String> {
+    use vega_theme_sync::{live, prefs, state};
+    if !prefs::load(env)?.live_claude {
+        return Ok(false);
+    }
+    let mut journal = live::Journal::load(env)?;
+    if let Some(request) = live::read_request(env)? {
+        journal.accept(request);
+    }
+    let inventory = terminals::Inventory::read();
+    for (backend, source) in [("hc", &inventory.hc), ("herdr", &inventory.herdr)] {
+        if let Ok(agents) = source {
+            journal.inventory(backend, theme::claude_panes(agents).into_keys());
+        }
+    }
+    // Do not type until the recipients and intent are durable.
+    journal.save(env)?;
+    let statuses = theme::claude_panes(&inventory.agents());
+    let Some(mode) = journal.request.as_ref().map(|r| r.mode) else {
+        return Ok(false);
+    };
+    // A request is written before tool application; do not deliver it until
+    // that apply succeeded, or replay obsolete work after a disabled period.
+    if state::read(env).is_none_or(|applied| applied.mode != mode) {
+        return Ok(false);
+    }
+    let line = format!("/config theme={}", mode.as_str());
+    for pane in journal.due(state::unix_now()) {
+        // Missing from an unavailable backend is unknown, not gone.
+        let Some(status) = statuses.get(&pane).map(String::as_str) else {
+            continue;
+        };
+        let working = status == "working";
+        let held = drafts.stashed.contains_key(&pane);
+        if theme::decide(Some(status), held, || screen(&pane)) != theme::Action::Send {
+            continue;
+        }
+        journal.send(env, &pane, state::unix_now(), || {
+            let result = notify_queued(&pane, &line, working)
+                .map_err(|f| format!("{} {}", f.code, f.message));
+            match &result {
+                Ok(()) => {
+                    log(&format!("theme: typed {line} into {pane}"));
+                    if working {
+                        submit_slash_menu(&pane, &line);
+                    }
+                }
+                Err(e) => log(&format!("theme: {pane}: {e}; retrying with backoff")),
+            }
+            result
+        })?;
+    }
+    Ok(journal.panes.values().any(|p| p.pending))
 }
 
 /// In a working Claude pane the Enter after a typed slash command only picks

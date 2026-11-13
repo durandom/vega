@@ -7,6 +7,7 @@ description = "OS dark/light mode to every TUI: preferences, applied state, per-
 publish = false
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 toml_edit = "0.25"
 vega-herdr = { path = "../vega-herdr" }

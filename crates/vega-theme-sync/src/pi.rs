@@ -78,28 +78,27 @@ fn discover_package(home: &Path, path: &[PathBuf], global_prefixes: &[PathBuf]) 
 
 fn pair(raw: &str) -> Option<(&str, &str)> {
     let (light, dark) = raw.split_once('/')?;
+    let (light, dark) = (light.trim(), dark.trim());
     (!light.is_empty() && !dark.is_empty() && !dark.contains('/')).then_some((light, dark))
 }
 
-fn names(env: &Env, supplied: &prefs::Prefs, raw: &str) -> Result<(String, String), String> {
-    // Reload the file: apply_all's Prefs may predate the first migration.
-    let saved = prefs::load(env)?;
-    let old = pair(raw);
+// Pi resolves pairs against terminal appearance and generates `system` from
+// terminal colors. These have no source JSON and must stay owned by pi.
+fn native(raw: &str) -> bool {
+    raw.is_empty() || raw == "system" || pair(raw).is_some()
+}
+
+fn names(prefs: &prefs::Prefs) -> (String, String) {
     let one = |mode| {
-        supplied
+        prefs
             .name("pi", mode)
-            .or_else(|| saved.name("pi", mode))
-            .or_else(|| {
-                old.map(|(l, d)| if mode == Mode::Light { l } else { d })
-                    .filter(|name| *name != "system")
-            })
             .unwrap_or(match mode {
                 Mode::Light => "catppuccin-latte",
                 Mode::Dark => "catppuccin-mocha",
             })
             .to_string()
     };
-    Ok((one(Mode::Light), one(Mode::Dark)))
+    (one(Mode::Light), one(Mode::Dark))
 }
 
 /// Search installed git/npm packages without following directory symlinks
@@ -175,13 +174,16 @@ pub(crate) fn status(env: &Env, prefs: &prefs::Prefs) -> (String, Current) {
         }
         Err(e) => return (String::new(), Current::Error(e)),
     };
+    if native(&raw) {
+        return (raw, Current::Native);
+    }
     if raw != AUTO {
-        // Fixed built-in themes still have a known mode before migration.
+        // Fixed built-in themes still have a known mode before selecting vega-auto.
         let current = by_name(&raw, &("light".into(), "dark".into()));
         return (raw, current);
     }
     let result = (|| {
-        let n = names(env, prefs, &raw)?;
+        let n = names(prefs);
         let current = files::read_json(&output(env))?;
         let mut missing = None;
         for (name, mode) in [(&n.0, Mode::Light), (&n.1, Mode::Dark)] {
@@ -202,14 +204,14 @@ pub(crate) fn apply(env: &Env, prefs: &prefs::Prefs, mode: Mode) -> Outcome {
         Ok(None) => return Outcome::Skipped(format!("no {}", settings(env).display())),
         Err(e) => return Outcome::Failed(e),
     };
+    if native(&old) {
+        return Outcome::Native;
+    }
     let result = (|| {
-        let (light, dark) = names(env, prefs, &old)?;
+        let (light, dark) = names(prefs);
         let selected = if mode == Mode::Light { &light } else { &dark };
-        // Validate before touching any file, including migration preferences.
+        // Validate before touching any file, including settings.
         let theme = source(env, selected)?;
-        if pair(&old).is_some() {
-            prefs::save_pi_pair(env, &light, &dark)?;
-        }
         let path = output(env);
         let mut text = serde_json::to_string_pretty(&theme).map_err(|e| e.to_string())?;
         text.push('\n');
@@ -279,20 +281,21 @@ mod tests {
                 &[env.home.join("homebrew")],
             );
             assert_eq!(env.pi_package, Some(env.home.join(&package)));
-            write(&env, ".pi/agent/settings.json", r#"{"theme":"light/dark"}"#);
+            write(&env, ".pi/agent/settings.json", r#"{"theme":"vega-auto"}"#);
+            let prefs = prefs::parse(
+                r#"[tools.pi]
+light = "light"
+dark = "dark"
+"#,
+            )
+            .unwrap();
             for (mode, color) in [(Mode::Light, "#fff"), (Mode::Dark, "#000")] {
-                assert!(matches!(
-                    apply(&env, &prefs::Prefs::default(), mode),
-                    Outcome::Set { .. }
-                ));
+                assert!(matches!(apply(&env, &prefs, mode), Outcome::Set { .. }));
                 assert_eq!(
                     source(&env, mode.as_str()).unwrap()["vars"]["accent"],
                     color
                 );
-                assert_eq!(
-                    status(&env, &prefs::Prefs::default()).1,
-                    Current::Mode(mode)
-                );
+                assert_eq!(status(&env, &prefs).1, Current::Mode(mode));
             }
         }
     }
@@ -333,60 +336,35 @@ mod tests {
     }
 
     #[test]
-    fn system_pair_migrates_defaults_and_preserves_override() {
-        for override_light in [false, true] {
+    fn native_settings_are_preserved_without_source_files() {
+        for raw in ["system", "light/dark", "system/system", "latte/mocha", ""] {
             let temp = tempfile::tempdir().unwrap();
             let env = Env::at(temp.path());
-            write(
-                &env,
-                ".pi/agent/settings.json",
-                r#"{"theme":"system/system","model":"keep"}"#,
-            );
-            for name in ["catppuccin-latte", "catppuccin-mocha", "custom"] {
-                theme(&env, &format!(".pi/agent/themes/{name}.json"), name, name);
-            }
-            if override_light {
-                write(
-                    &env,
-                    ".config/vega/theme.toml",
-                    "[tools.pi]\nlight = \"custom\"\n",
-                );
-            }
-            let prefs = prefs::load(&env).unwrap();
+            let original = serde_json::json!({"theme": raw, "model":"keep"}).to_string();
+            write(&env, ".pi/agent/settings.json", &original);
             for mode in [Mode::Light, Mode::Dark] {
-                assert!(matches!(apply(&env, &prefs, mode), Outcome::Set { .. }));
-                assert_eq!(status(&env, &prefs).1, Current::Mode(mode));
+                assert_eq!(apply(&env, &prefs::Prefs::default(), mode), Outcome::Native);
+                assert_eq!(status(&env, &prefs::Prefs::default()).1, Current::Native);
             }
-            let saved = prefs::load(&env).unwrap();
-            assert_eq!(
-                saved.name("pi", Mode::Light),
-                Some(if override_light {
-                    "custom"
-                } else {
-                    "catppuccin-latte"
-                })
-            );
-            assert_eq!(saved.name("pi", Mode::Dark), Some("catppuccin-mocha"));
-            assert_eq!(
-                files::read_json(&settings(&env)).unwrap().unwrap()["model"],
-                "keep"
-            );
+            assert_eq!(fs::read_to_string(settings(&env)).unwrap(), original);
+            assert!(!output(&env).exists());
+            assert!(!prefs::path(&env).exists());
         }
     }
 
     #[test]
-    fn migrates_pair_switches_live_file_and_reapply_does_not_write() {
+    fn managed_theme_switches_live_file_and_reapply_does_not_write() {
         let temp = tempfile::tempdir().unwrap();
         let env = Env::at(temp.path());
         write(
             &env,
             ".pi/agent/settings.json",
-            r#"{"theme":"latte/mocha","model":"keep"}"#,
+            r#"{"theme":"latte","model":"keep"}"#,
         );
         write(
             &env,
             ".config/vega/theme.toml",
-            "# keep\nmode = \"auto\"\n[tools.pi]\nenabled = true # also keep\n",
+            "# keep\nmode = \"auto\"\n[tools.pi]\nenabled = true # also keep\nlight = \"latte\"\ndark = \"mocha\"\n",
         );
         theme(
             &env,
@@ -417,7 +395,7 @@ mod tests {
         assert_eq!(light["name"], AUTO);
         assert_eq!(light["vars"]["accent"], "#aaa");
         assert_eq!(status(&env, &prefs).1, Current::Mode(Mode::Light));
-        // The caller may still hold the pre-migration preferences.
+        // The same preferences apply to both modes.
         assert!(matches!(
             apply(&env, &prefs, Mode::Dark),
             Outcome::Set { .. }
@@ -454,10 +432,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_source_leaves_migration_and_output_alone() {
+    fn missing_source_leaves_settings_and_output_alone() {
         let temp = tempfile::tempdir().unwrap();
         let env = Env::at(temp.path());
-        let original = r#"{"theme":"missing/also-missing","model":"keep"}"#;
+        let original = r#"{"theme":"missing","model":"keep"}"#;
         write(&env, ".pi/agent/settings.json", original);
         assert!(matches!(
             apply(&env, &prefs::Prefs::default(), Mode::Light),
@@ -486,15 +464,11 @@ mod tests {
             "npm",
             "#222",
         );
-        write(
-            &env,
-            ".pi/agent/settings.json",
-            r#"{"theme":"light/custom"}"#,
-        );
+        write(&env, ".pi/agent/settings.json", r#"{"theme":"light"}"#);
         write(
             &env,
             ".config/vega/theme.toml",
-            "[tools.pi]\ndark = \"npm\"\n",
+            "[tools.pi]\nlight = \"light\"\ndark = \"npm\"\n",
         );
         let prefs = prefs::load(&env).unwrap();
         assert!(matches!(
@@ -515,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn system_uses_defaults_and_disabled_or_absent_skips() {
+    fn system_is_native_and_disabled_or_absent_skips() {
         let temp = tempfile::tempdir().unwrap();
         let env = Env::at(temp.path());
         assert!(matches!(
@@ -538,7 +512,7 @@ mod tests {
         assert!(!output(&env).exists());
         assert!(matches!(
             apply(&env, &prefs::Prefs::default(), Mode::Dark),
-            Outcome::Set { .. }
+            Outcome::Native
         ));
         assert!(!prefs::path(&env).exists());
     }

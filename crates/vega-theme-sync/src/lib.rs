@@ -15,12 +15,14 @@ use std::path::{Path, PathBuf};
 
 pub mod adapters;
 pub mod files;
+pub mod live;
 pub mod os;
 mod pi;
 pub mod prefs;
 pub mod state;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
     Dark,
     Light,

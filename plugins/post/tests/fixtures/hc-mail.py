@@ -42,6 +42,10 @@ elif args[0] == 'read':
 elif args[0] == 'send':
     assert '--force' not in args
     p, text = args[-2:]
+    fail = home / ('theme-timeout-' + p)
+    if text.startswith('/config theme=') and fail.exists():
+        fail.unlink()
+        error('timeout')
     t = get(p)
     state = t.get('status',{}).get('state')
     # Simulate a status change between get and send.

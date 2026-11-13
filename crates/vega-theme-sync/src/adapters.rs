@@ -635,7 +635,7 @@ mod tests {
         .unwrap();
         let out: std::collections::HashMap<_, _> =
             apply_all(&env, &p, Mode::Dark).into_iter().collect();
-        assert!(matches!(out["pi"], Outcome::Failed(_)));
+        assert_eq!(out["pi"], Outcome::Native);
         assert_eq!(out["herdr"], Outcome::Native);
         assert!(matches!(out["openusage"], Outcome::Skipped(_)));
         assert!(matches!(out["delta"], Outcome::Skipped(_)));

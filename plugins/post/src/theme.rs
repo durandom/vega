@@ -9,7 +9,7 @@
 //! host, once, at once: idle, done or working (Claude runs the queued slash
 //! command), with an empty input and no dialog.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -79,6 +79,15 @@ pub(crate) fn step(
     let before = state::read(env).map(|a| a.mode);
     let live = p.live_claude && is_change(w.last(), before, mode);
     let mut out = Vec::new();
+    // Persist before applying: an exec between apply and event delivery must
+    // still leave a request for the relay on its next tick.
+    if live {
+        if let Err(e) = vega_theme_sync::live::request(env, mode) {
+            return Some(vec![Event::Log(format!(
+                "theme: live request not written, retrying: {e}"
+            ))]);
+        }
+    }
     match vega_theme_sync::apply_due(env, &p, mode, &source) {
         Ok(results) => {
             w.applied(mode);
@@ -163,7 +172,11 @@ pub async fn mode_of(
 pub fn registry_entry(host: &str) -> Option<(String, serde_json::Value)> {
     let env = Env::from_env()?;
     let a = state::read(&env)?;
-    Some((vega_registry::theme_key(host), a.to_json()))
+    let mut entry = a.to_json();
+    if let Ok(journal) = vega_theme_sync::live::Journal::load(&env) {
+        entry["claude"] = serde_json::to_value(journal).ok()?;
+    }
+    Some((vega_registry::theme_key(host), entry))
 }
 
 /// What to do with a pane waiting for `/config theme=<mode>`.
@@ -196,25 +209,6 @@ pub fn decide(status: Option<&str>, held: bool, screen: impl FnOnce() -> Option<
         return Action::Wait;
     }
     Action::Send
-}
-
-/// The Claude panes waiting for the new mode; each gets it once.
-#[derive(Default)]
-pub struct Live {
-    pub mode: Option<Mode>,
-    pub pending: HashSet<String>,
-}
-
-impl Live {
-    /// A new mode replaces the old one for every Claude pane on this host.
-    pub fn start(&mut self, mode: Mode, claude_panes: impl IntoIterator<Item = String>) {
-        self.mode = Some(mode);
-        self.pending = claude_panes.into_iter().collect();
-    }
-
-    pub fn line(&self) -> Option<String> {
-        self.mode.map(|m| format!("/config theme={}", m.as_str()))
-    }
 }
 
 /// `(pane, status)` of this host's Claude agents in `herdr agent list`.
@@ -280,11 +274,6 @@ mod tests {
         let c = claude_panes(&agents);
         assert_eq!(c.len(), 1);
         assert_eq!(c["w1:p1"], "idle");
-        let mut l = Live::default();
-        assert_eq!(l.line(), None);
-        l.start(Mode::Light, c.into_keys());
-        assert_eq!(l.line().as_deref(), Some("/config theme=light"));
-        assert!(l.pending.contains("w1:p1"));
     }
 
     #[test]
@@ -335,10 +324,19 @@ mod tests {
         assert!(step(&env, Some(Mode::Light), &mut w, &remote, &mut err).is_none());
         let ev = step(&env, Some(Mode::Dark), &mut w, &remote, &mut err).unwrap();
         assert!(ev.iter().any(|e| matches!(e, Event::Live(Mode::Dark))));
+        let request = vega_theme_sync::live::read_request(&env).unwrap().unwrap();
+        assert_eq!(request.mode, Mode::Dark);
         // A new vegad (restart, upgrade) with the same mode: applies, no typing.
         let mut w2 = Watcher::default();
         let ev = step(&env, Some(Mode::Dark), &mut w2, &remote, &mut err).unwrap();
         assert!(!ev.iter().any(|e| matches!(e, Event::Live(_))));
+        assert_eq!(
+            vega_theme_sync::live::read_request(&env)
+                .unwrap()
+                .unwrap()
+                .id,
+            request.id
+        );
         // live_claude = false: never typed.
         std::fs::create_dir_all(env.config.join("vega")).unwrap();
         std::fs::write(env.config.join("vega/theme.toml"), "live_claude = false\n").unwrap();
