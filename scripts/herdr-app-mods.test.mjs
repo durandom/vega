@@ -231,6 +231,39 @@ test('attention popover routes remote Open and Done, decisions and project-scope
   click('attention-notes');assert(h.calls.some(c=>c[0]==='open'&&c[1].props?.tab==='notes'));
 });
 
+test('unchanged waiting reconciliation never publishes or redraws, including empty and expired state',()=>{
+  const h=load('vega-sidebar');let writes=0, redraws=0;
+  h.api.setShared=(key,value)=>{writes++;h.state.set(key,value);};
+  h.cx.notify=()=>redraws++;
+  const reconcile=()=>h.mod.reconcileWaiting(h.cx);
+  reconcile();reconcile();assert.equal(writes,0);assert.equal(redraws,0);
+  const r={...row(),waiting_panes:[{pane:'hc:t7',attention:'input'}]};
+  h.state.set('vega.badges',[r]);reconcile();
+  assert.equal(writes,1);assert.equal(redraws,1);
+  const previous=h.state.get('vega.waiting-state');
+  reconcile();h.newCopy().reconcileWaiting(h.cx);
+  assert.equal(writes,1);assert.equal(redraws,1);
+  r.at-=61;reconcile();
+  assert.equal(writes,2);assert.equal(redraws,2);
+  assert.equal(Object.keys(previous).length,1,'published episodes are not mutated during reconciliation');
+  reconcile();assert.equal(writes,2);assert.equal(redraws,2);
+});
+
+test('attention clock only redraws for displayed age changes and stale badge expiry',async()=>{
+  const h=load('vega-sidebar');let now=1000000, redraws=0;const timers=new Map();
+  h.api.Date={now:()=>now};h.cx.notify=()=>redraws++;
+  h.cx.timer.every=(ms,f)=>timers.set(ms,f);
+  h.setProps({attentionProject:'project-a',uac:'t1'});
+  h.state.set('vega.badges',[{...row(),at:now/1000,decision_texts:[{id:'d1',created:now/1000-59}]}]);
+  h.mod.init({},h.cx);await h.flush();h.render();redraws=0;
+  const tick=()=>timers.get(1000)(h.cx);
+  tick();assert.equal(redraws,0);
+  now+=1000;tick();assert.equal(redraws,1,'minute boundary changes age');
+  h.render();tick();assert.equal(redraws,1);
+  now+=60000;tick();assert.equal(redraws,2,'expired badges disappear');
+  h.render();now+=1000;tick();assert.equal(redraws,2,'empty popover stays quiet');
+});
+
 test('waiting auto-clears only after a viewed turn advances, once across copies; a new episode can wait again',async()=>{
   for(const remote of [false,true]) {
     const h=load('vega-sidebar');const address=remote?'ganymede/t2':'t2';

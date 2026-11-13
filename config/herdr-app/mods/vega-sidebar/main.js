@@ -220,7 +220,10 @@ export default class Agents extends View {
     }
     if (props()?.attentionProject) {
       cx.spawn(cx => this.readNotes(cx));
-      cx.timer.every(1000, cx => cx.notify());
+      // Ages are minute-granular; only redraw when a label or badge freshness changes.
+      cx.timer.every(1000, cx => {
+        if (this.attentionClock() !== this.attentionClockSig) cx.notify();
+      });
       cx.timer.every(15000, cx => this.readNotes(cx));
       return;
     }
@@ -574,8 +577,11 @@ export default class Agents extends View {
   // Shared episodes prevent multiple sidebar copies from dismissing the same viewed turn.
   // A failure stays visible for explicit retry rather than retrying every poll.
   reconcileWaiting(cx) {
-    const state = shared("vega.waiting-state") ?? {};
+    const previous = shared("vega.waiting-state") ?? {};
+    const before = JSON.stringify(previous);
+    const state = Object.fromEntries(Object.entries(previous).map(([key, episode]) => [key, { ...episode }]));
     const active = new Set();
+    const dismissals = [];
     const all = new Map(visibleTerminals().map(t => [t.address, t]));
     for (const row of shared("vega.badges") ?? []) {
       if (Date.now()/1000 - row.at > 60) continue;
@@ -592,7 +598,7 @@ export default class Agents extends View {
             || (e.initialSeen == null || seen > e.initialSeen))) e.viewed = seen;
         if (e.viewed != null && term.turn > e.viewed && !e.failed) {
           e.busy = true;
-          cx.spawn(async cx => {
+          dismissals.push(async cx => {
             await this.dismissWaiting(row, w, cx);
             const latest = shared("vega.waiting-state") ?? {};
             if (latest[key]) { latest[key].busy = false; latest[key].failed = !latest[key].cleared; }
@@ -602,8 +608,25 @@ export default class Agents extends View {
       }
     }
     for (const key of Object.keys(state)) if (!active.has(key)) delete state[key];
-    setShared("vega.waiting-state", state);
-    cx.notify();
+    if (JSON.stringify(state) !== before) {
+      setShared("vega.waiting-state", state);
+      cx.notify();
+    }
+    // Publish busy episodes before starting work, so other copies cannot dismiss twice.
+    for (const dismiss of dismissals) cx.spawn(dismiss);
+  }
+
+  // Match the ages actually displayed, including expiration of the badge row.
+  attentionClock() {
+    const row = this.vegaTotals(props().uac, props().attentionProject) ?? {};
+    const all = new Map(visibleTerminals().map(t => [t.address, t]));
+    const age = at => at ? duration(Date.now() - at) : null;
+    return JSON.stringify([
+      (row.waiting_panes ?? []).map(w => [w.pane, age(all.get(w.pane.replace(/^hc:/, ""))?.status_ms
+        || shared("vega.waiting-state")?.[waitingKey(row, w)]?.since)]),
+      (row.decision_texts ?? []).map(d => [d.id, age(d.created * 1000)]),
+      (Array.isArray(this.notes) ? this.notes : []).filter(n => n.unread).map(n => [n.host, n.id, age(n.id)]),
+    ]);
   }
 
   openAttention(project, uac, cx) {
@@ -613,6 +636,7 @@ export default class Agents extends View {
   }
 
   attentionPopover(t) {
+    this.attentionClockSig = this.attentionClock();
     const project = props().attentionProject;
     const row = this.vegaTotals(props().uac, project) ?? {};
     const button = (id, label, action, tooltip = null) => pill(t, id, label, { action, tooltip });
