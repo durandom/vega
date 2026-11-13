@@ -1,6 +1,6 @@
 //! Independent herdr-app homes; no app or terminal mutations during config apply.
 use crate::{sources, Ctx, Env, Outcome, Plan, Unit};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -9,7 +9,7 @@ use std::{
     process::Command,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
     pub layout: String,
@@ -25,10 +25,12 @@ pub struct Profile {
     pub tabs: Vec<Tab>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tab {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub terminals: Vec<Terminal>,
 }
 
@@ -40,7 +42,7 @@ impl Profile {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Terminal {
     pub name: String,
@@ -89,7 +91,7 @@ pub fn parse(text: &str) -> Result<Profile, String> {
             return Err("profile tabs need unique valid names and one or two terminals".into());
         }
     }
-    if p.terminals().next().is_none() {
+    if p.terminals().next().is_none() && !p.mods.iter().any(|m| m == "vega-window-tabs") {
         return Err("profile needs at least one terminal".into());
     }
     for t in p.terminals() {
@@ -97,12 +99,12 @@ pub fn parse(text: &str) -> Result<Profile, String> {
             || !names.insert(&t.name)
             || t.machine.is_empty()
             || t.machine.starts_with('-')
-            || t.argv.is_empty()
-            || t.argv[0].is_empty()
+            || (t.optional && t.argv.is_empty())
+            || t.argv.first().is_some_and(|a| a.is_empty())
             || t.argv.iter().any(|a| a.contains('\0'))
         {
             return Err(
-                "profile terminals need unique valid names, a machine and nonempty argv".into(),
+                "profile terminals need unique valid names, a machine and valid argv (empty starts a shell; optional requires a program)".into(),
             );
         }
     }
@@ -167,14 +169,17 @@ pub fn build_tabs(
     profile: &Profile,
     addresses: &BTreeMap<String, String>,
 ) -> Result<(), String> {
-    if profile.tabs.is_empty() {
+    if profile.tabs.is_empty() && !profile.mods.iter().any(|m| m == "vega-window-tabs") {
         return Ok(());
     }
     fn replace(node: &mut Value, children: &[Value]) -> usize {
         if node["id"] == "profile:tabs" {
             node["type"] = "stack".into();
             node["children"] = children.to_vec().into();
-            node["active"] = children[0]["id"].clone();
+            node["active"] = children
+                .first()
+                .map(|c| c["id"].clone())
+                .unwrap_or(Value::Null);
             return 1;
         }
         node.get_mut("children")
@@ -189,9 +194,7 @@ pub fn build_tabs(
         if blocks.is_empty() { return None; }
         Some(json!({"id":tab.name, "type":"row", "gap":4, "children":blocks}))
     }).collect();
-    if children.is_empty() {
-        return Err("profile has no available tab terminals".into());
-    }
+
     if replace(layout, &children) != 1 {
         return Err("tab profile layout needs exactly one profile:tabs node".into());
     }
@@ -244,7 +247,7 @@ pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
             serde_json::to_string_pretty(&settings).unwrap() + "\n",
         )?);
         plan.sources.push(settings_src);
-        if !profile.tabs.is_empty() {
+        if profile.mods.iter().any(|m| m == "vega-window-tabs") {
             let keys_src = sources::get(&ctx.env, "herdr-app/keys.json")?;
             let mut keys: Value =
                 serde_json::from_str(&keys_src.text).map_err(|e| e.to_string())?;
@@ -252,7 +255,8 @@ pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
                 for binding in global.values_mut() {
                     if let Some(command) = binding.as_str() {
                         if let Some(action) = command.strip_prefix("tab.") {
-                            if action == "next" || action == "prev" || action.starts_with("select:")
+                            if matches!(action, "next" | "prev" | "new" | "close" | "rename")
+                                || action.starts_with("select:")
                             {
                                 *binding =
                                     format!("vega-window-tabs.{}", action.replace(':', "-")).into();
@@ -416,6 +420,9 @@ mod tests {
         assert_eq!(keys["global"]["ctrl-tab"], "vega-window-tabs.next");
         assert_eq!(keys["global"]["cmd-2"], "vega-window-tabs.select-2");
         assert_eq!(keys["global"]["ctrl-s p"], "vega-window-tabs.prev");
+        assert_eq!(keys["global"]["ctrl-s c"], "vega-window-tabs.new");
+        assert_eq!(keys["global"]["cmd-w"], "vega-window-tabs.close");
+        assert_eq!(keys["global"]["f2"], "vega-window-tabs.rename");
         assert_eq!(keys["terminal"]["cmd-c"], "terminal.copy");
         let shared: Value =
             serde_json::from_slice(&fs::read(target.join("shared.json")).unwrap()).unwrap();
@@ -499,7 +506,7 @@ optional = true
             &BTreeMap::from([("a".into(), "t1".into())])
         )
         .is_err());
-        assert!(build_tabs(&mut layout, &p, &BTreeMap::new()).is_err());
+        assert!(build_tabs(&mut layout, &p, &BTreeMap::new()).is_ok());
         assert!(parse("layout = \"status\"\n[[tab]]\nname = \"empty\"\nterminals = []").is_err());
         let flat = parse("layout = \"status\"\n[[terminals]]\nname = \"legacy\"\nmachine = \"local\"\nargv = [\"btop\"]").unwrap();
         assert_eq!(flat.terminals().count(), 1);

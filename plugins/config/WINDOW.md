@@ -22,3 +22,12 @@ usual Ctrl-Tab, Cmd-Shift-[ / ], Cmd-1..9 and ctrl-s n/p/1..9 keys.
 Tabs are layout groups, without shared core spaces or a sidebar.
 New homes skip welcome; existing shared state is preserved. No terminal cleanup
 is automatic. A partial launch can be retried without replacing successful slots.
+Manage grouped tabs in the top bar: + (or leader-c) chooses a machine for a
+plain shell; click a name to rename, drag to reorder, × to hide without killing.
+Config shows the effective TOML and offers promote/reset. Local edits persist in
+`$XDG_CONFIG_HOME/vega/windows/<name>.toml` across opens and config apply.
+`vega window promote <name> --repo <vega-checkout>` writes an uncommitted repo
+profile (defaults to the current checkout). Review/commit, rebuild/install, apply
+the new profile, then reset local edits.
+`vega window show <name>` prints effective config and overlay as JSON.
+`add`, `rename`, `move`, `close`, `reset` expose the same edits; use `--help`.

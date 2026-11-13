@@ -26,7 +26,7 @@ if pathlib.Path(sys.argv[0]).name == 'hc':
     else:
         assert a[0] == 'run' and '--no-parent' in a and '--bg' in a
         labels = dict(a[i+1].split('=',1) for i,x in enumerate(a) if x == '--label')
-        t = dict(address=a[a.index('--on')+1]+'/t'+str(len(terms)+1), labels=labels, argv=a[a.index('--')+1:], cwd='/', state='live', created_ms=0, screen='exact', cols=80, rows=24)
+        t = dict(address=(a[a.index('--on')+1] if '--on' in a else 'local')+'/t'+str(len(terms)+1), labels=labels, argv=a[a.index('--')+1:], cwd='/', state='live', created_ms=0, screen='exact', cols=80, rows=24)
         terms.append(t); state.write_text(json.dumps(terms)); print(json.dumps(t))
 else:
     if a and a[0] == 'check':
@@ -85,4 +85,59 @@ else:
         serde_json::from_slice(&fs::read(d.path().join("terminals.json")).unwrap()).unwrap();
     assert_eq!(terms.as_array().unwrap().len(), 3);
     assert_eq!(terms[2]["argv"], serde_json::json!(["token-burn", "tui"]));
+    let exe = env!("CARGO_BIN_EXE_vega-window");
+    let calls_before = fs::read_to_string(d.path().join("calls")).unwrap();
+    command(exe, &["add", "status", "--machine", "local"]);
+    let added: serde_json::Value =
+        serde_json::from_str(&command(exe, &["show", "status"])).unwrap();
+    let id = added["overlay"]["added"][0]["name"].as_str().unwrap();
+    command(exe, &["rename", "status", id, "My shell"]);
+    command(exe, &["move", "status", id, "1"]);
+    command(exe, &["close", "status", "proteus"]);
+    let show: serde_json::Value = serde_json::from_str(&command(exe, &["show", "status"])).unwrap();
+    assert_eq!(show["profile"]["tab"][0]["title"], "My shell");
+    assert_eq!(show["profile"]["tab"][0]["name"], id);
+    let calls_after = fs::read_to_string(d.path().join("calls")).unwrap();
+    assert!(
+        !calls_after[calls_before.len()..].contains("herdr-app"),
+        "edits must not launch/raise app"
+    );
+    let reopen = command(exe, &["status"]);
+    assert!(reopen.contains("started: 0"));
+    assert!(reopen.contains("reused: 3"));
+    let repo = d.path().join("repo");
+    fs::create_dir_all(repo.join("config/herdr-app/profiles")).unwrap();
+    fs::write(repo.join(".git"), "gitdir: fake").unwrap();
+    fs::copy(
+        config.join("herdr-app-status/profile.toml"),
+        repo.join("config/herdr-app/profiles/status.toml"),
+    )
+    .unwrap();
+    command(
+        exe,
+        &["promote", "status", "--repo", repo.to_str().unwrap()],
+    );
+    let promoted = fs::read_to_string(repo.join("config/herdr-app/profiles/status.toml")).unwrap();
+    assert!(promoted.contains("My shell"));
+    for id in [id, "ganymede", "io", "tokens"] {
+        command(exe, &["close", "status", id]);
+    }
+    command(exe, &["status"]);
+    let layout: serde_json::Value =
+        serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
+    assert_eq!(layout["children"][1]["children"], serde_json::json!([]));
+    command(exe, &["reset", "status"]);
+    assert!(command(exe, &["status"]).contains("reused: 3"));
+    let terms: serde_json::Value =
+        serde_json::from_slice(&fs::read(d.path().join("terminals.json")).unwrap()).unwrap();
+    assert_eq!(
+        terms.as_array().unwrap().len(),
+        4,
+        "close/reset never kill terminals"
+    );
+    assert_eq!(
+        terms[3]["argv"],
+        serde_json::json!([]),
+        "machine chooses its own shell"
+    );
 }

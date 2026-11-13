@@ -496,3 +496,17 @@ see the latest values and cannot submit simultaneous edits. Reads run when Model
 is selected, every 15 seconds while selected, on Refresh, and after each action.
 `node --test scripts/herdr-app-mods.test.mjs` covers rendering, independent defaults,
 puck, allowlists, exact set/clear argv, pi omission, refresh and inline errors.
+
+### Status tab management (vega-0h4c.87)
+
+Rechecked the installed `herdr-app --skill`, `AGENTS.md`, and `commands` on
+2026-11-13: native tabs still belong to a space on one machine; composition
+terminal blocks are not model panes. Keep the layout stack and `vega-window-tabs`
+mod for cross-machine groups and existing window/slot labels. Use native input
+widgets and the shipped tab bar's press/release reorder interaction.
+
+Local changes live in `$XDG_CONFIG_HOME/vega/windows/<profile>.toml`: added tabs,
+display titles, ordered stable IDs and hidden repo tabs. Closing hides a tab and
+leaves its terminal alive for reuse. Reset discards this overlay. Promote writes
+the effective profile into an explicitly selected vega checkout as an uncommitted
+change; it does not apply, install or commit it.

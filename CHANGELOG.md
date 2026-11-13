@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 199 · 2026-11-13
+
+- feature: status tabs support + / leader-c machine selection, inline rename, drag reorder and close. Local edits persist in `~/.config/vega/windows/<profile>.toml`; closing hides a tab without killing its terminal.
+- feature: Config shows the effective profile with promote/reset. `vega window promote <name> --repo <checkout>` writes an uncommitted repo profile for review; rebuild/install, apply it and reset local edits afterward.
+- unit: run `vega config apply herdr-app.profiles` after upgrading, then `vega window status` to load the management bar and keys.
+
 ## 198 · 2026-11-13
 
 - feature: the sidebar project badge opens a Needs you popover with waiting panes, decisions and notes, including Open and resolution actions. Waiting hands appear on the child's row and clear after viewing its turn and a later turn advance; Done dismisses them immediately. UAC rows no longer repeat project counts.

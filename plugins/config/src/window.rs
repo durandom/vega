@@ -1,5 +1,5 @@
 //! Launch an applied herdr-app profile without changing the main window.
-use clap::{error::ErrorKind, CommandFactory, Parser};
+use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -10,7 +10,7 @@ use std::{
 };
 use vega_config::{
     profiles::{self, Profile, Terminal},
-    Env,
+    window_overlay as overlay, Env,
 };
 use vega_herdr::{cell, print_failure, Failure};
 
@@ -21,10 +21,59 @@ const GUIDE: &str = include_str!("../WINDOW.md");
 struct Cli {
     #[arg(value_parser = profile_name)]
     name: Option<String>,
+    #[command(subcommand)]
+    action: Option<Action>,
     #[arg(long)]
     skill: bool,
     #[arg(short = 'V', short_alias = 'v', long)]
     version: bool,
+}
+
+#[derive(Subcommand)]
+enum Action {
+    /// Effective profile and local overlay (JSON for the config view).
+    Show { name: String },
+    /// Add a plain shell on a machine (use local for this computer).
+    Add {
+        name: String,
+        #[arg(long)]
+        machine: String,
+    },
+    /// Change a display title without changing terminal labels.
+    Rename {
+        name: String,
+        id: String,
+        title: String,
+    },
+    /// Move a tab to a one-based position.
+    Move {
+        name: String,
+        id: String,
+        index: usize,
+    },
+    /// Hide a tab, retaining its running terminals.
+    Close { name: String, id: String },
+    /// Discard all local tab customizations.
+    Reset { name: String },
+    /// Write the effective profile into a checkout, without committing or applying.
+    Promote {
+        name: String,
+        #[arg(long, default_value = ".")]
+        repo: std::path::PathBuf,
+    },
+}
+impl Action {
+    fn name(&self) -> &str {
+        match self {
+            Self::Show { name }
+            | Self::Add { name, .. }
+            | Self::Rename { name, .. }
+            | Self::Move { name, .. }
+            | Self::Close { name, .. }
+            | Self::Reset { name }
+            | Self::Promote { name, .. } => name,
+        }
+    }
 }
 
 fn profile_name(s: &str) -> Result<String, String> {
@@ -42,7 +91,9 @@ trait Backend {
     fn open(&mut self, home: &Path) -> Result<(), String>;
 }
 
-struct Live;
+struct Live {
+    raise: bool,
+}
 impl Backend for Live {
     fn inventory(&mut self) -> Result<Value, String> {
         vega_herdr::hc::terminal_list().map_err(|e| e.message)
@@ -83,6 +134,9 @@ impl Backend for Live {
             .ok_or_else(|| format!("starting {}: missing terminal address", t.name))
     }
     fn open(&mut self, home: &Path) -> Result<(), String> {
+        if !self.raise {
+            return Ok(());
+        }
         // Bare herdr-app opens or raises the instance selected by its home.
         let mut child = Command::new("herdr-app")
             .env("HERDR_APP_HOME", home)
@@ -152,6 +206,10 @@ fn start_args(window: &str, t: &Terminal) -> Vec<String> {
     .into_iter()
     .map(String::from)
     .collect();
+    if t.machine == "local" {
+        let on = args.iter().position(|a| a == "--on").unwrap();
+        args.drain(on..on + 2);
+    }
     args.extend(t.argv.clone());
     args
 }
@@ -234,6 +292,17 @@ fn launch(
     result.reused = addresses.len() - result.started;
     profiles::build_tabs(&mut layout, p, &addresses)?;
     profiles::resolve_layout(&mut layout, &addresses)?;
+    fn configure(node: &mut Value, name: &str, p: &Profile) {
+        if node["content"]["mod"] == "vega-window-tabs" {
+            node["content"]["props"] = serde_json::json!({"profile":name, "titles":p.tabs.iter().map(|t| (t.name.clone(), t.title.clone().unwrap_or_else(|| t.name.clone()))).collect::<BTreeMap<_,_>>()});
+        }
+        if let Some(children) = node["children"].as_array_mut() {
+            for child in children {
+                configure(child, name, p);
+            }
+        }
+    }
+    configure(&mut layout, name, p);
     fs::create_dir_all(home.join("layouts")).map_err(|e| e.to_string())?;
     let mut tmp =
         tempfile::NamedTempFile::new_in(home.join("layouts")).map_err(|e| e.to_string())?;
@@ -246,6 +315,9 @@ fn launch(
 
 fn run(cli: Cli) -> Result<(), String> {
     let env = Env::from_env().ok_or("HOME is required")?;
+    if let Some(action) = cli.action {
+        return manage(&env, action);
+    }
     let Some(name) = cli.name else {
         println!(
             "bin: {}",
@@ -271,7 +343,6 @@ fn run(cli: Cli) -> Result<(), String> {
         return Ok(());
     };
     let home = profiles::home(&env, &name)?;
-    let (profile, layout) = profiles::read_applied(&home)?;
     // OS releases the advisory lock even after a crash; concurrent opens cannot duplicate terminals.
     let lock = File::options()
         .create(true)
@@ -281,11 +352,97 @@ fn run(cli: Cli) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     lock.try_lock()
         .map_err(|_| "this profile is already opening; retry vega window after it finishes")?;
-    let result = launch(&home, &name, &profile, layout, &mut Live)?;
+    let (base, layout) = profiles::read_applied(&home)?;
+    let profile = overlay::effective(&base, &overlay::read(&overlay::path(&env, &name))?)?;
+    let result = launch(&home, &name, &profile, layout, &mut Live { raise: true })?;
     println!("window: {}", cell(&name));
     println!("started: {}", result.started);
     println!("reused: {}", result.reused);
     println!("skipped: {}", result.skipped);
+    for warning in result.warnings {
+        println!("warning: {}", cell(&warning));
+    }
+    Ok(())
+}
+
+fn manage(env: &Env, action: Action) -> Result<(), String> {
+    let name = action.name().to_owned();
+    let home = profiles::home(env, &name)?;
+    let lock = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(home.join(".vega-window.lock"))
+        .map_err(|e| e.to_string())?;
+    lock.try_lock()
+        .map_err(|_| "profile is busy; retry after the current edit")?;
+    let (base, layout) = profiles::read_applied(&home)?;
+    if !base.terminals.is_empty() {
+        return Err("tab management requires a grouped profile".into());
+    }
+    let path = overlay::path(env, &name);
+    let mut local = if matches!(action, Action::Reset { .. }) {
+        overlay::Overlay::default()
+    } else {
+        overlay::read(&path)?
+    };
+    let before = overlay::effective(&base, &local)?;
+    if matches!(action, Action::Show { .. }) {
+        println!(
+            "{}",
+            serde_json::json!({"profile":before,"overlay":local,"config":overlay::text(&before)?})
+        );
+        return Ok(());
+    }
+    if let Action::Promote { repo, .. } = action {
+        let destination = overlay::promote(&repo, &name, &base, &local)?;
+        println!("profile: {}", cell(&destination.display().to_string()));
+        println!("status: promoted; review and commit the working-tree change, then apply and reset the overlay");
+        return Ok(());
+    }
+    match action {
+        Action::Add { machine, .. } => {
+            local.order = before.tabs.iter().map(|t| t.name.clone()).collect();
+            overlay::add(&base, &mut local, &machine)?;
+        }
+        Action::Rename { id, title, .. } => {
+            if !before.tabs.iter().any(|t| t.name == id) {
+                return Err("unknown tab ID".into());
+            }
+            if title.trim().is_empty() || title.len() > 120 || title.chars().any(char::is_control) {
+                return Err("title must be 1-120 bytes without control characters".into());
+            }
+            local.titles.insert(id, title);
+        }
+        Action::Move { id, index, .. } => {
+            let mut ids: Vec<_> = before.tabs.iter().map(|t| t.name.clone()).collect();
+            let from = ids.iter().position(|t| t == &id).ok_or("unknown tab ID")?;
+            if index == 0 || index > ids.len() {
+                return Err("index must be within the tab list (1-based)".into());
+            }
+            ids.remove(from);
+            ids.insert(index - 1, id);
+            local.order = ids;
+        }
+        Action::Close { id, .. } => {
+            if !local.hidden.contains(&id) {
+                if !before.tabs.iter().any(|t| t.name == id) {
+                    return Err("unknown tab ID".into());
+                }
+                local.hidden.push(id);
+            }
+        }
+        Action::Reset { .. } => {
+            local = overlay::Overlay::default();
+        }
+        _ => unreachable!(),
+    }
+    let effective = overlay::effective(&base, &local)?;
+    // Persist intent first: a failed remote start can be retried by reopening.
+    overlay::save(&path, &local)?;
+    let result = launch(&home, &name, &effective, layout, &mut Live { raise: false })?;
+    println!("window: {}", cell(&name));
+    println!("status: saved");
     for warning in result.warnings {
         println!("warning: {}", cell(&warning));
     }

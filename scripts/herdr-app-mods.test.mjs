@@ -1583,8 +1583,54 @@ test('profile tab bar clicks and keyboard navigate layout groups without touchin
   await key('select-9'); assert.equal(stack.active,'ganymede');
   const bar=h.render();
   assert.equal(bar.items.length,3);
-  bar.items[2].handlers.on_click(); assert.equal(stack.active,'tokens');
-  assert.equal(bar.items[2].items[0],'tokens');
+  bar.items[0].items[2].handlers.on_mouse_up({},h.cx); assert.equal(stack.active,'tokens');
+  assert.equal(bar.items[0].items[2].items[0].items[0],'tokens');
   stack.children=[];
   await key('next'); assert.equal(stack.active,'tokens');
+});
+
+test('profile tabs rename inline, reorder, close and choose a machine through argv', async () => {
+  const h = load('vega-window-tabs', {allowFocus:true});
+  vm.runInContext(fs.readFileSync(new URL('../config/herdr-app/mods/vega-window-tabs/navigation.js', import.meta.url),'utf8').replaceAll('export function','function'), h.api);
+  h.setProps({profile:'status', titles:{a:'Alpha'}});
+  h.api.layout=()=>({id:'profile:tabs',active:'a',children:[{id:'a'},{id:'b'}]});
+  h.mod.init({},h.cx);
+  let tabs=h.render().items[0].items;
+  tabs[0].items[0].handlers.on_click({},h.cx);
+  assert.equal(h.mod.input.value(),'Alpha');
+  h.mod.input.set_value('My tab');
+  h.mod.input.handlers.submit({},h.cx); await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec' && JSON.stringify(c[2])===JSON.stringify(['window','rename','status','a','My tab'])));
+  tabs=h.render().items[0].items;
+  tabs[0].handlers.on_mouse_down({},h.cx);
+  tabs[1].handlers.on_mouse_up({},h.cx); await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec' && JSON.stringify(c[2])===JSON.stringify(['window','move','status','a','2'])));
+  tabs[1].items[1].handlers.on_click({},h.cx); await h.flush();
+  assert(h.calls.some(c=>c[0]==='exec' && c[2][1]==='close'));
+  h.render().items[1].handlers.on_click({},h.cx);
+  assert.equal(h.calls.find(c=>c[0]==='open')[1].props.mode,'add');
+  const picker=load('vega-window-tabs');
+  picker.setProps({profile:'status',mode:'add',overlay:'picker'});
+  picker.api.machines=()=>[{name:null},{name:'remote'},{name:'temporary',temporary:true}];
+  picker.mod.init({},picker.cx);
+  const choices=picker.render().items[1].items;
+  assert.equal(choices.length,2);
+  choices[1].handlers.on_click({},picker.cx); await picker.flush();
+  assert(picker.calls.some(c=>c[0]==='exec' && JSON.stringify(c[2])===JSON.stringify(['window','add','status','--machine','remote'])));
+  assert(picker.calls.some(c=>c[0]==='close' && c[1]==='picker'));
+});
+
+test('profile config dialog displays effective config, promotes to a selected checkout and reports failures', async () => {
+  const h=load('vega-window-tabs');
+  h.setProps({profile:'status',mode:'config',overlay:'config'});
+  h.api.exec=async (_bin,args)=>{h.calls.push(['exec',args]);return {code:0,stdout:JSON.stringify({config:'layout = "status"'})};};
+  h.api.pickFolder=async ()=>'/checkout with spaces';
+  h.mod.init({},h.cx); await h.flush();
+  assert.equal(h.render().items[1].items[0],'layout = "status"');
+  h.render().items[2].items[0].handlers.on_click({},h.cx); await h.flush(); await h.flush();
+  assert(h.calls.some(c=>JSON.stringify(c[1])===JSON.stringify(['window','promote','status','--repo','/checkout with spaces'])));
+  h.api.exec=async ()=>({code:1,stdout:'error: profile busy'});
+  h.render().items[2].items[1].handlers.on_click({},h.cx); await h.flush();
+  assert(h.mod.error.includes('profile busy'));
+  assert.equal(h.mod.busy,false);
 });
