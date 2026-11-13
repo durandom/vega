@@ -23,6 +23,9 @@ user whether you shall install it (see the link above); do not install it unaske
 
 ## Build
 
+Check all herdr-app mods with `nice -n 10 scripts/check-mods.sh`; it removes generated
+`gpui-kit.d.ts` and `jsconfig.json` after each check, including failures.
+
 - `mise run check`: fmt, clippy (`-D warnings`), tests.
 - `mise run install`: installs binaries, shims (agent-only dir) and the global skill link.
 
