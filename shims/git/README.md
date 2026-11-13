@@ -1,8 +1,22 @@
 # git shim
 
 Resolves the real `git` (skipping its own dir on `PATH`) and replaces itself with it via `exec`. Every command but
-`git push` is a plain `exec`: the argv check is pure (git's global options skipped), with no config read and no bd
-call, so stdout, stdin and exit code are git's own.
+`git push` is a plain `exec`, with optional one-line Worktrunk hints on stderr for the commands below. Stdout,
+stdin and exit code are git's own; hints never redirect or block the command.
+
+| Git command | Worktrunk hint |
+| --- | --- |
+| `branch -d` / `branch --delete` | `wt remove <branch>` cleans merged branches and worktrees, including squash merges |
+| `worktree add` | `wt switch <branch>` for an existing branch; `wt switch -c <branch>` for a new one |
+| `worktree remove` / `worktree prune` | `wt remove <branch-or-path>` for worktree cleanup |
+| `checkout -b` / `switch -c` / `switch --create` | `wt switch -c <branch> --base=@` for parallel work from HEAD |
+
+Hints require `.config/wt.toml` at the selected worktree root or a `wt` directory in Git's common directory
+(Worktrunk state shared by linked worktrees). A linked worktree alone is insufficient. Only matching commands
+probe the real git for these paths, forwarding global options such as `-C`, `--git-dir` and `--work-tree`.
+Probe failures silently skip the hint; other non-push commands exec immediately with no config read or bd call.
+These are workflow suggestions: `wt remove` also deletes a merged branch, and `wt switch -c` defaults to the
+default branch unless `--base` is supplied. Worktrunk runs project hooks when creating worktrees.
 
 `git push` in a repo with a `.vega/gate.toml` on the push target needs a recorded `vega gate` pass for each segment
 of the push. Without one the shim starts the review (`vega gate start`: a reviewer tab, verdict by mail) and fails

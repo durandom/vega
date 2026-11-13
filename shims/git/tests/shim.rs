@@ -340,3 +340,186 @@ fn a_reviewer_may_not_push() {
     assert!(stderr(&o).contains("a gate reviewer does not push"));
     assert_eq!(remote_head(&work, "feat"), None);
 }
+
+/// Rebuild the same temporary paths so mutating git calls can be compared
+/// byte-for-byte against a fresh, identical fixture.
+fn hint_repo(tmp: &Path, marker: &str) -> PathBuf {
+    let fixture = tmp.join("fixture");
+    if fixture.exists() {
+        fs::remove_dir_all(&fixture).unwrap();
+    }
+    let work = fixture.join("work");
+    fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main"]);
+    if marker == "config" {
+        common::write(&work, ".config/wt.toml", "# Worktrunk project\n");
+    }
+    common::write(&work, "file", "hello\n");
+    git(&work, &["add", "-A"]);
+    let o = cmd(
+        "git",
+        &work,
+        tmp,
+        &[
+            ("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z"),
+            ("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z"),
+        ],
+        &["commit", "-q", "-m", "initial"],
+    )
+    .output()
+    .unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    git(&work, &["branch", "topic"]);
+    git(
+        &work,
+        &["worktree", "add", "-q", "-b", "linked", "../linked"],
+    );
+    if marker == "state" {
+        fs::create_dir_all(work.join(".git/wt")).unwrap();
+    }
+    work
+}
+
+fn compare_hint(tmp: &Path, marker: &str, args: &[&str], expected: Option<&str>) {
+    let work = hint_repo(tmp, marker);
+    let real = cmd("git", &work, tmp, &[], args).output().unwrap();
+    let work = hint_repo(tmp, marker);
+    let via = shim(&work, tmp, &[], args);
+    assert_eq!(via.stdout, real.stdout, "stdout: {marker} {args:?}");
+    assert_eq!(via.status.code(), real.status.code(), "exit: {args:?}");
+    if let Some(expected) = expected {
+        let e = stderr(&via);
+        let (hint, rest) = e.split_once('\n').expect("one hint line");
+        assert!(hint.starts_with("hint: "), "{args:?}: {e}");
+        assert!(hint.contains(expected), "{args:?}: {e}");
+        assert_eq!(rest.as_bytes(), real.stderr, "stderr: {args:?}");
+    } else {
+        assert_eq!(via.stderr, real.stderr, "stderr: {marker} {args:?}");
+    }
+    for tool in ["bd", "vega", "herdr"] {
+        assert_eq!(log(tmp, tool), "", "{tool} called by hint");
+    }
+}
+
+#[test]
+fn housekeeping_hints_preserve_git_in_managed_repos_only() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["branch", "-d", "topic"], "wt remove <branch>"),
+        (&["branch", "--delete", "missing"], "wt remove <branch>"),
+        (&["branch", "-d", "linked"], "wt remove <branch>"),
+        (
+            &["worktree", "add", "../new", "topic"],
+            "wt switch <branch>",
+        ),
+        (
+            &["worktree", "add", "-b", "new-topic", "../new"],
+            "wt switch -c <branch>",
+        ),
+        (
+            &["worktree", "remove", "../linked"],
+            "wt remove <branch-or-path>",
+        ),
+        (
+            &["worktree", "remove", "../missing"],
+            "wt remove <branch-or-path>",
+        ),
+        (&["worktree", "prune"], "wt remove <branch-or-path>"),
+        (
+            &["checkout", "-b", "new-topic"],
+            "wt switch -c <branch> --base=@",
+        ),
+        (
+            &["checkout", "-bnew-topic"],
+            "wt switch -c <branch> --base=@",
+        ),
+        (
+            &["switch", "-c", "new-topic"],
+            "wt switch -c <branch> --base=@",
+        ),
+        (
+            &["switch", "--create=new-topic"],
+            "wt switch -c <branch> --base=@",
+        ),
+        (&["switch", "-c", "main"], "wt switch -c <branch> --base=@"),
+    ];
+    let tmp = tempfile::tempdir().unwrap();
+    for marker in ["config", "state", "none"] {
+        for (args, hint) in cases {
+            compare_hint(
+                tmp.path(),
+                marker,
+                args,
+                (marker != "none").then_some(*hint),
+            );
+        }
+    }
+}
+
+#[test]
+fn hints_follow_git_global_options_and_linked_worktrees() {
+    let tmp = tempfile::tempdir().unwrap();
+    for marker in ["config", "state"] {
+        for args in [
+            vec!["-C", "../linked", "branch", "-d", "topic"],
+            vec![
+                "-C",
+                "..",
+                "-C",
+                "work",
+                "-c",
+                "test.value=branch",
+                "branch",
+                "--delete",
+                "topic",
+            ],
+            vec!["--git-dir=.git", "--work-tree=.", "branch", "-d", "topic"],
+        ] {
+            compare_hint(tmp.path(), marker, &args, Some("wt remove <branch>"));
+        }
+    }
+    // The selected repo, rather than cwd, determines whether a hint appears.
+    compare_hint(
+        tmp.path(),
+        "config",
+        &["-C", "../..", "branch", "-d", "topic"],
+        None,
+    );
+    let work = hint_repo(tmp.path(), "none");
+    common::write(&work, ".config/wt.toml", "# managed\n");
+    let o = shim(
+        tmp.path(),
+        tmp.path(),
+        &[],
+        &["-C", work.to_str().unwrap(), "worktree", "prune"],
+    );
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).starts_with("hint: wt remove"));
+}
+
+#[test]
+fn unrelated_commands_and_path_operands_get_no_worktrunk_hint() {
+    let tmp = tempfile::tempdir().unwrap();
+    for args in [
+        &["branch", "--list"][..],
+        &["branch", "-D", "topic"],
+        &["branch", "--list", "--", "-d"],
+        &["branch", "--format", "-d"],
+        &["branch", "--format", "--delete"],
+        &["checkout", "--", "-b"],
+        &["switch", "--", "-c"],
+        &["worktree", "list"],
+        &["status", "--porcelain"],
+    ] {
+        compare_hint(tmp.path(), "config", args, None);
+    }
+    // A similarly named file outside a repository is insufficient.
+    common::write(tmp.path(), ".config/wt.toml", "# not a repo\n");
+    let args = &["branch", "-d", "topic"];
+    let real = cmd("git", tmp.path(), tmp.path(), &[], args)
+        .output()
+        .unwrap();
+    let via = shim(tmp.path(), tmp.path(), &[], args);
+    assert_eq!(via.stdout, real.stdout);
+    assert_eq!(via.stderr, real.stderr);
+    assert_eq!(via.status.code(), real.status.code());
+}

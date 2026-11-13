@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 195 · 2026-11-13
+
+- feature: the git shim hints at Worktrunk commands for branch deletion, worktree housekeeping and new-branch checkouts in wt-managed repos, preserving git's stdout and exit code.
+
 ## 194 · 2026-11-13
 
 - feature: `scripts/check-mods.sh` checks every herdr-app mod and cleans its generated type files, including on failure.
