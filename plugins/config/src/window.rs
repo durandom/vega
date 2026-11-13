@@ -58,8 +58,9 @@ enum Action {
     /// Write the effective profile into a checkout, without committing or applying.
     Promote {
         name: String,
-        #[arg(long, default_value = ".")]
-        repo: std::path::PathBuf,
+        /// The vega checkout to write into (default: the checkout this vega was built from).
+        #[arg(long)]
+        repo: Option<std::path::PathBuf>,
     },
 }
 impl Action {
@@ -74,6 +75,16 @@ impl Action {
             | Self::Promote { name, .. } => name,
         }
     }
+}
+
+/// The checkout this binary was built from (`vega deploy` builds on each host from its own
+/// clone), when it still exists there.
+fn build_checkout() -> Option<std::path::PathBuf> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = root.canonicalize().ok()?;
+    root.join("config/herdr-app/profiles")
+        .is_dir()
+        .then_some(root)
 }
 
 fn profile_name(s: &str) -> Result<String, String> {
@@ -395,6 +406,9 @@ fn manage(env: &Env, action: Action) -> Result<(), String> {
         return Ok(());
     }
     if let Action::Promote { repo, .. } = action {
+        let repo = repo
+            .or_else(build_checkout)
+            .ok_or("no vega checkout known; pass --repo <checkout>")?;
         let destination = overlay::promote(&repo, &name, &base, &local)?;
         println!("profile: {}", cell(&destination.display().to_string()));
         println!("status: promoted; review and commit the working-tree change, then apply and reset the overlay");
@@ -489,6 +503,12 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn promote_defaults_to_the_build_checkout() {
+        let root = super::build_checkout().expect("tests run inside the vega checkout");
+        assert!(root.join("config/herdr-app/profiles/status.toml").is_file());
+    }
+
     use super::*;
     use serde_json::json;
     #[derive(Default)]

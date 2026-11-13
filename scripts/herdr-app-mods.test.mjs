@@ -1629,7 +1629,7 @@ test('profile tabs rename inline, reorder, close and choose a machine through ar
   assert(picker.calls.some(c=>c[0]==='close' && c[1]==='picker'));
 });
 
-test('profile config dialog displays a diff, promotes to a selected checkout and reports failures', async () => {
+test('profile config dialog displays a diff, promotes to the build checkout (picker fallback) and reports failures', async () => {
   const h=load('vega-window-tabs');
   h.setProps({profile:'status',mode:'config',overlay:'config'});
   h.api.exec=async (_bin,args)=>{h.calls.push(['exec',args]);return {code:0,stdout:JSON.stringify({diff:'--- repo\n+++ effective\n@@ -1 +1 @@\n-title = "Old"\n+title = "New"\n'})};};
@@ -1640,7 +1640,13 @@ test('profile config dialog displays a diff, promotes to a selected checkout and
   assert.equal(h.mod.rows[2].text,'title = "New"');
   assert(elements(h.render()).some(n=>n.idValue==='changes-diff'),'stock virtualized diff viewport');
   h.render().items[2].items[0].handlers.on_click({},h.cx); await h.flush(); await h.flush();
-  assert(h.calls.some(c=>JSON.stringify(c[1])===JSON.stringify(['window','promote','status','--repo','/checkout with spaces'])));
+  assert(h.calls.some(c=>JSON.stringify(c[1])===JSON.stringify(['window','promote','status'])),'saves to the build checkout first');
+  assert(!h.calls.some(c=>c[1]?.includes('--repo')),'no folder picker when the checkout is known');
+  const ok=h.api.exec;
+  h.api.exec=async (_bin,args)=>{h.calls.push(['exec',args]);return args.includes('--repo')?{code:0,stdout:''}:{code:1,stdout:'error: no vega checkout known; pass --repo <checkout>'};};
+  h.render().items[2].items[0].handlers.on_click({},h.cx); await h.flush(); await h.flush(); await h.flush();
+  assert(h.calls.some(c=>JSON.stringify(c[1])===JSON.stringify(['window','promote','status','--repo','/checkout with spaces'])),'picker fallback');
+  h.api.exec=ok;
   h.api.exec=async ()=>({code:1,stdout:'error: profile busy'});
   h.render().items[2].items[1].handlers.on_click({},h.cx); await h.flush();
   assert(h.mod.error.includes('profile busy'));

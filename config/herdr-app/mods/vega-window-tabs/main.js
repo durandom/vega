@@ -94,8 +94,15 @@ export default class WindowTabs extends View {
       } else {
         body.child(this.rows.length ? renderDiff(this.rows, t) : div().flex_1().child(this.loaded ? "No local changes" : this.error || "Loading…"))
           .child(h_flex().gap(8)
-            .child(button("promote", "Promote to checkout…", (_e,cx) => cx.spawn(async cx => {
+            // Saves into the checkout vega was built from; the folder picker only when none is known.
+            .child(button("promote", "Promote to checkout", (_e,cx) => cx.spawn(async cx => {
               try {
+                const r = await exec("vega", ["window", "promote", this.profile()]);
+                if (r.code === 0) {
+                  this.message = "Saved to the vega checkout. Commit it, then apply and reset.";
+                  this.refresh(cx); cx.notify(); return;
+                }
+                if (!/no vega checkout known/.test(r.stdout + r.stderr)) throw new Error(r.stdout || r.stderr);
                 const repo = await pickFolder({ prompt: "Choose the vega checkout" });
                 if (repo) this.change(["promote", this.profile(), "--repo", repo], cx);
               } catch(e) { this.error = String(e); cx.notify(); }

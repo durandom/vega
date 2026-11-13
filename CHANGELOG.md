@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 201 · 2026-11-13
+
+- feature: Promote in the status window's Config view saves straight into the vega checkout this
+  vega was built from (`vega window promote <name>` without `--repo`); the folder picker only
+  appears when no checkout is known.
+
 ## 200 · 2026-11-13
 
 - feature: status windows use a fork of herdr-app's stock pill tab bar, with program icons, active-tab close, scrolling and window controls. Double-click a tab to rename inline; drag it onto another tab to persist its order, including when optional groups are unavailable.
