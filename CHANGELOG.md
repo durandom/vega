@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 193 · 2026-11-13
+
+- feature: the sidebar shows a headless sentinel's unread done as a filled grey dot when its
+  parent is live: done, handed to the UAC. Headed sessions and UACs keep the blue unread dot.
+
 ## 192 · 2026-11-12
 
 - feature: the Uber-UAC has its own hc role label (`vega.role=uber`, plus `vega.engaged=yes`

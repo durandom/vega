@@ -121,6 +121,13 @@ done turns blue (Latte `#1e66f5`, Mocha `#89b4fa`, as on herdr's mobile view) an
 amber (`#df8e1d`, `#ffb224`). herdr uses `teal` only for done; `yellow` also colours its
 connecting/reconnecting and update-available notices.
 
+In the herdr-app vega sidebar, unread done is a filled blue dot until the Slayer sees the turn
+(`herdr.seen`). A headless sentinel (`vega.mode=headless`) with a live parent instead shows a
+filled grey dot (`theme.dim`): done, handed to the UAC. This applies to child, top-level and rail
+rows. Headed sessions, UACs and headless sessions without a live parent keep the blue unread dot.
+Seen done still reads as an idle ring; working keeps its spinner. The colour does not change the
+status word used by the Active filter or navigation.
+
 ## Host identity
 
 herdr's combined multi-machine sidebar marks remote panes with its `machine` token, which can be

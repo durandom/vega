@@ -1126,7 +1126,13 @@ export default class Agents extends View {
 
   // compact: a ! for blocked where a header already says "Needs you".
   status(t, a, compact = false) {
-    const color = t[a.status] ?? t.dim;
+    const term = this.vegaTerminals?.get(a.address);
+    // A headless sentinel hands its done to its live parent, rather than the Slayer.
+    // Keep the status word for filtering/navigation; only the unread dot changes colour.
+    const handed = term?.labels?.["vega.mode"] === "headless"
+      && !["uac", "uber"].includes(term.labels?.["vega.role"])
+      && this.vegaTerminals?.get(term.parent)?.state === "live";
+    const color = a.status === "done" && handed ? t.dim : t[a.status] ?? t.dim;
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
     if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
     if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
@@ -1262,7 +1268,7 @@ export default class Agents extends View {
       const l = labelsOf(a.address);
       const uac = l["vega.role"] === "uac";
       const [glyph, color] = kindOf(a);
-      const st = depth ? { status: kidStatus(a, this.listed) } : { ...a, status: this.topStatus(a) };
+      const st = { ...a, status: depth ? kidStatus(a, this.listed) : this.topStatus(a) };
       const when = depth ? 0 : this.since(a);
       const name = uac ? "" : depth
         ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
@@ -1613,7 +1619,7 @@ export default class Agents extends View {
         el.on_mouse_down("right", (_e, cx) => this.openProject(this.vegaTerminals.get(a.address).labels["vega.project-id"], cx)))
       .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
       .child(h_flex().w(14).flex_none().items_center().justify_center()
-        .child(this.status(t, { status: this.topStatus(a) }, true)));
+        .child(this.status(t, { ...a, status: this.topStatus(a) }, true)));
 
     this.rowLabel = a => detail.get(a.address) ?? label(a);
     this.activeView = activeView();

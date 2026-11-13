@@ -13,7 +13,7 @@ function load(name, {allowFocus=false}={}) {
       if(k==='child')return c=>{o.items.push(c);return proxy;};
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
-      if(k==='id'||k==='tooltip'||k==='text_color')return v=>{o[k+'Value']=v;return proxy;};
+      if(k==='id'||k==='tooltip'||k==='text_color'||k==='bg'||k==='border_color'||k==='spin')return v=>{o[k+'Value']=v;return proxy;};
       if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down'){o.mouseButton=a[0];o.handlers[`${k}:${a[0]}`]=a.at(-1);}return proxy;};
       return ()=>proxy;
     }});return proxy;
@@ -1378,4 +1378,57 @@ test('done is blue and kept by the Active filter only while unread (turn past he
   assert(!elements(h.render()).map(n=>n.idValue).includes('ag-t3'),'seen top-level done hides');
   all.find(t=>t.address==='t3').turn=6;
   assert(elements(h.render()).map(n=>n.idValue).includes('ag-t3'),'new turn makes it unread again');
+});
+
+test('headless done is a filled grey dot in child, top-level and rail rows without changing Active or navigation',()=>{
+  const h=load('vega-sidebar');projectFixture(h);
+  const all=h.api.terminals(),agents=h.api.agents().filter(a=>a.address!=='t4');
+  for(const address of ['t2','t3']) {
+    const term=all.find(t=>t.address===address);
+    term.labels['vega.mode']='headless';term.turn=4;term.labels['herdr.seen']='3';
+    term.parent=address==='t2'?'puck/t1':'t4';
+    agents.find(a=>a.address===address).status='done';
+  }
+  // An unlisted child uses its terminal status, rather than agents().
+  all.push({address:'puck/t5',state:'live',parent:'puck/t1',status:'done',labels:{'vega.mode':'headless'}});
+  h.api.terminals=()=>all;h.api.agents=()=>agents;
+  h.api.theme=()=>({done:'blue',dim:'grey',idle:'idle-grey'});
+  h.mod.init({},h.cx);h.state.set('vega.hide-inactive',true);
+  function dot(tree,id) {
+    const row=elements(tree).find(n=>n.idValue===id);assert(row,id);
+    assert(elements(row).some(n=>n.bgValue==='grey'),`${id}: filled grey`);
+    assert(!elements(row).some(n=>n.bgValue==='blue'),`${id}: no blue news`);
+  }
+  let tree=h.render();
+  for(const id of ['sub-t2','sub-puck/t5','ag-t3'])dot(tree,id);
+  assert.equal(h.mod.topStatus(agents.find(a=>a.address==='t3')),'done');
+  assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='order').at(-1)[1]),['puck/t1','t2','t3']);
+  h.api.layout=()=>({id:'sidebar',size:{px:76}});
+  tree=h.render();for(const id of ['ag-t2','ag-puck/t5','ag-t3'])dot(tree,id);
+});
+
+test('handed-done colour requires a live parent and excludes headed sessions and UACs; other looks stay unchanged',()=>{
+  const h=load('vega-sidebar'),t={done:'blue',dim:'grey',idle:'idle-grey',working:'amber',blocked:'red'};
+  const parent={address:'puck/t1',state:'live'};
+  const child={address:'t2',parent:parent.address,labels:{'vega.mode':'headless'}};
+  h.mod.vegaTerminals=new Map([[parent.address,parent],[child.address,child]]);
+  const dot=()=>h.mod.status(t,{address:child.address,status:'done'},true);
+  assert.equal(dot().bgValue,'grey');
+  for(const mode of ['headed',undefined]) {
+    child.labels['vega.mode']=mode;assert.equal(dot().bgValue,'blue');
+  }
+  child.labels['vega.mode']='headless';
+  for(const role of ['uac','uber']) {
+    child.labels['vega.role']=role;assert.equal(dot().bgValue,'blue');
+  }
+  delete child.labels['vega.role'];
+  parent.state='exited';assert.equal(dot().bgValue,'blue');
+  h.mod.vegaTerminals.delete(parent.address);assert.equal(dot().bgValue,'blue');
+  h.mod.vegaTerminals.set(parent.address,{...parent,state:'live'});
+  const idle=h.mod.status(t,{address:child.address,status:'idle'},true);
+  assert.equal(idle.border_colorValue,'idle-grey');assert(!Object.hasOwn(idle,'bgValue'));
+  const working=h.mod.status(t,{address:child.address,status:'working'},true);
+  assert.equal(working.text_colorValue,'amber');assert.equal(working.spinValue,900);
+  const blocked=h.mod.status(t,{address:child.address,status:'blocked'},true);
+  assert.deepEqual(blocked.items,['!']);assert.equal(blocked.text_colorValue,'red');
 });
