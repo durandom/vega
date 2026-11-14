@@ -685,7 +685,10 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
         theme["args"],
         json!(["send", "--if", "idle", "t2", "/config theme=light"])
     );
-    assert!(f.log().contains("durable live request for light"));
+    // vegad may write the log line after the prompt lands: wait for it.
+    wait(f.home.path(), "durable live request log", || {
+        f.log().contains("durable live request for light")
+    });
     assert!(f.prompts("w1:p2").is_empty());
 }
 
