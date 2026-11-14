@@ -1,20 +1,45 @@
 """Private implementation helper for the Services mod; Unix hosts only."""
 import contextlib
 import fcntl
+import http.client
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 PRIVATE = {"proteus", "ganymede", "io", "io-wsl", "titan"}
 
 
 def command(args, **kwargs):
     return subprocess.run(args, capture_output=True, text=True, timeout=12, **kwargs)
+
+
+def protocol(listener):
+    """Bounded, manual-refresh-only HEAD checks; never assume a TCP port is HTTP."""
+    host = listener["host"]
+    if host not in ("127.0.0.1", "::1", "::", "0.0.0.0", "*"):
+        return "tcp"
+    host = "::1" if host in ("::1", "::") else "127.0.0.1"
+    for scheme, cls in (("http", http.client.HTTPConnection), ("https", http.client.HTTPSConnection)):
+        # This identifies a local protocol, not remote identity. The browser still
+        # performs its own TLS validation when the user opens the URL.
+        options = {"context": ssl._create_unverified_context()} if scheme == "https" else {}
+        connection = cls(host, listener["port"], timeout=0.4, **options)
+        try:
+            connection.request("HEAD", "/")
+            connection.getresponse()
+            return scheme
+        except (OSError, http.client.HTTPException):
+            pass
+        finally:
+            connection.close()
+    return "tcp"
 
 
 def scan():
@@ -54,6 +79,9 @@ def scan():
             if shutil.which("lsof"):
                 r = command(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"])
                 cwds[str(pid)] = next((s[1:] for s in r.stdout.splitlines() if s.startswith("n")), "")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for listener, scheme in zip(listeners, pool.map(protocol, listeners)):
+            listener["scheme"] = scheme
     return dict(listeners=listeners, parents=parents, cwds=cwds, home=str(Path.home()))
 
 

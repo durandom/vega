@@ -17,7 +17,9 @@ Read-only research clones, inspected 2026-11-14:
   These last two are ideas only: ancestry before most-specific cwd. No code copied.
 
 The Services implementation is original. It uses manual refresh, Unix TCP
-snapshots, project labels, explicitly owned SSH control sockets and no automatic
+snapshots, project labels, explicitly owned SSH control sockets and no background
 forwarding, detached hc terminals, UI timers, input widgets or animations.
 It deliberately does not copy the upstream process-wide pkill cleanup or
-survive-close tunnel behavior. HTTP links are defaults, not protocol detection.
+survive-close tunnel behavior. Manual-refresh loopback HEAD probes identify HTTP
+and HTTPS; web URL clicks can start an owned forward. Focus filtering and
+open/copy actions are original additions using Herdr's live data and cx APIs.

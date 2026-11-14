@@ -20,6 +20,23 @@ def result(stdout="", stderr="", code=0):
 
 
 class ServicesTest(unittest.TestCase):
+    def test_protocol_detection_uses_only_bounded_loopback_head(self):
+        listener = dict(host="0.0.0.0", port=5187)
+        with patch.object(helper.http.client, "HTTPConnection") as http, patch.object(helper.http.client, "HTTPSConnection") as https:
+            self.assertEqual(helper.protocol(listener), "http")
+            http.assert_called_once_with("127.0.0.1", 5187, timeout=0.4)
+            http.return_value.request.assert_called_once_with("HEAD", "/")
+            http.return_value.close.assert_called_once()
+            https.assert_not_called()
+            http.return_value.getresponse.side_effect = helper.http.client.BadStatusLine("SSH")
+            self.assertEqual(helper.protocol(dict(host="::", port=8443)), "https")
+            self.assertEqual(https.call_args.args, ("::1", 8443))
+            https.return_value.request.side_effect = OSError("not HTTP")
+            self.assertEqual(helper.protocol(listener), "tcp")
+            http.reset_mock()
+            self.assertEqual(helper.protocol(dict(host="10.0.0.1", port=80)), "tcp")
+            http.assert_not_called()
+
     def test_linux_and_mac_snapshots(self):
         def linux(args):
             if args[0] == "ps":
@@ -27,9 +44,9 @@ class ServicesTest(unittest.TestCase):
             if args[0] == "ss":
                 return result('LISTEN 0 128 127.0.0.1:5187 0.0.0.0:* users:(("node",pid=100,fd=4))\n')
             self.fail(args)
-        with patch.object(helper, "command", linux), patch.object(helper.shutil, "which", return_value="ss"), patch.object(helper.os, "readlink", return_value="/repo"):
+        with patch.object(helper, "protocol", return_value="http"), patch.object(helper, "command", linux), patch.object(helper.shutil, "which", return_value="ss"), patch.object(helper.os, "readlink", return_value="/repo"):
             data = helper.scan()
-            self.assertEqual(data["listeners"], [dict(pid=100, name="node", host="127.0.0.1", port=5187)])
+            self.assertEqual(data["listeners"], [dict(pid=100, name="node", host="127.0.0.1", port=5187, scheme="http")])
             self.assertEqual(data["parents"]["100"], 10)
             self.assertEqual(data["cwds"]["100"], "/repo")
         def mac(args):
@@ -38,7 +55,7 @@ class ServicesTest(unittest.TestCase):
             if "cwd" in args:
                 return result("p100\nn/repo\n")
             return result("p100\ncnode\nn[::1]:5187\nn127.0.0.1:5187\n")
-        with patch.object(helper, "command", mac), patch.object(helper.shutil, "which", side_effect=lambda name: None if name == "ss" else "lsof"), patch.object(helper.os, "readlink", side_effect=OSError):
+        with patch.object(helper, "protocol", return_value="tcp"), patch.object(helper, "command", mac), patch.object(helper.shutil, "which", side_effect=lambda name: None if name == "ss" else "lsof"), patch.object(helper.os, "readlink", side_effect=OSError):
             data = helper.scan()
             self.assertEqual(len(data["listeners"]), 2)
             self.assertEqual(data["cwds"]["100"], "/repo")

@@ -18,7 +18,7 @@ function load(name, {allowFocus=false}={}) {
       return ()=>proxy;
     }});return proxy;
   }
-  const cx={notify(){},stop_propagation(){calls.push(['stop']);},timer:{every(){}},sleep(){background=true;return new Promise(()=>{});},spawn(f){background=false;const p=f(cx);if(!background)tasks.push(p);return p;}};
+  const cx={notify(){},open_url:url=>calls.push(['open-url',url]),write_to_clipboard:text=>calls.push(['clipboard',text]),stop_propagation(){calls.push(['stop']);},timer:{every(){}},sleep(){background=true;return new Promise(()=>{});},spawn(f){background=false;const p=f(cx);if(!background)tasks.push(p);return p;}};
   const api={View:class {},div:el,h_flex:el,v_flex:el,svg:el,image:el,
     InputState:{new(options={}){assert.equal(rendering,false,'input state created in render');let value=options.value??'';return {handlers:{},on(event,f){this.handlers[event]=f;},value:()=>value,set_value:v=>{value=v;},focus(){assert(allowFocus,'focus stolen');calls.push(['focus']);}};}},
     Input:{new:el},ScrollHandle:{new:()=>({scroll_to_item:i=>calls.push(['scroll',i])})},
@@ -1889,10 +1889,11 @@ test('services refresh renders fake snapshots and opens the forwarded URL',async
   h.api.hc=async()=>({code:0,stdout:JSON.stringify({machines:[{name:'ganymede',target:'ganymede'},{name:'puck',target:'puck'},{name:'io',target:'io',via:['ssh']}]})});
   h.api.spaces=()=>[{id:'ganymede/s1',name:'Spire',machine:'ganymede'}];
   h.api.terminals=()=>[{address:'ganymede/t1',state:'live',pid:10,labels:{'herdr.space':'s1','vega.project-id':'spellkave','vega.role':'uac'}}];
+  h.api.focused=()=>({terminal:'ganymede/t1',space:'ganymede/s1'});
   h.api.window=()=>({platform:'macos'});
   h.api.exec=async(...args)=>{
     h.calls.push(args);
-    if(args[1][0]==='-c') { scans++; return {code:0,stdout:JSON.stringify({listeners:[{pid:100,port:5187,name:'spire',host:'127.0.0.1'}],parents:{100:10},cwds:{},home:'/temporary-home'})}; }
+    if(args[1][0]==='-c') { scans++; return {code:0,stdout:JSON.stringify({listeners:[{pid:100,port:5187,name:'spire',host:'127.0.0.1',scheme:'http'}],parents:{100:10},cwds:{},home:'/temporary-home'})}; }
     if(args[1][1]==='status') return {code:0,stdout:'{"alive":true}'};
     return {code:0,stdout:'{"local":40518}'};
   };
@@ -1901,13 +1902,76 @@ test('services refresh renders fake snapshots and opens the forwarded URL',async
   assert.equal(h.mod.targets.has('io'),false,'command transport cannot forward');
   const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
   const row=h.mod.rows[0];
-  nodes(h.render()).find(n=>n.idValue===`forward-${row.key}`).handlers.on_click({},h.cx);await h.flush();
-  nodes(h.render()).find(n=>n.idValue===`open-${row.key}`).handlers.on_click({},h.cx);await h.flush();
-  assert.equal(h.calls.at(-1)[0],'open');assert.equal(h.calls.at(-1)[1][0],'http://127.0.0.1:40518');
+  nodes(h.render()).find(n=>n.idValue===`address-${row.key}`).handlers.on_click({},h.cx);await h.flush();
+  assert.equal(h.calls.at(-1)[0],'open-url');assert.equal(h.calls.at(-1)[1],'http://127.0.0.1:40518');
   h.mod.refresh(h.cx);await h.flush();assert.equal(scans,2);assert.equal(h.mod.forwards.size,1);
   h.api.exec=async(...args)=>({code:0,stdout:args[1][0]==='-c'?'{"listeners":[],"parents":{},"cwds":{}}':'{"alive":true}'});
   h.mod.refresh(h.cx);await h.flush();assert(h.mod.rows[0].gone);h.render();
   h.api.exec=async()=>({code:0,stdout:'{"alive":false}'});
   h.api.spaces=()=>[];h.mod.refresh(h.cx);await h.flush();assert.equal(h.mod.forwards.size,0);
   h.render();
+});
+
+test('services follows project focus across machines; only a live focused uber sees all',()=>{
+  const h=load('vega-services');
+  const term=(address,space,project,role,parent)=>({address,state:'live',parent,labels:{'herdr.space':space,'vega.project-id':project,'vega.role':role}});
+  const terms=[term('t1','s1','org/a','uac'),term('ganymede/t1','s1','org/a','uac'),
+    term('t2','s2','org/b','uac'),term('t3','s1','stale','sentinel'),
+    term('t4','s4',null,'sentinel','t1'),term('uber','su','org/a','uber')];
+  let focus={terminal:'t1',space:'s1'};
+  h.api.terminals=()=>terms;h.api.focused=()=>focus;
+  Object.assign(h.mod,{errors:[],forwards:new Map(),pending:new Set(),targets:new Map(),rows:[
+    {key:'a-local',project:'org/a',space:'s1',host:'127.0.0.1',port:80},
+    {key:'a-remote',project:'org/a',space:'ganymede/s1',machine:'ganymede',host:'127.0.0.1',port:80},
+    {key:'b',project:'org/b',space:'s2',host:'127.0.0.1',port:80},
+    {key:'other',project:'Other spaces',space:'s3',host:'127.0.0.1',port:80}]});
+  const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
+  const shown=()=>nodes(h.render()).filter(n=>typeof n.idValue==='string'&&n.idValue.startsWith('address-')).map(n=>n.idValue);
+  assert.deepEqual(shown(),['address-a-local','address-a-remote']);
+  focus={terminal:'t2',space:'s2'};assert.deepEqual(shown(),['address-b']);
+  focus={terminal:'t3',space:'s1'};assert.equal(shown().length,2,'UAC space wins stale sentinel project');
+  focus={terminal:'t4',space:'s4'};assert.equal(shown().length,2,'unlabelled child inherits ancestor');
+  focus={space:'ganymede/s1'};assert.equal(shown().length,2,'space context while panel has focus');
+  focus=null;assert.equal(shown().length,0);
+  focus={terminal:'uber'};assert.equal(shown().length,4);
+  terms.at(-1).state='exited';assert.equal(shown().length,0,'stale uber cannot enable estate view');
+  const selected=vm.runInContext('selectedProject',h.api);
+  terms.push(term('t5','s5','else/a','uac'),{address:'legacy',state:'live',labels:{'vega.project':'a'}});
+  assert.equal(selected({terminal:'legacy'},terms).project,null,'ambiguous short project stays unresolved');
+  terms.at(-1).labels['vega.project']='b';
+  assert.equal(selected({terminal:'legacy'},terms).project,'org/b');
+  assert.equal(h.calls.length,0,'render does not execute, focus, notify or start timers');
+});
+
+test('services URL clicks await one forward, preserve HTTPS path, copy puck and non-web addresses',async()=>{
+  const h=load('vega-services');
+  Object.assign(h.mod,{errors:[],forwards:new Map(),pending:new Set(),next:0,targets:new Map([['ganymede','ganymede'],['puck','puck']])});
+  const remote={key:'r',machine:'ganymede',host:'::1',port:8443,url:'https://[::1]:8443/path?q=1#part'};
+  let finish;
+  h.mod.call=async(action,args)=>{h.calls.push([action,args]);return new Promise(resolve=>{finish=resolve;});};
+  h.mod.activate(remote,h.cx);h.mod.activate(remote,h.cx);
+  assert.equal(h.calls.length,1);assert.equal(h.calls[0][0],'start');
+  assert(!h.calls.some(c=>c[0]==='open-url'));
+  finish({local:40518});await h.flush();
+  assert.equal(h.calls.at(-1)[1],'https://127.0.0.1:40518/path?q=1#part');
+  h.mod.activate(remote,h.cx);await h.flush();assert.equal(h.calls.filter(c=>c[0]==='start').length,1,'reuse does not stop or restart');
+  const local={...remote,key:'local',machine:null,url:'http://[::1]:8443/'};
+  h.mod.activate(local,h.cx);assert.deepEqual(h.calls.at(-1),['open-url',local.url]);
+  for(const row of [{...remote,machine:'puck'}, {...remote,machine:'unknown'},
+    {...remote,url:null,scheme:'tcp'}, {...local,url:null,address:'/tmp/service.sock'}]) {
+    const before=h.calls.length;
+    h.mod.activate(row,h.cx);await h.flush();
+    assert.equal(h.calls.length,before+2);
+    assert.equal(h.calls[before][0],'clipboard');
+    assert.equal(h.calls[before+1][0],'toast');
+    assert.equal(h.calls[before+1][1].timeout,1800);
+  }
+  h.mod.call=async()=>{throw new Error('SSH unavailable');};
+  const before=h.calls.length;h.mod.activate({...remote,key:'failure'},h.cx);await h.flush();
+  assert.equal(h.calls.length,before);assert.match(h.mod.errors[0],/SSH unavailable/);
+  let complete;
+  h.mod.call=async action=>action==='start'?new Promise(resolve=>{complete=resolve;}):{};
+  h.mod.activate({...remote,key:'closing'},h.cx);await h.mod.close();complete({local:40519});await h.flush();
+  assert.equal(h.calls.length,before,'closing an in-flight click never opens');
+  assert.equal(h.mod.forwards.has('closing'),false);
 });

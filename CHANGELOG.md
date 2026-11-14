@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 209 · 2026-11-14
+
+- feature: Services follows the focused project across machines; only the focused Über-UAC
+  sees all projects. Click an HTTP/HTTPS address to open it; remote private loopback URLs
+  start or reuse a forward first. Puck URLs and non-web addresses copy with a short confirmation.
+  Refresh checks for HTTP/HTTPS; unrecognized TCP services retain copyable TCP addresses.
+- unit: apply `herdr-app.vega-services` to update the existing panel.
+
 ## 208 · 2026-11-14
 
 - feature: Services beside Files/Changes lists TCP listeners by project and space across hc

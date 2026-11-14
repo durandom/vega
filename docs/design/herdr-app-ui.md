@@ -580,16 +580,23 @@ On first show and explicit Refresh it snapshots listeners (`ss -tlnpH` on Linux,
 `lsof` on macOS), parent PIDs and listener cwds through `exec` on each space’s hc
 machine. Python 3 plus ps and ss/lsof are required there. The panel groups by
 `vega.project-id` (a UAC’s label wins within its space), space and machine.
+Only the focused project's services appear, across all its machines/spaces;
+the focused live `vega.role=uber` terminal alone enables the unscoped list.
+Project resolution follows sidebar identity rules: full IDs, unambiguous legacy
+names, UAC space labels and live ancestors. An unresolved focus shows no services.
+Herdr's live focus renders update the filter without timers or rescanning. Owned
+forwards survive a scope switch and become visible again with their project.
 Attribution follows PID ancestry to a live terminal, then the most specific pane
 or foreground cwd, excluding root/home and ambiguous equal matches. Unattributed
 listeners and listeners bound only to a specific non-loopback interface are omitted.
 PID and machine are part of each service’s identity.
 
-Forward is explicit. The app host and SSH destination must be known private
-hosts (proteus, ganymede, io/io-wsl, titan); puck, unknown aliases/IPs and command
+Forward is explicit, or started by clicking a remote web URL. The app host and
+SSH destination must be known private hosts (proteus, ganymede, io/io-wsl, titan);
+puck, unknown aliases/IPs and command
 transports are read only. This preserves the private-to-corp direction rule in
-hc-migration.md; it never gives a corporate app a private tunnel. No auto-forward
-exists. Each panel owns private SSH control sockets under `/tmp/vega-services-UID`,
+hc-migration.md; it never gives a corporate app a private tunnel. Refresh never
+starts a forward. Each panel owns private SSH control sockets under `/tmp/vega-services-UID`,
 uses strict existing host-key trust and batch authentication, binds only local
 127.0.0.1, selects an ephemeral local port and retries bind collisions. Nothing
 changes the remote listener’s loopback binding. Stop targets only its socket.
@@ -600,15 +607,25 @@ owner tombstones are tiny and remain in /tmp to reject late starts. There are no
 hc terminal creations or global process-pattern kills. Hiding the side stack
 keeps the panel alive: use Stop, switch layout or quit to tear it down.
 
-URLs default to HTTP; other TCP services still list and forward, but Open is only
-useful for HTTP. This version has no protocol detection, health polling or redraw
-timers. Refresh failures show per machine; a vanished listener with an owned
+Manual Refresh identifies HTTP and HTTPS with loopback HEAD requests (400 ms per
+attempt, at most eight listeners concurrently). TLS verification is skipped only
+for protocol identification; opening still uses the browser's normal validation.
+Unrecognized services retain `tcp://` addresses; a slow/nonresponsive web service
+may need another Refresh. There is no periodic health polling or redraw timer.
+Clicking a local web URL uses `cx.open_url`; a remote private web URL awaits its
+forward then opens the forwarded localhost URL, preserving scheme/path/query.
+Existing forwards are reused, repeated pending clicks ignored, and failures stay
+inline without opening the unreachable remote URL. Puck/unknown targets and
+non-HTTP addresses (including socket addresses supplied as rows) use
+`cx.write_to_clipboard` and a 1.8-second confirmation toast; clicks never forward
+these addresses. Explicit Forward/Stop remains available for private TCP services.
+Refresh failures show per machine; a vanished listener with an owned
 forward stays visible with Stop. Refresh also checks the owned SSH masters and
 drops dead forwards. Authentication and bind errors stay inline.
 
 Live trial after the UAC installs/applies the three units: on ganymede open the
 spellkave UAC space and run `just spire` (127.0.0.1:5187). In proteus’s vega
-window choose Services, Refresh, find spellkave/ganymede :5187, Forward then Open.
+window focus spellkave, choose Services, Refresh, then click the ganymede :5187 URL.
 The displayed ephemeral localhost URL reaches Spire without exposing its remote
 listener. Stop removes it; a second forward followed by layout teardown exercises
 cleanup. This sentinel only used fake tests, never started that live flow.
