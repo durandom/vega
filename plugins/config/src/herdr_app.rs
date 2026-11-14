@@ -199,6 +199,14 @@ fn mod_files(name: &str) -> &[&str] {
             "win-close.svg",
             "win-restore.svg",
         ]
+    } else if name == "vega-services" {
+        &[
+            "main.js",
+            "model.js",
+            "helper.py",
+            "mod.json",
+            "UPSTREAM.md",
+        ]
     } else if name == "vega-pane" {
         &[
             "main.js",
@@ -226,6 +234,7 @@ fn mod_name(unit: crate::Unit) -> Option<&'static str> {
         crate::Unit::HerdrAppWindowTabs => Some("vega-window-tabs"),
         crate::Unit::HerdrAppTabs => Some("vega-tabs"),
         crate::Unit::HerdrAppPane => Some("vega-pane"),
+        crate::Unit::HerdrAppServices => Some("vega-services"),
         _ => None,
     }
 }
@@ -368,6 +377,7 @@ pub fn apply(
             "vega-inbox",
             "vega-tabs",
             "vega-pane",
+            "vega-services",
         ] {
             if !home(&ctx.env)
                 .join("mods")

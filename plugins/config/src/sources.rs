@@ -14,7 +14,7 @@ macro_rules! default {
 }
 
 /// Every embedded default: (path relative to `config/`, text).
-pub const DEFAULTS: [(&str, &str); 58] = [
+pub const DEFAULTS: [(&str, &str); 63] = [
     default!("instructions/role.md"),
     default!("instructions/interaction.md"),
     default!("instructions/reasoning.md"),
@@ -48,6 +48,11 @@ pub const DEFAULTS: [(&str, &str); 58] = [
     default!("herdr-app/mods/vega-tabs/win-max.svg"),
     default!("herdr-app/mods/vega-tabs/win-min.svg"),
     default!("herdr-app/mods/vega-tabs/win-restore.svg"),
+    default!("herdr-app/mods/vega-services/main.js"),
+    default!("herdr-app/mods/vega-services/model.js"),
+    default!("herdr-app/mods/vega-services/helper.py"),
+    default!("herdr-app/mods/vega-services/mod.json"),
+    default!("herdr-app/mods/vega-services/UPSTREAM.md"),
     default!("herdr-app/mods/vega-pane/UPSTREAM.md"),
     default!("herdr-app/mods/vega-pane/close.svg"),
     default!("herdr-app/mods/vega-pane/main.js"),
@@ -260,6 +265,7 @@ mod tests {
             "herdr-app/mods/vega-window-tabs",
             "herdr-app/mods/vega-tabs",
             "herdr-app/mods/vega-pane",
+            "herdr-app/mods/vega-services",
             "herdr-app/layouts",
         ] {
             for f in repo_files(dir) {

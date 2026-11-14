@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 208 · 2026-11-14
+
+- feature: Services beside Files/Changes lists TCP listeners by project and space across hc
+  machines. Refresh after starting a service; Forward opens an explicit loopback SSH tunnel,
+  Open uses its local HTTP URL, and Stop or panel teardown cleans up that panel’s tunnels.
+  Puck and unknown SSH targets are read only; there is no automatic forwarding.
+- unit: apply `herdr-app.vega-services` with `herdr-app.vega-tabs` before
+  `herdr-app.layouts` (or use the `herdr-app` group). No live apply is part of this change.
+
 ## 207 · 2026-11-13
 
 - feature: the gear beside VEGA opens settings for estate model defaults and host tiers,

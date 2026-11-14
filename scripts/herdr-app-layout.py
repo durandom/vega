@@ -79,6 +79,14 @@ def generate(app_home, version):
                 static_status_mods(child)
 
     static_status_mods(tree)
+    def services_panel(node):
+        if node.get("id") == "panel-body":
+            node.setdefault("children", []).append({
+                "id": "services", "type": "block", "content": {"mod": "vega-services"}})
+        for child in node.get("children", []):
+            services_panel(child)
+
+    services_panel(tree)
     tree["cloned_from"] = {"name": "main", "version": version}
     tree["vega_source"] = {
         "installed_hash": fingerprint,

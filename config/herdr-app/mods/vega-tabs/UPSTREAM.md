@@ -16,3 +16,6 @@ the clone base.
 
 To rebase, compare upstream files against these hashes, port stock changes
 keeping the static dot, then run fake mod tests and `scripts/check-mods.sh`.
+
+Services adds an always-enabled right-stack toggle, following the Apache-2.0
+ship-it-mind/herdr-ports pattern. See `../vega-services/UPSTREAM.md` for attribution.

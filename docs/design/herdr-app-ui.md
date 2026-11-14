@@ -567,3 +567,48 @@ applied repo profile to effective profile, so formatting alone is not a change.
 This is the same applied base checked by Promote, not a read of an arbitrary
 checkout. Reset refreshes the view to “No local changes”; Promote keeps the diff
 until the reviewed profile is installed/applied and the local overlay reset.
+
+
+## Services right panel (vega-0h4c.95)
+
+`vega-services` is a child of `panel-body` beside Files and Changes, toggled by
+vega-tabs. Apply its new `herdr-app.vega-services` whole-folder config unit before
+the layout; no shipped layout or mod is edited in place. The original small
+implementation and prior-art licenses are documented in its UPSTREAM.md.
+
+On first show and explicit Refresh it snapshots listeners (`ss -tlnpH` on Linux,
+`lsof` on macOS), parent PIDs and listener cwds through `exec` on each space’s hc
+machine. Python 3 plus ps and ss/lsof are required there. The panel groups by
+`vega.project-id` (a UAC’s label wins within its space), space and machine.
+Attribution follows PID ancestry to a live terminal, then the most specific pane
+or foreground cwd, excluding root/home and ambiguous equal matches. Unattributed
+listeners and listeners bound only to a specific non-loopback interface are omitted.
+PID and machine are part of each service’s identity.
+
+Forward is explicit. The app host and SSH destination must be known private
+hosts (proteus, ganymede, io/io-wsl, titan); puck, unknown aliases/IPs and command
+transports are read only. This preserves the private-to-corp direction rule in
+hc-migration.md; it never gives a corporate app a private tunnel. No auto-forward
+exists. Each panel owns private SSH control sockets under `/tmp/vega-services-UID`,
+uses strict existing host-key trust and batch authentication, binds only local
+127.0.0.1, selects an ephemeral local port and retries bind collisions. Nothing
+changes the remote listener’s loopback binding. Stop targets only its socket.
+Close marks the owner closed before serializing cleanup, covering an in-flight
+start too. The app’s close hook is best effort (250 ms); exec cleanup already
+launched continues, but forced termination/crash can leave a tunnel. The private
+owner tombstones are tiny and remain in /tmp to reject late starts. There are no
+hc terminal creations or global process-pattern kills. Hiding the side stack
+keeps the panel alive: use Stop, switch layout or quit to tear it down.
+
+URLs default to HTTP; other TCP services still list and forward, but Open is only
+useful for HTTP. This version has no protocol detection, health polling or redraw
+timers. Refresh failures show per machine; a vanished listener with an owned
+forward stays visible with Stop. Refresh also checks the owned SSH masters and
+drops dead forwards. Authentication and bind errors stay inline.
+
+Live trial after the UAC installs/applies the three units: on ganymede open the
+spellkave UAC space and run `just spire` (127.0.0.1:5187). In proteus’s vega
+window choose Services, Refresh, find spellkave/ganymede :5187, Forward then Open.
+The displayed ephemeral localhost URL reaches Spire without exposing its remote
+listener. Stop removes it; a second forward followed by layout teardown exercises
+cleanup. This sentinel only used fake tests, never started that live flow.

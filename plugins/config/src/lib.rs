@@ -95,12 +95,13 @@ pub enum Unit {
     HerdrAppWindowTabs,
     HerdrAppTabs,
     HerdrAppPane,
+    HerdrAppServices,
     HerdrAppLayouts,
     HerdrAppProfiles,
 }
 
 impl Unit {
-    pub const ALL: [Unit; 25] = [
+    pub const ALL: [Unit; 26] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -126,6 +127,7 @@ impl Unit {
         Unit::HerdrAppMods,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
+        Unit::HerdrAppServices,
         Unit::HerdrAppLayouts,
         Unit::HerdrAppProfiles,
         Unit::HerdrAppSettings,
@@ -156,6 +158,7 @@ impl Unit {
             Unit::HerdrAppWindowTabs => "herdr-app.vega-window-tabs",
             Unit::HerdrAppTabs => "herdr-app.vega-tabs",
             Unit::HerdrAppPane => "herdr-app.vega-pane",
+            Unit::HerdrAppServices => "herdr-app.vega-services",
             Unit::HerdrAppLayouts => "herdr-app.layouts",
             Unit::HerdrAppProfiles => "herdr-app.profiles",
         }
@@ -187,6 +190,7 @@ impl Unit {
             Unit::HerdrAppWindowTabs => "~/.config/herdr-app/mods/vega-window-tabs/",
             Unit::HerdrAppTabs => "~/.config/herdr-app/mods/vega-tabs/",
             Unit::HerdrAppPane => "~/.config/herdr-app/mods/vega-pane/",
+            Unit::HerdrAppServices => "~/.config/herdr-app/mods/vega-services/",
             Unit::HerdrAppLayouts => "~/.config/herdr-app/layouts/vega.json",
             Unit::HerdrAppProfiles => "~/.config/herdr-app-<name>/",
         }
@@ -205,6 +209,7 @@ impl Unit {
             | Unit::HerdrAppInbox
             | Unit::HerdrAppWindowTabs
             | Unit::HerdrAppTabs
+            | Unit::HerdrAppServices
             | Unit::HerdrAppPane => "whole folder",
             Unit::DcgPacks | Unit::ClaudeStyles | Unit::HerdrAppThemes => "whole file each",
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
@@ -234,6 +239,7 @@ impl Unit {
                 | Unit::HerdrAppInbox
                 | Unit::HerdrAppWindowTabs
                 | Unit::HerdrAppTabs
+                | Unit::HerdrAppServices
                 | Unit::HerdrAppPane
                 | Unit::HerdrAppLayouts
                 | Unit::HerdrAppProfiles
@@ -266,6 +272,7 @@ pub const GROUPS: [(&str, &[Unit]); 3] = [
             Unit::HerdrAppWindowTabs,
             Unit::HerdrAppTabs,
             Unit::HerdrAppPane,
+            Unit::HerdrAppServices,
             Unit::HerdrAppLayouts,
             Unit::HerdrAppProfiles,
         ],
@@ -688,6 +695,7 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
         | Unit::HerdrAppInbox
         | Unit::HerdrAppWindowTabs
         | Unit::HerdrAppTabs
+        | Unit::HerdrAppServices
         | Unit::HerdrAppPane
         | Unit::HerdrAppLayouts => herdr_app::plan(ctx, unit),
         Unit::HerdrAppKeys => {
@@ -1064,6 +1072,7 @@ fn apply_inner(
             | Unit::HerdrAppInbox
             | Unit::HerdrAppWindowTabs
             | Unit::HerdrAppTabs
+            | Unit::HerdrAppServices
             | Unit::HerdrAppPane
             | Unit::HerdrAppLayouts
     ) {

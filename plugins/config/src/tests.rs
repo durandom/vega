@@ -764,6 +764,7 @@ fn herdr_app_units_skip_write_seed_and_reject() {
         Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
+        Unit::HerdrAppServices,
     ] {
         assert!(
             matches!(outcome(&all, u), Outcome::Skipped(r) if r.contains("herdr-app")),
@@ -992,6 +993,7 @@ fn app_layout_selects_once_via_supported_command_and_rejects_false_success() {
         Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
+        Unit::HerdrAppServices,
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
     }
@@ -1062,6 +1064,7 @@ fn app_selected_layout_update_reverifies_and_restores_on_false_success() {
         Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
+        Unit::HerdrAppServices,
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
     }
@@ -1154,6 +1157,7 @@ fn app_layout_drift_and_unit_dependency_order_are_visible() {
     assert!(index(Unit::HerdrAppWindowTabs) < index(Unit::HerdrAppSidebar));
     assert!(index(Unit::HerdrAppTabs) < index(Unit::HerdrAppLayouts));
     assert!(index(Unit::HerdrAppPane) < index(Unit::HerdrAppLayouts));
+    assert!(index(Unit::HerdrAppServices) < index(Unit::HerdrAppLayouts));
     assert!(index(Unit::HerdrAppLayouts) < index(Unit::HerdrAppSettings));
 }
 
@@ -1172,6 +1176,7 @@ fn app_first_layout_apply_retries_fresh_mod_discovery() {
         Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
+        Unit::HerdrAppServices,
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
     }
@@ -1199,6 +1204,7 @@ fn app_layout_mod_discovery_retry_is_bounded_and_rolls_back() {
         Unit::HerdrAppWindowTabs,
         Unit::HerdrAppTabs,
         Unit::HerdrAppPane,
+        Unit::HerdrAppServices,
     ] {
         assert_eq!(apply(&ctx, unit, &managed).kind(), "written");
     }

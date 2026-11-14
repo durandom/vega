@@ -35,9 +35,9 @@ function load(name, {allowFocus=false}={}) {
   let code=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
   code=code.replace(/^import .*;\n/gm,'').replace('export default class','globalThis.Mod = class');
   const context=vm.createContext(api);
-  if(name==='vega-window-tabs') for(const file of ['navigation.js','tabs.js','diff.js']) {
+  if(['vega-window-tabs','vega-services'].includes(name)) for(const file of name==='vega-services'?['model.js']:['navigation.js','tabs.js','diff.js']) {
     const helper=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/${file}`,import.meta.url),'utf8')
-      .replace(/^import .*;\n/gm,'').replaceAll('export function','function');
+      .replace(/^import .*;\n/gm,'').replaceAll('export function','function').replaceAll('export const','const');
     vm.runInContext(helper,context);
   }
   vm.runInContext(code,context);
@@ -1845,4 +1845,69 @@ test('stock diff rows number hunks and config reset refreshes to a definitive em
   await h.flush(); await h.flush();
   assert.equal(h.mod.rows.length,0);
   assert(elements(h.render()).some(n=>n.items.includes('No local changes')));
+});
+
+
+test('services attributes by machine and ancestry before cwd, with UAC project grouping',()=>{
+  const h=load('vega-services');
+  const attribute=vm.runInContext('attribute',h.api);
+  const spaces=[{id:'ganymede/s1',name:'UAC'},{id:'ganymede/s2',name:'Worktree'}];
+  const terms=[{address:'ganymede/t1',state:'live',pid:10,labels:{'herdr.space':'s1','vega.role':'uac','vega.project-id':'spellkave'},foreground:{cwd:'/repo'}},
+    {address:'ganymede/t2',state:'live',pid:20,labels:{'herdr.space':'s2'},foreground:{cwd:'/repo/wt'}},
+    {address:'t3',state:'live',pid:30,labels:{'herdr.space':'s1'}}];
+  const snapshot={home:'/home/me',parents:{100:10},cwds:{100:'/repo/wt',200:'/repo/wt/src',300:'/outside'},
+    listeners:[100,200,300].map(pid=>({pid,port:5187,host:'127.0.0.1',name:'node'}))};
+  const rows=attribute(snapshot,'ganymede',terms,spaces,[]);
+  assert.equal(rows.length,2); assert.equal(rows[0].space,'ganymede/s1');
+  assert.equal(rows[0].project,'spellkave'); assert.equal(rows[1].space,'ganymede/s2');
+  assert.equal(attribute(snapshot,null,terms,spaces,[]).length,0);
+  terms.push({...terms[1],address:'ganymede/t4',labels:{'herdr.space':'s1'}});
+  assert.equal(attribute(snapshot,'ganymede',terms,spaces,[]).length,1,'ambiguous cwd omitted');
+});
+
+test('services owns forward lifecycle and refuses puck and unknown targets',async()=>{
+  const h=load('vega-services');
+  // Avoid initialization reads; every host call below is fake.
+  Object.assign(h.mod,{rows:[],errors:[],forwards:new Map(),pending:new Set(),owner:'test',next:0,targets:new Map([['ganymede','ganymede'],['puck','puck']]),helper:'/temp/helper.py'});
+  const row={key:'service',machine:'ganymede',port:5187,host:'127.0.0.1'};
+  h.api.exec=async(...args)=>{h.calls.push(args);return {code:0,stdout:'{"local":40518}'};};
+  h.mod.toggle(row,h.cx);h.mod.toggle(row,h.cx);await h.flush();
+  assert.equal(h.mod.forwards.get(row.key).local,40518); assert.equal(h.calls.length,1);
+  assert.deepEqual(Array.from(h.calls[0][1]).slice(1),['start','test','1','ganymede','127.0.0.1','5187']);
+  h.mod.toggle(row,h.cx);await h.flush();assert.equal(h.mod.forwards.size,0);
+  h.mod.toggle({...row,machine:'puck'},h.cx);await h.flush();assert.equal(h.calls.length,2);
+  h.mod.targets.set('ganymede','unknown');h.mod.toggle(row,h.cx);await h.flush();assert.equal(h.calls.length,2);
+  await h.mod.close();assert.equal(h.calls.at(-1)[1][1],'close');
+  h.mod.toggle(row,h.cx);await h.flush();assert.equal(h.calls.length,3);
+});
+
+test('services refresh renders fake snapshots and opens the forwarded URL',async()=>{
+  const h=load('vega-services');
+  let scans=0;
+  h.api.appHome=()=>'/temporary-home/herdr-app';
+  h.api.readTextFile=async()=> 'fake script';
+  h.api.hc=async()=>({code:0,stdout:JSON.stringify({machines:[{name:'ganymede',target:'ganymede'},{name:'puck',target:'puck'},{name:'io',target:'io',via:['ssh']}]})});
+  h.api.spaces=()=>[{id:'ganymede/s1',name:'Spire',machine:'ganymede'}];
+  h.api.terminals=()=>[{address:'ganymede/t1',state:'live',pid:10,labels:{'herdr.space':'s1','vega.project-id':'spellkave','vega.role':'uac'}}];
+  h.api.window=()=>({platform:'macos'});
+  h.api.exec=async(...args)=>{
+    h.calls.push(args);
+    if(args[1][0]==='-c') { scans++; return {code:0,stdout:JSON.stringify({listeners:[{pid:100,port:5187,name:'spire',host:'127.0.0.1'}],parents:{100:10},cwds:{},home:'/temporary-home'})}; }
+    if(args[1][1]==='status') return {code:0,stdout:'{"alive":true}'};
+    return {code:0,stdout:'{"local":40518}'};
+  };
+  h.mod.init({},h.cx);await h.flush();
+  assert.equal(scans,1);assert.equal(h.mod.rows[0].project,'spellkave');
+  assert.equal(h.mod.targets.has('io'),false,'command transport cannot forward');
+  const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
+  const row=h.mod.rows[0];
+  nodes(h.render()).find(n=>n.idValue===`forward-${row.key}`).handlers.on_click({},h.cx);await h.flush();
+  nodes(h.render()).find(n=>n.idValue===`open-${row.key}`).handlers.on_click({},h.cx);await h.flush();
+  assert.equal(h.calls.at(-1)[0],'open');assert.equal(h.calls.at(-1)[1][0],'http://127.0.0.1:40518');
+  h.mod.refresh(h.cx);await h.flush();assert.equal(scans,2);assert.equal(h.mod.forwards.size,1);
+  h.api.exec=async(...args)=>({code:0,stdout:args[1][0]==='-c'?'{"listeners":[],"parents":{},"cwds":{}}':'{"alive":true}'});
+  h.mod.refresh(h.cx);await h.flush();assert(h.mod.rows[0].gone);h.render();
+  h.api.exec=async()=>({code:0,stdout:'{"alive":false}'});
+  h.api.spaces=()=>[];h.mod.refresh(h.cx);await h.flush();assert.equal(h.mod.forwards.size,0);
+  h.render();
 });

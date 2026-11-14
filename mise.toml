@@ -34,6 +34,7 @@ run = [
   "python3 scripts/herdr-app-layout.test.py",
   "python3 scripts/check-mods.test.py",
   "node --test scripts/herdr-app-mods.test.mjs",
+  "python3 scripts/vega-services.test.py",
   "node --test scripts/dcg-guard.test.mjs",
   "python3 scripts/install-dcg.test.py",
   "sh scripts/install-vscode-ext.test.sh",

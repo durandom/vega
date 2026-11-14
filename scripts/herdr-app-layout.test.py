@@ -55,12 +55,14 @@ class GeneratorTest(unittest.TestCase):
                 {"id": "spaces", "content": {"mod": "spaces"}},
                 {"id": "sidebar-footer"},
                 {"id": "tabs", "content": {"mod": "tabs"}},
+                {"id": "panel-body", "type": "stack", "children": []},
                 {"content": {"tab": "active", "pane": {"header": {"content": {"mod": "pane"}}}}}]}
             (home / "layouts/main.json").write_text(json.dumps(main))
             (home / "installed.json").write_text('{"layout:main":{"json":"hash"}}')
             result = json.loads(generator.generate(home, "0.1.15"))
             self.assertEqual(result["children"][2]["content"]["mod"], "vega-tabs")
-            self.assertEqual(result["children"][3]["content"]["pane"]["header"]["content"]["mod"], "vega-pane")
+            self.assertEqual(result["children"][3]["children"][0]["content"]["mod"], "vega-services")
+            self.assertEqual(result["children"][4]["content"]["pane"]["header"]["content"]["mod"], "vega-pane")
 
 
 if __name__ == "__main__":
