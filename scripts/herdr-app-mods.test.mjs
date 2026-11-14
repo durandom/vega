@@ -1975,3 +1975,29 @@ test('services URL clicks await one forward, preserve HTTPS path, copy puck and 
   assert.equal(h.calls.length,before,'closing an in-flight click never opens');
   assert.equal(h.mod.forwards.has('closing'),false);
 });
+
+test('services displays registered metadata and toggles hidden agent ports without rescanning',()=>{
+  const h=load('vega-services');
+  const attribute=vm.runInContext('attribute',h.api);
+  const terms=[{address:'t1',state:'live',pid:10,labels:{'herdr.space':'s1','vega.project-id':'spellkave','vega.role':'uac'}}];
+  const spaces=[{id:'s1',name:'Spire'}];
+  const snapshot={home:'/temp',parents:{100:10,101:10,102:10},cwds:{},listeners:[
+    {pid:100,port:5187,host:'127.0.0.1',name:'node',title:'Spire',description:'Evidence browser',url:'https://127.0.0.1:5187/path?q=a#hash',agent:true},
+    {pid:101,port:5000,host:'127.0.0.1',name:'codex',agent:true},
+    {pid:102,port:8080,host:'127.0.0.1',name:'vite',agent:false}]};
+  Object.assign(h.mod,{rows:attribute(snapshot,null,terms,spaces,[]),errors:[],forwards:new Map(),pending:new Set(),targets:new Map(),showAgentPorts:false});
+  h.api.terminals=()=>terms;
+  h.api.focused=()=>({terminal:'t1',space:'s1'});
+  const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
+  let text=JSON.stringify(h.render());
+  assert(text.includes('Spire :5187')); assert(text.includes('Evidence browser'));
+  assert(text.includes('https://127.0.0.1:5187/path?q=a#hash'));
+  assert(text.includes('vite :8080')); assert(!text.includes('codex :5000'));
+  const toggle=nodes(h.render()).find(n=>n.idValue==='agent-ports');
+  toggle.handlers.on_click({},h.cx);
+  assert.equal(h.mod.showAgentPorts,true);
+  assert(JSON.stringify(h.render()).includes('codex :5000'));
+  assert.equal(h.calls.length,0,'filter changes do not scan or forward');
+  toggle.handlers.on_click({},h.cx);
+  assert(!JSON.stringify(h.render()).includes('codex :5000'));
+});

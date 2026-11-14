@@ -1,4 +1,5 @@
-"""Private implementation helper for the Services mod; Unix hosts only."""
+"""Shared service registry/scan backend and private panel SSH helper; Unix only."""
+import argparse
 import contextlib
 import fcntl
 import http.client
@@ -6,11 +7,14 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import socket
 import ssl
 import subprocess
 import sys
+import tempfile
+from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
 PRIVATE = {"proteus", "ganymede", "io", "io-wsl", "titan"}
@@ -42,11 +46,12 @@ def protocol(listener):
     return "tcp"
 
 
-def scan():
-    parents = {}
-    for line in command(["ps", "-A", "-o", "pid=", "-o", "ppid="]).stdout.splitlines():
-        pid, parent = line.split()
+def scan(enrich=True):
+    parents, processes = {}, {}
+    for line in command(["ps", "-A", "-o", "pid=", "-o", "ppid=", "-o", "comm=", "-o", "args="]).stdout.splitlines():
+        pid, parent, *process = line.split(maxsplit=2)
         parents[pid] = int(parent)
+        processes[pid] = process[0] if process else ""
     listeners = []
     if shutil.which("ss"):
         result = command(["ss", "-tlnpH"])
@@ -79,10 +84,204 @@ def scan():
             if shutil.which("lsof"):
                 r = command(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"])
                 cwds[str(pid)] = next((s[1:] for s in r.stdout.splitlines() if s.startswith("n")), "")
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        for listener, scheme in zip(listeners, pool.map(protocol, listeners)):
-            listener["scheme"] = scheme
+    if enrich:
+        entries = registrations()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for listener, scheme in zip(listeners, pool.map(protocol, listeners)):
+                listener["scheme"] = scheme
+                listener["agent"] = agent_runtime(processes.get(str(listener["pid"]), listener["name"]))
+                entry = entries.get(listener["port"])
+                if entry and entry["pid"] == listener["pid"]:
+                    listener.update({k: entry[k] for k in ("title", "description", "url")})
     return dict(listeners=listeners, parents=parents, cwds=cwds, home=str(Path.home()))
+
+
+def agent_runtime(process):
+    """Match executable names and runtime package scripts, not user arguments."""
+    try:
+        words = shlex.split(process)
+    except ValueError:
+        words = process.split()
+    runtimes = {"codex", "claude", "claude-code", "opencode", "gemini", "agy", "pi"}
+    if words and Path(words[0]).name.lower() in runtimes:
+        return True
+    # ps supplies comm then argv[0]; a node/bun runtime's script follows those.
+    packages = ("@openai/codex/", "@anthropic-ai/claude-code/", "@mariozechner/pi-coding-agent/")
+    return any(any(package in word for package in packages) for word in words[:3])
+
+
+def process_identity(pid):
+    r = command(["ps", "-p", str(pid), "-o", "stat=", "-o", "lstart="], env={**os.environ, "LC_ALL": "C"})
+    if r.returncode not in (0, 1) or (r.returncode and r.stderr.strip()):
+        raise RuntimeError(r.stderr.strip() or "Could not read process identity")
+    fields = r.stdout.strip().split(maxsplit=1)
+    return fields[1] if len(fields) == 2 and "Z" not in fields[0] else None
+
+
+def state_dir():
+    base = os.environ.get("XDG_STATE_HOME")
+    if not base:
+        home = os.environ.get("HOME")
+        if not home:
+            raise RuntimeError("Set HOME or XDG_STATE_HOME for service state")
+        base = str(Path(home) / ".local/state")
+    return Path(base) / "vega/services"
+
+
+@contextlib.contextmanager
+def registry_lock():
+    folder = state_dir()
+    folder.mkdir(parents=True, mode=0o700, exist_ok=True)
+    with (folder / "lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield folder
+
+
+def read_entries(folder):
+    entries = {}
+    for path in folder.glob("*.json"):
+        entry = json.loads(path.read_text())
+        if (not isinstance(entry, dict) or entry.get("schema") != 1
+                or not isinstance(entry.get("pid"), int) or entry["pid"] <= 1
+                or not isinstance(entry.get("port"), int) or not 0 < entry["port"] < 65536
+                or path.stem != str(entry["port"])
+                or not isinstance(entry.get("start"), str) or not entry["start"]
+                or any(not isinstance(entry.get(k), str) for k in ("title", "description", "url"))):
+            raise ValueError(f"Invalid service entry {path}; remove or repair it")
+        if process_identity(entry["pid"]) != entry["start"]:
+            path.unlink(missing_ok=True)
+        else:
+            entries[entry["port"]] = entry
+    return entries
+
+
+def registrations():
+    if not state_dir().exists():
+        return {}
+    with registry_lock() as folder:
+        return read_entries(folder)
+
+
+class UsageError(ValueError):
+    pass
+
+
+class Parser(argparse.ArgumentParser):
+    def parse_args(self, args=None, namespace=None):
+        options, extra = self.parse_known_args(args, namespace)
+        if extra:
+            owner = self
+            for action in self._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    owner = action.choices.get(getattr(options, action.dest, None), self)
+            owner.error("unrecognized arguments: " + " ".join(extra))
+        return options
+
+    def error(self, message):
+        raise UsageError(message + "; valid flags: " + " ".join(self._option_string_actions))
+
+
+def port_number(value):
+    try:
+        number = int(value)
+        if 0 < number < 65536:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("port must be 1..65535")
+
+
+def pid_number(value):
+    try:
+        number = int(value)
+        if 1 < number <= 2147483647:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("pid must be 2..2147483647")
+
+
+def cli(args):
+    # Parse and validate everything before scanning processes or touching state.
+    parser = Parser(prog="vega service", allow_abbrev=False, description="Register host-local service metadata")
+    commands = parser.add_subparsers(dest="action", parser_class=Parser)
+    register = commands.add_parser("register", allow_abbrev=False, help="Register or replace metadata for a port",
+        epilog='Example: vega service register --port 5187 --title Spire --url http://127.0.0.1:5187')
+    register.add_argument("--port", required=True, type=port_number)
+    register.add_argument("--title", required=True)
+    register.add_argument("--description", default="")
+    register.add_argument("--url", default="")
+    register.add_argument("--pid", type=pid_number, help="Listener owner PID (default: discover unambiguous owner)")
+    listing = commands.add_parser("ls", allow_abbrev=False, help="List live registrations and prune expired entries",
+        epilog="Examples: vega service ls; vega service ls --json")
+    remove = commands.add_parser("rm", allow_abbrev=False, help="Remove metadata; never stop the service",
+        epilog="Example: vega service rm --port 5187 (repeating is a successful no-op)")
+    remove.add_argument("--port", required=True, type=port_number)
+    for sub in (parser, register, listing, remove):
+        sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON instead of TOON")
+    options = parser.parse_args(args)
+    action = options.action or "ls"
+    if action == "register":
+        for key in ("title", "description", "url"):
+            value = getattr(options, key)
+            if (key == "title" and not value.strip()) or any(ord(c) < 32 or ord(c) == 127 for c in value):
+                raise UsageError(f"--{key} must be nonempty (title) and contain no controls")
+        if options.url:
+            try:
+                url = urlsplit(options.url)
+                valid = (url.scheme in ("http", "https") and url.hostname in ("127.0.0.1", "localhost", "::1")
+                         and url.port == options.port and url.username is None and url.password is None)
+            except ValueError:
+                valid = False
+            if not valid:
+                raise UsageError("--url must be an HTTP(S) loopback URL with the registered port (paths allowed)")
+        owners = {r["pid"] for r in scan(enrich=False)["listeners"] if r["port"] == options.port}
+        pid = options.pid
+        if pid is None:
+            if len(owners) != 1:
+                raise ValueError("Port has no unique listener owner; use --pid <listener-pid> to disambiguate")
+            pid = owners.pop()
+        elif pid not in owners:
+            raise ValueError("--pid does not own a listener on --port; use the listener PID")
+        start = process_identity(pid)
+        if not start:
+            raise ValueError("Listener process has exited; retry after starting the service")
+        entry = dict(schema=1, port=options.port, pid=pid, start=start,
+                     title=options.title, description=options.description, url=options.url)
+        with registry_lock() as folder:
+            with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as out:
+                temp = Path(out.name)
+                try:
+                    json.dump(entry, out)
+                    out.flush()
+                    os.replace(temp, folder / f"{options.port}.json")
+                finally:
+                    temp.unlink(missing_ok=True)
+        data = dict(service=entry)
+    elif action == "rm":
+        if state_dir().exists():
+            with registry_lock() as folder:
+                (folder / f"{options.port}.json").unlink(missing_ok=True)
+        data = dict(removed=options.port)
+    else:
+        data = dict(services=sorted(registrations().values(), key=lambda e: e["port"]))
+    if getattr(options, "json", False):
+        print(json.dumps(data))
+    elif action == "ls":
+        if not args:
+            print("bin: " + json.dumps(os.environ.get("VEGA_SERVICE_BIN", "vega-service")))
+            print("description: Register host-local service metadata tied to listener processes")
+        entries = data["services"]
+        if entries:
+            print(f"services[{len(entries)}]{{port,pid,title,url}}:")
+            for entry in entries:
+                print("  " + ",".join(json.dumps(entry[k]) for k in ("port", "pid", "title", "url")))
+        else:
+            print("services: 0 live registrations on this host")
+        print('help: vega service register --port <port> --title "<title>"; vega service ls --json; vega service rm --port <port>')
+    else:
+        print(f"service: {options.port} { 'registered' if action == 'register' else 'removed (or already absent)'}")
+    return 0
 
 
 def private_host(target):
@@ -166,6 +365,18 @@ def forward(action, owner, key="", target="", host="", port=0):
 
 
 def main():
+    if sys.argv[1:2] == ["cli"]:
+        try:
+            return cli(sys.argv[2:])
+        except Exception as error:
+            code = "usage" if isinstance(error, UsageError) else "service_failed"
+            hint = "vega service " + (sys.argv[2] if sys.argv[2:3] and sys.argv[2] in ("register", "ls", "rm") else "") + " --help"
+            if "--json" in sys.argv[2:]:
+                print(json.dumps(dict(error=dict(code=code, message=str(error), hint=hint))))
+            else:
+                print("error: " + json.dumps(str(error)))
+                print("help: " + json.dumps(hint))
+            return 2 if code == "usage" else 1
     try:
         action, *args = sys.argv[1:]
         result = scan() if action == "scan" else forward(action, *args[:-1], int(args[-1])) if action == "start" else forward(action, *args)

@@ -1,0 +1,18 @@
+[package]
+name = "vega-service"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Register host-local service metadata tied to listener processes"
+publish = false
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+serde_json = "1"

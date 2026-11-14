@@ -5,6 +5,7 @@ import { attribute, privateTarget, selectedProject, serviceAddress } from "./mod
 
 export default class Services extends View {
   init(_props, cx) {
+    this.showAgentPorts = false;
     this.rows = []; this.errors = []; this.forwards = new Map(); this.pending = new Set();
     this.owner = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     this.next = 0; this.targets = new Map();
@@ -92,10 +93,11 @@ export default class Services extends View {
     const button = (id, text, action) => div().id(id).px(7).py(3).rounded(4).text_color(t.accent).hover(s => s.bg(t.hover))
       .on_mouse_down("left", (_e,cx) => cx.stop_propagation()).on_click((_e,cx) => action(cx)).child(text);
     const scope = selectedProject(focused(), terminals());
-    const rows = this.rows.filter(row => scope.all || (scope.project && row.project === scope.project));
+    const rows = this.rows.filter(row => (scope.all || (scope.project && row.project === scope.project)) && (this.showAgentPorts || !row.agent || row.title || this.forwards.has(row.key)));
     let group = "";
     return v_flex().size_full().min_h(0).bg(t.background).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.foreground)
       .child(h_flex().px(12).h(40).items_center().child(div().flex_1().child("Services"))
+        .child(button("agent-ports", this.showAgentPorts ? "Hide agent ports" : "Show agent ports", cx => { this.showAgentPorts = !this.showAgentPorts; cx.notify(); }))
         .child(button("refresh", this.reading ? "Reading…" : "Refresh", cx => this.refresh(cx))))
       .children(this.errors.map(e => div().px(12).py(4).text_color(t.blocked).child(e)))
       .child(v_flex().id("services-list").flex_1().min_h(0).overflow_y_scroll().p(10).gap(6)
@@ -108,8 +110,9 @@ export default class Services extends View {
           return v_flex().gap(4).flex_none()
             .when(changed, el => el.child(div().pt(8).font_semibold().text_color(t.muted).child(header)))
             .child(h_flex().gap(6).items_center()
-              .child(div().flex_1().child(`${row.name} :${row.port}${row.gone ? " · stopped" : ""}`))
+              .child(div().flex_1().child(`${row.title || row.name} :${row.port}${row.gone ? " · stopped" : ""}`))
               .when(Boolean(f || allowed), el => el.child(button(`forward-${row.key}`, busy ? "Working…" : f ? "Stop" : "Forward", cx => this.toggle(row,cx)))))
+            .when(Boolean(row.description), el => el.child(div().text_color(t.muted).child(row.description)))
             .child(button(`address-${row.key}`, url, cx => this.activate(row,cx)))
             .when(Boolean(row.machine && !allowed), el => el.child(div().text_color(t.dim).child("Read only · private SSH hosts only")));
         }))

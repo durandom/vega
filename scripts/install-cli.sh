@@ -22,7 +22,7 @@ export CARGO_TARGET_DIR="$root/target"
 # VEGA_INSTALL_EXTRA adds optional packages.
 bins="$HOME/.local/bin"
 shims="$HOME/.local/share/vega/shims/bin"
-pkgs="vega vega-mux vega-post vega-history vega-notify vega-deploy vega-skills
+pkgs="vega vega-service vega-mux vega-post vega-history vega-notify vega-deploy vega-skills
 vega-orchestration vega-uac vega-ci vega-theme vega-uber vega-config vega-onboard
 vega-lanista vega-capacity vega-janitor vega-review vega-gate vega-bd vega-secrets-cli
 herdr-shim gh-shim tea-shim git-shim bd-shim ${VEGA_INSTALL_EXTRA:-}"

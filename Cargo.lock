@@ -3168,6 +3168,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vega-service"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "vega-build",
+ "vega-plugin",
+]
+
+[[package]]
 name = "vega-shim"
 version = "0.1.0"
 dependencies = [

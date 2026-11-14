@@ -15,6 +15,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | Plugin | Purpose |
 | --- | --- |
 | [`mux`](plugins/mux/) | Agent messaging and lifecycle over herdr TUI and hc |
+| [`service`](plugins/service/) | PID-bound titles, descriptions and URLs for listening ports and the Services panel |
 | [`notify`](plugins/notify/) | Raise and settle blocking operator asks; probe desktop delivery |
 | [`post`](plugins/post/) | Agent mail over a NATS JetStream broker; `vegad`, the per-host daemon |
 | [`uac`](plugins/uac/) | Coordinator mode: the role guide and the home view of the agents a session runs |
