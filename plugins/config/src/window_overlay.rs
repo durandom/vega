@@ -176,7 +176,7 @@ pub fn promote(
 mod tests {
     use super::*;
     fn base() -> Profile {
-        profiles::parse(crate::sources::default("herdr-app/profiles/status.toml").unwrap()).unwrap()
+        profiles::parse(include_str!("testdata/status-profile.toml")).unwrap()
     }
     #[test]
     fn patches_roundtrip_hide_rename_reorder_and_reset_without_changing_slots() {

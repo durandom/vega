@@ -474,7 +474,7 @@ mod tests {
     }
     #[test]
     fn grouped_profile_validation_and_split_building() {
-        let source = sources::default("herdr-app/profiles/status.toml").unwrap();
+        let source = STATUS_FIXTURE;
         for bad in [
             source.replace("name = \"io\"", "name = \"proteus\""),
             source.replace("name = \"io\"", "name = \"../io\""),
@@ -544,7 +544,7 @@ optional = true
 
     #[test]
     fn invalid_profiles_fail_before_writes() {
-        let source = sources::default("herdr-app/profiles/status.toml").unwrap();
+        let source = STATUS_FIXTURE;
         assert!(parse(&source.replace("layout = \"status\"", "layout = \"../status\"")).is_err());
         assert!(parse(&source.replace("ganymede-btop", "proteus-btop")).is_err());
         assert!(parse(&format!("unknown = true\n{source}")).is_err());
@@ -566,12 +566,10 @@ optional = true
         let local = sources::local_dir(&ctx.env);
         fs::create_dir_all(local.join("herdr-app/profiles")).unwrap();
         fs::create_dir_all(local.join("herdr-app/mods/third-party")).unwrap();
-        let source = sources::default("herdr-app/profiles/status.toml")
-            .unwrap()
-            .replace(
-                "mods = [\"vega-window-tabs\"]",
-                "mods = [\"vega-window-tabs\", \"third-party\"]",
-            );
+        let source = STATUS_FIXTURE.replace(
+            "mods = [\"vega-window-tabs\"]",
+            "mods = [\"vega-window-tabs\", \"third-party\"]",
+        );
         fs::write(local.join("herdr-app/profiles/status.toml"), source).unwrap();
         fs::write(
             local.join("herdr-app/mods/third-party/main.js"),

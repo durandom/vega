@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn promote_defaults_to_the_build_checkout() {
         let root = super::build_checkout().expect("tests run inside the vega checkout");
-        assert!(root.join("config/herdr-app/profiles/status.toml").is_file());
+        assert!(root.join("plugins/config/Cargo.toml").is_file());
     }
 
     use super::*;
@@ -544,10 +544,7 @@ mod tests {
     }
     fn fixture() -> (Profile, Value) {
         (
-            profiles::parse(
-                vega_config::sources::default("herdr-app/profiles/status.toml").unwrap(),
-            )
-            .unwrap(),
+            profiles::parse(include_str!("testdata/status-profile.toml")).unwrap(),
             serde_json::from_str(
                 vega_config::sources::default("herdr-app/layouts/status.json").unwrap(),
             )

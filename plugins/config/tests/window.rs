@@ -5,6 +5,14 @@ use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 fn apply_and_open_twice_only_starts_three_terminals_in_the_profile_home() {
     let d = tempfile::tempdir().unwrap();
     let config = d.path().join("config");
+    // Settings edits the checkout profile; keep this fake HOME on the shared fixture.
+    let profiles = config.join("vega/config/herdr-app/profiles");
+    fs::create_dir_all(&profiles).unwrap();
+    fs::write(
+        profiles.join("status.toml"),
+        include_str!("../src/testdata/status-profile.toml"),
+    )
+    .unwrap();
     let bin = d.path().join("bin");
     fs::create_dir_all(&bin).unwrap();
     // inline-md: allow (executable test fixture, not guide/help)
