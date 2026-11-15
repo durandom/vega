@@ -1881,6 +1881,19 @@ test('services owns forward lifecycle and refuses puck and unknown targets',asyn
   h.mod.toggle(row,h.cx);await h.flush();assert.equal(h.calls.length,3);
 });
 
+test('registered bundle forwards all ports in one action and stops its one master',async()=>{
+  const h=load('vega-services');
+  Object.assign(h.mod,{rows:[],errors:[],forwards:new Map(),pending:new Set(),owner:'test',next:0,targets:new Map([['ganymede','ganymede']])});
+  const row={key:'bundle',machine:'ganymede',port:5320,host:'127.0.0.1',registered:true,also_forward:[8367]};
+  h.mod.call=async(action,args)=>{h.calls.push([action,Array.from(args)]);return {local:5320};};
+  h.mod.toggle(row,h.cx);await h.flush();
+  assert.deepEqual(h.calls[0],['start',['1','ganymede','127.0.0.1','5320','same','8367']]);
+  const dependency={...row,key:'world',port:8367,also_forward:[]};
+  assert.equal(h.mod.forwardFor(dependency).local,8367,'separate registered dependency shows its bundled forward');
+  h.mod.toggle(dependency,h.cx);await h.flush();
+  assert.deepEqual(h.calls[1],['stop',['1']]);assert.equal(h.mod.forwards.size,0);
+});
+
 test('services refresh renders fake snapshots and opens the forwarded URL',async()=>{
   const h=load('vega-services');
   let scans=0;

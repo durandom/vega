@@ -232,6 +232,32 @@ class ServicesTest(unittest.TestCase):
                     helper.forward("start", "test", "1", "ganymede", "127.0.0.1", 5187)
                 self.assertFalse((folder / "s1").exists())
 
+    def test_bundle_registration_and_same_port_forward_conflicts(self):
+        with patch.object(helper, "scan", return_value=dict(listeners=[dict(pid=31560, port=5320)])), patch.object(helper, "process_identity", return_value="start"):
+            self.call_cli(["register", "--port", "5320", "--also-forward", "8367", "--title", "Classic app"])
+            self.assertEqual(helper.registrations()[5320]["also_forward"], [8367])
+            for extra in ("5320", "0"):
+                with self.assertRaises(helper.UsageError):
+                    self.call_cli(["register", "--port", "5320", "--also-forward", extra, "--title", "x"])
+        folder = Path(self.tmp.name)
+        with patch.object(helper, "owner_dir", return_value=folder), patch.object(helper.socket, "gethostname", return_value="proteus"), patch.object(helper.socket, "socket") as sock, patch.object(helper, "command", return_value=result()) as ssh:
+            self.assertEqual(helper.forward("start", "test", "1", "ganymede", "127.0.0.1", 5320, "same", "8367"), {"local":5320})
+            args = ssh.call_args.args[0]
+            self.assertEqual(args.count("-L"), 2)
+            self.assertIn("127.0.0.1:5320:127.0.0.1:5320", args)
+            self.assertIn("127.0.0.1:8367:127.0.0.1:8367", args)
+            self.assertIn("ExitOnForwardFailure=yes", args)
+            ssh.reset_mock()
+            sock.return_value.bind.side_effect = [None, OSError("Address already in use")]
+            with self.assertRaisesRegex(RuntimeError, "127.0.0.1:8367 unavailable"):
+                helper.forward("start", "test", "2", "ganymede", "127.0.0.1", 5320, "same", "8367")
+            ssh.assert_not_called()
+            sock.return_value.bind.side_effect = None
+            ssh.return_value = result(stderr="bind 127.0.0.1:5320: Address already in use", code=255)
+            with self.assertRaisesRegex(RuntimeError, "Local port conflict"):
+                helper.forward("start", "test", "3", "ganymede", "127.0.0.1", 5320, "same", "8367")
+            self.assertEqual(ssh.call_count, 1, "same-port collision must not fall back to random ports")
+
 
 if __name__ == "__main__":
     unittest.main()

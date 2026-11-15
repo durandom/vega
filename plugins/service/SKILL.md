@@ -7,7 +7,7 @@ description: Registers host-local service titles, descriptions and URLs for the 
 
 Run on the service's host; this never starts services or tunnels.
 
-- `vega service register --port <port> --title "<title>" [--description "<text>"] [--url <url>] [--pid <pid>]`
+- `vega service register --port <port> --title "<title>" [--description "<text>"] [--url <url>] [--pid <pid>] [--also-forward <port>]`
   replaces that port's metadata. PID defaults to its unique listener owner; use
   `--pid` when multiple processes own the port. An explicit PID must own the listener.
 - `vega service` or `vega service ls` lists live registrations; `ls --json`
@@ -21,6 +21,11 @@ Run on the service's host; this never starts services or tunnels.
 - Refresh the Services panel to read each machine's metadata. Titles and
   descriptions replace process-only labels. Without terminal ancestry or cwd
   attribution, registrations appear in Host registrations across project filters.
+- Repeat `--also-forward <port>` for dependent loopback ports (for example 5320
+  plus 8367). One Forward/Stop controls the entire bundle. Registered services
+  always use matching local port numbers, preserving URLs baked into web pages.
+  A local port conflict fails the whole action; stop its owner and retry. Extra
+  ports may belong to different processes; the primary PID owns registration lifetime.
 - Agent runtimes are hidden by default; **Show agent ports** reveals them.
   Registered ports remain visible. Forward uses private-host SSH `-L` to
   loopback only; Stop or panel close ends its tunnel.

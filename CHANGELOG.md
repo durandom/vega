@@ -9,6 +9,9 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - feature: Services retains registered titles without terminal attribution, labels
   running/forwarded/stopped rows and distinguishes remote ports from local forwards.
+- feature: `vega service register --port 5320 --also-forward 8367 --title "Classic app"`
+  groups ports under one Forward/Stop. Registered services use the same local ports;
+  occupied ports produce an error. Unregistered listeners retain ephemeral forwards.
 - unit: update the CLI on service hosts and apply `herdr-app.vega-services`.
 
 ## 210 · 2026-11-14

@@ -583,13 +583,14 @@ machine. Python 3 plus ps and ss/lsof are required there. The panel groups by
 Only the focused project's services appear, across all its machines/spaces;
 the focused live `vega.role=uber` terminal alone enables the unscoped list.
 Project resolution follows sidebar identity rules: full IDs, unambiguous legacy
-names, UAC space labels and live ancestors. An unresolved focus shows no services.
+names, UAC space labels and live ancestors. An unresolved focus shows only
+unattributed registrations in their explicit host group.
 Herdr's live focus renders update the filter without timers or rescanning. Owned
 forwards survive a scope switch and become visible again with their project.
 Attribution follows PID ancestry to a live terminal, then the most specific pane
-or foreground cwd, excluding root/home and ambiguous equal matches. Unattributed
+or foreground cwd, excluding root/home and ambiguous equal matches. Unregistered unattributed
 listeners and listeners bound only to a specific non-loopback interface are omitted.
-PID and machine are part of each service’s identity.
+Unregistered identities include PID and machine; registered identities use host/port.
 
 Forward is explicit, or started by clicking a remote web URL. The app host and
 SSH destination must be known private hosts (proteus, ganymede, io/io-wsl, titan);
@@ -598,7 +599,8 @@ transports are read only. This preserves the private-to-corp direction rule in
 hc-migration.md; it never gives a corporate app a private tunnel. Refresh never
 starts a forward. Each panel owns private SSH control sockets under `/tmp/vega-services-UID`,
 uses strict existing host-key trust and batch authentication, binds only local
-127.0.0.1, selects an ephemeral local port and retries bind collisions. Nothing
+127.0.0.1, selects an ephemeral local port for unregistered listeners and retries bind collisions.
+Registered services use same-port binds; a conflict is an error rather than a random-port fallback. Nothing
 changes the remote listener’s loopback binding. Stop targets only its socket.
 Close marks the owner closed before serializing cleanup, covering an in-flight
 start too. The app’s close hook is best effort (250 ms); exec cleanup already
@@ -636,3 +638,11 @@ Registered services / Host registrations across project filters, explicitly host
 scoped rather than guessed into a project. A still-live registered process without
 a listener shows Stopped. Rows independently label running/forwarded/stopped,
 host, and remote port versus local forward; only owned forwards offer Stop.
+
+`vega service register --port 5320 --also-forward 8367 --title "Classic app"`
+adds a dependency bundle (repeatable extra ports). One Forward owns one SSH master
+with multiple loopback binds; one Stop closes all. The primary process controls
+registration lifetime, dependencies may start/restart independently. Registered
+services default to same local ports to preserve embedded URLs; the panel labels
+the bundle ports. Preflight checks every local bind and SSH catches bind races.
+No forwards start during registration or Refresh.

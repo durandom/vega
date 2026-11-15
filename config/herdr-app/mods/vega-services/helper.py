@@ -94,6 +94,7 @@ def scan(enrich=True):
                 if entry and entry["pid"] == listener["pid"]:
                     listener.update({k: entry[k] for k in ("title", "description", "url")})
                     listener["registered"] = True
+                    listener["also_forward"] = entry.get("also_forward", [])
         for port, entry in entries.items():
             if not any(r["port"] == port and r["pid"] == entry["pid"] for r in listeners):
                 listeners.append({**entry, "registered": True, "gone": True,
@@ -153,6 +154,10 @@ def read_entries(folder):
                 or not isinstance(entry.get("start"), str) or not entry["start"]
                 or any(not isinstance(entry.get(k), str) for k in ("title", "description", "url"))):
             raise ValueError(f"Invalid service entry {path}; remove or repair it")
+        extra = entry.get("also_forward", [])
+        if (not isinstance(extra, list) or any(type(p) is not int or not 0 < p < 65536 for p in extra)
+                or len(set([entry["port"], *extra])) != len(extra) + 1):
+            raise ValueError(f"Invalid service bundle {path}; remove or repair it")
         if process_identity(entry["pid"]) != entry["start"]:
             path.unlink(missing_ok=True)
         else:
@@ -213,6 +218,8 @@ def cli(args):
     register = commands.add_parser("register", allow_abbrev=False, help="Register or replace metadata for a port",
         epilog='Example: vega service register --port 5187 --title Spire --url http://127.0.0.1:5187')
     register.add_argument("--port", required=True, type=port_number)
+    register.add_argument("--also-forward", action="append", type=port_number, default=[],
+                          help="Additional remote loopback port; repeat for bundles (same local ports)")
     register.add_argument("--title", required=True)
     register.add_argument("--description", default="")
     register.add_argument("--url", default="")
@@ -227,6 +234,8 @@ def cli(args):
     options = parser.parse_args(args)
     action = options.action or "ls"
     if action == "register":
+        if len(set([options.port, *options.also_forward])) != len(options.also_forward) + 1:
+            raise UsageError("--also-forward ports must be unique and differ from --port")
         for key in ("title", "description", "url"):
             value = getattr(options, key)
             if (key == "title" and not value.strip()) or any(ord(c) < 32 or ord(c) == 127 for c in value):
@@ -252,7 +261,8 @@ def cli(args):
         if not start:
             raise ValueError("Listener process has exited; retry after starting the service")
         entry = dict(schema=1, port=options.port, pid=pid, start=start,
-                     title=options.title, description=options.description, url=options.url)
+                     title=options.title, description=options.description, url=options.url,
+                     also_forward=options.also_forward)
         with registry_lock() as folder:
             with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as out:
                 temp = Path(out.name)
@@ -318,7 +328,7 @@ def end(path):
             path.unlink(missing_ok=True)  # stale socket from an exited master
 
 
-def forward(action, owner, key="", target="", host="", port=0):
+def forward(action, owner, key="", target="", host="", port=0, mode="ephemeral", *also):
     folder = owner_dir(owner)
     if action == "close":
         (folder / "closed").touch()
@@ -348,17 +358,33 @@ def forward(action, owner, key="", target="", host="", port=0):
             raise ValueError("Forwarding requires a private app host and private SSH target")
         if not 0 < port < 65536 or host not in ("127.0.0.1", "::1"):
             raise ValueError("Invalid loopback destination")
+        ports = [port, *(int(p) for p in also)]
+        if (mode not in ("same", "ephemeral") or any(not 0 < p < 65536 for p in ports)
+                or len(set(ports)) != len(ports) or (also and mode != "same")):
+            raise ValueError("Invalid forwarding ports or mode")
+        if mode == "same":
+            # Hold all probes together so the whole bundle is checked before SSH.
+            with contextlib.ExitStack() as stack:
+                for number in ports:
+                    probe = stack.enter_context(contextlib.closing(socket.socket()))
+                    try:
+                        probe.bind(("127.0.0.1", number))
+                    except OSError as error:
+                        raise RuntimeError(f"Local port 127.0.0.1:{number} unavailable; stop its owner before forwarding") from error
         # SSH confirms the actual bind; retry if another process wins the free-port race.
-        for _ in range(5):
-            with contextlib.closing(socket.socket()) as probe:
-                probe.bind(("127.0.0.1", 0))
-                local = probe.getsockname()[1]
+        for _ in range(1 if mode == "same" else 5):
+            local = port
+            if mode == "ephemeral":
+                with contextlib.closing(socket.socket()) as probe:
+                    probe.bind(("127.0.0.1", 0))
+                    local = probe.getsockname()[1]
             far = f"[{host}]" if ":" in host else host
+            bindings = [arg for number in ports for arg in ("-L", f"127.0.0.1:{local if number == port else number}:{far}:{number}")]
             r = command(["ssh", "-fNT", "-M", "-S", str(path), "-o", "ControlPersist=no",
                          "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                          "-o", "ConnectTimeout=5", "-o", "ExitOnForwardFailure=yes",
                          "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2",
-                         "-L", f"127.0.0.1:{local}:{far}:{port}", "--", target])
+                         *bindings, "--", target])
             if r.returncode == 0:
                 if (folder / "closed").exists():
                     end(path)
@@ -366,6 +392,9 @@ def forward(action, owner, key="", target="", host="", port=0):
                 return dict(local=local)
             if "Address already in use" not in r.stderr:
                 break
+        if mode == "same" and "Address already in use" in r.stderr:
+            end(path)
+            raise RuntimeError(f"Local port conflict in bundle {ports}; stop the local owner before forwarding: {r.stderr.strip()}")
         raise RuntimeError(r.stderr.strip() or "SSH forwarding failed")
 
 
@@ -384,7 +413,7 @@ def main():
             return 2 if code == "usage" else 1
     try:
         action, *args = sys.argv[1:]
-        result = scan() if action == "scan" else forward(action, *args[:-1], int(args[-1])) if action == "start" else forward(action, *args)
+        result = scan() if action == "scan" else forward(action, *args[:4], int(args[4]), *args[5:]) if action == "start" else forward(action, *args)
         print(json.dumps(result))
     except Exception as error:
         print(json.dumps({"error": str(error)}))
