@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 214 · 2026-11-15
+
+- feature: Vega tabs follows agents' live task titles while keeping custom tab
+  names, switches once per wheel notch with paced swipes, and recovers from
+  corrupt saved panel state. Working indicators remain static themed dots.
+- unit: apply `herdr-app.vega-tabs` on herdr-app 0.1.16 to use the updated fork.
+
 ## 213 · 2026-11-15
 
 - feature: `vega mux mode --machine <host>` reads and changes the mode on the

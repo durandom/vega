@@ -14,7 +14,7 @@ function load(name, {allowFocus=false}={}) {
       if(k==='children')return cs=>{o.items.push(...cs);return proxy;};
       if(k==='when')return (yes,f)=>yes?f(proxy):proxy;
       if(k==='id'||k==='tooltip'||k==='text_color'||k==='bg'||k==='border_color'||k==='spin')return v=>{o[k+'Value']=v;return proxy;};
-      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down'){o.mouseButton=a[0];o.handlers[`${k}:${a[0]}`]=a.at(-1);}return proxy;};
+      if(k==='on_click'||k==='on_mouse_down'||k==='on_mouse_move'||k==='on_mouse_up'||k==='on_key_down'||k==='on_scroll_wheel')return (...a)=>{o.handlers[k]=a.at(-1);if(k==='on_mouse_down'){o.mouseButton=a[0];o.handlers[`${k}:${a[0]}`]=a.at(-1);}return proxy;};
       return ()=>proxy;
     }});return proxy;
   }
@@ -72,6 +72,82 @@ test('stock tabs and pane forks render static themed working dots and keep actio
     const source=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
     assert(!/\.(spin|frames|loop)\(/.test(source));
   }
+});
+
+test('tabs follow the leading agent live title and preserve custom names and generic fallbacks',()=>{
+  const h=load('vega-tabs');
+  const program={name:'Claude Code',key:'claude',agent:true};
+  let tab={id:'tb1',name:'1',named:false,active:true};
+  let lead={tab:'tb1',terminal:'t1',title:'✳ Fix login',program};
+  h.api.spaces=()=>[{id:'s1',active:true,tabs:[tab]}];
+  // An agent takes precedence even with a shell first in the split.
+  h.api.panes=()=>[{tab:'tb1',program:{name:'zsh',agent:false}},lead];
+  h.mod.init();
+  const title=()=>texts(elements(h.render()).find(n=>n.idValue==='tab-tb1'))[0];
+  assert.equal(title(),'Fix login');
+  lead.title='[ ! ] [Review] “Unicode 修正”';
+  assert.equal(title(),'[Review] “Unicode 修正”');
+  tab={...tab,name:'My task',named:true};
+  assert.equal(title(),'My task');
+  tab.name='Claude Code';
+  assert.equal(title(),'[Review] “Unicode 修正”','program-named tabs follow live titles');
+  tab={...tab,name:'1',named:false};
+  for(const generic of ['',null,'t1','Claude Code','CLAUDE','✳ ~/repo','/repo','C:\\repo','user@host']) {
+    lead.title=generic;assert.equal(title(),'Claude Code',String(generic));
+  }
+  lead={...lead,program:{name:'zsh',agent:false},title:'Do not use a shell title'};
+  assert.equal(title(),'zsh');
+  h.api.panes=()=>[];
+  assert.equal(title(),'Terminal');
+  tab={...tab,name:'tb42',named:true};
+  assert.equal(title(),'tb42','explicit names resembling old automatic IDs stay');
+});
+
+test('tabs recover invalid saved panels and retain the Services choice per space',()=>{
+  for(const saved of ['{bad','null','[]','"text"','42','false',null]) {
+    const h=load('vega-tabs');
+    if(saved!==null) h.storage.set('panels',saved);
+    h.mod.init();
+    assert.equal(JSON.stringify(h.mod.panels),'{}');
+    h.render();
+  }
+  const h=load('vega-tabs');
+  h.storage.set('panels','{"s1":"services"}');
+  h.api.spaces=()=>[{id:'s1',active:true,tabs:[]}];
+  h.api.layout=()=>({children:[{id:'panel',hidden:true},{id:'panel-body',active:'files'},{id:'services'}]});
+  h.state.set('workspace.panels',[]);
+  h.mod.init();
+  const tree=h.render();
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='layout.select'&&c[2].child==='services'));
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='layout.show'&&c[2].id==='panel'));
+  assert(elements(tree).some(n=>n.idValue==='panel-services'));
+  assert.equal(JSON.parse(h.storage.get('panels')).s1,'services','pending restore is not overwritten');
+});
+
+test('tabs wheel notches switch once and smooth swipes accumulate with pacing and resets',()=>{
+  const h=load('vega-tabs');let now=1000;
+  h.api.Date={now:()=>now};h.mod.init();
+  const wheel=h.render().handlers.on_scroll_wheel;
+  const commands=()=>h.calls.filter(c=>c[0]==='run').map(c=>c[1]);
+  const smooth=(y,ms=0,phase)=>{now+=ms;wheel({delta:{x:0,y},touch_phase:phase});};
+  wheel({delta:{y:120},delta_lines:{x:0,y:3}});
+  wheel({delta:{y:-120},delta_lines:{x:0,y:-3}});
+  wheel({delta:{y:120},delta_lines:{x:1,y:0}});
+  assert.deepEqual(commands(),['tab.prev','tab.next']);
+  h.calls.length=0;
+  smooth(9);smooth(10,10);assert.deepEqual(commands(),[]);
+  smooth(1,10);assert.deepEqual(commands(),['tab.prev']);
+  smooth(60,50);assert.equal(commands().length,1,'rapid events are paced');
+  smooth(1,50);assert.equal(commands().length,2);
+  smooth(58,100);assert.equal(commands().length,2,'long swipe needs another 60px');
+  smooth(1);assert.equal(commands().length,3);
+  smooth(1,10);
+  smooth(-20,100);assert.equal(commands().at(-1),'tab.next','turn resets the gesture');
+  smooth(19,300);assert.equal(commands().length,4,'pause starts at the short-swipe threshold');
+  smooth(1);assert.equal(commands().length,5);
+  smooth(19,100,'started');assert.equal(commands().length,5,'explicit start resets the threshold');
+  smooth(1);assert.equal(commands().length,6);
+  smooth(0,300);assert.equal(commands().length,6,'horizontal-only motion does nothing');
 });
 
 function navigationFixture() {

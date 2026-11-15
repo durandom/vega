@@ -10,6 +10,10 @@ Forked from the installed herdr-app 0.1.15 on 2026-11-13 (read-only sources).
 - `pane/unzoom.svg`: SHA256 `a061af514f83278f3b5f0bea6388b116ce66969897b202cd5709f4970b8750c6`
 - `pane/zoom.svg`: SHA256 `e2d29d06235819c0b617029291adc8a9f4d31dc59264a50e97e55470e9ad2823`
 
+Verified against herdr-app `v0.1.16` on 2026-11-15 via read-only `gh api`
+(commit `034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f`): all seven stock files
+still match the hashes above. No code or clone-base update is needed.
+
 The working spinner is replaced with the static `theme.working` dot used by
 vega-sidebar. Owned asset paths use the fork name; other behavior and SVGs
 remain stock. Other mod assets remain upstream references. `mod.json` records
