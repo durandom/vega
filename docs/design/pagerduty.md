@@ -128,7 +128,10 @@ written; resolve the fallback note when handed off or the incident disappears.
 
 Persist the latest observation before sending. Mark delivered only after durable
 mail acceptance or durable note creation, then persist the notification clock.
-Delivery is at-least-once: a crash after send but before checkpoint can duplicate
+A mail acceptance timeout records a `maybe_delivered` receipt and returns its diagnostic;
+subsequent ticks suppress a second send until the normal four-hour reminder, status change,
+or recipient change. This trades an uncertain notification for avoiding duplicate mail.
+Delivery is otherwise at-least-once: a crash after send but before checkpoint can duplicate
 a mail. No stable event IDs, receiver receipts or changes to vega post. Exactly-once
 delivery is deferred to vega-lhc.158.8. Retry failed delivery each minute without
 another pdc call; resolve the recipient again. A replacement UAC gets the current

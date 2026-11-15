@@ -28,6 +28,11 @@ have no appearance of their own.
   error, attempt count and retry time. Watcher and relay own separate files to avoid lost updates.
   `vega theme` shows these per-pane receipts (unknown before the first send); they record successful
   transport delivery, not an acknowledgement from Claude. The registry entry includes the journal as `claude`.
+  Each request permits at most three attempts per pane. An hc send timeout is maybe-delivered:
+  exact command readback counts as transport receipt; without it the pane is failed and automatic
+  retyping stops. Loading older journals also stops ambiguous or exhausted work. Bounded hc sends
+  allow 15 s because hc observes startup for 5 s after submitting, including slash commands that
+  never report working; other daemon hc RPCs retain their 5 s deadline.
 - Due mode (`resolve`): a fixed mode wins; `auto` follows the OS; on a headless host it follows the control
   host's `<host>.theme` registry entry (fresh hosts only; inbox-only hosts: see vegad). Nothing known means
   nothing changes.

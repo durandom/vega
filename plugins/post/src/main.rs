@@ -3668,8 +3668,14 @@ fn type_theme_in(env: &vega_theme_sync::Env, drafts: &Drafts) -> Result<bool, St
             continue;
         }
         journal.send(env, &pane, state::unix_now(), || {
-            let result = notify_queued(&pane, &line, working)
-                .map_err(|f| format!("{} {}", f.code, f.message));
+            let result = theme::send_checked(
+                &line,
+                || {
+                    notify_queued(&pane, &line, working)
+                        .map_err(|f| format!("{} {}", f.code, f.message))
+                },
+                || screen(&pane),
+            );
             match &result {
                 Ok(()) => {
                     log(&format!("theme: typed {line} into {pane}"));
@@ -3677,7 +3683,9 @@ fn type_theme_in(env: &vega_theme_sync::Env, drafts: &Drafts) -> Result<bool, St
                         submit_slash_menu(&pane, &line);
                     }
                 }
-                Err(e) => log(&format!("theme: {pane}: {e}; retrying with backoff")),
+                Err(e) => log(&format!(
+                    "theme: {pane}: {e}; bounded delivery policy applies"
+                )),
             }
             result
         })?;

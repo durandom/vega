@@ -7,6 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{files, Env, Mode};
 
+pub const MAX_ATTEMPTS: u32 = 3;
+
+/// A deadline after sending does not prove that the text was refused.
+pub fn maybe_delivered(error: &str) -> bool {
+    error.starts_with("hc_timeout")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Request {
     pub id: String,
@@ -85,7 +92,14 @@ pub fn read_request(env: &Env) -> Result<Option<Request>, String> {
 
 impl Journal {
     pub fn load(env: &Env) -> Result<Self, String> {
-        Ok(read(env, "theme-live.json")?.unwrap_or_default())
+        let mut journal: Self = read(env, "theme-live.json")?.unwrap_or_default();
+        // Upgrade old unbounded journals without replaying an ambiguous send.
+        for pane in journal.panes.values_mut() {
+            if pane.attempts >= MAX_ATTEMPTS || pane.error.as_deref().is_some_and(maybe_delivered) {
+                pane.pending = false;
+            }
+        }
+        Ok(journal)
     }
 
     pub fn save(&self, env: &Env) -> Result<(), String> {
@@ -128,7 +142,7 @@ impl Journal {
     pub fn due(&self, now: i64) -> Vec<String> {
         self.panes
             .iter()
-            .filter(|(_, p)| p.pending && p.retry_at <= now)
+            .filter(|(_, p)| p.pending && p.attempts < MAX_ATTEMPTS && p.retry_at <= now)
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -141,6 +155,13 @@ impl Journal {
         now: i64,
         send: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
+        if !self
+            .panes
+            .get(id)
+            .is_some_and(|p| p.pending && p.attempts < MAX_ATTEMPTS)
+        {
+            return Ok(());
+        }
         self.result(id, now, send());
         self.save(env)
     }
@@ -158,6 +179,8 @@ impl Journal {
                 pane.retry_at = 0;
             }
             Err(error) => {
+                // Unconfirmed delivery is terminal for this request: never retype it.
+                pane.pending = !maybe_delivered(&error) && pane.attempts < MAX_ATTEMPTS;
                 pane.error = Some(error);
                 pane.retry_at = now.saturating_add((2_i64 << pane.attempts.min(7)).min(120));
             }
@@ -170,7 +193,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timeout_then_restart_retries_and_keeps_success_receipt() {
+    fn old_unbounded_journals_stop_on_upgrade() {
+        let temp = tempfile::tempdir().unwrap();
+        let env = Env::at(temp.path());
+        let journal = Journal {
+            panes: [(
+                "t7".into(),
+                Pane {
+                    pending: true,
+                    attempts: 83,
+                    error: Some("hc_timeout hc did not answer before the deadline".into()),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        journal.save(&env).unwrap();
+        let mut loaded = Journal::load(&env).unwrap();
+        assert!(!loaded.panes["t7"].pending);
+        assert!(loaded.due(i64::MAX).is_empty());
+        loaded
+            .send(&env, "t7", 999, || panic!("must not type"))
+            .unwrap();
+        loaded.accept(Request {
+            id: "new".into(),
+            mode: Mode::Light,
+        });
+        assert_eq!(loaded.due(999), ["t7"]);
+    }
+
+    #[test]
+    fn delivered_timeout_then_restart_never_retypes_and_keeps_success_receipt() {
         let temp = tempfile::tempdir().unwrap();
         let env = Env::at(temp.path());
         request(&env, Mode::Dark).unwrap();
@@ -197,12 +251,13 @@ mod tests {
             .starts_with("failed: hc_timeout"));
         assert_eq!(restarted.panes["t3p"].applied, Some(Mode::Dark));
         assert!(restarted.due(103).is_empty());
-        assert_eq!(restarted.due(104), ["t31"]);
+        assert!(restarted.due(104).is_empty());
         restarted.send(&env, "t31", 104, &mut fake_hc).unwrap();
-        assert_eq!(calls, 3);
+        assert_eq!(calls, 2);
         let loaded = Journal::load(&env).unwrap();
         assert!(loaded.due(999).is_empty());
-        assert_eq!(loaded.panes["t31"].status(), "applied");
+        assert!(!loaded.panes["t31"].pending);
+        assert_eq!(loaded.panes["t31"].attempts, 1);
     }
 
     #[test]
@@ -232,10 +287,18 @@ mod tests {
         assert_eq!(journal.panes["t1k"].attempts, 0);
         journal.inventory("herdr", []);
         assert!(!journal.panes.contains_key("w1:p1"));
+        let mut calls = 0;
         for n in 0..30 {
-            journal.result("t1k", n, Err("timeout".into()));
+            journal
+                .send(&env, "t1k", n * 120, || {
+                    calls += 1;
+                    Err("transport unavailable".into())
+                })
+                .unwrap();
         }
-        assert_eq!(journal.panes["t1k"].retry_at, 29 + 120);
+        assert_eq!(calls, MAX_ATTEMPTS);
+        assert!(!journal.panes["t1k"].pending);
+        assert!(journal.due(i64::MAX).is_empty());
     }
 
     #[test]

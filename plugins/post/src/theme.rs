@@ -211,6 +211,32 @@ pub fn decide(status: Option<&str>, held: bool, screen: impl FnOnce() -> Option<
     Action::Send
 }
 
+/// Verify an ambiguous send using exact command readback. Absence is not
+/// evidence of refusal (Claude may already have consumed/cleared the line).
+fn command_visible(screen: &str, line: &str) -> bool {
+    screen.lines().any(|s| {
+        let s = s.trim().strip_prefix('❯').unwrap_or(s.trim()).trim();
+        s == line
+    })
+}
+
+pub fn send_checked(
+    line: &str,
+    send: impl FnOnce() -> Result<(), String>,
+    readback: impl FnOnce() -> Option<String>,
+) -> Result<(), String> {
+    match send() {
+        Err(e) if vega_theme_sync::live::maybe_delivered(&e) => {
+            if readback().is_some_and(|screen| command_visible(&screen, line)) {
+                Ok(()) // Receipt of text only, not a Claude theme acknowledgement.
+            } else {
+                Err(format!("{e}; maybe delivered, automatic retyping stopped"))
+            }
+        }
+        result => result,
+    }
+}
+
 /// `(pane, status)` of this host's Claude agents in `herdr agent list`.
 pub fn claude_panes(agents: &[serde_json::Value]) -> HashMap<String, String> {
     agents
@@ -229,6 +255,52 @@ pub fn claude_panes(agents: &[serde_json::Value]) -> HashMap<String, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn fake_hc_delivered_timeout_readback_and_restart_do_not_retype() {
+        use vega_theme_sync::live::{Journal, Request};
+        for readback in [
+            Some("output\n❯ /config theme=light\n────"),
+            None,
+            Some("cleared"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let env = Env::at(dir.path());
+            let mut journal = Journal::default();
+            journal.accept(Request {
+                id: "test".into(),
+                mode: Mode::Light,
+            });
+            journal.inventory("hc", ["t7".into()]);
+            let mut delivered = Vec::new();
+            journal
+                .send(&env, "t7", 0, || {
+                    send_checked(
+                        "/config theme=light",
+                        || {
+                            delivered.push("/config theme=light");
+                            Err("hc_timeout deadline".into())
+                        },
+                        || readback.map(String::from),
+                    )
+                })
+                .unwrap();
+            let mut restarted = Journal::load(&env).unwrap();
+            restarted.inventory("hc", ["t7".into()]);
+            assert!(restarted.due(999).is_empty());
+            restarted
+                .send(&env, "t7", 999, || {
+                    delivered.push("duplicate");
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(delivered, ["/config theme=light"]);
+            assert_eq!(
+                restarted.panes["t7"].applied.is_some(),
+                readback.is_some_and(|s| s.contains("/config theme=light"))
+            );
+        }
+    }
 
     #[test]
     fn live_only_on_a_real_change() {

@@ -43,9 +43,6 @@ elif args[0] == 'send':
     assert '--force' not in args
     p, text = args[-2:]
     fail = home / ('theme-timeout-' + p)
-    if text.startswith('/config theme=') and fail.exists():
-        fail.unlink()
-        error('timeout')
     t = get(p)
     state = t.get('status',{}).get('state')
     # Simulate a status change between get and send.
@@ -53,6 +50,10 @@ elif args[0] == 'send':
     if state == 'blocked' or ('--if' in args and state != args[args.index('--if')+1]):
         error('blocked' if state == 'blocked' else 'status_mismatch')
     with (home/'prompts').open('a') as f: f.write(json.dumps({'pane':p,'args':args,'text':text})+'\n')
+    # The text landed but hc's post-send observation missed its deadline.
+    if text.startswith('/config theme=') and fail.exists():
+        fail.unlink()
+        error('timeout')
     emit({'started':True,'status':state,'turn':1})
 elif args[0] == 'events':
     if (home/'poll-mode').exists(): sys.exit(1)

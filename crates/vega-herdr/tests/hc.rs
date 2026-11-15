@@ -31,6 +31,13 @@ fn fake_hc_contract() {
                     "remote/t7"
                 );
             }
+            "bounded_send" => {
+                vega_herdr::bound_daemon_calls();
+                assert_eq!(
+                    hc_local(&["send", "t8", "literal --text"]).unwrap()["turn"],
+                    1
+                );
+            }
             "send" => assert_eq!(
                 hc_local(&["send", "t8", "literal --text"]).unwrap()["turn"],
                 1
@@ -90,6 +97,7 @@ elif c=='exit': sys.exit(4)
 elif c=='timeout': time.sleep(5)
 elif c=='on': t['address']='remote/t7'
 elif c=='send': t={{'turn':1}}
+elif c=='bounded_send': time.sleep(5.2);t={{'turn':1}}
 elif c not in ['hc']:
  print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"error":{{"code":-32000,"message":"probe","data":{{"kind":c,"hint":"try again"}}}}}}));sys.exit(3)
 print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"result":t}}))
@@ -116,6 +124,7 @@ esac
         "stale_herdr",
         "on",
         "send",
+        "bounded_send",
         "usage",
         "bad",
         "exit",
@@ -138,6 +147,9 @@ esac
             .env("VEGA_HC_TEST", case)
             .env("VEGA_HC_ARGS", &args)
             .env("VEGA_HC_REQUEST", &request)
+            .env("HOME", dir.path())
+            .env("XDG_STATE_HOME", dir.path().join("state"))
+            .env("XDG_CONFIG_HOME", dir.path().join("config"))
             .env_remove("HERDR_PANE_ID")
             .env_remove("HC_TERMINAL_ID")
             .env(

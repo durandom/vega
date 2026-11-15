@@ -228,7 +228,14 @@ pub fn hc_on(
         timeout.or_else(|| {
             BOUNDED
                 .load(std::sync::atomic::Ordering::Relaxed)
-                .then_some(DAEMON_CALL_TIMEOUT)
+                .then_some(if method == "terminal.send" {
+                    // hc pastes first, then watches for `working` for 5 s even
+                    // without wait=true. Slash commands may never go working.
+                    // Allow quiet/settle/paste plus that window before timing out.
+                    Duration::from_secs(15)
+                } else {
+                    DAEMON_CALL_TIMEOUT
+                })
         }),
     )
 }

@@ -693,7 +693,7 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
 }
 
 #[test]
-fn failed_theme_send_is_retried_after_fixture_relay_restart() {
+fn delivered_theme_timeout_is_not_retyped_after_fixture_relay_restart() {
     let mut f = theme_fixture();
     fs::write(f.home.path().join("theme-timeout-t2"), "").unwrap();
     let env = vega_theme_sync::Env::at(f.home.path());
@@ -709,12 +709,12 @@ fn failed_theme_send_is_retried_after_fixture_relay_restart() {
             .ok()
             .and_then(|j| j.panes.get("t2").cloned())
             .is_some_and(|p| {
-                p.pending && p.error.as_deref().is_some_and(|e| e.contains("hc_timeout"))
+                !p.pending && p.error.as_deref().is_some_and(|e| e.contains("hc_timeout"))
             })
     });
     // Stop only the test relay (both terminal backends and HOME are fakes).
     drop(f.relay.take());
-    assert!(f.prompts("t2").is_empty());
+    assert_eq!(f.prompts("t2").len(), 1);
     let before = f.prompts("t1").len();
     assert_eq!(before, 1);
     assert_eq!(
@@ -722,12 +722,7 @@ fn failed_theme_send_is_retried_after_fixture_relay_restart() {
         vega_theme_sync::Mode::Light
     );
     f.start();
-    wait(f.home.path(), "resumed theme send", || {
-        vega_theme_sync::live::Journal::load(&env)
-            .ok()
-            .and_then(|j| j.panes.get("t2").cloned())
-            .is_some_and(|p| !p.pending && p.applied == Some(vega_theme_sync::Mode::Light))
-    });
+    // Startup reconciles the saved request; the uncertain receipt is terminal.
     assert_eq!(f.prompts("t2").len(), 1);
     assert_eq!(
         f.prompts("t1").len(),
@@ -735,8 +730,13 @@ fn failed_theme_send_is_retried_after_fixture_relay_restart() {
         "successful receipt was replayed"
     );
     let journal = vega_theme_sync::live::Journal::load(&env).unwrap();
-    assert_eq!(journal.panes["t2"].attempts, 2);
-    assert!(journal.panes["t2"].error.is_none());
+    assert_eq!(journal.panes["t2"].attempts, 1);
+    assert!(!journal.panes["t2"].pending);
+    assert!(journal.panes["t2"]
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("maybe delivered"));
 }
 
 #[test]

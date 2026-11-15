@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 212 · 2026-11-15
+
+- feature: live Claude theme delivery stops after an unconfirmed send timeout and
+  caps failed attempts at three per request, preventing repeated slash commands.
+- feature: PagerDuty mail acceptance timeouts retain a maybe-delivered receipt,
+  preventing duplicate reminders on the next relay tick.
+
 ## 211 · 2026-11-15
 
 - feature: Services retains registered titles without terminal attribution, labels

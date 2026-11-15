@@ -83,6 +83,7 @@ struct Fake {
     poll_error: Option<String>,
     poll_calls: usize,
     fail_delivery: bool,
+    acceptance_timeout: bool,
     registry_error: bool,
     view: View,
     ownership: Ownership,
@@ -97,6 +98,7 @@ impl Default for Fake {
             poll_error: None,
             poll_calls: 0,
             fail_delivery: false,
+            acceptance_timeout: false,
             registry_error: false,
             view: view("ganymede", "w1:p1"),
             ownership: ownership(),
@@ -135,7 +137,11 @@ impl Ops for Fake {
             return Err("mail unavailable".into());
         }
         self.mails.push((to.clone(), text.into()));
-        Ok(())
+        if self.acceptance_timeout {
+            Err(MAIL_ACCEPTANCE_TIMEOUT.into())
+        } else {
+            Ok(())
+        }
     }
     fn clear_notes(&mut self, state: &State, _: i64) {
         self.cleared = state.incidents.keys().cloned().collect();
@@ -569,6 +575,7 @@ fn board_notes_are_durable_scoped_and_resolve_on_handoff_or_absence() {
             pane: "w1:p1".into(),
         },
         at: 300,
+        maybe_delivered: false,
     });
     resolve_notes(&store, &state, 300);
     assert_eq!(store.list()[0].resolved, Some(300));
@@ -1015,4 +1022,38 @@ fn a_registered_failed_clone_blocks_only_its_id_and_healthy_projects_still_mail(
             .iter()
             .any(|(to, _)| matches!(to, Destination::Mail { project, .. } if project == shared)));
     }
+}
+
+#[test]
+fn accepted_mail_timeout_records_receipt_before_next_tick_and_restart() {
+    let dir = tempdir().unwrap();
+    let path = state_file(&dir);
+    let mut ops = Fake {
+        acceptance_timeout: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        cycle(&path, 0, &mut ops).unwrap_err(),
+        MAIL_ACCEPTANCE_TIMEOUT
+    );
+    assert_eq!(ops.mails.len(), 1);
+    assert!(
+        State::load(&path).unwrap().incidents["QTEST01"]
+            .delivered
+            .as_ref()
+            .unwrap()
+            .maybe_delivered
+    );
+    // cycle reloads the durable state on every call, including after restart.
+    cycle(&path, 60, &mut ops).unwrap();
+    cycle(&path, REMIND_EVERY - 1, &mut ops).unwrap();
+    assert_eq!(ops.mails.len(), 1);
+    // A scheduled reminder still gets exactly one attempt.
+    assert!(cycle(&path, REMIND_EVERY, &mut ops).is_err());
+    cycle(&path, REMIND_EVERY + 60, &mut ops).unwrap();
+    assert_eq!(ops.mails.len(), 2);
+    ops.incidents[0].status = "acknowledged".into();
+    ops.incidents[0].last_status_change_at = "t2".into();
+    assert!(cycle(&path, REMIND_EVERY + POLL_EVERY, &mut ops).is_err());
+    assert_eq!(ops.mails.len(), 3);
 }
