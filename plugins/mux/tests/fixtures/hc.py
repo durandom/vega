@@ -66,7 +66,8 @@ if cmd=='run':
  emit(t)
 elif cmd=='exec':
  if os.environ.get('TEST_PREPARE_FAIL'): err('unavailable')
- assert a[a.index('--')+1:a.index('--')+3]==['vega-mux','prepare']
+ assert a[a.index('--')+1]=='vega-mux'
+ assert a[a.index('--')+2] in ['prepare','mode']
  if (root/'remote-home').exists():
   import subprocess
   e=dict(os.environ, HOME=str(root/'remote-home'), PATH=str(root/'remote-home/bin')+':'+os.environ['PATH'])
@@ -76,7 +77,13 @@ elif cmd=='exec':
  else: out,errb,rc=(json.dumps({'schema':1,'trust':None})+'\n').encode(),b'',0
  # machine.exec wraps the program's output: base64 stdout/stderr plus its exit code.
  import base64
- emit({'code':rc,'ms':1,'signal':None,'stderr':base64.b64encode(errb).decode(),'stdout':base64.b64encode(out).decode(),'timed_out':False,'truncated':False})
+ failure=os.environ.get('TEST_MODE_FAILURE')
+ if failure=='exit': rc=1
+ elif failure=='old': out=b'mode: headed (t8 worker)\n'
+ elif failure=='json': out=b'{}'
+ elif failure=='base64': out=b'not json'
+ elif failure=='mismatch': out=json.dumps({'schema':1,'mode':'headless','output':'mode: headless'}).encode()
+ emit({'code':rc,'ms':1,'signal':None,'stderr':base64.b64encode(errb).decode(),'stdout':base64.b64encode(out).decode(),'timed_out':failure=='timeout','truncated':failure=='truncated'})
 elif cmd=='get': emit(get(a[1]))
 elif cmd=='label':
  t=get(a[1])

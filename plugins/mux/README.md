@@ -16,6 +16,11 @@ Target commands accept `hc:t7` or `hc:machine/t7` independently of the caller's 
 `--machine` lookup uses `hc machine ls`, falling back to `herdr machine list` when hc
 is absent or its fleet is empty. hc remote spawn refuses corporate-to-private control.
 
+`mode --machine <host> <pane> [headed|headless]` executes on the pane host through
+hc, so its local mode query, question hooks and `vega review start` share the same
+record. Qualified pane addresses work too. Both ends need matching vega versions;
+unavailable transport, failed writes and unconfirmed replies return structured errors.
+
 Mail keeps machine-qualified addresses intact. The hc machine name must equal its
 vega registry host: `vega mux send machine/t7 "<text>"` needs no `--host`.
 Post verifies that host exists; unknown hosts or unavailable registry checks fail

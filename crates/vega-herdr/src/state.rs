@@ -413,8 +413,28 @@ impl Mode {
 
 /// Records the mode of the agent `name` in `pane` (`None`: this machine).
 pub fn save_mode(machine: Option<&str>, pane: &str, name: &str, mode: Mode) {
+    let _ = save_mode_checked(machine, pane, name, mode);
+}
+
+/// Explicit mode changes must not acknowledge a failed write. Other callers
+/// retain best-effort persistence through save_mode.
+pub fn save_mode_checked(
+    machine: Option<&str>,
+    pane: &str,
+    name: &str,
+    mode: Mode,
+) -> std::io::Result<()> {
+    let file = state_file_on("modes", machine, pane)
+        .ok_or_else(|| std::io::Error::other("no state directory configured"))?;
+    std::fs::create_dir_all(file.parent().expect("state file has a parent"))?;
     let record = json!({"name": name, "mode": mode.as_str()});
-    write(&state_file_on("modes", machine, pane), &record.to_string());
+    let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&tmp, record.to_string())?;
+    let result = std::fs::rename(&tmp, &file);
+    if result.is_err() {
+        let _ = std::fs::remove_file(tmp);
+    }
+    result
 }
 
 /// The mode of the agent `name` in `pane`. No record, an unknown mode or one

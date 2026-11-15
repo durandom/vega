@@ -915,3 +915,176 @@ fn empty_tui_identity_still_binds_hc_session_before_dispatch() {
     let child = records.iter().find(|v| v["pane"] == "t8").unwrap();
     assert_eq!(child["session"], "eager-session");
 }
+
+fn mode_remote(f: &Fixture) -> std::path::PathBuf {
+    let remote = f.root().join("remote-home");
+    fs::create_dir_all(remote.join("bin")).unwrap();
+    for name in ["hc", "herdr"] {
+        fs::copy(
+            f.root().join("bin").join(name),
+            remote.join("bin").join(name),
+        )
+        .unwrap();
+    }
+    fs::write(
+        remote.join("terminals.json"),
+        serde_json::json!({"t8":{
+            "address":"t8", "name":"worker", "state":"live", "parent":"t7",
+            "argv":[], "cwd":"/remote/repo", "created_ms":0,
+            "screen":"exact", "cols":80, "rows":24, "labels":{},
+            "pid": std::process::id(), "status":{"app":"codex","state":"idle"}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    remote
+}
+
+#[test]
+fn remote_mode_uses_target_local_store_for_reads_and_writes() {
+    let f = Fixture::new();
+    let remote = mode_remote(&f);
+    for (args, expected) in [
+        (
+            vec!["mode", "--machine", "remote", "t8", "headed"],
+            "headed",
+        ),
+        (vec!["mode", "hc:remote/t8"], "headed"),
+        (
+            vec!["mode", "--machine", "remote", "worker", "headless"],
+            "headless",
+        ),
+        (vec!["--machine", "remote", "mode", "t8"], "headless"),
+        (vec!["mode", "remote/t8", "headed"], "headed"),
+    ] {
+        let out = success(
+            f.cmd()
+                .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
+                .args(args)
+                .output()
+                .unwrap(),
+        );
+        assert!(out.contains(&format!("mode: {expected}")), "{out}");
+        let local = success(
+            f.cmd()
+                .env("HOME", &remote)
+                .env_remove("XDG_STATE_HOME")
+                .env_remove("XDG_CONFIG_HOME")
+                .args(["mode", "t8"])
+                .output()
+                .unwrap(),
+        );
+        assert!(local.contains(&format!("mode: {expected}")), "{local}");
+        let mode =
+            fs::read_to_string(remote.join(".local/state/vega/modes/local_hc-7438")).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&mode).unwrap()["mode"],
+            expected
+        );
+    }
+    assert!(!f.root().join("state/vega/modes").exists());
+    let calls = f.calls();
+    let exec = calls.iter().find(|v| v[0] == "exec").unwrap();
+    assert_eq!(exec[2], "remote");
+    assert!(exec.as_array().unwrap().iter().any(|v| v == "hc:t8"));
+}
+
+#[test]
+fn remote_mode_never_reports_success_for_unconfirmed_execution() {
+    for failure in [
+        "exit",
+        "old",
+        "json",
+        "base64",
+        "mismatch",
+        "timeout",
+        "truncated",
+    ] {
+        let f = Fixture::new();
+        let out = f
+            .cmd()
+            .env("TEST_MODE_FAILURE", failure)
+            .args(["mode", "--machine", "remote", "t8", "headed"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "accepted {failure}");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("remote_mode_failed"), "{failure}: {text}");
+        assert!(!text.contains("mode: headed"), "{failure}: {text}");
+        assert!(!f.root().join("state/vega/modes").exists());
+    }
+}
+
+#[test]
+fn remote_mode_reports_target_write_failures_and_refuses_conflicting_hosts() {
+    let f = Fixture::new();
+    let remote = mode_remote(&f);
+    fs::create_dir_all(remote.join(".local/state/vega")).unwrap();
+    fs::write(remote.join(".local/state/vega/modes"), "not a directory").unwrap();
+    let out = f
+        .cmd()
+        .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
+        .args(["mode", "--machine", "remote", "t8", "headed"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("remote_mode_failed"));
+    let out = f
+        .cmd()
+        .args(["mode", "--machine", "remote", "other/t8", "headed"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("different hosts"));
+    assert_eq!(f.calls().iter().filter(|v| v[0] == "exec").count(), 1);
+    assert!(!f.root().join("state/vega/modes").exists());
+}
+
+#[test]
+fn remote_mode_supports_tui_panes_without_remote_file_caches() {
+    let f = Fixture::new();
+    let remote = mode_remote(&f);
+    fs::write(
+        remote.join("bin/herdr"),
+        r#"#!/bin/sh
+[ "$*" = 'agent get w1:p2' ] || exit 2
+printf '%s\n' '{"result":{"agent":{"pane_id":"w1:p2","name":"worker","agent":"codex"}}}'
+"#,
+    )
+    .unwrap();
+    for args in [
+        vec!["mode", "--machine", "remote", "w1:p2", "headed"],
+        vec!["mode", "remote:w1:p2"],
+    ] {
+        let out = success(
+            f.cmd()
+                .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
+                .args(args)
+                .output()
+                .unwrap(),
+        );
+        assert!(out.contains("mode: headed"), "{out}");
+    }
+    assert!(remote.join(".local/state/vega/modes/local_w1_p2").exists());
+    assert!(!f.root().join("state/vega/modes").exists());
+}
+
+#[test]
+fn remote_mode_refuses_unavailable_transport_and_disallowed_direction() {
+    for (variable, value, expected) in [
+        ("TEST_PREPARE_FAIL", "1", "remote_mode_failed"),
+        ("VEGA_POST_HOST", "puck", "machine_direction"),
+    ] {
+        let f = Fixture::new();
+        let out = f
+            .cmd()
+            .env(variable, value)
+            .args(["mode", "--machine", "remote", "t8", "headed"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(!out.status.success());
+        assert!(text.contains(expected), "{text}");
+        assert!(!f.root().join("state/vega/modes").exists());
+    }
+}

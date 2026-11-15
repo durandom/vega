@@ -7,6 +7,7 @@ mod dialog;
 mod hc_spawn;
 mod hook;
 mod next;
+mod remote_mode;
 mod reopen;
 mod tier;
 mod transcript;
@@ -173,6 +174,9 @@ enum Cmd {
         /// The new mode; omit it to print the current one
         #[arg(value_enum)]
         mode: Option<ModeArg>,
+        /// Print the versioned mode result as JSON
+        #[arg(long, hide = true)]
+        json: bool,
     },
     /// Focus the agent that has waited longest for you (done or blocked), on any host
     #[command(
@@ -382,6 +386,7 @@ fn main() -> ExitCode {
     {
         let _ = vega_herdr::hc::own_terminal();
     }
+    let mode_json = matches!(cli.cmd, Some(Cmd::Mode { json: true, .. }));
     let result = match cli.cmd {
         None => home(cli.all),
         Some(Cmd::Prepare {
@@ -458,7 +463,7 @@ fn main() -> ExitCode {
         Some(Cmd::Dismiss { target }) => dismiss(&target),
         Some(Cmd::Reopen { targets }) => reopen::run_all(&targets),
         Some(Cmd::Next { status }) => next::run(&status),
-        Some(Cmd::Mode { target, mode }) => set_mode(&target, mode),
+        Some(Cmd::Mode { target, mode, json }) => set_mode(&target, mode, json),
         Some(Cmd::Spawn {
             name,
             kind,
@@ -500,7 +505,11 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(f) => {
-            print_failure(&f);
+            if mode_json {
+                vega_herdr::print_failure_json(&f);
+            } else {
+                print_failure(&f);
+            }
             ExitCode::from(if f.code == "usage" { 2 } else { 1 })
         }
     }
@@ -730,22 +739,40 @@ fn close(target: &str) -> Result<(), Failure> {
 
 /// `vega mux mode <target> [headless|headed]`: records the mode for the
 /// agent that runs in the pane now; without a mode prints it.
-fn set_mode(target: &str, mode: Option<ModeArg>) -> Result<(), Failure> {
+fn set_mode(target: &str, mode: Option<ModeArg>, json: bool) -> Result<(), Failure> {
+    if let Some(result) = remote_mode::run(target, mode)? {
+        return print_mode_result(&result, json);
+    }
     let a = backend::agent(target)?["result"]["agent"].clone();
     let pane = str_of(&a, "pane_id");
+    // A name lookup can resolve to a qualified hc address as well.
+    if let Some(result) = remote_mode::run(pane, mode)? {
+        return print_mode_result(&result, json);
+    }
     let (name, mode) = agent_mode(&a, mode)?;
-    let name = name.as_str();
-    let parent = parent_of(pane, name);
-    println!("mode: {} ({pane} {})", mode.as_str(), cell(name));
-    match (parent, mode) {
+    let parent = parent_of(pane, &name);
+    let questions = match (parent, mode) {
         (None, _) => {
-            println!("note: no parent recorded: the hook leaves its dialogs alone in either mode")
+            "note: no parent recorded: the hook leaves its dialogs alone in either mode".into()
         }
-        (Some(p), Mode::Headless) => println!(
+        (Some(p), Mode::Headless) => format!(
             "questions: to its parent {} (ask-parent hook)",
             p.label(&vega_herdr::state::post_host())
         ),
-        (Some(_), Mode::Headed) => println!("questions: stay in its pane (the user answers)"),
+        (Some(_), Mode::Headed) => "questions: stay in its pane (the user answers)".into(),
+    };
+    let result = serde_json::json!({
+        "schema": 1, "mode": mode.as_str(),
+        "output": format!("mode: {} ({pane} {})\n{questions}\n", mode.as_str(), cell(&name)),
+    });
+    print_mode_result(&result, json)
+}
+
+fn print_mode_result(result: &Value, json: bool) -> Result<(), Failure> {
+    if json {
+        println!("{result}");
+    } else {
+        print!("{}", result["output"].as_str().unwrap_or_default());
     }
     Ok(())
 }
@@ -765,7 +792,13 @@ fn agent_mode(a: &Value, requested: Option<ModeArg>) -> Result<(String, Mode), F
             ModeArg::Headless => Mode::Headless,
             ModeArg::Headed => Mode::Headed,
         };
-        save_mode(machine(), pane, &name, m);
+        vega_herdr::state::save_mode_checked(machine(), pane, &name, m).map_err(|e| {
+            Failure::new(
+                "mode_write_failed",
+                format!("cannot save mode for {pane}: {e}"),
+                "check the pane host's state directory permissions and retry the mode command",
+            )
+        })?;
     }
     let mode = mode_of(machine(), pane, &name);
     Ok((name, mode))

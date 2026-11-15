@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 213 · 2026-11-15
+
+- feature: `vega mux mode --machine <host>` reads and changes the mode on the
+  pane host, so review and question routing see it. Unconfirmed remote changes
+  return an error; both hosts need matching vega versions.
+
 ## 212 · 2026-11-15
 
 - feature: live Claude theme delivery stops after an unconfirmed send timeout and
