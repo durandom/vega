@@ -57,8 +57,8 @@ export function selectedProject(focus, allTerms) {
 export function serviceAddress(row, forward) {
   const host = row.host === "::1" ? "[::1]" : row.host;
   const address = row.url || row.address || `${row.scheme || "tcp"}://${host}:${row.port}`;
-  if (!forward || !/^https?:\/\//i.test(address)) return address;
-  return address.replace(/^(https?:\/\/)[^/?#]+/i, (_match, scheme) => `${scheme}127.0.0.1:${forward.local}`);
+  if (!forward || !/^(https?|tcp):\/\//i.test(address)) return address;
+  return address.replace(/^((?:https?|tcp):\/\/)[^/?#]+/i, (_match, scheme) => `${scheme}127.0.0.1:${forward.local}`);
 }
 export function attribute(snapshot, machine, allTerms, allSpaces, allPanes) {
   const terms = allTerms.filter(t => t.state === "live" && machineOf(t.address) === machine);
@@ -85,13 +85,14 @@ export function attribute(snapshot, machine, allTerms, allSpaces, allPanes) {
       // Equal specificity in different spaces is ambiguous: leave it unassigned.
       if (matches.length && !matches.some(c => c.dir.length === matches[0].dir.length && c.space.id !== matches[0].space.id)) owner = matches[0];
     }
-    if (!owner) continue;
+    if (!owner && !listener.registered) continue;
     const host = listener.host === "::1" || listener.host === "::" ? "::1" : "127.0.0.1";
     // Only loopback or wildcard listeners are reachable at the loopback destination.
     if (!["127.0.0.1", "::1", "::", "0.0.0.0", "*"].includes(listener.host)) continue;
-    const key = JSON.stringify([machine, listener.pid, listener.port, host]);
-    rows.set(key, {...listener, host, key, machine, space: owner.space.id,
-      spaceName: owner.space.name, project: context.ofTerm(owner.term) ?? "Other spaces"});
+    const key = JSON.stringify(listener.registered ? [machine, "registered", listener.port] : [machine, listener.pid, listener.port, host]);
+    rows.set(key, {...listener, host, key, machine, space: owner?.space.id ?? "",
+      spaceName: owner?.space.name ?? "Host registrations", unattributed: !owner,
+      project: owner ? context.ofTerm(owner.term) ?? "Other spaces" : "Registered services"});
   }
   return [...rows.values()];
 }

@@ -19,8 +19,8 @@ Run on the service's host; this never starts services or tunnels.
 - URLs must be HTTP(S) loopback URLs with the registered port. Paths, queries
   and fragments survive SSH forwarding. Omit URL to use protocol detection.
 - Refresh the Services panel to read each machine's metadata. Titles and
-  descriptions replace process-only labels. Project/space attribution still
-  requires a matching live terminal's ancestry or working directory.
+  descriptions replace process-only labels. Without terminal ancestry or cwd
+  attribution, registrations appear in Host registrations across project filters.
 - Agent runtimes are hidden by default; **Show agent ports** reveals them.
   Registered ports remain visible. Forward uses private-host SSH `-L` to
   loopback only; Stop or panel close ends its tunnel.

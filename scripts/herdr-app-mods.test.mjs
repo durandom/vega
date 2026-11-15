@@ -1976,6 +1976,33 @@ test('services URL clicks await one forward, preserve HTTPS path, copy puck and 
   assert.equal(h.mod.forwards.has('closing'),false);
 });
 
+test('registered 5320/8367 survive failed attribution and PID restart with correct forward state',()=>{
+  const h=load('vega-services');
+  const attribute=vm.runInContext('attribute',h.api);
+  const snapshot={parents:{},cwds:{},listeners:[
+    {pid:31560,port:5320,host:'127.0.0.1',name:'node',registered:true,title:'Classic app (local Elven Mini)',scheme:'http'},
+    {pid:20931,port:8367,host:'127.0.0.1',name:'node',registered:true,title:'Classic world node',scheme:'tcp'}]};
+  const rows=attribute(snapshot,'ganymede',[],[],[]);
+  assert.equal(rows.length,2);
+  Object.assign(h.mod,{rows,errors:[],forwards:new Map(),pending:new Set(),targets:new Map([['ganymede','ganymede']])});
+  let text=JSON.stringify(h.render());
+  assert(text.includes('Classic app (local Elven Mini) :5320'));
+  assert(text.includes('Classic world node :8367'));
+  assert(text.includes('Running · ganymede')); assert(!text.includes('Stop"'));
+  h.mod.forwards.set(rows[0].key,{local:40518});
+  snapshot.listeners[0].pid=999;
+  h.mod.rows=attribute(snapshot,'ganymede',[],[],[]);
+  assert.equal(h.mod.rows[0].key,rows[0].key);
+  text=JSON.stringify(h.render());
+  assert(text.includes('Forwarded · ganymede')); assert(text.includes('Local forward → ganymede:5320'));
+  assert(text.includes('http://127.0.0.1:40518')); assert(!text.includes('stopped'));
+  h.mod.rows[1].gone=true;
+  text=JSON.stringify(h.render());
+  assert(text.includes('Stopped · ganymede'));
+  h.mod.forwards.clear();
+  assert(!JSON.stringify(h.render()).includes('Stop"'));
+});
+
 test('services displays registered metadata and toggles hidden agent ports without rescanning',()=>{
   const h=load('vega-services');
   const attribute=vm.runInContext('attribute',h.api);

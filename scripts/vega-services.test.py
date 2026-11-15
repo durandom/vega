@@ -152,9 +152,12 @@ class ServicesTest(unittest.TestCase):
         with patch.object(helper, "registrations", return_value=entries), patch.object(helper, "command", processes), patch.object(helper.shutil, "which", return_value="ss"), patch.object(helper.os, "readlink", return_value="/repo"), patch.object(helper, "protocol", return_value="http"):
             rows = helper.scan()["listeners"]
             self.assertEqual(rows[0]["title"], "Spire")
+            self.assertTrue(rows[0]["registered"])
             self.assertTrue(rows[0]["agent"])
             self.assertNotIn("title", rows[1])
             self.assertFalse(rows[1]["agent"])
+            self.assertTrue(rows[2]["gone"])
+            self.assertEqual(rows[2]["title"], "Wrong process")
 
     def test_main_structured_errors_and_help_without_state(self):
         for args, code in [(["cli", "ls", "--typo"], 2), (["cli", "register", "--port", "80", "--title", "x"], 1)]:

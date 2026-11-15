@@ -629,3 +629,10 @@ window focus spellkave, choose Services, Refresh, then click the ganymede :5187 
 The displayed ephemeral localhost URL reaches Spire without exposing its remote
 listener. Stop removes it; a second forward followed by layout teardown exercises
 cleanup. This sentinel only used fake tests, never started that live flow.
+
+Registered services use host/port identities, retaining titles and owned forwards
+across listener restarts. When ancestry/cwd attribution fails they appear under
+Registered services / Host registrations across project filters, explicitly host
+scoped rather than guessed into a project. A still-live registered process without
+a listener shows Stopped. Rows independently label running/forwarded/stopped,
+host, and remote port versus local forward; only owned forwards offer Stop.

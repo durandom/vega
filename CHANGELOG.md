@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 211 · 2026-11-15
+
+- feature: Services retains registered titles without terminal attribution, labels
+  running/forwarded/stopped rows and distinguishes remote ports from local forwards.
+- unit: update the CLI on service hosts and apply `herdr-app.vega-services`.
+
 ## 210 · 2026-11-14
 
 - feature: `vega service register --port <port> --title "<title>"` adds host-local

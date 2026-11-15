@@ -93,6 +93,11 @@ def scan(enrich=True):
                 entry = entries.get(listener["port"])
                 if entry and entry["pid"] == listener["pid"]:
                     listener.update({k: entry[k] for k in ("title", "description", "url")})
+                    listener["registered"] = True
+        for port, entry in entries.items():
+            if not any(r["port"] == port and r["pid"] == entry["pid"] for r in listeners):
+                listeners.append({**entry, "registered": True, "gone": True,
+                                  "host": "127.0.0.1", "name": entry["title"], "scheme": "tcp"})
     return dict(listeners=listeners, parents=parents, cwds=cwds, home=str(Path.home()))
 
 
