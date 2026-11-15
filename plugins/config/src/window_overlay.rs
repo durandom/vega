@@ -197,7 +197,10 @@ mod tests {
         assert_eq!(p.tabs[1].name, id);
         assert!(p.tabs[1].terminals[0].argv.is_empty());
         assert!(!p.tabs.iter().any(|t| t.name == "proteus"));
-        assert_eq!(effective(&base, &Overlay::default()).unwrap().tabs.len(), 4);
+        assert_eq!(
+            effective(&base, &Overlay::default()).unwrap().tabs.len(),
+            base.tabs.len()
+        );
         o.hidden = base
             .tabs
             .iter()

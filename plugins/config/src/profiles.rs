@@ -425,6 +425,45 @@ mod tests {
         assert!(plan(&ctx).is_err());
     }
 
+    const STATUS_FIXTURE: &str = r#"layout = "status"
+mods = ["vega-window-tabs"]
+
+[settings.sounds]
+enabled = false
+
+[shared]
+"frame.welcomed" = "finished"
+
+[[tab]]
+name = "proteus"
+[[tab.terminals]]
+name = "proteus-btop"
+machine = "proteus"
+argv = ["btop"]
+
+[[tab]]
+name = "ganymede"
+[[tab.terminals]]
+name = "ganymede-btop"
+machine = "ganymede"
+argv = ["btop"]
+
+[[tab]]
+name = "io"
+[[tab.terminals]]
+name = "io-btop"
+machine = "io"
+argv = ["btop"]
+optional = true
+
+[[tab]]
+name = "tokens"
+[[tab.terminals]]
+name = "ganymede-tokens"
+machine = "ganymede"
+argv = ["token-burn", "tui"]
+"#;
+
     #[test]
     fn profile_apply_is_isolated_idempotent_and_preserves_shared_state() {
         let temp = tempfile::tempdir().unwrap();
@@ -432,6 +471,10 @@ mod tests {
         let main = ctx.env.config.join("herdr-app");
         fs::create_dir_all(&main).unwrap();
         fs::write(main.join("settings.json"), "main home sentinel").unwrap();
+        // A fixture, not the repo's status.toml: the settings window edits that file (vega-h06v).
+        let local = sources::local_dir(&ctx.env).join("herdr-app/profiles");
+        fs::create_dir_all(&local).unwrap();
+        fs::write(local.join("status.toml"), STATUS_FIXTURE).unwrap();
         let p = plan(&ctx).unwrap();
         assert!(matches!(apply(&ctx, &p, &mut vec![]), Outcome::Written(_)));
         let target = home(&ctx.env, "status").unwrap();
