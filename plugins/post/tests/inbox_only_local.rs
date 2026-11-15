@@ -389,11 +389,19 @@ fn log_without_pane_lists_the_archive_across_panes() {
         .local_addr()
         .unwrap()
         .port();
+    let config = home.join("nats.conf");
+    std::fs::write(
+        &config,
+        format!(
+            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 64G }}\n",
+            home.join("js").display()
+        ),
+    )
+    .unwrap();
     let _server = Server(
         Command::new("nats-server")
-            .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string()])
-            .arg("-sd")
-            .arg(home.join("js"))
+            .arg("-c")
+            .arg(&config)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

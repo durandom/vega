@@ -24,10 +24,19 @@ fn broker(dir: &std::path::Path) -> (Broker, String) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
+    let config = dir.join("nats.conf");
+    std::fs::write(
+        &config,
+        format!(
+            "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 64G }}\n",
+            dir.join("js").display()
+        ),
+    )
+    .unwrap();
     let server = Broker(
         Command::new("nats-server")
-            .args(["-a", "127.0.0.1", "-p", &port.to_string(), "-js", "-sd"])
-            .arg(dir.join("js"))
+            .arg("-c")
+            .arg(&config)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

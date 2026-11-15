@@ -1152,9 +1152,18 @@ mod tests {
                 .local_addr()
                 .unwrap()
                 .port();
+            let config = d.path().join("nats.conf");
+            fs::write(
+                &config,
+                format!(
+                    "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{}\", max_file_store: 64G }}\n",
+                    d.path().join("nats").display()
+                ),
+            )
+            .unwrap();
             let mut server = Command::new("nats-server")
-                .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"])
-                .arg(d.path().join("nats"))
+                .arg("-c")
+                .arg(&config)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
