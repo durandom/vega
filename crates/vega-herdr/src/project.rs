@@ -669,7 +669,9 @@ pub fn decode_component(encoded: &str) -> Result<String, Failure> {
     }
     let bytes = encoded
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let a = char::from(pair[0]).to_digit(16).ok_or_else(invalid)?;
             let b = char::from(pair[1]).to_digit(16).ok_or_else(invalid)?;

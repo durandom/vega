@@ -42,7 +42,7 @@ fn gather(store: &Store) -> (Vec<Note>, Option<String>) {
         }
         Err(e) => Some(e),
     };
-    notes.sort_by(|a, b| b.id.cmp(&a.id));
+    notes.sort_by_key(|a| std::cmp::Reverse(a.id));
     (notes, off)
 }
 
