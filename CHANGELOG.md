@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 215 · 2026-11-15
+
+- feature: `vega mux spawn --machine <host>` confirms mode, parent, task and
+  spawn records on the target, where review and hooks read them. Unconfirmed
+  writes report an error naming the started terminal; both hosts need matching
+  vega versions.
+
 ## 214 · 2026-11-15
 
 - feature: Vega tabs follows agents' live task titles while keeping custom tab

@@ -62,22 +62,28 @@ if cmd=='run':
  assert p['argv'][0]==labels['vega.kind']
  t=terminal({'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':p['argv'][0],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0})
  ts[i]=t;save()
+ if p.get('on') and (root/'remote-home').exists():
+  local=dict(t,address=i.split('/')[-1])
+  (root/'remote-home/terminals.json').write_text(json.dumps({local['address']:local}))
  if os.environ.get('TEST_UNDELIVERED'): t['first_message']={'sent':False,'reason':'blocked'}
  emit(t)
 elif cmd=='exec':
- if os.environ.get('TEST_PREPARE_FAIL'): err('unavailable')
+ if os.environ.get('TEST_PREPARE_FAIL') or (os.environ.get('TEST_RECORD_FAILURE')=='unavailable' and a[a.index('--')+2]=='record-spawn'): err('unavailable')
  assert a[a.index('--')+1]=='vega-mux'
- assert a[a.index('--')+2] in ['prepare','mode']
+ assert a[a.index('--')+2] in ['prepare','mode','record-spawn']
  if (root/'remote-home').exists():
   import subprocess
   e=dict(os.environ, HOME=str(root/'remote-home'), PATH=str(root/'remote-home/bin')+':'+os.environ['PATH'])
   for k in ['HC_TERMINAL_ID','HERDR_PANE_ID','XDG_CONFIG_HOME','XDG_STATE_HOME']: e.pop(k,None)
   r=subprocess.run([os.environ['TEST_MUX_EXE']]+a[a.index('--')+2:],env=e,capture_output=True)
   out,errb,rc=r.stdout,r.stderr,r.returncode
+ elif a[a.index('--')+2]=='record-spawn':
+  import base64
+  out,errb,rc=base64.b64decode(a[-1]),b'',0
  else: out,errb,rc=(json.dumps({'schema':1,'trust':None})+'\n').encode(),b'',0
  # machine.exec wraps the program's output: base64 stdout/stderr plus its exit code.
  import base64
- failure=os.environ.get('TEST_MODE_FAILURE')
+ failure=os.environ.get('TEST_RECORD_FAILURE') if a[a.index('--')+2]=='record-spawn' else os.environ.get('TEST_MODE_FAILURE')
  if failure=='exit': rc=1
  elif failure=='old': out=b'mode: headed (t8 worker)\n'
  elif failure=='json': out=b'{}'

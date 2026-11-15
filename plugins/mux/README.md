@@ -104,6 +104,12 @@ its startup background probe; see [openai/codex#54159](https://github.com/openai
 An explicit `--env FORCE_COLOR=...` wins, including an empty value. This applies to every
 spawn location, including worktrees and remote machines.
 
+Remote spawns persist mode, parent lineage, task title, spawn identity/cwd,
+and brief state on the target host through a bounded, confirmed helper call.
+Review and hooks on that host see those local records. Both hosts need matching
+vega versions. If confirmation fails, `remote_spawn_record_failed` names the
+terminal already started: inspect it before retrying to avoid duplicate agents.
+
 Design: [vega-mux-mvp.md](../../docs/design/vega-mux-mvp.md), [pane-control.md](../../docs/design/pane-control.md),
 [mux-next.md](../../docs/design/mux-next.md), [hc migration](../../docs/design/hc-migration.md).
 

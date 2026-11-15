@@ -8,6 +8,7 @@ mod hc_spawn;
 mod hook;
 mod next;
 mod remote_mode;
+mod remote_spawn;
 mod reopen;
 mod tier;
 mod transcript;
@@ -68,6 +69,9 @@ const SKILL: &str = include_str!("../SKILL.md");
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Persist remote spawn metadata on the pane host (internal JSON protocol)
+    #[command(hide = true)]
+    RecordSpawn { payload: String },
     /// Apply this machine's existing repository trust before a remote hc launch (JSON)
     #[command(
         hide = true,
@@ -386,9 +390,13 @@ fn main() -> ExitCode {
     {
         let _ = vega_herdr::hc::own_terminal();
     }
-    let mode_json = matches!(cli.cmd, Some(Cmd::Mode { json: true, .. }));
+    let mode_json = matches!(
+        cli.cmd,
+        Some(Cmd::Mode { json: true, .. } | Cmd::RecordSpawn { .. })
+    );
     let result = match cli.cmd {
         None => home(cli.all),
+        Some(Cmd::RecordSpawn { payload }) => remote_spawn::receive(&payload),
         Some(Cmd::Prepare {
             kind,
             cwd,
@@ -1675,6 +1683,11 @@ fn spawn_inner(
         brief: text.to_string(),
         no_parent,
     });
+    if let Some(host) = machine() {
+        // Keep the prompt until delivery is confirmed, including startup dialogs.
+        lineage.started_ms = Some(vega_herdr::notes::now_ms());
+        remote_spawn::save(host, &lineage, prompt)?;
+    }
     if let Err(f) = started {
         // For the user: `io:w1:p2` on another machine, so selecting it in
         // herdr jumps there.
@@ -1808,6 +1821,9 @@ fn spawn_inner(
     // Some harnesses publish their session only after the first prompt.
     reopen::capture(&mut lineage);
     reopen::save_best_effort(&lineage);
+    if let Some(host) = machine() {
+        remote_spawn::save(host, &lineage, None)?;
+    }
     Ok(pane)
 }
 

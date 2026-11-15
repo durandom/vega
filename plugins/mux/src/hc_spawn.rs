@@ -306,20 +306,24 @@ pub fn spawn(
         "spawn",
         serde_json::json!({"pane":pane,"backend":"hc","kind":kind,"parent":record.parent,"tier":record.tier,"model":record.model,"cwd":cwd,"brief":prompt,"started":true}),
     );
-    if v["first_message"]["sent"] == false {
-        if let Some(text) = prompt {
-            keep_brief(
-                &pane,
-                &KeptBrief {
-                    name: name.into(),
-                    kind: kind.into(),
-                    cwd: cwd.clone(),
-                    brief: text.into(),
-                    no_parent,
-                },
-            );
-            return Err(Failure::new("brief_not_delivered", format!("terminal {pane} started, but hc did not deliver its first message"), &format!("inspect `vega mux show {pane}`; after resolving startup, use `vega mux spawn --resume {pane}`")));
-        }
+    let undelivered = prompt.filter(|_| v["first_message"]["sent"] == false);
+    if let Some(text) = undelivered {
+        keep_brief(
+            &pane,
+            &KeptBrief {
+                name: name.into(),
+                kind: kind.into(),
+                cwd: cwd.clone(),
+                brief: text.into(),
+                no_parent,
+            },
+        );
+    }
+    if let Some(host) = machine() {
+        remote_spawn::save(host, &record, undelivered)?;
+    }
+    if undelivered.is_some() {
+        return Err(Failure::new("brief_not_delivered", format!("terminal {pane} started, but hc did not deliver its first message"), &format!("inspect `vega mux show {pane}`; after resolving startup, use `vega mux spawn --resume {pane}`")));
     }
     if tab_fallback {
         println!("placement: no local herdr-app; started as a tab in the caller's space");

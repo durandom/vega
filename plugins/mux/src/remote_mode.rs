@@ -60,7 +60,24 @@ pub fn run(target: &str, requested: Option<ModeArg>) -> Result<Option<Value>, Fa
         "check the host connection and matching vega versions; run `vega mux mode <pane>` on the pane host before retrying",
     )
     };
-    let wrapped = vega_herdr::hc::hc_on(Some(host), &args, Some(Duration::from_secs(20)))
+    let result = execute(host, &args, &fail)?;
+    if result["schema"] != 1
+        || result["output"].as_str().is_none_or(str::is_empty)
+        || result["mode"].as_str().and_then(Mode::parse).is_none()
+        || wanted.is_some_and(|m| result["mode"] != m)
+    {
+        return Err(fail("incompatible or unconfirmed mode reply".into()));
+    }
+    Ok(Some(result))
+}
+
+/// Shared bounded target-local execution; callers validate their versioned reply.
+pub fn execute(
+    host: &str,
+    args: &[&str],
+    fail: &impl Fn(String) -> Failure,
+) -> Result<Value, Failure> {
+    let wrapped = vega_herdr::hc::hc_on(Some(host), args, Some(Duration::from_secs(20)))
         .map_err(|f| fail(f.message))?;
     if wrapped["timed_out"] != false || wrapped["truncated"] != false {
         return Err(fail(format!(
@@ -73,19 +90,12 @@ pub fn run(target: &str, requested: Option<ModeArg>) -> Result<Option<Value>, Fa
         .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
         .ok_or_else(|| fail("missing or invalid stdout".into()))?;
     let result: Value = serde_json::from_slice(&stdout)
-        .map_err(|_| fail("incompatible mode reply; expected JSON".into()))?;
+        .map_err(|_| fail("incompatible remote reply; expected JSON".into()))?;
     if wrapped["code"] != 0 {
         let reason = result["error"]["message"]
             .as_str()
-            .unwrap_or("remote mode command failed");
+            .unwrap_or("remote command failed");
         return Err(fail(format!("{reason} (exit {})", wrapped["code"])));
     }
-    if result["schema"] != 1
-        || result["output"].as_str().is_none_or(str::is_empty)
-        || result["mode"].as_str().and_then(Mode::parse).is_none()
-        || wanted.is_some_and(|m| result["mode"] != m)
-    {
-        return Err(fail("incompatible or unconfirmed mode reply".into()));
-    }
-    Ok(Some(result))
+    Ok(result)
 }
