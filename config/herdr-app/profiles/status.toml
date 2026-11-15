@@ -1,5 +1,6 @@
 layout = "status"
 mods = ["vega-window-tabs"]
+terminals = []
 
 [settings.sounds]
 enabled = false
@@ -8,21 +9,48 @@ enabled = false
 "frame.welcomed" = "finished"
 
 [[tab]]
+name = "tokens"
+
+[[tab.terminals]]
+name = "ganymede-tokens"
+machine = "ganymede"
+argv = [
+    "token-burn",
+    "tui",
+]
+optional = false
+
+[[tab]]
+name = "shell-18e84033814de838"
+title = "pdc"
+
+[[tab.terminals]]
+name = "shell-18e84033814de838"
+machine = "ganymede"
+argv = []
+optional = false
+
+[[tab]]
 name = "proteus"
+
 [[tab.terminals]]
 name = "proteus-btop"
 machine = "proteus"
 argv = ["btop"]
+optional = false
 
 [[tab]]
 name = "ganymede"
+
 [[tab.terminals]]
 name = "ganymede-btop"
 machine = "ganymede"
 argv = ["btop"]
+optional = false
 
 [[tab]]
 name = "io"
+
 [[tab.terminals]]
 name = "io-btop"
 machine = "io"
@@ -30,8 +58,11 @@ argv = ["btop"]
 optional = true
 
 [[tab]]
-name = "tokens"
+name = "shell-18e79b4534f22c58"
+title = "puck"
+
 [[tab.terminals]]
-name = "ganymede-tokens"
-machine = "ganymede"
-argv = ["token-burn", "tui"]
+name = "shell-18e79b4534f22c58"
+machine = "puck"
+argv = []
+optional = false
