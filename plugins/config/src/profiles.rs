@@ -425,44 +425,7 @@ mod tests {
         assert!(plan(&ctx).is_err());
     }
 
-    const STATUS_FIXTURE: &str = r#"layout = "status"
-mods = ["vega-window-tabs"]
-
-[settings.sounds]
-enabled = false
-
-[shared]
-"frame.welcomed" = "finished"
-
-[[tab]]
-name = "proteus"
-[[tab.terminals]]
-name = "proteus-btop"
-machine = "proteus"
-argv = ["btop"]
-
-[[tab]]
-name = "ganymede"
-[[tab.terminals]]
-name = "ganymede-btop"
-machine = "ganymede"
-argv = ["btop"]
-
-[[tab]]
-name = "io"
-[[tab.terminals]]
-name = "io-btop"
-machine = "io"
-argv = ["btop"]
-optional = true
-
-[[tab]]
-name = "tokens"
-[[tab.terminals]]
-name = "ganymede-tokens"
-machine = "ganymede"
-argv = ["token-burn", "tui"]
-"#;
+    const STATUS_FIXTURE: &str = include_str!("testdata/status-profile.toml");
 
     #[test]
     fn profile_apply_is_isolated_idempotent_and_preserves_shared_state() {
