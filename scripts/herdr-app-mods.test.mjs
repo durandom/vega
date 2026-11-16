@@ -1056,6 +1056,67 @@ function projectFixture(h) {
   return project;
 }
 
+test('sidebar derivation is cached between renders and rebuilt exactly when an input changes',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
+  h.render();
+  const first=h.mod.modelCache;
+  assert.ok(first,'first render derives a model');
+  h.render();
+  assert.equal(h.mod.modelCache,first,'unchanged inputs reuse the cached model');
+  // Terminal data: a pin label rebuilds.
+  const all=h.api.terminals();h.api.terminals=()=>all;
+  all[1].labels['herdr.pinned']='true';
+  h.render();assert.notEqual(h.mod.modelCache,first);
+  let model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  assert(elements(h.render()).some(n=>n.tooltipValue==='Pinned agent'),'rebuilt model carries the pin marker');
+  // Agent data: a status change rebuilds.
+  const agents=h.api.agents();h.api.agents=()=>agents;agents[2].status='blocked';
+  h.render();assert.notEqual(h.mod.modelCache,model);
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  // Focus changes rebuild (the focused row highlight and Active retention read it).
+  h.api.focused=()=>({terminal:'t3'});
+  h.render();assert.notEqual(h.mod.modelCache,model);
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  // Views, badges and preferences rebuild; a stale badge row (past 60 s) rebuilds too.
+  h.state.set('vega.view',`label:${'work'}`);
+  h.render();assert.notEqual(h.mod.modelCache,model);
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  h.state.set('vega.badges',[{project,at:Date.now()/1000,decisions:1}]);
+  h.render();assert.notEqual(h.mod.modelCache,model);
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  h.state.set('vega.badges',[{project,at:Date.now()/1000-61,decisions:1}]);
+  h.render();assert.notEqual(h.mod.modelCache,model,'crossing the 60 s freshness boundary rebuilds');
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  h.mod.preferences={projects:{[project]:{pinned:true}},views:{}};
+  h.render();assert.notEqual(h.mod.modelCache,model);
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  // Manual project order is a model input (drag order).
+  h.mod.move([project],project,project);h.mod.order=['zzz-other'];
+  h.render();assert.notEqual(h.mod.modelCache,model,'manual order is a model input');
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  // Pure build state reuses the cache: folds, theme, layout width, shared-state mirrors.
+  h.mod.folded.add(`uac-${project}`);
+  h.render();assert.equal(h.mod.modelCache,model);
+  h.api.theme=()=>({selected:'#selected'});h.api.layout=()=>({id:'sidebar',size:{px:76}});
+  h.render();assert.equal(h.mod.modelCache,model);
+  h.api.layout=()=>null;h.mod.folded.clear();
+  // Waiting episodes (shared state) rebuild the waiting rows.
+  h.state.set('vega.waiting-state',{[JSON.stringify([project,'','t2'])]:{cleared:true}});
+  h.render();assert.notEqual(h.mod.modelCache,model);
+  model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
+  // The localStorage fallback (restart path) is an input too: shared state unset.
+  const g=load('vega-sidebar');projectFixture(g);g.mod.init({},g.cx);g.render();
+  g.storage.set('active-view','all');g.render();
+  const restart=g.mod.modelCache;
+  g.storage.set('active-view','label:work');
+  g.render();assert.notEqual(g.mod.modelCache,restart,'localStorage view fallback rebuilds');
+  g.render();assert.equal(g.mod.modelCache,g.mod.modelCache);
+  // The rendered tree still follows rebuilt data: unpin removes the marker.
+  all[1].labels={};
+  h.render();
+  assert(!elements(h.render()).some(n=>n.tooltipValue==='Pinned agent'));
+});
+
 test('inactive filter retains UAC context and active descendants; retains done sub-agents; hides idle and unknown rows and empty groups',()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);
   const all=h.api.terminals();

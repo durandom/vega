@@ -5,6 +5,18 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 221 · 2026-11-16
+
+- feature: The vega-sidebar no longer trips herdr-app's "This view could not be
+  re-rendered; showing last good … interrupted" overlay on large fleets. All
+  derivation (project groups and repo-group member JSON, agent trees, view/
+  Active/pin filtering, project order, per-project totals, row labels) moved into
+  a cache rebuilt only when its inputs change; `render()` reads the cache and
+  builds rows. With a fake fleet of 140 terminals, 110 agents and 40 projects
+  (27-member repo group), a render with unchanged inputs drops from ~15 ms to
+  ~1.5 ms, a render after a data change from ~15 ms to ~2.4 ms. Re-apply the
+  `herdr-app.vega-sidebar` unit (or the herdr-app group) to pick it up.
+
 ## 220 · 2026-11-16
 
 - feature: The keychain lock shows SSH agent state and key count. `vega config

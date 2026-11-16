@@ -52,8 +52,7 @@ function parseSymbols(text) {
   return out;
 }
 
-// A machine's $host label: the one vegad wrote on any of its terminals.
-const labelOfMachine = (machine, live) => live.find(x => x.address.startsWith(`${machine}/`) && x.labels?.["vega.host"])?.labels["vega.host"] ?? machine;
+// A machine's $host label is resolved once per derivation in buildModel (model.hostLabels).
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 
@@ -1366,12 +1365,28 @@ export default class Agents extends View {
     return Boolean(own && parent && own !== parent && this.projectUacs?.has(own));
   }
 
+  // Live tree-eligible children by parent, so tree() walks subtrees without
+  // rescanning every terminal per node (O(n^2) across a render before).
+  treeIndex(all) {
+    const index = new Map();
+    for (const k of all) {
+      if (k.state !== "live" || k.labels?.["vega.worktree-owner"] || this.foreignChild(k)) continue;
+      const kids = index.get(k.parent);
+      if (kids) kids.push(k); else index.set(k.parent, [k]);
+    }
+    return index;
+  }
+
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
-  tree(all, addr, lead = [], visible = null, seen = new Set()) {
+  tree(all, addr, lead = [], visible = null, seen = new Set(), index = null) {
     if (seen.has(addr)) return [];
     seen = new Set([...seen, addr]);
-    const children = parent => all.filter(k => k.parent === parent && k.state === "live"
-      && !seen.has(k.address) && !k.labels?.["vega.worktree-owner"] && !this.foreignChild(k));
+    const children = parent => {
+      const indexed = index?.get(parent);
+      if (indexed) return indexed.filter(k => !seen.has(k.address));
+      return all.filter(k => k.parent === parent && k.state === "live"
+        && !seen.has(k.address) && !k.labels?.["vega.worktree-owner"] && !this.foreignChild(k));
+    };
     // Promote active grandchildren past hidden idle parents, preserving tree connectors.
     const frontier = (parent, path) => children(parent).flatMap(k => {
       if (path.has(k.address)) return [];
@@ -1519,15 +1534,21 @@ export default class Agents extends View {
 
   orderedProjects(projects) {
     const saved = this.order ?? [];
-    const orderIndex = id => {
-      const exact = saved.indexOf(id);
-      if (exact >= 0) return exact;
-      // Migrate the old short-name order only for an unambiguous project.
+    // orderIndex per id, computed before sorting: the sort comparator used to
+    // refilter every project key per comparison (the render interrupt vega-0h4c.103).
+    const shortCount = new Map();
+    for (const id of projects.keys()) {
       const short = id.split("/").at(-1);
-      return [...projects.keys()].filter(p => p.split("/").at(-1) === short).length === 1 ? saved.indexOf(short) : -1;
-    };
+      shortCount.set(short, (shortCount.get(short) ?? 0) + 1);
+    }
+    const orderIndex = new Map();
+    for (const id of projects.keys()) {
+      const exact = saved.indexOf(id);
+      // Migrate the old short-name order only for an unambiguous project.
+      orderIndex.set(id, exact >= 0 ? exact : shortCount.get(id.split("/").at(-1)) === 1 ? saved.indexOf(id.split("/").at(-1)) : -1);
+    }
     return [...projects.keys()].sort((a, b) => {
-      const i = orderIndex(a), j = orderIndex(b);
+      const i = orderIndex.get(a), j = orderIndex.get(b);
       return (i < 0 ? Infinity : i) - (j < 0 ? Infinity : j) || a.localeCompare(b);
     });
   }
@@ -1535,19 +1556,12 @@ export default class Agents extends View {
   // Projects in the Slayer's order, holding agents on every machine (UAC first,
   // when present, its sentinels as branches). Then the unlabelled spaces.
   // Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
-  projectTree(t, all, list, shown, now) {
-    const membership = this.projectGroups(all);
-    const { live, labelsOf, projects: groups, blocks, blockOf, projectsInBlock, uacs, projectOfSpace, projectOfAgent } = membership;
-    const hasRows = p => list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a));
-    const projects = this.orderedProjects(blocks).filter(p => {
-      const ids = projectsInBlock(p);
-      const rows = ids.some(hasRows);
-      const pinned = this.blockPinned(membership, p);
-      const plain = (this.plainTerminals ?? []).some(x => ids.includes(projectOfAgent(x)));
-      return (uacs.has(p) || pinned || rows || plain)
-        && (this.matchesBlock(membership, p) || rows || plain)
-        && (!hideInactive() || pinned || rows);
-    });
+  projectTree(t, m, now) {
+    // Precomputed by buildModel: membership, per-project members/plain rows/totals,
+    // blocks in view, host labels and memoized trees. Only elements are built here.
+    const membership = m.membership;
+    const { labelsOf, projects: groups, uacs, projectOfSpace, projectOfAgent } = membership;
+    const projects = m.shownBlocks;
     const C = this.colors();
     const kindOf = (k) => {
       const key = (labelsOf(k.address)["vega.harness"] || k.program?.key || k.app || "").toLowerCase();
@@ -1558,7 +1572,7 @@ export default class Agents extends View {
       const label = labelsOf(address)["vega.host"];
       return label ? div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[label] ?? t.dim).child(label) : div().w(22).flex_none();
     };
-    const tokens = (address, uac) => this.vegaIcons(address, t, uac ? ["uac", "kind", "git"] : ["uac", "kind"]);
+    const tokens = (address, uac) => this.vegaIcons(address, t, uac ? ["uac", "kind", "git"] : ["uac", "kind"], m.waitingByAddress.get(address) ?? []);
     const agentRow = (a, subs, depth, lines = []) => {
       const l = labelsOf(a.address);
       const uac = l["vega.role"] === "uac";
@@ -1568,7 +1582,7 @@ export default class Agents extends View {
       const name = uac ? "" : depth
         ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
         : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
-      const on = a.address === shown;
+      const on = a.address === m.shown;
       return h_flex()
         .id(depth ? `sub-${a.address}` : `ag-${a.address}`)
         .pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
@@ -1594,8 +1608,8 @@ export default class Agents extends View {
         .child(host(a.address));
     };
     const withTree = (a) => {
-      const subs = this.tree(all, a.address, [], this.visibleSessions);
-      const visible = !this.visibleSessions || this.visibleSessions.has(a.address);
+      const subs = m.treeVis(a.address);
+      const visible = !m.visibleSessions || m.visibleSessions.has(a.address);
       return [...(visible ? [agentRow(a, subs, 0)] : []),
         ...(visible && this.folded.has(a.address) ? [] : subs.map(s => agentRow(s.t, [], 1, s.lines)))];
     };
@@ -1609,12 +1623,12 @@ export default class Agents extends View {
       return base(x.foreground?.name) || base(x.foreground?.argv?.[0]) || x.program?.key || "terminal";
     };
     // Plain shells are noise: under Active only a focused one or one in a pinned project stays.
-    const plainRows = (members, pinned) => members.filter(x => !hideInactive() || !SHELLS.has(programOf(x))
-      || x.address === shown || pinned).map(x => {
+    const plainRows = (members, pinned) => members.filter(x => !m.filtering || !SHELLS.has(programOf(x))
+      || x.address === m.shown || pinned).map(x => {
       const cwd = x.foreground?.cwd?.split("/").at(-1);
       const argv = x.foreground?.argv?.join(" ");
       return h_flex().id(`term-${x.address}`).pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
-        .when(x.address === shown, el => el.bg(t.selected))
+        .when(x.address === m.shown, el => el.bg(t.selected))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([argv, x.foreground?.cwd].filter(Boolean).join(" · ") || x.address)
         .on_click(() => x.pane ? run("pane.focus", { pane: x.pane }) : this.peek(x.address))
@@ -1624,9 +1638,9 @@ export default class Agents extends View {
         .child(div().flex_1())
         .child(host(x.address));
     });
-    const plainOf = (p) => (this.plainTerminals ?? []).filter(x => projectOfAgent(x) === p);
+    const plainOf = (p) => m.plainByProject.get(p) ?? [];
     const out = [];
-    if (this.uberRow) out.push(this.uberRowView(t, C, host, shown, now));
+    if (this.uberRow) out.push(this.uberRowView(t, C, host, m.shown, now));
     const renderProject = (p, nested = false) => {
       const rows = [];
       const gid = `uac-${p}`;
@@ -1636,9 +1650,8 @@ export default class Agents extends View {
       const address = uac?.address ?? groups.get(p).address;
       const groupUac = uac && projectOfAgent(uac) !== p;
       const display = this.preferences?.projects?.[project]?.name || (!groupUac && ul["vega.project"]?.split("/").at(-1)) || p.split("/").at(-1);
-      const totals = this.vegaTotals(address, project) ?? {};
-      const members = list.filter(a => projectOfAgent(a) === p)
-        .sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
+      const totals = m.totals.get(project) ?? {};
+      const members = m.membersByProject.get(project) ?? [];
       const open = !this.folded.has(gid);
       const git = !groupUac && ul["vega.git"];
       rows.push(h_flex().id(gid).on_mouse_down("right", (_e, cx) => this.openProject(project, cx)).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
@@ -1697,8 +1710,8 @@ export default class Agents extends View {
           rows.push(agentRow(row, [], 0));
         }
         for (const a of members) rows.push(...withTree(a));
-        rows.push(...plainRows(plainOf(p), this.blockPinned(membership, p)));
-        if (!nested) for (const member of this.orderedProjects(groups).filter(id => id !== p && blockOf(id) === p && hasRows(id))) {
+        rows.push(...plainRows(plainOf(p), m.pinnedBlocks.get(p) ?? false));
+        if (!nested) for (const member of m.nestedMembers.get(p) ?? []) {
           rows.push(renderProject(member, true));
         }
       }
@@ -1708,11 +1721,12 @@ export default class Agents extends View {
     for (const p of projects) out.push(renderProject(p));
     const all_spaces = spaces();
     const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && (this.matchesView(null, s.machine || "local")
-      || list.some(a => a.space === s.id && this.hasVisibleTree(all, a)))
-      && (!hideInactive() || list.some(a => a.space === s.id && !projectOfAgent(a) && this.hasVisibleTree(all, a))));
+      || m.spaceRows.has(s.id))
+      && (!m.filtering || m.spaceAgentRows.has(s.id)));
     if (rest.length) {
       out.push(div().px(6).pt(12).pb(2).text_size(11).font_medium().text_color(t.dim).child("Spaces"));
       for (const sp of rest) {
+        const hostLabel = sp.machine ? m.hostLabels.get(sp.machine) ?? sp.machine : m.localHost;
         out.push(h_flex().id(`space-${sp.id}`).pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
           .when(sp.active, el => el.bg(t.selected))
           .cursor_pointer().hover(s => s.bg(t.hover))
@@ -1720,15 +1734,14 @@ export default class Agents extends View {
           .on_mouse_down("right", (_e, cx) => this.openSpaceMenu(sp, cx))
           .child(div().min_w(0).flex_shrink_1().truncate().text_color(t.muted).child(sp.name))
           .child(div().flex_1())
-          .child(div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live)] ?? t.dim)
-            .child(sp.machine ? labelOfMachine(sp.machine, live) : this.localHost(live))));
-        for (const a of list.filter(a => a.space === sp.id && !projectOfAgent(a))) out.push(...withTree(a));
-        out.push(...plainRows((this.plainTerminals ?? []).filter(x => x.space === sp.id && !projectOfAgent(x)), false));
+          .child(div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[hostLabel] ?? t.dim)
+            .child(hostLabel)));
+        for (const a of m.agentsBySpace.get(sp.id) ?? []) out.push(...withTree(a));
+        out.push(...plainRows(m.plainBySpace.get(sp.id) ?? [], false));
       }
     }
     // Agents whose space this window doesn't know yet still show.
-    const known = new Set(all_spaces.map(s => s.id));
-    for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a))) out.push(...withTree(a));
+    for (const a of m.orphanAgents) out.push(...withTree(a));
     return out;
   }
 
@@ -1760,11 +1773,6 @@ export default class Agents extends View {
     return seenDone(this.vegaTerminals?.get(a.address), this.listed.get(a.address) ?? a.status);
   }
 
-  hasVisibleTree(all, a) {
-    return !this.visibleSessions || this.visibleSessions.has(a.address)
-      || this.tree(all, a.address).some(s => this.visibleSessions.has(s.t.address));
-  }
-
   // The local machine's $host label: the one vegad wrote on a local terminal.
   localHost(live) {
     return live.find(x => !x.address.includes("/") && x.labels?.["vega.host"])?.labels["vega.host"] ?? "";
@@ -1772,7 +1780,7 @@ export default class Agents extends View {
 
   // Drag one project above another; the order stays across restarts.
   move(projects, from, to) {
-    const all = this.orderedProjects(this.projectGroups(visibleTerminals()).blocks);
+    const all = this.modelCache?.projectOrder ?? this.orderedProjects(this.projectGroups(visibleTerminals()).blocks);
     const visible = projects.filter(p => p !== from);
     visible.splice(visible.indexOf(to), 0, from);
     // Reorder only the visible slots, so hidden projects keep their positions.
@@ -1802,7 +1810,8 @@ export default class Agents extends View {
 
   // uac and kind are drawn before the name, as in the TUI row.
   // Per-agent signals only; project-wide notes and decisions sit in the project badge.
-  vegaIcons(address, t, skip = ["uac", "kind"]) {
+  // `waiting` comes from the model's per-address map; direct callers get a live scan.
+  vegaIcons(address, t, skip = ["uac", "kind"], waitingRows = null) {
     skip = [...skip, "notes", "decisions", "waiting"];
     const labels = this.vegaTerminals?.get(address)?.labels ?? {};
     const focus = () => run("agent.focus", {terminal: address});
@@ -1817,7 +1826,7 @@ export default class Agents extends View {
       ["waiting", "Waiting panes", focus], ["decisions", "Decisions", inbox],
       ["git", "Git changes", () => { focus(); run("layout.show", {id:"panel"}); run("layout.select", {stack:"panel-body", child:"changes"}); }],
     ];
-    const waiting = (shared("vega.badges") ?? []).flatMap(row => Date.now()/1000-row.at <= 60
+    const waiting = waitingRows ?? (shared("vega.badges") ?? []).flatMap(row => Date.now()/1000-row.at <= 60
       ? (row.waiting_panes ?? []).filter(w => w.pane.replace(/^hc:/, "") === address
         && !shared("vega.waiting-state")?.[waitingKey(row, w)]?.cleared) : []);
     return h_flex().gap(4).flex_none()
@@ -1828,6 +1837,240 @@ export default class Agents extends View {
         .child(key === "attention" ? "✋" : labels[`vega.${key}`])
         .on_mouse_down("left", (_e,cx) => cx.stop_propagation())
         .on_click((_e,cx) => {cx.stop_propagation(); action();})));
+  }
+
+  // Signature of every input the sidebar derivation reads: terminals (labels,
+  // turn, foreground), agents, panes, spaces, focus, badges and their 60-second
+  // freshness, waiting episodes, the resolved view and activity filter (including
+  // their localStorage fallbacks), project preferences and the manual order.
+  inputSignature(badges) {
+    const focus = focused();
+    return JSON.stringify([
+      terminals().map(x => [x.address, x.state, x.parent ?? null, x.pane ?? null, x.turn ?? null,
+        x.status ?? null, x.status_ms ?? null, x.name ?? null, x.title ?? null, x.agent ?? null, x.app ?? null, x.cwd ?? null,
+        x.program?.key ?? null, x.foreground?.name ?? null, x.foreground?.argv ?? null, x.foreground?.cwd ?? null, x.labels ?? null]),
+      agents().map(a => [a.address, a.status ?? null, a.pane ?? null, a.tab ?? null, a.space ?? null,
+        a.space_name ?? null, a.title ?? null, a.name ?? null, a.template ?? null, a.program?.name ?? null]),
+      panes().map(p => [p.terminal ?? null, p.tab ?? null, Boolean(p.focused), p.program?.name ?? null,
+        Boolean(p.program?.agent), p.title ?? null]),
+      spaces().map(s => [s.id, s.name ?? null, s.named ?? null, s.machine ?? null, Boolean(s.active),
+        (s.tabs ?? []).map(tab => [tab.id, tab.name ?? null, tab.named ?? null])]),
+      focus ? [focus.terminal ?? null, focus.agent ?? null, focus.space ?? null, focus.tab ?? null, focus.pane ?? null] : null,
+      badges, badges.map(r => Date.now() / 1000 - r.at <= 60 ? 1 : 0),
+      shared("vega.waiting-state") ?? null,
+      activeView(), hideInactive(),
+      this.preferences ?? null, this.order ?? null,
+    ]);
+  }
+
+  viewModel() {
+    const badges = shared("vega.badges") ?? [];
+    const sig = this.inputSignature(badges);
+    if (this.modelCache?.sig === sig) return this.modelCache;
+    this.modelCache = this.buildModel(sig, badges);
+    return this.modelCache;
+  }
+
+  // Everything render() needs except element building, derived once per input
+  // change. A render that only builds rows (focus, theme, layout, folds, drags)
+  // reuses the previous model instead of redoing group parsing, tree scans and
+  // sorts per frame ("This view could not be re-rendered ... interrupted").
+  buildModel(sig, badges) {
+    const model = { sig };
+    const windowAddresses = new Set(terminals().filter(t => Object.hasOwn(t.labels ?? {}, "vega.window")).map(t => t.address));
+    let list = agents().filter(a => !windowAddresses.has(a.address));
+    this.listed = model.listed = new Map(list.map((a) => [a.address, a.status]));
+    const all = model.all = visibleTerminals();
+    this.vegaTerminals = model.vegaTerminals = new Map(all.map(t => [t.address, t]));
+    const membership = this.projectGroups(all);
+    model.membership = membership;
+    this.projectUacs = model.projectUacs = membership.uacs;
+    // Memoize the membership walks queried per project and per agent below.
+    for (const walk of ["projectOfAgent", "projectsInBlock", "blockOf"]) {
+      const memo = new Map(), original = membership[walk];
+      membership[walk] = x => { if (!memo.has(x)) memo.set(x, original(x)); return memo.get(x); };
+    }
+    // The Uber-UAC lists as one row at the top, outside every project (docs/design/uber-uac.md).
+    const uberTerm = all.find(x => x.state === "live" && x.labels?.["vega.role"] === "uber");
+    this.uberRow = model.uberRow = uberTerm ? { term: uberTerm, agent: list.find(a => a.address === uberTerm.address) } : null;
+    list = list.filter(a => a.address !== uberTerm?.address);
+    // A worktree's placeholder shell holds the checkout for its sentinel; the TUI never listed it.
+    const placeholder = (address) => Boolean(model.vegaTerminals.get(address)?.labels?.["vega.worktree-owner"]);
+    list = list.filter(a => !placeholder(a.address));
+    const filtering = hideInactive();
+    model.filtering = filtering;
+    // A UAC without an agent-status entry still provides context for its live children.
+    if (filtering) {
+      const known = new Set(list.map(a => a.address));
+      list = [...list, ...all.filter(a => a.state === "live" && a.labels?.["vega.role"] === "uac"
+        && !known.has(a.address) && !placeholder(a.address)).map(a => ({ ...a, space: this.spaceOfTerminal(a) }))];
+    }
+    this.migratePins(all);
+    const shown = focused()?.terminal ?? focused()?.agent;
+    model.shown = shown;
+    this.track(list, Date.now());
+    // A listed child belongs to its visible ancestor's tree, even in another space.
+    const listedSet = new Set(list.map(a => a.address));
+    list = list.filter(a => {
+      const seen = new Set([a.address]);
+      let parent = model.vegaTerminals.get(a.address)?.parent;
+      while (parent && !seen.has(parent) && model.vegaTerminals.get(parent)?.state === "live") {
+        if (listedSet.has(parent) && !this.foreignChild(model.vegaTerminals.get(a.address))) return false;
+        seen.add(parent); parent = model.vegaTerminals.get(parent)?.parent;
+      }
+      return true;
+    });
+    // One children index feeds every tree walk; full and visible trees are memoized per address.
+    model.index = this.treeIndex(all);
+    model.trees = new Map();
+    model.treeFull = addr => {
+      if (!model.trees.has(addr)) model.trees.set(addr, this.tree(all, addr, [], null, new Set(), model.index));
+      return model.trees.get(addr);
+    };
+    // A pinned child can cross the view boundary without admitting its siblings.
+    const blockViews = model.blockViews = new Map([...membership.blocks.keys()].map(p => [p, this.matchesBlock(membership, p)]));
+    const viewFilter = this.viewFilter();
+    const viewAllows = (a, grouped = true) => {
+      const project = membership.projectOfAgent(a);
+      const block = membership.blockOf(project);
+      const wholeBlock = grouped || membership.projectsInBlock(project).length > 1;
+      return (project && wholeBlock ? blockViews.get(block) : this.matchesView(project, machineOf(a.address)))
+        || (viewFilter.respect_pins && this.isPinned(a.address));
+    };
+    const viewSessions = model.viewSessions = new Set(all.filter(a => viewAllows(a)).map(a => a.address));
+    list = list.filter(a => viewSessions.has(a.address)
+      || model.treeFull(a.address).some(s => viewSessions.has(s.t.address)));
+    // Count only this view's sessions, before folds; UACs may remain as context.
+    const kids = new Set(list.flatMap(a => model.treeFull(a.address).map(s => s.t.address)));
+    const candidates = new Map(list.flatMap(a => [a, ...model.treeFull(a.address).map(s => s.t)])
+      .filter(a => viewSessions.has(a.address)).map(a => [a.address, a]));
+    // Judge the status the row shows, including unread done sub-agents.
+    const rowStatus = a => kids.has(a.address) ? kidStatus(a, model.listed) : this.topStatus(a);
+    const waitingState = shared("vega.waiting-state");
+    const waitingAddresses = model.waitingAddresses = new Set(badges.flatMap(r => Date.now() / 1000 - r.at <= 60
+      ? (r.waiting_panes ?? []).filter(w => !waitingState?.[waitingKey(r, w)]?.cleared).map(w => w.pane.replace(/^hc:/, "")) : []));
+    model.waitingByAddress = new Map();
+    for (const row of badges) {
+      if (Date.now() / 1000 - row.at > 60) continue;
+      for (const w of (row.waiting_panes ?? []).filter(w => !waitingState?.[waitingKey(row, w)]?.cleared)) {
+        const pane = w.pane.replace(/^hc:/, "");
+        const open = model.waitingByAddress.get(pane);
+        if (open) open.push(w); else model.waitingByAddress.set(pane, [w]);
+      }
+    }
+    this.visibleSessions = model.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
+      this.isPinned(a.address) || a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
+    ).map(a => a.address)) : viewSessions;
+    model.visTrees = new Map();
+    model.treeVis = addr => {
+      if (!model.visTrees.has(addr)) model.visTrees.set(addr, this.tree(all, addr, [], model.visibleSessions, new Set(), model.index));
+      return model.visTrees.get(addr);
+    };
+    model.hasVisible = a => !model.visibleSessions || model.visibleSessions.has(a.address)
+      || model.treeFull(a.address).some(s => model.visibleSessions.has(s.t.address));
+    if (filtering) for (const uac of membership.uacs.values()) {
+      if (this.blockPinned(membership, uac.labels?.["vega.project-id"])
+        || model.treeFull(uac.address).some(s => model.visibleSessions.has(s.t.address))) model.visibleSessions.add(uac.address);
+    }
+    // Live terminals without an agent (token-burn tui, pdc, a dev server, a shell) list under their
+    // project or space as dim rows. Sub-agent rows, UACs and worktree placeholders are not among them.
+    const agentAddresses = new Set(agents().map(x => x.address));
+    this.plainTerminals = model.plainTerminals = all.filter(x => x.state === "live" && x.foreground && !agentAddresses.has(x.address)
+      && !kids.has(x.address) && !placeholder(x.address) && !["uac", "uber"].includes(x.labels?.["vega.role"])
+      && !(list.some(a => a.address === x.address)))
+      .map(x => ({ ...x, space: this.spaceOfTerminal(x) }))
+      .filter(x => viewAllows(x, false));
+    model.hiddenCount = filtering ? [...candidates.keys()].filter(a => !model.visibleSessions.has(a)).length : 0;
+    list = list.filter(a => model.hasVisible(a));
+    // Manual project order (per-id order indexes precomputed in orderedProjects).
+    model.projectOrder = this.orderedProjects(membership.blocks);
+    model.memberOrder = this.orderedProjects(membership.projects);
+    const blockIndex = new Map(model.projectOrder.map((p, i) => [p, i]));
+    const memberIndexMap = new Map(model.memberOrder.map((p, i) => [p, i]));
+    // A block's own agents sort before member projects' agents within the block.
+    const memberIndexOf = p => membership.blockOf(p) === p ? -1 : memberIndexMap.get(p) ?? -1;
+    const labelsOf = membership.labelsOf;
+    list.sort((a, b) => {
+      const pa = membership.projectOfAgent(a), pb = membership.projectOfAgent(b);
+      const ia = blockIndex.get(membership.blockOf(pa)) ?? -1, ib = blockIndex.get(membership.blockOf(pb)) ?? -1;
+      return (ia < 0 ? Infinity : ia) - (ib < 0 ? Infinity : ib) ||
+        (ia >= 0 && ia === ib ? memberIndexOf(pa) - memberIndexOf(pb) : 0) ||
+        (pa && pa === pb ? (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac") : 0);
+    });
+    model.list = list;
+    model.agentOrder = list.flatMap(a => [a.address, ...model.treeFull(a.address).map(s => s.t.address)])
+      .filter(a => listedSet.has(a) && (!model.visibleSessions || model.visibleSessions.has(a)));
+    // A row reads "space \u00b7 detail": the detail is a tab someone named or the
+    // agent's own title, never an automatic tab number unless two rows would
+    // otherwise read the same.
+    // Read the pane snapshot once: every host read copies the whole list into JS.
+    const leads = leadPanes(panes());
+    const tabLabels = new Map(spaces().flatMap(s => s.tabs).map(tab => [tab.id, title(tab, leads.get(tab.id))]));
+    const labels = new Map(list.map(a => [a.address, tabLabels.get(a.tab) ?? (a.title || a.program?.name || "")]));
+    const label = (a) => labels.get(a.address);
+    const detail = new Map(list.map(a => [a.address, /^\d+$/.test(label(a)) ? null : label(a)]));
+    const seenLabels = {};
+    for (const a of list) { const k = `${a.space_name}\u0000${detail.get(a.address) ?? ""}`; seenLabels[k] = (seenLabels[k] ?? 0) + 1; }
+    for (const a of list) {
+      if (detail.get(a.address) == null && seenLabels[`${a.space_name}\u0000`] > 1) detail.set(a.address, label(a));
+    }
+    model.rowLabel = a => detail.get(a.address) ?? label(a);
+    model.activeView = activeView();
+    // Per-project derivations projectTree used to redo per frame.
+    const projectsWithRows = model.projectsWithRows = new Set(list.map(a => membership.projectOfAgent(a)));
+    const plainProjects = new Set(model.plainTerminals.map(x => membership.projectOfAgent(x)));
+    model.shownBlocks = model.projectOrder.filter(p => {
+      const ids = membership.projectsInBlock(p);
+      const rows = ids.some(id => projectsWithRows.has(id));
+      const pinned = this.blockPinned(membership, p);
+      const plain = ids.some(id => plainProjects.has(id));
+      return (membership.uacs.has(p) || pinned || rows || plain)
+        && (blockViews.get(p) || rows || plain)
+        && (!filtering || pinned || rows);
+    });
+    model.membersByProject = new Map();
+    for (const a of list) {
+      const arr = model.membersByProject.get(membership.projectOfAgent(a));
+      if (arr) arr.push(a); else model.membersByProject.set(membership.projectOfAgent(a), [a]);
+    }
+    for (const arr of model.membersByProject.values())
+      arr.sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
+    model.plainByProject = new Map();
+    for (const x of model.plainTerminals) {
+      const arr = model.plainByProject.get(membership.projectOfAgent(x));
+      if (arr) arr.push(x); else model.plainByProject.set(membership.projectOfAgent(x), [x]);
+    }
+    model.totals = new Map();
+    for (const p of membership.projects.keys())
+      model.totals.set(p, this.vegaTotals(membership.uacs.get(p)?.address ?? membership.projects.get(p).address, p));
+    model.pinnedBlocks = new Map([...membership.blocks.keys()].map(p => [p, this.blockPinned(membership, p)]));
+    model.nestedMembers = new Map();
+    for (const p of membership.blocks.keys())
+      model.nestedMembers.set(p, model.memberOrder.filter(id => id !== p && membership.blockOf(id) === p && projectsWithRows.has(id)));
+    // A machine's $host label: the first vegad wrote on any of its terminals.
+    model.hostLabels = new Map();
+    for (const x of membership.live) {
+      const hostLabel = x.labels?.["vega.host"];
+      if (hostLabel && x.address.includes("/") && !model.hostLabels.has(machineOf(x.address))) model.hostLabels.set(machineOf(x.address), hostLabel);
+    }
+    model.localHost = this.localHost(membership.live);
+    model.agentsBySpace = new Map();
+    for (const a of list) {
+      if (membership.projectOfAgent(a)) continue;
+      const arr = model.agentsBySpace.get(a.space);
+      if (arr) arr.push(a); else model.agentsBySpace.set(a.space, [a]);
+    }
+    model.plainBySpace = new Map();
+    for (const x of model.plainTerminals) {
+      if (membership.projectOfAgent(x)) continue;
+      const arr = model.plainBySpace.get(x.space);
+      if (arr) arr.push(x); else model.plainBySpace.set(x.space, [x]);
+    }
+    model.spaceRows = new Set(list.map(a => a.space));
+    model.spaceAgentRows = new Set(list.filter(a => !membership.projectOfAgent(a)).map(a => a.space));
+    const knownSpaces = new Set(spaces().map(s => s.id));
+    model.orphanAgents = list.filter(a => !knownSpaces.has(a.space) && !membership.projectOfAgent(a));
+    return model;
   }
 
   render(cx) {
@@ -1848,109 +2091,24 @@ export default class Agents extends View {
     if (props()?.agentMenu) return this.agentMenu(t);
     sampleFocus();
     const collapsed = narrow();
-
-    const windowAddresses = new Set(terminals().filter(t => Object.hasOwn(t.labels ?? {}, "vega.window")).map(t => t.address));
-    let list = agents().filter(a => !windowAddresses.has(a.address));
-    this.listed = new Map(list.map((a) => [a.address, a.status]));
-    const all = visibleTerminals();
-    this.vegaTerminals = new Map(all.map(t => [t.address, t]));
-    this.projectUacs = this.projectGroups(all).uacs;
-    // The Uber-UAC lists as one row at the top, outside every project (docs/design/uber-uac.md).
-    const uberTerm = all.find(x => x.state === "live" && x.labels?.["vega.role"] === "uber");
-    this.uberRow = uberTerm ? { term: uberTerm, agent: list.find(a => a.address === uberTerm.address) } : null;
-    list = list.filter(a => a.address !== uberTerm?.address);
-    // A worktree's placeholder shell holds the checkout for its sentinel; the TUI never listed it.
-    const placeholder = (address) => Boolean(this.vegaTerminals.get(address)?.labels?.["vega.worktree-owner"]);
-    list = list.filter(a => !placeholder(a.address));
-    const filtering = hideInactive();
-    // A UAC without an agent-status entry still provides context for its live children.
-    if (filtering) {
-      const known = new Set(list.map(a => a.address));
-      list = [...list, ...all.filter(a => a.state === "live" && a.labels?.["vega.role"] === "uac"
-        && !known.has(a.address) && !placeholder(a.address)).map(a => ({ ...a, space: this.spaceOfTerminal(a) }))];
-    }
-    this.migratePins(all);
-    const focus = focused();
-    const shown = focus?.terminal ?? focus?.agent;
-    const now = Date.now();
-    this.track(list, now);
-    // A listed child belongs to its visible ancestor's tree, even in another space.
-    const listed = new Set(list.map(a => a.address));
-    list = list.filter(a => {
-      const seen = new Set([a.address]);
-      let parent = this.vegaTerminals.get(a.address)?.parent;
-      while (parent && !seen.has(parent) && this.vegaTerminals.get(parent)?.state === "live") {
-        if (listed.has(parent) && !this.foreignChild(this.vegaTerminals.get(a.address))) return false;
-        seen.add(parent); parent = this.vegaTerminals.get(parent)?.parent;
-      }
-      return true;
-    });
-    const membership = this.projectGroups(all);
-    // A pinned child can cross the view boundary without admitting its siblings.
-    const blockViews = new Map([...membership.blocks.keys()].map(p => [p, this.matchesBlock(membership, p)]));
-    const viewAllows = (a, grouped = true) => {
-      const project = membership.projectOfAgent(a);
-      const block = membership.blockOf(project);
-      const wholeBlock = grouped || membership.projectsInBlock(project).length > 1;
-      return (project && wholeBlock ? blockViews.get(block) : this.matchesView(project, machineOf(a.address)))
-        || (this.viewFilter().respect_pins && this.isPinned(a.address));
-    };
-    const viewSessions = new Set(all.filter(a => viewAllows(a)).map(a => a.address));
-    list = list.filter(a => viewSessions.has(a.address)
-      || this.tree(all, a.address).some(s => viewSessions.has(s.t.address)));
+    // The derivation lives in a cache rebuilt only when its inputs change
+    // (vega-0h4c.103); this render reads it and builds rows.
+    const m = this.viewModel();
+    this.vegaTerminals = m.vegaTerminals;
+    this.projectUacs = m.projectUacs;
+    this.listed = m.listed;
+    this.uberRow = m.uberRow;
+    this.plainTerminals = m.plainTerminals;
+    this.visibleSessions = m.visibleSessions;
+    this.waitingByAddress = m.waitingByAddress;
+    this.rowLabel = m.rowLabel;
+    this.activeView = m.activeView;
+    const filtering = m.filtering;
+    const list = m.list;
+    setAgentOrder(m.agentOrder);
+    // Restart fallbacks sync on every render, as before the cache.
     if (shared(INACTIVE_KEY) != null) localStorage.setItem("hide-inactive", String(filtering));
-    // Count only this view's sessions, before folds; UACs may remain as context.
-    const kids = new Set(list.flatMap(a => this.tree(all, a.address).map(s => s.t.address)));
-    const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)])
-      .filter(a => viewSessions.has(a.address)).map(a => [a.address, a]));
-    // Judge the status the row shows, including unread done sub-agents.
-    const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : this.topStatus(a);
-    const waitingAddresses = new Set((shared("vega.badges") ?? []).flatMap(r => Date.now()/1000-r.at <= 60
-      ? (r.waiting_panes ?? []).filter(w => !shared("vega.waiting-state")?.[waitingKey(r, w)]?.cleared).map(w => w.pane.replace(/^hc:/, "")) : []));
-    this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
-      this.isPinned(a.address) || a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
-    ).map(a => a.address)) : viewSessions;
-    if (filtering) for (const uac of membership.uacs.values()) {
-      if (this.blockPinned(membership, uac.labels?.["vega.project-id"])
-        || this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
-    }
-    // Live terminals without an agent (token-burn tui, pdc, a dev server, a shell) list under their
-    // project or space as dim rows. Sub-agent rows, UACs and worktree placeholders are not among them.
-    const agentAddresses = new Set(agents().map(x => x.address));
-    this.plainTerminals = all.filter(x => x.state === "live" && x.foreground && !agentAddresses.has(x.address)
-      && !kids.has(x.address) && !placeholder(x.address) && !["uac", "uber"].includes(x.labels?.["vega.role"])
-      && !(list.some(a => a.address === x.address)))
-      .map(x => ({ ...x, space: this.spaceOfTerminal(x) }))
-      .filter(x => viewAllows(x, false));
-    const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
-    list = list.filter(a => this.hasVisibleTree(all, a));
-    const projectOrder = this.orderedProjects(membership.blocks);
-    const memberOrder = this.orderedProjects(membership.projects);
-    const memberIndex = p => membership.blockOf(p) === p ? -1 : memberOrder.indexOf(p);
-    list.sort((a, b) => {
-      const pa = membership.projectOfAgent(a), pb = membership.projectOfAgent(b);
-      const ia = projectOrder.indexOf(membership.blockOf(pa)), ib = projectOrder.indexOf(membership.blockOf(pb));
-      return (ia < 0 ? Infinity : ia) - (ib < 0 ? Infinity : ib) ||
-        (ia >= 0 && ia === ib ? memberIndex(pa) - memberIndex(pb) : 0) ||
-        (pa && pa === pb ? (membership.labelsOf(b.address)["vega.role"] === "uac") - (membership.labelsOf(a.address)["vega.role"] === "uac") : 0);
-    });
-    setAgentOrder(list.flatMap(a => [a.address, ...this.tree(all, a.address).map(s => s.t.address)])
-      .filter(a => listed.has(a) && (!this.visibleSessions || this.visibleSessions.has(a))));
-
-    // A row reads "space \u00b7 detail": the detail is a tab someone named or the
-    // agent's own title, never an automatic tab number unless two rows would
-    // otherwise read the same.
-    // Read the pane snapshot once: every host read copies the whole list into JS.
-    const leads = leadPanes(panes());
-    const tabLabels = new Map(spaces().flatMap(s => s.tabs).map(tab => [tab.id, title(tab, leads.get(tab.id))]));
-    const labels = new Map(list.map(a => [a.address, tabLabels.get(a.tab) ?? (a.title || a.program?.name || "")]));
-    const label = (a) => labels.get(a.address);
-    const detail = new Map(list.map(a => [a.address, /^\d+$/.test(label(a)) ? null : label(a)]));
-    const seen = {};
-    for (const a of list) { const k = `${a.space_name}\u0000${detail.get(a.address) ?? ""}`; seen[k] = (seen[k] ?? 0) + 1; }
-    for (const a of list) {
-      if (detail.get(a.address) == null && seen[`${a.space_name}\u0000`] > 1) detail.set(a.address, label(a));
-    }
+    if (shared(VIEW_KEY) && localStorage.getItem("active-view") !== m.activeView) localStorage.setItem("active-view", m.activeView);
 
     const railRow = (a, i) => h_flex().id(`ag-${a.address}`).h(26).px(8).flex_none().items_center().gap(4)
       .hover(el => el.bg(t.hover)).on_click(() => a.pane ? run("pane.focus", { pane: a.pane }) : this.peek(a.address))
@@ -1960,12 +2118,9 @@ export default class Agents extends View {
       .child(h_flex().w(14).flex_none().items_center().justify_center()
         .child(this.status(t, { ...a, status: this.topStatus(a) }, true)));
 
-    this.rowLabel = a => detail.get(a.address) ?? label(a);
-    this.activeView = activeView();
-    if (shared(VIEW_KEY) && localStorage.getItem("active-view") !== this.activeView) localStorage.setItem("active-view", this.activeView);
-    const rail = filtering || this.viewFilter().respect_pins ? list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)])
-      .filter(a => this.visibleSessions.has(a.address)) : list;
-    const rows = collapsed ? rail.map(railRow) : this.projectTree(t, all, list, shown, now);
+    const rail = filtering || this.viewFilter().respect_pins ? list.flatMap(a => [a, ...m.treeFull(a.address).map(s => s.t)])
+      .filter(a => m.visibleSessions.has(a.address)) : list;
+    const rows = collapsed ? rail.map(railRow) : this.projectTree(t, m, Date.now());
 
     return v_flex()
       .size_full()
@@ -2009,7 +2164,7 @@ export default class Agents extends View {
         .cursor_pointer().tooltip("Show inactive sessions")
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { cx.stop_propagation(); setHideInactive(false); cx.notify(); })
-        .child(`${hiddenCount} idle hidden`)))
+        .child(`${m.hiddenCount} idle hidden`)))
       .when(Boolean(this.configError) && !collapsed, el => el.child(div().px(12).text_size(11).text_color(t.blocked).child(this.configError)))
       .when(list.length === 0 && !collapsed && !filtering, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
