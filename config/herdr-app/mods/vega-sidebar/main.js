@@ -242,6 +242,7 @@ export default class Agents extends View {
         this.viewLabels = InputState.new({ placeholder: "Labels, comma separated" });
         this.viewMachines = InputState.new({ placeholder: "Machines, comma separated (local for this host)" });
         this.viewMatch = "all";
+        this.viewRespectPins = false;
       }
       cx.spawn(async cx => {
         await this.refreshPreferences(cx);
@@ -276,7 +277,7 @@ export default class Agents extends View {
       }
       return;
     }
-    if (props()?.spaceMenu) return;
+    if (props()?.spaceMenu || props()?.agentMenu) return;
     this.startNavigation(cx);
     cx.timer.every(1000, cx => this.reconcileWaiting(cx));
     this.preferences = { projects: {}, views: {} };
@@ -1220,6 +1221,7 @@ export default class Agents extends View {
       for (const label of labels) args.push("--label", label);
       for (const machine of machines) args.push("--machine", machine);
       args.push("--match", this.viewMatch === "any" ? "any" : "all");
+      if (this.viewRespectPins) args.push("--respect-pins");
     }
     args.push("--json");
     try {
@@ -1264,7 +1266,7 @@ export default class Agents extends View {
           () => select(id))))
         .child(link(`edit-view-${id}`, "Edit", (_e, cx) => {
           this.viewName.set_value(id); this.viewLabels.set_value(view.labels.join(", "));
-          this.viewMachines.set_value(view.machines.join(", ")); this.viewMatch = view.match === "any" ? "any" : "all"; cx.notify();
+          this.viewMachines.set_value(view.machines.join(", ")); this.viewMatch = view.match === "any" ? "any" : "all"; this.viewRespectPins = view.respect_pins === true; cx.notify();
         }))
         .child(link(`delete-view-${id}`, "Delete", (_e, cx) => cx.spawn(cx => this.saveView(cx, true, id))))))
       .child(heading("Save a view"))
@@ -1277,9 +1279,38 @@ export default class Agents extends View {
         .child(div().text_size(11).text_color(t.dim).child("Show projects matching"))
         .child(pill(t, "match-all", "a label and a machine", { on: this.viewMatch !== "any", action: () => { this.viewMatch = "all"; } }))
         .child(pill(t, "match-any", "a label or a machine", { on: this.viewMatch === "any", action: () => { this.viewMatch = "any"; } })))
+      .child(choice("respect-pins", "Respect pins", this.viewRespectPins, [], (_e, cx) => {
+        this.viewRespectPins = !this.viewRespectPins; cx.notify();
+      }))
       .child(h_flex().pt(4).child(div().id("save-view").px(12).py(5).rounded(6).bg(t.raised).cursor_pointer()
         .child(this.saving ? "Saving…" : "Save view").on_click((_e, cx) => cx.spawn(cx => this.saveView(cx)))))
       .when(Boolean(this.configError), el => el.child(div().text_color(t.blocked).child(this.configError)));
+  }
+
+  isPinned(address) {
+    return Boolean(this.vegaTerminals?.get(address)?.labels?.["herdr.pinned"]);
+  }
+
+  openAgentMenu(address, cx) {
+    cx.stop_propagation();
+    openOverlay({ mod: "vega-sidebar", kind: "popup", width: 260, height: 100,
+      props: { agentMenu: { address } } });
+  }
+
+  agentMenu(t) {
+    const address = props().agentMenu.address;
+    const terminal = visibleTerminals().find(x => x.address === address && x.state === "live");
+    const pinned = Boolean(terminal?.labels?.["herdr.pinned"]);
+    const project = terminal?.labels?.["vega.role"] === "uac" && terminal.labels["vega.project-id"];
+    const item = (id, label, action) => div().id(id).h(31).px(8).rounded(7).cursor_pointer()
+      .hover(el => el.bg(t.hover)).child(label).on_click((_e, cx) => {
+        cx.stop_propagation(); closeOverlay(props().overlay); action(cx);
+      });
+    return v_flex().w_full().p(8).gap(8).bg(t.popover).text_color(t.foreground).text_size(12.8)
+      .on_key_down((e, cx) => { if (e.keystroke === "escape") { cx.stop_propagation(); closeOverlay(props().overlay); } })
+      .when(Boolean(terminal), el => el.child(item("pin-agent", pinned ? "Unpin" : "Pin", () =>
+        run("terminal.pin", { terminal: address, pinned: !pinned }))))
+      .when(Boolean(project), el => el.child(item("agent-project", "Open project window", cx => this.openProject(project, cx))));
   }
 
   openSpaceMenu(space, cx) {
@@ -1448,6 +1479,7 @@ export default class Agents extends View {
 
   matchesView(project, machine) {
     const view = this.viewFilter();
+    if (view.respect_pins && this.preferences?.projects?.[project]?.pinned) return true;
     const labels = this.preferences?.projects?.[project]?.labels ?? [];
     const byLabel = view.labels.some(label => labels.includes(label)), byMachine = view.machines.includes(machine);
     // any: a chosen label OR a chosen machine; an empty dimension then adds nothing.
@@ -1481,8 +1513,10 @@ export default class Agents extends View {
       const empty = !uacs.has(p) && !this.preferences?.projects?.[p]?.pinned
         && !list.some(a => projectOfAgent(a) === p)
         && !(this.plainTerminals ?? []).some(x => projectOfAgent(x) === p);
-      return !empty && this.matchesView(p, machineOf(representative.address))
-        && (!this.visibleSessions || this.preferences?.projects?.[p]?.pinned
+      return !empty && (this.matchesView(p, machineOf(representative.address))
+        || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a))
+        || (this.plainTerminals ?? []).some(x => projectOfAgent(x) === p))
+        && (!hideInactive() || this.preferences?.projects?.[p]?.pinned
           || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a)));
     });
     const C = this.colors();
@@ -1513,11 +1547,12 @@ export default class Agents extends View {
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
         .on_click(() => depth || !a.pane ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
-        .when(uac, el => el.on_mouse_down("right", (_e, cx) => this.openProject(l["vega.project-id"], cx)))
+        .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx))
         .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
           .when(x === "└" || x === "├", el => el.border_b(1.5).rounded_bl(6))))
         .child(this.status(t, st, true))
+        .when(this.isPinned(a.address), el => el.child(svg("mods/vega-sidebar/pin.svg").size(10).flex_none().tooltip("Pinned agent").text_color(t.accent)))
         .when(uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(l["vega.uac"] || "u▲c")))
         .child(div().flex_none().text_color(color).child(glyph))
         .when(!depth && this.foreignChild(this.vegaTerminals.get(a.address) ?? {}), el => el.child(div().flex_none().text_size(11).text_color(t.dim)
@@ -1545,7 +1580,7 @@ export default class Agents extends View {
       return base(x.foreground?.name) || base(x.foreground?.argv?.[0]) || x.program?.key || "terminal";
     };
     // Plain shells are noise: under Active only a focused one or one in a pinned project stays.
-    const plainRows = (members, pinned) => members.filter(x => !this.visibleSessions || !SHELLS.has(programOf(x))
+    const plainRows = (members, pinned) => members.filter(x => !hideInactive() || !SHELLS.has(programOf(x))
       || x.address === shown || pinned).map(x => {
       const cwd = x.foreground?.cwd?.split("/").at(-1);
       const argv = x.foreground?.argv?.join(" ");
@@ -1628,8 +1663,9 @@ export default class Agents extends View {
       }
     }
     const all_spaces = spaces();
-    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && this.matchesView(null, s.machine || "local")
-      && (!this.visibleSessions || list.some(a => a.space === s.id && !projectOfAgent(a) && this.hasVisibleTree(all, a))));
+    const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && (this.matchesView(null, s.machine || "local")
+      || list.some(a => a.space === s.id && this.hasVisibleTree(all, a)))
+      && (!hideInactive() || list.some(a => a.space === s.id && !projectOfAgent(a) && this.hasVisibleTree(all, a))));
     if (rest.length) {
       out.push(div().px(6).pt(12).pb(2).text_size(11).font_medium().text_color(t.dim).child("Spaces"));
       for (const sp of rest) {
@@ -1648,7 +1684,7 @@ export default class Agents extends View {
     }
     // Agents whose space this window doesn't know yet still show.
     const known = new Set(all_spaces.map(s => s.id));
-    for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a) && this.matchesView(null, machineOf(a.address)))) out.push(...withTree(a));
+    for (const a of list.filter(a => !known.has(a.space) && !projectOfAgent(a))) out.push(...withTree(a));
     return out;
   }
 
@@ -1665,6 +1701,8 @@ export default class Agents extends View {
       .cursor_pointer().hover(s => s.bg(t.hover))
       .tooltip(["Uber-UAC", agent?.title].filter(Boolean).join(" · "))
       .on_click(() => pane ? run("pane.focus", { pane }) : this.peek(term.address))
+      .on_mouse_down("right", (_e, cx) => this.openAgentMenu(term.address, cx))
+      .when(this.isPinned(term.address), el => el.child(svg("mods/vega-sidebar/pin.svg").size(10).flex_none().tooltip("Pinned agent").text_color(t.accent)))
       .child(this.status(t, a, true))
       .child(div().flex_none().font_semibold().text_color(C.uac).child("Über"))
       .when(l["vega.engaged"] === "yes", el => el.child(div().flex_none().text_size(11).text_color(t.accent).child("engaged")))
@@ -1763,6 +1801,7 @@ export default class Agents extends View {
     if (props()?.projectConfig) return this.projectOverlay(t);
     if (props()?.viewMenu) return this.viewMenu(t);
     if (props()?.spaceMenu) return this.spaceMenu(t);
+    if (props()?.agentMenu) return this.agentMenu(t);
     sampleFocus();
     const collapsed = narrow();
 
@@ -1803,21 +1842,27 @@ export default class Agents extends View {
       return true;
     });
     const membership = this.projectGroups(all);
-    list = list.filter(a => {
+    // A pinned child can cross the view boundary without admitting its siblings.
+    const viewAllows = (a, grouped = true) => {
       const project = membership.projectOfAgent(a);
-      return this.matchesView(project, machineOf(membership.projects.get(project)?.address ?? a.address));
-    });
+      return this.matchesView(project, machineOf((grouped && membership.projects.get(project)?.address) || a.address))
+        || (this.viewFilter().respect_pins && this.isPinned(a.address));
+    };
+    const viewSessions = new Set(all.filter(a => viewAllows(a)).map(a => a.address));
+    list = list.filter(a => viewSessions.has(a.address)
+      || this.tree(all, a.address).some(s => viewSessions.has(s.t.address)));
     if (shared(INACTIVE_KEY) != null) localStorage.setItem("hide-inactive", String(filtering));
     // Count only this view's sessions, before folds; UACs may remain as context.
     const kids = new Set(list.flatMap(a => this.tree(all, a.address).map(s => s.t.address)));
-    const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)]).map(a => [a.address, a]));
+    const candidates = new Map(list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)])
+      .filter(a => viewSessions.has(a.address)).map(a => [a.address, a]));
     // Judge the status the row shows, including unread done sub-agents.
     const rowStatus = a => kids.has(a.address) ? kidStatus(a, this.listed) : this.topStatus(a);
     const waitingAddresses = new Set((shared("vega.badges") ?? []).flatMap(r => Date.now()/1000-r.at <= 60
       ? (r.waiting_panes ?? []).filter(w => !shared("vega.waiting-state")?.[waitingKey(r, w)]?.cleared).map(w => w.pane.replace(/^hc:/, "")) : []));
     this.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
-      a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
-    ).map(a => a.address)) : null;
+      this.isPinned(a.address) || a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
+    ).map(a => a.address)) : viewSessions;
     if (filtering) for (const uac of membership.uacs.values()) {
       if (this.preferences?.projects?.[uac.labels?.["vega.project-id"]]?.pinned
         || this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
@@ -1829,7 +1874,7 @@ export default class Agents extends View {
       && !kids.has(x.address) && !placeholder(x.address) && !["uac", "uber"].includes(x.labels?.["vega.role"])
       && !(list.some(a => a.address === x.address)))
       .map(x => ({ ...x, space: this.spaceOfTerminal(x) }))
-      .filter(x => this.matchesView(membership.projectOfAgent(x), machineOf(x.address)));
+      .filter(x => viewAllows(x, false));
     const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
     list = list.filter(a => this.hasVisibleTree(all, a));
     const projectOrder = this.orderedProjects(membership.projects);
@@ -1859,8 +1904,8 @@ export default class Agents extends View {
 
     const railRow = (a, i) => h_flex().id(`ag-${a.address}`).h(26).px(8).flex_none().items_center().gap(4)
       .hover(el => el.bg(t.hover)).on_click(() => a.pane ? run("pane.focus", { pane: a.pane }) : this.peek(a.address))
-      .when(this.vegaTerminals.get(a.address)?.labels?.["vega.role"] === "uac", el =>
-        el.on_mouse_down("right", (_e, cx) => this.openProject(this.vegaTerminals.get(a.address).labels["vega.project-id"], cx)))
+      .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx))
+      .when(this.isPinned(a.address), el => el.child(svg("mods/vega-sidebar/pin.svg").size(10).flex_none().tooltip("Pinned agent").text_color(t.accent)))
       .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
       .child(h_flex().w(14).flex_none().items_center().justify_center()
         .child(this.status(t, { ...a, status: this.topStatus(a) }, true)));
@@ -1868,7 +1913,7 @@ export default class Agents extends View {
     this.rowLabel = a => detail.get(a.address) ?? label(a);
     this.activeView = activeView();
     if (shared(VIEW_KEY) && localStorage.getItem("active-view") !== this.activeView) localStorage.setItem("active-view", this.activeView);
-    const rail = filtering ? list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)])
+    const rail = filtering || this.viewFilter().respect_pins ? list.flatMap(a => [a, ...this.tree(all, a.address).map(s => s.t)])
       .filter(a => this.visibleSessions.has(a.address)) : list;
     const rows = collapsed ? rail.map(railRow) : this.projectTree(t, all, list, shown, now);
 

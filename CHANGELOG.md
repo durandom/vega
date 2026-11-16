@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 216 · 2026-11-16
+
+- feature: Right-click sidebar agent rows to Pin/Unpin; pinned agents show a pin
+  and stay visible under Active. UAC menus also offer Open project window.
+- feature: Saved sidebar views offer Respect pins, keeping pinned projects and
+  agents visible outside the view's filters. Existing views default off;
+  `vega project view <name> --respect-pins` enables it when replacing a view.
+- unit: apply `herdr-app.vega-sidebar` with the matching project CLI to use it.
+
 ## 215 · 2026-11-15
 
 - feature: `vega mux spawn --machine <host>` confirms mode, parent, task and

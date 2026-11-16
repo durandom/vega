@@ -80,7 +80,7 @@ fn project_cli_uses_private_home_and_xdg_config_and_reports_failures() {
         let data: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(
             data["views"]["Work"],
-            json!({"labels":["work"],"machines":["puck"],"match":"all"})
+            json!({"labels":["work"],"machines":["puck"],"match":"all","respect_pins":false})
         );
         assert!(call(&["view", "Work", "--delete", "--json"], xdg)
             .status
@@ -146,10 +146,23 @@ fn view_filters_replace_both_dimensions_and_label_removal_wins() {
         "puck",
         "--json",
     ]);
+    let pinned = call(&[
+        "view",
+        "Focus",
+        "--label",
+        "work",
+        "--respect-pins",
+        "--json",
+    ]);
+    assert_eq!(pinned["views"]["Focus"]["respect_pins"], true);
+    assert_eq!(
+        call(&["config", "--json"])["views"]["Focus"]["respect_pins"],
+        true
+    );
     let replaced = call(&["view", "Focus", "--machine", "local", "--json"]);
     assert_eq!(
         replaced["views"]["Focus"],
-        json!({"labels":[],"machines":["local"],"match":"all"})
+        json!({"labels":[],"machines":["local"],"match":"all","respect_pins":false})
     );
 }
 

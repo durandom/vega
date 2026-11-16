@@ -6,8 +6,9 @@ description: Reads and edits personal project display names, labels and saved si
 `vega project config [<project-id>] [--name <name>] [--label <label>]... [--unlabel <label>]... [--pin|--unpin] [--json]`.
 Use the full normalized `vega.project-id` terminal label as the key. Empty name clears the override.
 No ID lists all projects and views in one read; a missing file means empty preferences.
-`vega project view [<name>] [--label <label>]... [--machine <machine>]... [--delete] [--json]`.
+`vega project view [<name>] [--label <label>]... [--machine <machine>]... [--match all|any] [--respect-pins] [--delete] [--json]`.
 Filter flags replace a saved view; labels match any selected label, machines any selected machine,
-and both dimensions must match. `all` is reserved. `local` means the app host.
+and both dimensions must match by default (`--match any` accepts either).
+`--respect-pins` keeps pinned projects and agents visible despite the view; omitted means off. `all` is reserved. `local` means the app host.
 Storage is `$XDG_CONFIG_HOME/vega/projects.toml` (normally `~/.config/vega/projects.toml`),
 local to the app host; the registry and project repository are untouched.

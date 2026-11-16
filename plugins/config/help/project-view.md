@@ -3,6 +3,8 @@ Filter flags replace a view whole. Empty dimensions match everything.
 Labels match ANY selected label; machines match ANY selected machine.
 --match all (default): a project needs a chosen label AND a chosen machine.
 --match any: a chosen label OR a chosen machine is enough (everything on puck plus label vega).
+--respect-pins keeps pinned projects and agents visible despite these filters (default off).
+Replacing a view without --respect-pins disables it.
 Use hc machine names, or local for terminals on the app host. The built-in all view is reserved.
 
 Examples:

@@ -1237,6 +1237,79 @@ test('legacy-only projects stay visible and no-UAC projects retain manual order'
   assert.equal(h.mod.projectGroups(all).projectOfAgent({address:'legacy'}),'legacy');
 });
 
+test('agent popup pins live terminals and preserves UAC actions and Escape',()=>{
+  const h=load('vega-sidebar');projectFixture(h);h.mod.init({},h.cx);
+  for(const id of ['ag-puck/t1','sub-t2','ag-t3']) {
+    elements(h.render()).find(n=>n.idValue===id).handlers['on_mouse_down:right']({},h.cx);
+    const spec=h.calls.filter(c=>c[0]==='open').at(-1)[1];
+    assert.equal(spec.kind,'popup');assert.equal(spec.props.agentMenu.address,id.replace(/^(ag|sub)-/,''));
+  }
+  const m=load('vega-sidebar');const all=h.api.terminals();m.api.terminals=()=>all;
+  m.setProps({agentMenu:{address:'puck/t1'},overlay:'menu'});m.mod.init({},m.cx);
+  assert.equal(m.calls.length,0,'menu starts no navigation or reads');
+  let nodes=elements(m.render());assert(texts(nodes.find(n=>n.idValue==='pin-agent')).includes('Pin'));
+  nodes.find(n=>n.idValue==='pin-agent').handlers.on_click({},m.cx);
+  assert.equal(JSON.stringify(m.calls.find(c=>c[0]==='run')),JSON.stringify(['run','terminal.pin',{terminal:'puck/t1',pinned:true}]));
+  all[0].labels['herdr.pinned']='true';nodes=elements(m.render());
+  assert(texts(nodes.find(n=>n.idValue==='pin-agent')).includes('Unpin'));
+  nodes.find(n=>n.idValue==='pin-agent').handlers.on_click({},m.cx);
+  assert.equal(m.calls.filter(c=>c[0]==='run').at(-1)[2].pinned,false);
+  nodes.find(n=>n.idValue==='agent-project').handlers.on_click({},m.cx);
+  assert.equal(m.calls.filter(c=>c[0]==='open').at(-1)[1].props.projectConfig,'github.com/team/a');
+  m.render().handlers.on_key_down({keystroke:'escape'},m.cx);
+  assert(m.calls.some(c=>c[0]==='close'&&c[1]==='menu'));
+  m.setProps({agentMenu:{address:'t3'},overlay:'menu'});
+  assert(!elements(m.render()).some(n=>n.idValue==='agent-project'));
+  all.find(t=>t.address==='t3').state='exited';
+  assert(!elements(m.render()).some(n=>n.idValue==='pin-agent'),'vanished targets have no pin action');
+});
+
+test('pins survive Active and only cross saved view filters with Respect pins',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);const all=h.api.terminals();
+  for(const address of ['t2','t3','t4'])all.find(t=>t.address===address).labels['herdr.pinned']='true';
+  all.push({address:'puck/sibling',state:'live',parent:'puck/t1',status:'working',labels:{}});
+  h.api.terminals=()=>all;h.mod.init({},h.cx);h.state.set('vega.hide-inactive',true);
+  const ids=()=>elements(h.render()).map(n=>n.idValue);
+  for(const id of ['ag-puck/t1','sub-t2','ag-t3','ag-t4'])assert(ids().includes(id),id);
+  assert(elements(elements(h.render()).find(n=>n.idValue==='sub-t2')).some(n=>n.tooltipValue==='Pinned agent'));
+  h.mod.preferences={projects:{[project]:{labels:['work']}},views:{Strict:{labels:['other'],machines:['other']}}};
+  h.state.set('vega.view','Strict');assert(!ids().includes(`uac-${project}`));assert(!ids().includes('ag-t4'));
+  h.mod.preferences.views.Strict.respect_pins=true;
+  for(const active of [false,true]) {
+    h.state.set('vega.hide-inactive',active);
+    for(const id of [`uac-${project}`,'sub-t2','ag-t3','ag-t4'])assert(ids().includes(id),`${id}, Active=${active}`);
+    assert(!ids().includes('sub-puck/sibling'),'unpinned working sibling cannot cross view boundary');
+    h.api.layout=()=>({id:'sidebar',size:{px:76}});
+    const nodes=elements(h.render());assert(nodes.some(n=>n.idValue==='ag-t2'),'rail includes pinned child');
+    nodes.find(n=>n.idValue==='ag-t3').handlers['on_mouse_down:right']({},h.cx);
+    assert.equal(h.calls.filter(c=>c[0]==='open').at(-1)[1].props.agentMenu.address,'t3');
+    h.api.layout=()=>null;
+  }
+  h.mod.preferences.projects[project].pinned=true;
+  assert(ids().includes('sub-puck/sibling'),'pinned project admits its working members');
+  h.mod.preferences.views.Strict.respect_pins=false;
+  assert(!ids().includes(`uac-${project}`),'project pins also obey strict views');
+  h.state.set('vega.view','label:other');assert(!ids().includes(`uac-${project}`),'ad-hoc view remains strict');
+  h.state.set('vega.view','all');delete all.find(t=>t.address==='t3').labels['herdr.pinned'];
+  assert(!ids().includes('ag-t3'),'unpinning idle agent restores Active filtering');
+});
+
+test('view popup edits, saves and clears Respect pins with the whole saved view',async()=>{
+  const h=load('vega-sidebar');h.setProps({viewMenu:true,overlay:'views'});
+  const prefs={projects:{},views:{Work:{labels:['work'],machines:[],respect_pins:true},Old:{labels:['work'],machines:[]}}};
+  h.api.exec=async(bin,args)=>{h.calls.push(['exec',bin,args]);return {code:0,stdout:JSON.stringify(prefs)};};
+  h.mod.init({},h.cx);await h.flush();assert.equal(h.mod.viewRespectPins,false);
+  elements(h.render()).find(n=>n.idValue==='edit-view-Work').handlers.on_click({},h.cx);
+  assert.equal(h.mod.viewRespectPins,true);await h.mod.saveView(h.cx);
+  const argv=()=>h.calls.filter(c=>c[0]==='exec'&&c[2][1]==='view').at(-1)[2];
+  assert(argv().includes('--respect-pins'));
+  elements(h.render()).find(n=>n.idValue==='respect-pins').handlers.on_click({},h.cx);
+  await h.mod.saveView(h.cx);assert(!argv().includes('--respect-pins'));
+  h.mod.viewRespectPins=true;
+  elements(h.render()).find(n=>n.idValue==='edit-view-Old').handlers.on_click({},h.cx);
+  assert.equal(h.mod.viewRespectPins,false,'old views reset the editor toggle');
+});
+
 test('view popup selects, saves and deletes CLI-owned views without persisting config in shared state',async()=>{
   const h=load('vega-sidebar');h.setProps({viewMenu:true,overlay:'views'});
   let preferences={projects:{},views:{Work:{labels:['work'],machines:['puck']}}};

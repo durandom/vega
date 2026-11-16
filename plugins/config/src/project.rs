@@ -65,6 +65,9 @@ enum Cmd {
         /// all: a project needs a chosen label and a chosen machine; any: either is enough
         #[arg(long = "match", requires = "id", value_parser = ["all", "any"], conflicts_with = "delete")]
         match_mode: Option<String>,
+        /// Keep pinned projects and agents visible despite this view's filters
+        #[arg(long, requires = "id", conflicts_with = "delete")]
+        respect_pins: bool,
         #[arg(long, requires = "id", conflicts_with_all = ["label", "machine"])]
         delete: bool,
         #[arg(long)]
@@ -188,7 +191,11 @@ fn snapshot(doc: &DocumentMut) -> Result<Value, String> {
                             }
                         },
                     };
-                    json!({"labels": labels, "machines": strings(entry.get("machines"))?, "match": mode})
+                    let respect_pins = match entry.get("respect_pins") {
+                        None => false,
+                        Some(v) => v.as_bool().ok_or("respect_pins: expected a boolean")?,
+                    };
+                    json!({"labels": labels, "machines": strings(entry.get("machines"))?, "match": mode, "respect_pins": respect_pins})
                 };
                 rows.insert(id.to_string(), row);
             }
@@ -209,6 +216,7 @@ fn array(values: &[String]) -> Item {
 fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
     let mut match_mode: Option<String> = None;
     let mut pinned = None;
+    let mut respect_pins = false;
     let (kind, id, name, labels, unlabels, machines, delete, json_output) = match cmd {
         Some(Cmd::Config {
             id,
@@ -233,10 +241,12 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
             label,
             machine,
             match_mode: mode,
+            respect_pins: pins,
             delete,
             json,
         }) => {
             match_mode = mode;
+            respect_pins = pins;
             ("views", id, None, label, vec![], machine, delete, json)
         }
         None => ("projects", None, None, vec![], vec![], vec![], false, false),
@@ -261,6 +271,7 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
         || !unlabels.is_empty()
         || !machines.is_empty()
         || match_mode.is_some()
+        || respect_pins
         || delete;
     // Readers need no writable directory. Writers serialize the read-modify-write,
     // including distinct project and view edits, and atomically replace the file.
@@ -326,6 +337,7 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
                 doc[kind][id]["machines"] = array(&ms);
                 // A view is replaced whole: no --match means the default, all.
                 doc[kind][id]["match"] = value(match_mode.as_deref().unwrap_or("all"));
+                doc[kind][id]["respect_pins"] = value(respect_pins);
             }
         }
         let after = snapshot(&doc)?;
@@ -339,7 +351,7 @@ fn execute(path: &Path, cmd: Option<Cmd>) -> Result<(Value, bool), String> {
             if kind == "projects" {
                 json!({"name":"","labels":[],"pinned":false})
             } else {
-                json!({"labels":[],"machines":[],"match":"all"})
+                json!({"labels":[],"machines":[],"match":"all","respect_pins":false})
             }
         });
         data = if delete {
@@ -390,6 +402,7 @@ mod tests {
             label: vec!["work".into()],
             machine: vec!["puck".into()],
             match_mode: Some("any".into()),
+            respect_pins: false,
             delete: false,
             json: true,
         });
@@ -452,6 +465,39 @@ mod tests {
         }
     }
     #[test]
+    fn respect_pins_defaults_off_and_whole_view_replacement_clears_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        fs::write(&path, "[views.Old]\nlabels = ['work']\nfuture = 42\n").unwrap();
+        assert_eq!(
+            execute(&path, None).unwrap().0["views"]["Old"]["respect_pins"],
+            false
+        );
+        for enabled in [true, false] {
+            let mut args = vec!["vega-project", "view", "Old", "--label", "work", "--json"];
+            if enabled {
+                args.push("--respect-pins");
+            }
+            let cli = Cli::try_parse_from(&args).unwrap();
+            let data = execute(&path, cli.cmd).unwrap().0;
+            assert_eq!(data["views"]["Old"]["respect_pins"], enabled);
+            assert_eq!(
+                execute(&path, None).unwrap().0["views"]["Old"]["respect_pins"],
+                enabled
+            );
+            let saved = fs::read_to_string(&path).unwrap();
+            assert!(saved.contains("future = 42"));
+            execute(&path, Cli::try_parse_from(args).unwrap().cmd).unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+        }
+        for args in [
+            vec!["vega-project", "view", "--respect-pins"],
+            vec!["vega-project", "view", "Old", "--respect-pins", "--delete"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+    #[test]
     fn malformed_config_is_never_overwritten_and_usage_is_strict() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("projects.toml");
@@ -461,6 +507,7 @@ mod tests {
             "[projects.a]\nlabels = [3]",
             "[views.a]\nmachines = true",
             "[projects.a]\npinned = 3",
+            "[views.a]\nrespect_pins = 3",
         ] {
             fs::write(&p, text).unwrap();
             assert!(execute(&p, config("a", Some("x"), &[], &[])).is_err());

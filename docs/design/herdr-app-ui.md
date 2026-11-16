@@ -646,3 +646,31 @@ registration lifetime, dependencies may start/restart independently. Registered
 services default to same local ports to preserve embedded URLs; the panel labels
 the bundle ports. Preflight checks every local bind and SSH catches bind races.
 No forwards start during registration or Refresh.
+
+## Sidebar pins and saved views (vega-0h4c.100)
+
+Right-click any expanded agent row (including children and the Über row), or a
+compact rail row, to open a pointer popup with Pin/Unpin. UAC agent menus also
+include Open project window; project headers retain their existing right-click
+action. The popup stops propagation and closes on selection or Escape. It reads
+the terminal's live `herdr.pinned` label and writes only through
+`run("terminal.pin", {terminal, pinned})`. Pins belong to the terminal, survive
+sidebar reloads and disappear when the terminal ends. A small themed pin marks
+pinned rows. Pins keep idle agents visible under Active, including nested agents;
+existing folds still apply. There is no additional pin store or redraw timer.
+
+The view editor's Respect pins toggle is saved with the label/machine filters in
+`$XDG_CONFIG_HOME/vega/projects.toml` as `views.<name>.respect_pins`.
+`vega project config --json` returns it, defaulting to false for old views;
+`vega project view <name> --label … --machine … --respect-pins` enables it.
+View writes replace the whole view, so omitting the flag clears the option.
+All and ad-hoc label views retain their existing semantics.
+
+An opted-in view admits pinned projects and their members despite its label or
+machine filters. An individual pinned agent admits only itself and the project
+context needed to reach it; unrelated siblings in an excluded project stay
+hidden. View eligibility is computed before Active eligibility, so pins do not
+bypass a strict view unless Respect pins is enabled. Active still hides idle
+unpinned agents within pinned projects. Fake-host tests exercise menu actions,
+markers, nested/remote agents, compact rows and combined view/Active filtering;
+CLI tests use temporary preference paths. Live deployment remains a UAC step.
