@@ -23,6 +23,7 @@ pub mod pane;
 pub mod pane_state;
 pub mod project;
 pub mod prompt;
+pub mod remote_mode;
 pub mod resets;
 pub mod resume;
 pub mod service_config;

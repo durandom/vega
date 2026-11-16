@@ -16,6 +16,18 @@ spawns have no record; `vega uac claim` records the UAC's own terminal. This
 machine only. Extra harness args are retained; explicit --env values are not
 stored or replayed.
 
+Recovery for a pre-upgrade spawn (`spawn_not_found`): no durable record exists,
+so vega cannot safely reconstruct the harness session, cwd or launch arguments.
+On the lane host, find and resume the original harness session in its original
+worktree (for example `codex resume <session-id>`), using `hc run --no-parent`
+if a new terminal is needed. From the current UAC, re-parent each lane with
+`vega uac adopt hc:<host>/<pane>` (add `--headless` for unattended lanes).
+This records vega lineage and mode on the lane host; it does not change hc's
+native parent. Cross-core `hc run --parent <host>/<pane>` requires that core to
+know the parent's machine; `machine_unknown` is an hc machine-routing failure.
+Use vega adoption to re-parent running/restored lanes after a UAC or host reboot.
+Adoption does not create a missing durable spawn record for future `reopen`.
+
 After a boot vegad finds lost agents once and, per ~/.config/vega/resume.toml
 `mode = "offer" | "auto" | "off"` (default offer), leaves one note with this
 command or resumes them itself.

@@ -109,3 +109,9 @@ Examples:
   vega skills uac        # the role guide
   vega uac rules        # the coordinator rules
 vega uac --json: schema-1 facility object (project, agents, grants, unreachable, registry_error), selected by cwd; no calling pane required.
+
+Remote adoption: `vega uac adopt hc:io/t9` records parent, mode and briefing time
+on io, with a confirmed reply before reporting success. Both hosts need matching
+vega versions. Add `--headless` for unattended lanes. After a reboot, resume the
+harness on its lane host first, then adopt it from the current UAC. Adoption
+updates vega supervision/mail lineage; hc's native parent is separate.

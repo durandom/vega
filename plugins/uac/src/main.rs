@@ -10,6 +10,7 @@
 //! belong to it. Remote membership uses the registry's published project ID;
 //! a remote path is never resolved on this host.
 
+mod adoption;
 mod beads;
 mod grants;
 mod group;
@@ -64,6 +65,15 @@ fn run(mode: Mode) -> ExitCode {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "record-adoption") {
+        return match adoption::receive(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(f) => {
+                vega_herdr::print_failure_json(&f);
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.iter().any(|a| a == "--json") && !args.iter().any(|a| a == "--help" || a == "-h") {
         if args == ["--json"] {
             return run(Mode::Json);
@@ -386,6 +396,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
         }
     }
 
+    terminal::add_registry_hc(&mut snapshots, view);
     let host = st::post_host();
     let mut lookup = beads::Lookup::default();
     let watching = vega_ci_watch::store::waiting(vega_ci_watch::unix_now());
@@ -1081,7 +1092,7 @@ fn release(key: &str, me: &str) -> Result<(), Failure> {
 
 /// `vega uac adopt <pane|name>`: a session the UAC did not spawn gets the UAC
 /// as its parent, so vegad supervises it and its report goes to the UAC. The
-/// session is told so. This machine only (until the registry). Headed unless
+/// session is told so. Records belong to the target host. Headed unless
 /// `headless`: an adopted session is mostly one the user works in, so its
 /// in-pane questions stay (`vega mux mode`).
 fn adopt(target: &str, machine: Option<&str>, me: &str, headless: bool) -> Result<(), Failure> {
@@ -1099,13 +1110,12 @@ fn adopt(target: &str, machine: Option<&str>, me: &str, headless: bool) -> Resul
     if machine.is_none() {
         vega_herdr::project::resolve_optional(Path::new(str_of(&a, "cwd")), &st::post_host())?;
     }
-    st::save_parent_on(machine, &pane, agent_name(&a), me);
     let mode = if headless {
         st::Mode::Headless
     } else {
         st::Mode::Headed
     };
-    st::save_mode(machine, &pane, agent_name(&a), mode);
+    adoption::save(machine, &pane, agent_name(&a), me, mode)?;
     // Its worktree becomes a lane: status labels the beads it creates from now.
     let lane = match machine {
         None => {

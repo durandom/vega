@@ -167,3 +167,100 @@ pub fn backend(pane: &str) -> &'static str {
         "herdr"
     }
 }
+
+/// Fresh registry publications supply remote hc agents absent from herdr lists.
+pub fn add_registry_hc(snapshots: &mut Vec<Snapshot>, view: Option<&vega_registry::View>) {
+    let Some(view) = view else {
+        return;
+    };
+    let local = vega_registry::token(&st::post_host().to_lowercase());
+    for (host, a) in view.agents() {
+        if host == local || a["backend"] != "hc" || a["schema"] != 2 {
+            continue;
+        }
+        let Some(pane) = a["pane"].as_str().filter(|p| vega_herdr::pane::is_hc_id(p)) else {
+            continue;
+        };
+        let index = snapshots.iter().position(|s| {
+            s.machine
+                .as_deref()
+                .is_some_and(|m| vega_registry::token(&m.to_lowercase()) == host)
+        });
+        let index = index.unwrap_or_else(|| {
+            snapshots.push(Snapshot {
+                machine: Some(host.clone()),
+                agents: vec![],
+                workspaces: vec![],
+                tabs: vec![],
+                backends: vec![],
+            });
+            snapshots.len() - 1
+        });
+        let snapshot = &mut snapshots[index];
+        if !snapshot.backends.contains(&"hc") {
+            snapshot.backends.push("hc");
+        }
+        if snapshot
+            .agents
+            .iter()
+            .any(|existing| existing["pane_id"] == pane)
+        {
+            continue;
+        }
+        snapshot.agents.push(serde_json::json!({
+            "pane_id":pane,"backend":"hc","name":a["name"],
+            "agent":a["kind"],"agent_status":a["status"],"cwd":a["cwd"]
+        }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fresh_registry_hc_agents_reach_remote_project_inventory() {
+        use serde_json::json;
+        use vega_registry::{agent_key, beat_key, View};
+        let mut view = View::default();
+        view.entries
+            .insert(beat_key("io"), json!({"at":unix_now()}));
+        view.entries.insert(beat_key("stale"), json!({"at":0}));
+        let a = json!({"schema":2,"backend":"hc","pane":"t9","name":"remote-worker","kind":"codex","status":"idle","project":"github.com/example/project","cwd":"/remote/never/local"});
+        for host in ["io", "stale"] {
+            view.entries.insert(agent_key(host, "t9"), a.clone());
+        }
+        let mut snapshots = vec![Snapshot {
+            machine: Some("io".into()),
+            agents: vec![],
+            workspaces: vec![],
+            tabs: vec![],
+            backends: vec!["herdr"],
+        }];
+        add_registry_hc(&mut snapshots, Some(&view));
+        add_registry_hc(&mut snapshots, Some(&view));
+        assert_eq!(snapshots.len(), 1);
+        let snapshot = &snapshots[0];
+        assert_eq!(snapshot.backends, ["herdr", "hc"]);
+        assert_eq!(snapshot.agents.len(), 1);
+        let agent = &snapshot.agents[0];
+        assert_eq!(agent["pane_id"], "t9");
+        assert_eq!(agent["agent"], "codex");
+        assert!(remote_in_project(
+            Some(&view),
+            "io",
+            str_of(agent, "pane_id"),
+            "github.com/example/project"
+        ));
+        assert!(!remote_in_project(
+            Some(&view),
+            "io",
+            "t9",
+            "github.com/example/other"
+        ));
+        assert_eq!(agent["cwd"], "/remote/never/local");
+        let mut hc_only = vec![];
+        add_registry_hc(&mut hc_only, Some(&view));
+        assert_eq!(hc_only.len(), 1);
+        assert_eq!(hc_only[0].machine.as_deref(), Some("io"));
+    }
+}

@@ -88,7 +88,7 @@ fn find(target: &str, records: Vec<SpawnRecord>) -> Result<SpawnRecord, Failure>
         Failure::new(
             "spawn_not_found",
             format!("no spawn record for {target}"),
-            "reopen an agent started with `vega mux spawn` after this upgrade",
+            "older spawns have no durable record; resume the harness session on its host, then run `vega uac adopt hc:<host>/<pane>` from the current UAC (see `vega mux reopen --help`)",
         )
     })?;
     if matches.next().is_some() {

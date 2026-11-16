@@ -276,7 +276,7 @@ pub fn local_entries(
             link_key(host, &child_host, &c.pane),
             json!({
                 "parent": c.parent.pane,
-                "parent_host": host,
+                "parent_host": c.parent.host,
                 "child_host": child_host,
                 "pane": c.pane,
                 "backend": if vega_herdr::pane::hc_storage_token(&c.pane).is_some() { "hc" } else { "herdr" },

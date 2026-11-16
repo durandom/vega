@@ -11,6 +11,14 @@ inspect `vega post log --pane <pane>` on the owning host for broker read status.
 Commands: `vega uac`, `claim`, `release`, `adopt`, `ask`, `status`, `answer`, `land`, `prune`,
 `grant`, `revoke`, `grants`, `group`, `park`, `hold`, `unpark`.
 
+`vega uac adopt hc:<host>/<pane>` records parent, mode and briefing time on the
+lane host, with checked persistence and a confirmed reply before success or mail.
+Both hosts need matching vega versions; unconfirmed remote writes fail clearly.
+After a reboot, resume the harness on its lane host and adopt it from the current
+UAC (add `--headless` for unattended lanes). This changes vega lineage, separately
+from hc's native parent. Fresh remote hc agents appear through the project registry.
+For pre-upgrade spawns without durable records, see `vega mux reopen --help`.
+
 `vega uac hold <pane>` pauses attention without a decision bead. Resume with
 `vega uac unpark <pane>`; new work from the parent also clears a hold.
 

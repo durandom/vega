@@ -49,13 +49,27 @@ esac"#,
             "hc",
             r#"
 exec /usr/bin/python3 -c '
-import json,os,sys
+import base64,json,os,subprocess,sys
 from pathlib import Path
 r=json.loads(sys.stdin.readline()); p=r["params"]; root=Path(os.environ["HOME"])
-if r["method"]=="terminal.list": v=json.loads((root/"hc.json").read_text())
+if r["method"]=="machine.exec":
+ assert p["on"]=="io" and p["timeout"]==15.0
+ assert p["argv"][:2]==["vega-uac","record-adoption"]
+ remote=root/"remote-home"
+ e=dict(os.environ, HOME=str(remote), XDG_STATE_HOME=str(remote/"state"), XDG_CONFIG_HOME=str(remote/"config"), VEGA_POST_HOST="io")
+ for k in ["HC_TERMINAL_ID","HERDR_PANE_ID"]: e.pop(k,None)
+ out=subprocess.run([os.environ["TEST_UAC_EXE"]]+p["argv"][1:],env=e,capture_output=True)
+ failure=(root/"failure").read_text() if (root/"failure").exists() else ""
+ stdout=out.stdout
+ if failure=="old": stdout=b"adopted: t9"
+ if failure=="json": stdout=b"{}"
+ if failure=="mismatch":
+  obj=json.loads(stdout); obj["parent"]["host"]="wrong"; stdout=json.dumps(obj).encode()
+ v={"ms":1,"signal":None,"stdout":base64.b64encode(stdout).decode(),"stderr":base64.b64encode(out.stderr).decode(),"code":out.returncode if failure!="exit" else 1,"timed_out":failure=="timeout","truncated":failure=="truncated"}
+elif r["method"]=="terminal.list": v=json.loads((root/"hc.json").read_text())
 else:
  assert r["method"]=="terminal.get"
- name={"t1":"me","t2":"child","io/t9":"remote","io/remote-worker":"remote"}.get(p["terminal"])
+ name={"t1":"me","t2":"child","t9":"remote","io/t9":"remote","io/remote-worker":"remote"}.get(p["terminal"])
  if name is None:
   print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32000,"message":"unexpected target","data":{"kind":"not_found"}}})); sys.exit(3)
  v=json.loads((root/(name+".json")).read_text())
@@ -109,7 +123,8 @@ esac"#,
                 .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
                 .env("FAKE_PID", std::process::id().to_string())
                 .env("VEGA_POST_HOST", "fixture")
-                .env("VEGA_POST_INBOX_ONLY", "fixture")
+                .env("VEGA_POST_INBOX_ONLY", "fixture,io")
+                .env("TEST_UAC_EXE", env!("CARGO_BIN_EXE_vega-uac"))
                 .env("VEGA_NATS_URL", "nats://127.0.0.1:9")
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -172,7 +187,109 @@ esac"#,
         assert!(call(&["unpark", child]).contains("unparked:"));
         fs::rename(bin.join("bd-off"), bin.join("bd")).unwrap();
         // All remote operations below go through the fake hc, never a real core.
+        let remote = root.join("remote-home");
+        fs::create_dir(&remote).unwrap();
+        let mut target: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join("remote.json")).unwrap()).unwrap();
+        target["address"] = "t9".into();
+        fs::write(remote.join("remote.json"), target.to_string()).unwrap();
+        // Every unconfirmed reply fails before success, cache writes, or mail.
+        let mail_before = fs::read(root.join("mail")).unwrap();
+        for failure in ["old", "json", "mismatch", "exit", "timeout", "truncated"] {
+            fs::write(root.join("failure"), failure).unwrap();
+            let out = invoke(&["adopt", "hc:io/t9"], hc);
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(!out.status.success(), "{failure}: {text}");
+            assert!(
+                text.contains("remote_adoption_failed") && !text.contains("adopted:"),
+                "{text}"
+            );
+            assert!(!root.join("state/vega/parents/io_hc-7439").exists());
+            assert_eq!(fs::read(root.join("mail")).unwrap(), mail_before);
+        }
+        fs::remove_file(root.join("failure")).unwrap();
+        target["name"] = "replacement-agent".into();
+        fs::write(remote.join("remote.json"), target.to_string()).unwrap();
+        let changed = invoke(&["adopt", "hc:io/t9"], hc);
+        let text = String::from_utf8_lossy(&changed.stdout);
+        assert!(
+            !changed.status.success()
+                && text.contains("adoption target changed")
+                && !text.contains("adopted:"),
+            "{text}"
+        );
+        target["name"] = "remote-worker".into();
+        fs::write(remote.join("remote.json"), target.to_string()).unwrap();
+        // Target write failures cannot be acknowledged either.
+        for kind in ["parents", "modes", "briefs"] {
+            let dir = remote.join(format!("state/vega/{kind}"));
+            if dir.exists() {
+                fs::remove_dir_all(&dir).unwrap();
+            }
+            fs::create_dir_all(dir.parent().unwrap()).unwrap();
+            fs::write(&dir, "blocked").unwrap();
+            let out = invoke(&["adopt", "hc:io/t9"], hc);
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                !out.status.success()
+                    && text.contains("remote_adoption_failed")
+                    && !text.contains("adopted:"),
+                "{text}"
+            );
+            assert!(!root.join("state/vega/parents/io_hc-7439").exists());
+            assert_eq!(fs::read(root.join("mail")).unwrap(), mail_before);
+            fs::remove_file(&dir).unwrap();
+        }
+        assert!(call(&["adopt", "hc:io/t9"]).contains("headed"));
+        let read_remote = |kind: &str| -> serde_json::Value {
+            serde_json::from_slice(
+                &fs::read(remote.join(format!("state/vega/{kind}/local_hc-7439"))).unwrap(),
+            )
+            .unwrap()
+        };
+        let check_readers = |mode: &str| {
+            for (home, host) in [(root, "fixture"), (remote.as_path(), "io")] {
+                let out = Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", "adopted_state_is_readable_on_each_host"])
+                    .env_clear()
+                    .env("HOME", home)
+                    .env("XDG_STATE_HOME", home.join("state"))
+                    .env("XDG_CONFIG_HOME", home.join("config"))
+                    .env("PATH", "/usr/bin:/bin")
+                    .env("VEGA_POST_HOST", host)
+                    .env("TEST_ADOPTED_MODE", mode)
+                    .env("TEST_ADOPTED_PARENT", if hc { "t1" } else { "w1:p1" })
+                    .output()
+                    .unwrap();
+                assert!(
+                    out.status.success(),
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+        };
+        check_readers("headed");
+        assert_eq!(read_remote("modes")["mode"], "headed");
+        assert_eq!(read_remote("parents")["host"], "fixture");
+        assert_eq!(
+            read_remote("parents")["parent"],
+            if hc { "t1" } else { "w1:p1" }
+        );
+        assert!(!remote.join("state/vega/parents/io_hc-7439").exists());
+        assert!(!root.join("state/vega/parents/local_hc-7439").exists());
         assert!(call(&["adopt", "hc:io/t9", "--headless"]).contains("adopted: t9"));
+        assert_eq!(read_remote("modes")["mode"], "headless");
+        check_readers("headless");
+        assert_eq!(read_remote("parents")["name"], "remote-worker");
+        assert!(
+            fs::read_to_string(remote.join("state/vega/briefs/local_hc-7439"))
+                .unwrap()
+                .parse::<u128>()
+                .unwrap()
+                > 0
+        );
+        assert!(call(&["adopt", "hc:remote-worker", "--machine", "io"]).contains("headed"));
         assert!(call(&["park", "hc:io/t9", "--bead", "decision-1"]).contains("parked: t9"));
         let remote_park = root.join("state/vega/parked/io_hc-7439");
         let parked: serde_json::Value =
@@ -245,4 +362,31 @@ esac"#,
             .unwrap()
             .contains("comments add decision-1 --author Slayer -- still saved"));
     }
+}
+
+// Run in a subprocess so host state cannot leak between parallel tests.
+#[test]
+fn adopted_state_is_readable_on_each_host() {
+    let Ok(expected_mode) = std::env::var("TEST_ADOPTED_MODE") else {
+        return;
+    };
+    use vega_herdr::state as st;
+    let remote = std::env::var("VEGA_POST_HOST").unwrap() == "io";
+    let scope = (!remote).then_some("io");
+    assert_eq!(
+        st::mode_of(scope, "t9", "remote-worker").as_str(),
+        expected_mode
+    );
+    assert_eq!(st::mode_of(scope, "t9", "reused-name"), st::Mode::Headless);
+    let parent = st::parent_of_on(scope, "t9", "remote-worker").unwrap();
+    assert_eq!(parent.host, "fixture");
+    assert_eq!(parent.pane, std::env::var("TEST_ADOPTED_PARENT").unwrap());
+    assert!(st::parent_of_on(scope, "t9", "reused-name").is_none());
+    let host = if remote { "io" } else { "fixture" };
+    let entries = vega_registry::local_entries(host, &[], &[]);
+    let link = entries
+        .get(&vega_registry::link_key(host, "io", "t9"))
+        .unwrap();
+    assert_eq!(link["parent_host"], "fixture");
+    assert_eq!(link["parent"], parent.pane);
 }

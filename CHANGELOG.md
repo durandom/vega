@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 218 · 2026-11-16
+
+- feature: `vega uac adopt hc:<host>/<pane>` confirms parent, mode and briefing
+  records on the lane host before reporting success. Both hosts need matching
+  vega versions. Use it from the current UAC to re-parent resumed lanes after a
+  reboot; `--headless` routes questions to the UAC. The facility view now includes
+  fresh remote hc agents from the project registry.
+- optional: Pre-upgrade spawns without durable records need manual harness resume
+  followed by adoption; `vega mux reopen --help` explains recovery.
+
 ## 217 · 2026-11-16
 
 - feature: Repo-group member projects show their shared UAC in the sidebar and
