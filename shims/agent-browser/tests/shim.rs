@@ -31,6 +31,8 @@ fn fix() -> Fix {
     let shims = f.tmp.join("shims");
     fs::create_dir_all(&fake).unwrap();
     fs::create_dir_all(&shims).unwrap();
+    // A non-git cwd, so the recorded project does not depend on the checkout.
+    fs::create_dir_all(f.tmp.join("proj")).unwrap();
     script(
         &fake.join("agent-browser"),
         r#"printf '%s\n' "$*" >> "$VEGA_FIX/ab-argv"; echo ok"#,
@@ -48,6 +50,7 @@ fn fix() -> Fix {
 fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
     let mut cmd = Command::new(SHIM);
     cmd.args(args)
+        .current_dir(f.tmp.join("proj"))
         .env(
             "PATH",
             format!(
@@ -107,7 +110,7 @@ fn a_named_call_passes_through_unchanged_and_records_the_owner() {
     assert_eq!(argv(&f), ["--session vega-shim-test get url"]);
     let rec = &records(&f)["vega-shim-test"];
     assert_eq!(rec["pane"], "w1:p2");
-    assert_eq!(rec["project"], "vega-browser");
+    assert_eq!(rec["project"], "proj");
     assert!(rec["first_seen"].as_i64().unwrap() > 0);
 }
 

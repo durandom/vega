@@ -199,8 +199,12 @@ fn records(f: &Fix) -> Value {
 }
 
 fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
+    // A non-git cwd, so the recorded project does not depend on the checkout.
+    let proj = f.tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
     let mut cmd = Command::new(BIN);
     cmd.args(args)
+        .current_dir(&proj)
         .env("PATH", format!("{}:/usr/bin:/bin", f.bin.display()))
         .env("XDG_STATE_HOME", &f.state)
         .env("HOME", &f.home)
@@ -346,7 +350,7 @@ fn ab_attaches_passes_through_and_records_the_owner() {
     let me = &records(&f)["me"];
     assert_eq!(me["pane"], "w1:p2");
     assert_eq!(me["host"], hostname());
-    assert_eq!(me["project"], "vega-browser");
+    assert_eq!(me["project"], "proj");
     assert!(me["first_seen"].as_i64().unwrap() > 0);
     assert_eq!(me["first_seen"], me["last_seen"]);
 }
