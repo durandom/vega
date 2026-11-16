@@ -478,6 +478,13 @@ does not run there, so that part stays in chezmoi until vega does.
 - Writing through symlinks: it would write chezmoi's link target (pi's `AGENTS.md` into `CLAUDE.md`).
 - Moving the global skill list into the repo: `vega skills lib` owns it; a second list would drift.
 
+## Git SSH diagnostics
+
+`vega config infra` includes explicit network BatchMode Git SSH authentication
+checks, locally and on saved hc machines with `--fleet`. Ordinary component and
+onboarding probes remain local. See [ssh-agent.md](ssh-agent.md) for discovery,
+deadlines, macOS session repair hints and trust.
+
 ## Service endpoints
 
 Endpoints are local configuration, independent of the rendered agent config

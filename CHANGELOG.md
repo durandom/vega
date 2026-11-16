@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 220 · 2026-11-16
+
+- feature: The keychain lock shows SSH agent state and key count. `vega config
+  infra` checks configured Git host SSH auth; `--fleet` checks saved hc machines.
+  Failures include repair hints for macOS Background/Aqua sessions.
+- unit: Apply `herdr-app.mods` after upgrading vegad on sender and relay hosts;
+  see [SSH agent setup](docs/design/ssh-agent.md) for the dotfiles-owned socket.
+
 ## 219 · 2026-11-16
 
 - feature: Repo groups show as one sidebar block with a single UAC row. Only

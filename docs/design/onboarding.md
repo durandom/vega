@@ -29,8 +29,9 @@ call `vega config` already makes. No default check touches the network: `vega po
 reachability themselves, and a probe that waits on an unreachable tailnet host would make the home view slow
 exactly for the outside user.
 
-The explicit `vega config infra --fleet` diagnostic additionally checks hc machine
-names against registry hosts over the network. Names must match; it reports
+The explicit `vega config infra` diagnostic additionally checks BatchMode Git SSH
+authentication over the network; `--fleet` checks authentication on saved hc machines
+and their names against registry hosts. See [ssh-agent.md](ssh-agent.md). Names must match; it reports
 `hc machine rename <old> <host>` for mismatches without changing any machine.
 
 Required means the build tools, vega CLI and an agent. Optional means a backend or feature set;

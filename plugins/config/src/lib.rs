@@ -15,6 +15,7 @@ pub mod infra;
 pub mod merge;
 pub mod profiles;
 pub mod sources;
+pub mod ssh_auth;
 pub mod window_overlay;
 
 use std::collections::BTreeSet;

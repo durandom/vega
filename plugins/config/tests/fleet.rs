@@ -12,6 +12,7 @@ fn fleet_is_explicit_and_empty_inventory_needs_no_registry() {
         r#"#!/bin/sh
 echo called >> "$HOME/hc-calls"
 read -r request
+printf '%s\n' "$request" >> "$HOME/requests"
 printf '{"jsonrpc":"2.0","id":1,"result":%s}' "$TEST_FLEET"
 "#,
     )
@@ -47,6 +48,8 @@ printf '{"jsonrpc":"2.0","id":1,"result":%s}' "$TEST_FLEET"
     );
     assert!(!unavailable.status.success());
     assert!(String::from_utf8_lossy(&unavailable.stdout).contains("registry_unavailable"));
+    let requests = fs::read_to_string(home.path().join("requests")).unwrap();
+    assert!(requests.contains("machine.exec") && requests.contains("BatchMode=yes"));
     let mut c = Command::new(env!("CARGO_BIN_EXE_vega-config"));
     let inbox_only = c
         .env_clear()

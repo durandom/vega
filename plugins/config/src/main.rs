@@ -58,11 +58,11 @@ enum Cmd {
     Init { source: String },
     /// The infra vega needs on this host: level, state, what it enables, next step
     #[command(
-        after_help = "Default: local checks only (PATH without the shims, env vars, config files). --fleet also checks hc machine names against registry hosts over the network; mismatches exit 1.\nRequired: build tools, vega and an agent. Optional: hc, herdr-app, legacy herdr and feature tools.\n\nExamples:\n  vega config infra\n  vega config infra --fleet"
+        after_help = "Default: local component checks plus read-only BatchMode Git SSH auth for configured hosts (network). --fleet also checks auth on saved hc machines and machine names against registry hosts; SSH failures and mismatches exit 1.\nRequired: build tools, vega and an agent. Optional: hc, herdr-app, legacy herdr and feature tools.\n\nExamples:\n  vega config infra\n  vega config infra --fleet"
     )]
     #[command(visible_alias = "check")]
     Infra {
-        /// Also verify that every hc machine name exists as a registry host (network)
+        /// Also check Git SSH auth on hc machines and verify their registry names (network)
         #[arg(long)]
         fleet: bool,
     },
@@ -254,7 +254,12 @@ fn infra(ctx: &Ctx, fleet: bool) -> Result<ExitCode, Failure> {
             println!("  {},{}", r.name(), cell(r.next()));
         }
     }
-    if fleet && !vega_config::fleet::check()? {
+    let ssh_ok = vega_config::ssh_auth::print(
+        "local",
+        &vega_config::ssh_auth::local(&infra::Probe::from_env(ctx.env.clone()))?,
+    );
+    let fleet_ok = !fleet || vega_config::fleet::check()?;
+    if !ssh_ok || !fleet_ok {
         return Ok(ExitCode::from(1));
     }
     Ok(ExitCode::SUCCESS)

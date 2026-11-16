@@ -142,7 +142,7 @@ export default class Vega extends View {
       this.applyKeychains(data.rows ?? [], data.at, cx);
       this.probeOpenPopups(cx);
     } catch (_) {
-      this.keychains = this.keychains.map(r => ({...r, state: "unknown"}));
+      this.keychains = this.keychains.map(r => ({...r, state: "unknown", agent: {state: "unknown"}}));
       cx.notify();
     } finally { this.readingKeychains = false; }
   }
@@ -182,6 +182,8 @@ export default class Vega extends View {
     this.keychains = rows.filter(r => /^[a-zA-Z0-9_-]+$/.test(r.host)).map(r => {
       const state = now-at <= 180 && now-r.at <= 180 && ["locked", "unlocked"].includes(r.state) ? r.state : "unknown";
       const seen = unlockedAt[r.host];
+      const agent = now-at <= 180 && now-r.at <= 180 ? r.agent ?? {state: "unknown"} : {state: "unknown"};
+      r = {...r, agent};
       return seen && seen > r.at * 1000 && state !== "unlocked" ? {...r, state: "unlocked", since: Math.floor(seen / 1000)} : {...r, state};
     });
     setShared("vega.keychains", this.keychains);
@@ -241,10 +243,11 @@ export default class Vega extends View {
     const f = focused()?.terminal ?? "";
     const host = (f.includes("/") ? f.split("/")[0] : this.localKeychainHost ?? "").toLowerCase();
     return (this.keychains ?? []).filter(row => row.host === host).map(row => div().id(`keychain-${row.host}`).px(4)
-      .text_color(row.state === "locked" ? t.ansi1 : row.state === "unlocked" ? t.ansi2 : t.dim)
-      .tooltip(`${row.host}: ${row.state} since ${new Date(row.since*1000).toLocaleString()}`)
+      .text_color(row.state === "locked" ? t.ansi1 : row.state === "unlocked" && row.agent?.state === "ready" ? t.ansi2 : t.dim)
+      .tooltip(`${row.host}: login keychain ${row.state} since ${new Date(row.since*1000).toLocaleString()}\nSSH ~/.ssh/agent.sock: ${row.agent?.state ?? "unknown"}${row.agent?.keys != null ? ` · ${row.agent.keys} keys` : ""}\n${row.agent?.state === "ready" ? "Loaded keys are usable by any process of this user." : "hc uses a Background session. Check the Aqua local.ssh-agent LaunchAgent; in Terminal.app run ssh-add --apple-use-keychain <key>, then ssh-add --apple-load-keychain with SSH_AUTH_SOCK=$HOME/.ssh/agent.sock."}`)
       .on_click((_e, cx) => { if (row.state === "locked") this.openKeychain(row, cx); })
-      .child(svg("mods/vega/lock.svg").size(13)));
+      .child(svg("mods/vega/lock.svg").size(13))
+      .child(` ${row.agent?.keys ?? "?"}`));
   }
 
   // The focused terminal's project and that project's live UAC (same machine first).

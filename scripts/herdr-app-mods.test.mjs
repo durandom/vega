@@ -1674,7 +1674,7 @@ test('keychain popup opens once globally per lock, click reopens only its own te
 test('keychain status uses theme colours, host and since tooltips, and stale data becomes unknown',async()=>{
   const h=load('vega'), now=Date.now()/1000;
   const t={ansi1:'theme-red',ansi2:'theme-green',dim:'theme-dim'};h.api.theme=()=>t;
-  h.mod.applyKeychains(['unlocked','locked','unknown'].map((state,i)=>({host:['localmac','puck','offline'][i],state,since:now-30,at:now})),now,h.cx);
+  h.mod.applyKeychains(['unlocked','locked','unknown'].map((state,i)=>({host:['localmac','puck','offline'][i],state,since:now-30,at:now,agent:{state:'ready',keys:2}})),now,h.cx);
   await h.flush();
   h.mod.localKeychainHost='localmac';
   const lockOf=focus=>{h.api.focused=()=>({terminal:focus});return elements(h.render()).filter(n=>String(n.idValue).startsWith('keychain-'));};
@@ -2322,4 +2322,24 @@ test('services displays registered metadata and toggles hidden agent ports witho
   assert.equal(h.calls.length,0,'filter changes do not scan or forward');
   toggle.handlers.on_click({},h.cx);
   assert(!JSON.stringify(h.render()).includes('codex :5000'));
+});
+
+
+test('keychain indicator includes agent count, fix hint and expires agent claims',async()=>{
+  const h=load('vega'),now=Date.now()/1000;
+  h.mod.localKeychainHost='localmac';
+  const sample={host:'localmac',state:'unlocked',since:now-30,at:now,agent:{state:'ready',keys:3}};
+  h.mod.applyKeychains([sample],now,h.cx);
+  let lock=elements(h.render()).find(n=>n.idValue==='keychain-localmac');
+  assert(lock.tooltipValue.includes('ready · 3 keys'));
+  assert(texts(lock).includes(' 3'));
+  h.mod.applyKeychains([{...sample,agent:{state:'empty',keys:0}}],now,h.cx);
+  lock=elements(h.render()).find(n=>n.idValue==='keychain-localmac');
+  assert(lock.tooltipValue.includes('empty · 0 keys'));
+  assert(lock.tooltipValue.includes('Terminal.app'));
+  assert(lock.tooltipValue.includes('--apple-use-keychain'));
+  h.mod.applyKeychains([sample],now-181,h.cx);
+  lock=elements(h.render()).find(n=>n.idValue==='keychain-localmac');
+  assert(lock.tooltipValue.includes('agent.sock: unknown'));
+  assert(!lock.tooltipValue.includes('3 keys'));
 });

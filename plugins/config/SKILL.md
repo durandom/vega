@@ -32,9 +32,9 @@ vega config infra            # the infra vega needs: required/optional, state, n
 - `vega deploy apply` runs `vega config apply` on every host; install-cli.sh applies only `hooks`.
 - Apply retains 256 redacted results in `$XDG_STATE_HOME/vega/config-evidence.json`:
   phases, targets, operations and presence, never values.
-- `infra` warns above 50k deps entries; `mise run target-sweep` between builds.
-  `infra --fleet` additionally checks hc names against registry hosts (network);
-  mismatches exit 1 with `hc machine rename <old> <host>`. It never renames machines.
+- `infra`: 50k deps warning (`mise run target-sweep`), BatchMode Git SSH auth.
+  `--fleet`: auth on hc machines and registry-name checks; failures exit 1.
+  Name fix: `hc machine rename <old> <host>`; SSH setup: docs/design/ssh-agent.md.
 - Apply `herdr-app` together: checked mods precede layout. Decisions open the inbox;
   status or scale reopens it.
 

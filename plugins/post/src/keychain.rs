@@ -30,6 +30,37 @@ fn probe(program: &Path, keychain: &Path) -> &'static str {
     }
 }
 
+// Never retain fingerprints/comments: only a bounded count enters the registry.
+fn agent_probe(program: &Path, socket: &Path) -> Value {
+    use std::os::unix::fs::FileTypeExt;
+    match fs::symlink_metadata(socket) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return json!({"state":"missing"}),
+        Ok(m) if m.file_type().is_socket() => (),
+        _ => return json!({"state":"unavailable"}),
+    }
+    let out = vega_herdr::output_within(
+        Command::new(program).arg("-l").env("SSH_AUTH_SOCK", socket),
+        Duration::from_secs(3),
+    );
+    match out {
+        Ok(Some(o)) if o.status.success() => {
+            let keys = o
+                .stdout
+                .split(|b| *b == b'\n')
+                .filter(|l| !l.is_empty())
+                .count();
+            if keys > 0 && keys <= 4096 {
+                json!({"state":"ready","keys":keys})
+            } else {
+                json!({"state":"unknown"})
+            }
+        }
+        Ok(Some(o)) if o.status.code() == Some(1) => json!({"state":"empty","keys":0}),
+        Ok(None) => json!({"state":"timeout"}),
+        _ => json!({"state":"unavailable"}),
+    }
+}
+
 fn advance(old: Option<&Value>, state: &str, at: u64) -> Value {
     let since = old
         .filter(|o| o["state"] == state)
@@ -58,7 +89,11 @@ pub fn spawn() {
                 Path::new("/usr/bin/security"),
                 &Path::new(&home).join("Library/Keychains/login.keychain-db"),
             );
-            let value = advance(old.as_ref(), state, now());
+            let mut value = advance(old.as_ref(), state, now());
+            value["agent"] = agent_probe(
+                Path::new("/usr/bin/ssh-add"),
+                &Path::new(&home).join(".ssh/agent.sock"),
+            );
             if old.as_ref().is_none_or(|o| o["state"] != state) {
                 crate::log(&format!("keychain: {state}"));
             }
@@ -87,6 +122,27 @@ struct Sample {
     state: State,
     since: u64,
     at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<Agent>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct Agent {
+    state: AgentState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keys: Option<u16>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum AgentState {
+    Ready,
+    Empty,
+    Missing,
+    Unavailable,
+    Timeout,
+    Unknown,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -118,6 +174,21 @@ fn validate(from: &str, payload: &[u8], at: u64) -> Result<Sample, String> {
         || at.saturating_sub(sample.at) > 180
     {
         return Err("invalid or stale keychain timestamps".into());
+    }
+    if let Some(agent) = &sample.agent {
+        let object: Value =
+            serde_json::from_slice(payload).map_err(|_| "invalid keychain sample")?;
+        if !object["agent"].is_object() {
+            return Err("agent sample must be an object".into());
+        }
+        let valid = match agent.state {
+            AgentState::Ready => agent.keys.is_some_and(|n| (1..=4096).contains(&n)),
+            AgentState::Empty => agent.keys == Some(0),
+            _ => agent.keys.is_none(),
+        };
+        if !valid {
+            return Err("invalid agent count".into());
+        }
     }
     Ok(sample)
 }
@@ -187,7 +258,7 @@ impl Publisher {
         let changed = self
             .last
             .as_ref()
-            .is_none_or(|v| v["state"] != value["state"]);
+            .is_none_or(|v| v["state"] != value["state"] || v["agent"] != value["agent"]);
         if !changed && self.next.is_some_and(|next| now < next) {
             return;
         }
@@ -238,7 +309,7 @@ fn snapshot(view: &vega_registry::View, at: u64) -> Value {
     let rows: Vec<_> = view.entries.iter().filter_map(|(k, v)| {
         let host = k.strip_suffix(".status.keychain").filter(|h| !h.contains('.'))?;
         let fresh = v["at"].as_u64().is_some_and(|t| at.saturating_sub(t) <= 180);
-        Some(json!({"host":host,"state":if fresh {v["state"].as_str().unwrap_or("unknown")} else {"unknown"},"since":v["since"],"at":v["at"]}))
+        Some(json!({"host":host,"state":if fresh {v["state"].as_str().unwrap_or("unknown")} else {"unknown"},"since":v["since"],"at":v["at"],"agent":if fresh {v["agent"].clone()} else {json!({"state":"unknown"})}}))
     }).collect();
     json!({"at":at,"rows":rows})
 }
@@ -315,6 +386,73 @@ mod tests {
             probe(&dir.path().join("missing"), Path::new("unused")),
             "unknown"
         );
+    }
+
+    #[test]
+    fn agent_probe_counts_only_and_distinguishes_socket_failures() {
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("agent.sock");
+        let program = dir.path().join("ssh-add");
+        assert_eq!(agent_probe(&program, &socket)["state"], "missing");
+        fs::write(&socket, "not a socket").unwrap();
+        assert_eq!(agent_probe(&program, &socket)["state"], "unavailable");
+        fs::remove_file(&socket).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        for (code, output, expected) in [
+            (
+                0,
+                "fingerprint secret-comment\nsecond-key\n",
+                json!({"state":"ready","keys":2}),
+            ),
+            (
+                1,
+                "The agent has no identities.",
+                json!({"state":"empty","keys":0}),
+            ),
+            (2, "could not connect", json!({"state":"unavailable"})),
+            (0, "", json!({"state":"unknown"})),
+        ] {
+            fs::write(&program, format!("#!/bin/sh\n[ \"$1\" = -l ] && [ \"$#\" = 1 ] && [ \"$SSH_AUTH_SOCK\" = '{}' ] || exit 99\nprintf '%s' '{}'\nexit {code}\n", socket.display(), output)).unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+            assert_eq!(agent_probe(&program, &socket), expected);
+        }
+        fs::write(&program, "#!/bin/sh\nexec /bin/sleep 5\n").unwrap();
+        assert_eq!(agent_probe(&program, &socket)["state"], "timeout");
+    }
+
+    #[test]
+    fn relay_validates_agent_fields_and_snapshot_expires_them() {
+        let at = now();
+        for agent in [
+            json!({"state":"ready","keys":2}),
+            json!({"state":"empty","keys":0}),
+            json!({"state":"missing"}),
+        ] {
+            let mut value = advance(None, "unlocked", at);
+            value["agent"] = agent.clone();
+            assert!(validate("puck", value.to_string().as_bytes(), at).is_ok());
+            let mut view = vega_registry::View::default();
+            view.entries.insert("puck.status.keychain".into(), value);
+            assert_eq!(snapshot(&view, at)["rows"][0]["agent"], agent);
+            assert_eq!(
+                snapshot(&view, at + 181)["rows"][0]["agent"],
+                json!({"state":"unknown"})
+            );
+        }
+        for agent in [
+            json!({"state":"ready","keys":0}),
+            json!({"state":"empty","keys":2}),
+            json!({"state":"ready","keys":4097}),
+            json!({"state":"missing","keys":0}),
+            json!({"state":"unknown","comment":"private"}),
+            json!({"state":"other"}),
+            json!(["ready", 2]),
+        ] {
+            let mut value = advance(None, "unlocked", at);
+            value["agent"] = agent;
+            assert!(validate("puck", value.to_string().as_bytes(), at).is_err());
+        }
     }
 
     #[test]

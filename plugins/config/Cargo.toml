@@ -23,6 +23,7 @@ name = "vega-window"
 path = "src/window.rs"
 
 [dependencies]
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 vega-build = { path = "../../crates/vega-build" }
