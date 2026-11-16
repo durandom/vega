@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 217 · 2026-11-16
+
+- feature: Repo-group member projects show their shared UAC in the sidebar and
+  project window, with member-specific attention badges.
+- unit: use matching vegad and apply `herdr-app.vega-sidebar` for group UAC labels.
+
 ## 216 · 2026-11-16
 
 - feature: Right-click sidebar agent rows to Pin/Unpin; pinned agents show a pin

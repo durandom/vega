@@ -195,6 +195,17 @@ fn send(cmd: &Cmd) -> Result<(), vega_herdr::Failure> {
     }
 }
 
+/// All project claims owned by this pane, including group members without a
+/// local checkout. Reuse routing records; never read manifests from the UI.
+pub fn claimed_projects(pane: &str, uacs: &[(String, String, i64)]) -> String {
+    let projects: std::collections::BTreeSet<_> = uacs
+        .iter()
+        .filter(|(_, owner, _)| owner == pane)
+        .map(|(project, _, _)| project.as_str())
+        .collect();
+    serde_json::to_string(&projects).expect("project IDs serialize")
+}
+
 /// Translate only vegad-owned metadata. Emit the entire known key set so a
 /// lost role/attention is removed even after a daemon restart. Never touch
 /// hc's parent, herdr.* or gate-owned vega.review labels.
@@ -215,6 +226,7 @@ pub fn hc_labels(pane: &str, args: &[String]) -> Cmd {
         "kind",
         "project",
         "project-id",
+        "group-members",
         "label",
         "git",
         "mail",
@@ -333,6 +345,33 @@ mod tests {
             s.mark_sent(k, c, now);
         }
         n
+    }
+
+    #[test]
+    fn group_claim_labels_are_sorted_deduplicated_and_cleared() {
+        let claims = vec![
+            ("github.com/team/web".into(), "hc:t7".into(), 1),
+            ("github.com/team/app".into(), "hc:t7".into(), 2),
+            ("github.com/team/web".into(), "hc:t7".into(), 3),
+            ("github.com/team/other".into(), "hc:t8".into(), 4),
+        ];
+        let members = claimed_projects("hc:t7", &claims);
+        assert_eq!(members, r#"["github.com/team/app","github.com/team/web"]"#);
+        let cmd = hc_labels(
+            "hc:t7",
+            &["--token".into(), format!("group-members={members}")],
+        );
+        assert!(cmd.contains(&format!("vega.group-members={members}")));
+        assert!(hc_labels("hc:t7", &[]).contains(&"vega.group-members=".into()));
+        assert_eq!(claimed_projects("hc:t9", &claims), "[]");
+        let mut state = State::default();
+        let now = Instant::now();
+        state.set(vec![cmd]);
+        send_all(&mut state, now);
+        state.set(vec![]);
+        assert!(state.take_withdrawn()[0]
+            .1
+            .contains(&"vega.group-members=".into()));
     }
 
     #[test]

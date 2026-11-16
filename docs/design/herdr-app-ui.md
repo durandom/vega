@@ -674,3 +674,14 @@ bypass a strict view unless Respect pins is enabled. Active still hides idle
 unpinned agents within pinned projects. Fake-host tests exercise menu actions,
 markers, nested/remote agents, compact rows and combined view/Active filtering;
 CLI tests use temporary preference paths. Live deployment remains a UAC step.
+
+Repo-group member headers resolve their UAC from `vega.group-members`, a JSON
+array of canonical project IDs published by the owning vegad from its ordinary
+UAC claim records on each metadata refresh. This reuses the records behind
+registry publication and `post send --uac` without a UI registry query or timer;
+release clears the label. Only live UAC terminals participate, and an own UAC
+wins over group membership. Member groups show a context UAC row that focuses
+the shared terminal; its right-click menu opens the member project window.
+Headers and summary badges also keep the member project ID. Member attention
+is read from that project's badge on the UAC host, never from coordination totals;
+the coordination project's name and git status are not copied to member headers.

@@ -403,8 +403,7 @@ export default class Agents extends View {
   openProject(project, cx, tab = null, follow = false) {
     cx?.stop_propagation?.();
     if (!project) return;
-    const uac = visibleTerminals().find(x => x.state === "live" && x.labels?.["vega.role"] === "uac"
-      && x.labels?.["vega.project-id"] === project);
+    const uac = this.projectGroups(visibleTerminals()).uacs.get(project);
     openOverlay({ kind: "window", key: follow ? "vega-project-follow" : `vega-project-${project}`, width: 640, height: 0.7,
       mod: "vega-sidebar", props: { projectConfig: project, uac: uac?.address ?? null, tab, follow } });
   }
@@ -1291,17 +1290,18 @@ export default class Agents extends View {
     return Boolean(this.vegaTerminals?.get(address)?.labels?.["herdr.pinned"]);
   }
 
-  openAgentMenu(address, cx) {
+  openAgentMenu(address, cx, project = null) {
     cx.stop_propagation();
     openOverlay({ mod: "vega-sidebar", kind: "popup", width: 260, height: 100,
-      props: { agentMenu: { address } } });
+      props: { agentMenu: { address, project } } });
   }
 
   agentMenu(t) {
     const address = props().agentMenu.address;
     const terminal = visibleTerminals().find(x => x.address === address && x.state === "live");
     const pinned = Boolean(terminal?.labels?.["herdr.pinned"]);
-    const project = terminal?.labels?.["vega.role"] === "uac" && terminal.labels["vega.project-id"];
+    const project = terminal?.labels?.["vega.role"] === "uac"
+      && (props().agentMenu.project || terminal.labels["vega.project-id"]);
     const item = (id, label, action) => div().id(id).h(31).px(8).rounded(7).cursor_pointer()
       .hover(el => el.bg(t.hover)).child(label).on_click((_e, cx) => {
         cx.stop_propagation(); closeOverlay(props().overlay); action(cx);
@@ -1448,6 +1448,17 @@ export default class Agents extends View {
         projects.set(id, x);
       }
     }
+    // The owning vegad publishes the same per-project claims used by post --uac.
+    // Only a live UAC can supply membership; an explicit own UAC wins.
+    for (const x of live.filter(x => x.labels?.["vega.role"] === "uac")) {
+      let members;
+      try { members = JSON.parse(x.labels["vega.group-members"] || "[]"); } catch (_) { continue; }
+      if (!Array.isArray(members)) continue;
+      for (const id of members) if (typeof id === "string" && id && !uacs.has(id)) {
+        uacs.set(id, x);
+        projects.set(id, x);
+      }
+    }
     const projectOfSpace = new Map();
     // UAC space wins over a sentinel's stale label in the same space.
     for (const x of [...uacs.values(), ...live]) {
@@ -1530,7 +1541,7 @@ export default class Agents extends View {
       return label ? div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[label] ?? t.dim).child(label) : div().w(22).flex_none();
     };
     const tokens = (address, uac) => this.vegaIcons(address, t, uac ? ["uac", "kind", "git"] : ["uac", "kind"]);
-    const agentRow = (a, subs, depth, lines = []) => {
+    const agentRow = (a, subs, depth, lines = [], project = null) => {
       const l = labelsOf(a.address);
       const uac = l["vega.role"] === "uac";
       const [glyph, color] = kindOf(a);
@@ -1541,13 +1552,13 @@ export default class Agents extends View {
         : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
       const on = a.address === shown;
       return h_flex()
-        .id(depth ? `sub-${a.address}` : `ag-${a.address}`)
+        .id(project ? `group-uac-${project}` : depth ? `sub-${a.address}` : `ag-${a.address}`)
         .pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
         .when(on, el => el.bg(t.selected))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
         .on_click(() => depth || !a.pane ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
-        .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx))
+        .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx, project))
         .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
           .when(x === "└" || x === "├", el => el.border_b(1.5).rounded_bl(6))))
@@ -1603,13 +1614,14 @@ export default class Agents extends View {
       const uac = uacs.get(p);
       const ul = uac?.labels ?? {};
       const project = p;
-      const address = groups.get(p).address;
-      const display = this.preferences?.projects?.[project]?.name || ul["vega.project"]?.split("/").at(-1) || p.split("/").at(-1);
+      const address = uac?.address ?? groups.get(p).address;
+      const groupUac = uac && projectOfAgent(uac) !== p;
+      const display = this.preferences?.projects?.[project]?.name || (!groupUac && ul["vega.project"]?.split("/").at(-1)) || p.split("/").at(-1);
       const totals = this.vegaTotals(address, project) ?? {};
       const members = list.filter(a => projectOfAgent(a) === p)
         .sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
       const open = !this.folded.has(gid);
-      const git = ul["vega.git"];
+      const git = !groupUac && ul["vega.git"];
       out.push(h_flex().id(gid).on_mouse_down("right", (_e, cx) => this.openProject(project, cx)).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
         .when(this.dragFrom === p && this.dragOver !== p, el => el.opacity(0.5))
         .when(Boolean(this.dragFrom) && this.dragOver === p && this.dragFrom !== p, el => el.border_t(2).border_color(t.accent))
@@ -1658,6 +1670,10 @@ export default class Agents extends View {
           .on_click((_e, cx) => this.openProject(project, cx)))
         .when(!open, el => el.child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim))));
       if (open) {
+        if (groupUac) {
+          const row = agents().find(a => a.address === uac.address) ?? uac;
+          out.push(agentRow(row, [], 0, [], project));
+        }
         for (const a of members) out.push(...withTree(a));
         out.push(...plainRows(plainOf(p), Boolean(this.preferences?.projects?.[project]?.pinned)));
       }

@@ -5856,6 +5856,12 @@ fn report_metadata(
         args.extend(host_token(sym, &host));
         args.extend(layout.kind_token(sym, pane));
         args.extend(layout.project_token(pane, parents.get(pane).map(String::as_str)));
+        if uac {
+            args.extend([
+                "--token".into(),
+                format!("group-members={}", sidebar::claimed_projects(pane, &uacs)),
+            ]);
+        }
         args.extend(label);
         let cwd = layout.pane(pane).and_then(|p| p["cwd"].as_str());
         match cwd.and_then(git_of) {

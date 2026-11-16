@@ -47,6 +47,66 @@ function load(name, {allowFocus=false}={}) {
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
 
+test('repo-group members resolve their remote UAC, member actions and badges',()=>{
+  const h=load('vega-sidebar'),coord='github.com/durandom/rally-ng-app',member='github.com/durandom/rally-ng-maps';
+  const uac={address:'ganymede/t1j',state:'live',status:'idle',labels:{'vega.role':'uac','vega.project-id':coord,'vega.project':'rally-ng-app','vega.git':'dirty','vega.group-members':JSON.stringify([coord,member])}};
+  const child={address:'io/t2',state:'live',status:'working',parent:uac.address,labels:{'vega.role':'sentinel','vega.project-id':member}};
+  h.api.terminals=()=>[uac,child];
+  h.api.agents=()=>[uac,child].map(a=>({...a,pane:a.address,program:{key:'codex'}}));
+  h.mod.init({},h.cx);
+  h.state.set('vega.badges',[
+    {...row(),project:coord,machine:'ganymede',decisions:9},
+    {...row(),project:member,machine:'ganymede',decisions:2},
+    {...row(),project:member,machine:'io',decisions:7},
+  ]);
+  const nodes=elements(h.render()),header=nodes.find(n=>n.idValue===`uac-${member}`);
+  assert(header);assert(texts(header).includes('rally-ng-maps'));
+  assert(!texts(header).includes('no UAC'));assert(!texts(header).includes('dirty'));
+  const context=nodes.find(n=>n.idValue===`group-uac-${member}`);
+  assert(context);assert(nodes.some(n=>n.idValue==='ag-io/t2'));
+  const badge=nodes.find(n=>n.idValue===`total-uac-${member}`);
+  assert(texts(badge).includes('2'));
+  badge.handlers.on_click({},h.cx);
+  let overlay=h.calls.filter(c=>c[0]==='open').at(-1)[1];
+  assert.equal(overlay.props.attentionProject,member);assert.equal(overlay.props.uac,uac.address);
+  header.handlers['on_mouse_down:right']({},h.cx);
+  overlay=h.calls.filter(c=>c[0]==='open').at(-1)[1];
+  assert.equal(overlay.props.projectConfig,member);assert.equal(overlay.props.uac,uac.address);
+  context.handlers.on_click();assert(h.calls.some(c=>c[0]==='run'&&c[1]==='pane.focus'&&c[2].pane===uac.address));
+  context.handlers['on_mouse_down:right']({},h.cx);
+  overlay=h.calls.filter(c=>c[0]==='open').at(-1)[1];
+  h.setProps({...overlay.props,overlay:'menu'});
+  elements(h.render()).find(n=>n.idValue==='agent-project').handlers.on_click({},h.cx);
+  overlay=h.calls.filter(c=>c[0]==='open').at(-1)[1];
+  assert.equal(overlay.props.projectConfig,member);assert.equal(overlay.props.uac,uac.address);
+  h.setProps(overlay.props);
+  assert(texts(h.mod.uacTab(h.mod.colors())).includes(uac.address));
+  h.setProps({});h.state.set('vega.hide-inactive',true);
+  assert(elements(h.render()).some(n=>n.idValue===`group-uac-${member}`),'active member keeps its idle group UAC context');
+  h.mod.preferences={projects:{},views:{Remote:{machines:['ganymede'],labels:[]}}};
+  h.state.set('vega.view','Remote');
+  assert(elements(h.render()).some(n=>n.idValue===`group-uac-${member}`),'machine view uses the group UAC host');
+  h.state.set('vega.view','all');uac.labels['vega.group-members']='';
+  assert.equal(h.mod.projectGroups([uac,child]).uacs.has(member),false);
+});
+
+test('group membership ignores malformed, dead and foreign-role labels; own UAC wins',()=>{
+  const h=load('vega-sidebar'),member='github.com/team/maps',coord='github.com/team/app';
+  const group={address:'ganymede/t1',state:'live',labels:{'vega.role':'uac','vega.project-id':coord,'vega.group-members':JSON.stringify([member])}};
+  const resolve=terms=>h.mod.projectGroups(terms).uacs.get(member)?.address;
+  assert.equal(resolve([group]),group.address);
+  const own={address:'t2',state:'live',labels:{'vega.role':'uac','vega.project-id':member}};
+  assert.equal(resolve([group,own]),own.address);assert.equal(resolve([own,group]),own.address);
+  assert.equal(resolve([{...group,state:'exited'}]),undefined);
+  for(const role of ['sentinel','uber'])assert.equal(resolve([{...group,labels:{...group.labels,'vega.role':role}}]),undefined);
+  assert.equal(resolve([{...group,labels:{...group.labels,'vega.window':'status'}}]),undefined);
+  for(const value of ['{broken','null','{}','"maps"','[null,42,{},""]']) {
+    assert.equal(resolve([{...group,labels:{...group.labels,'vega.group-members':value}}]),undefined);
+  }
+  assert.equal(resolve([{...group,address:'t1'}]),'t1');
+  assert(h.mod.projectGroups([group]).projects.has(member));
+});
+
 test('stock tabs and pane forks render static themed working dots and keep actions',()=>{
   const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
   for(const name of ['vega-tabs','vega-pane']) {
