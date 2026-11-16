@@ -2,7 +2,121 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home, nextCommand } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home, appHome, checking, nextCommand } from "herdr";
+import * as fs from "fs/promises";
+
+// --- Render/load diagnostics (vega-0h4c.104) ---
+// herdr-app aborts a render that overruns its budget and shows "This view could
+// not be re-rendered; showing last good … interrupted"; a module or init
+// failure shows "The sidebar could not be loaded". Neither can log itself, so
+// every render and init keeps its current phase and timing in module memory
+// (shared by all copies, no I/O on the render path). The next begin that finds
+// a breadcrumb never finished records an "interrupted" event; a wrapper around
+// init/render records caught exceptions and slow renders the same way. Events
+// flush asynchronously (fs/promises) into a size-capped ring file under
+// data/vega-sidebar-diagnostics/ — app data survives `vega config apply`, which
+// replaces the whole mods/vega-sidebar folder. console.log only reaches tracing
+// (gpui_shell::script, RUST_LOG-gated), so this file is the durable record.
+const DIAG = {
+  current: null,   // breadcrumb of the render/init in flight
+  pending: [],     // JSONL lines waiting for the next flush
+  lastWrite: 0, writing: false,
+  slowMs: 10, flushMinMs: 2000, pendingMax: 100, phasesMax: 24,
+  fileMax: 128 * 1024, fileKeep: 64 * 1024,
+  flush: null,     // set below; tests and live debugging call it directly
+};
+const diagFile = () => `${appHome()}/data/vega-sidebar-diagnostics/render-log.jsonl`;
+const diagDir = () => `${appHome()}/data/vega-sidebar-diagnostics`;
+
+function diagMeta(sizes) { try { if (DIAG.current) Object.assign(DIAG.current.meta ??= {}, sizes); } catch (_) {} }
+function diagPhase(name) {
+  try {
+    const c = DIAG.current;
+    if (!c) return;
+    const now = Date.now();
+    if (c.phases.length < DIAG.phasesMax) c.phases.push([c.phase, now - c.phaseAt]);
+    c.phase = name;
+    c.phaseAt = now;
+  } catch (_) {}
+}
+function diagEvent(event, data) {
+  try {
+    if (checking()) return;
+    DIAG.pending.push(JSON.stringify({ t: new Date().toISOString(), e: event, ...data }));
+    if (DIAG.pending.length > DIAG.pendingMax) DIAG.pending.splice(0, DIAG.pending.length - DIAG.pendingMax);
+    Promise.resolve().then(diagFlushIfDue);
+  } catch (_) {}
+}
+function diagBegin(kind) {
+  try {
+    if (DIAG.current) {
+      // The previous render/init never returned: herdr-app interrupted it.
+      const c = DIAG.current, now = Date.now();
+      diagEvent("interrupted", { kind: c.kind, phase: c.phase, phaseMs: now - c.phaseAt,
+        sinceStartMs: now - c.start, phases: c.phases, sizes: c.meta, by: kind });
+    }
+    const now = Date.now();
+    DIAG.current = { kind, start: now, phase: "begin", phaseAt: now, phases: [], meta: null };
+  } catch (_) {}
+}
+function diagFinish(ok, error) {
+  try {
+    const c = DIAG.current;
+    DIAG.current = null;
+    if (!c) return;
+    const now = Date.now();
+    if (c.phases.length < DIAG.phasesMax) c.phases.push([c.phase, now - c.phaseAt]);
+    if (ok) {
+      if (now - c.start >= DIAG.slowMs)
+        diagEvent("slow", { kind: c.kind, ms: now - c.start, phases: c.phases, sizes: c.meta });
+    } else {
+      diagEvent("exception", { kind: c.kind, phase: c.phase, ms: now - c.start,
+        error, phases: c.phases, sizes: c.meta });
+    }
+  } catch (_) {}
+}
+function diagFlushIfDue() {
+  try {
+    if (DIAG.writing || !DIAG.pending.length) return;
+    if (Date.now() - DIAG.lastWrite < DIAG.flushMinMs) return; // a later event retries
+    DIAG.flush();
+  } catch (_) {}
+}
+async function diagFlush() {
+  if (DIAG.writing) return;
+  DIAG.writing = true;
+  DIAG.lastWrite = Date.now();
+  const flushing = [...DIAG.pending];
+  try {
+    await fs.mkdir(diagDir(), { recursive: true });
+    let text = "";
+    try { text = await fs.readFile(diagFile(), "utf8"); } catch (_) {}
+    let lines = text ? text.split("\n") : [];
+    if (lines.at(-1) === "") lines.pop();
+    lines.push(...flushing);
+    let total = lines.reduce((n, l) => n + l.length + 1, 0);
+    if (total > DIAG.fileMax) {
+      // Ring: keep the newest lines under the keep cap.
+      let drop = 0;
+      while (drop < lines.length && total > DIAG.fileKeep) { total -= lines[drop].length + 1; drop++; }
+      lines = lines.slice(drop);
+    }
+    await fs.writeFile(diagFile(), lines.length ? lines.join("\n") + "\n" : "");
+    DIAG.pending.splice(0, flushing.length);
+  } catch (_) { /* diagnostics must never break the sidebar */ }
+  finally {
+    DIAG.writing = false;
+    if (DIAG.pending.length) Promise.resolve().then(diagFlushIfDue);
+  }
+}
+DIAG.flush = diagFlush;
+// Which copy is running: the main sidebar or one of its popup/window views.
+const copyKind = () => {
+  const p = props();
+  return p?.globalConfig ? "settings" : p?.mail ? "mail" : p?.attentionProject ? "attention"
+    : p?.projectConfig ? "project" : p?.viewMenu ? "views" : p?.spaceMenu ? "space-menu"
+    : p?.agentMenu ? "agent-menu" : "main";
+};
 
 // Profile windows share hc inventory, but own their terminal rows and subtrees.
 function visibleTerminals() {
@@ -196,7 +310,17 @@ function lastFocus(command) {
 }
 
 export default class Agents extends View {
-  init(_props, cx) {
+  static diagState() { return DIAG; }
+
+  init(props, cx) {
+    diagBegin(`init:${copyKind()}`);
+    try {
+      this.initBody(props, cx);
+      diagFinish(true);
+    } catch (e) { diagFinish(false, String(e?.stack ?? e)); throw e; }
+  }
+
+  initBody(_props, cx) {
     this.dismissBusy = new Set(); this.dismissResults = new Map();
     if (props()?.globalConfig) {
       this.settingsTab = "models";
@@ -1845,28 +1969,36 @@ export default class Agents extends View {
   // their localStorage fallbacks), project preferences and the manual order.
   inputSignature(badges) {
     const focus = focused();
-    return JSON.stringify([
-      terminals().map(x => [x.address, x.state, x.parent ?? null, x.pane ?? null, x.turn ?? null,
+    const terms = terminals(), ags = agents(), paneRows = panes(), spaceRows = spaces();
+    const view = activeView(), hide = hideInactive();
+    diagMeta({ terminals: terms.length, agents: ags.length, panes: paneRows.length,
+      spaces: spaceRows.length, badges: badges.length, view, filtering: hide });
+    const sig = JSON.stringify([
+      terms.map(x => [x.address, x.state, x.parent ?? null, x.pane ?? null, x.turn ?? null,
         x.status ?? null, x.status_ms ?? null, x.name ?? null, x.title ?? null, x.agent ?? null, x.app ?? null, x.cwd ?? null,
         x.program?.key ?? null, x.foreground?.name ?? null, x.foreground?.argv ?? null, x.foreground?.cwd ?? null, x.labels ?? null]),
-      agents().map(a => [a.address, a.status ?? null, a.pane ?? null, a.tab ?? null, a.space ?? null,
+      ags.map(a => [a.address, a.status ?? null, a.pane ?? null, a.tab ?? null, a.space ?? null,
         a.space_name ?? null, a.title ?? null, a.name ?? null, a.template ?? null, a.program?.name ?? null]),
-      panes().map(p => [p.terminal ?? null, p.tab ?? null, Boolean(p.focused), p.program?.name ?? null,
+      paneRows.map(p => [p.terminal ?? null, p.tab ?? null, Boolean(p.focused), p.program?.name ?? null,
         Boolean(p.program?.agent), p.title ?? null]),
-      spaces().map(s => [s.id, s.name ?? null, s.named ?? null, s.machine ?? null, Boolean(s.active),
+      spaceRows.map(s => [s.id, s.name ?? null, s.named ?? null, s.machine ?? null, Boolean(s.active),
         (s.tabs ?? []).map(tab => [tab.id, tab.name ?? null, tab.named ?? null])]),
       focus ? [focus.terminal ?? null, focus.agent ?? null, focus.space ?? null, focus.tab ?? null, focus.pane ?? null] : null,
       badges, badges.map(r => Date.now() / 1000 - r.at <= 60 ? 1 : 0),
       shared("vega.waiting-state") ?? null,
-      activeView(), hideInactive(),
+      view, hide,
       this.preferences ?? null, this.order ?? null,
     ]);
+    diagMeta({ sigLen: sig.length });
+    return sig;
   }
 
   viewModel() {
     const badges = shared("vega.badges") ?? [];
+    diagPhase("signature");
     const sig = this.inputSignature(badges);
     if (this.modelCache?.sig === sig) return this.modelCache;
+    diagPhase("derive");
     this.modelCache = this.buildModel(sig, badges);
     return this.modelCache;
   }
@@ -1883,6 +2015,7 @@ export default class Agents extends View {
     const all = model.all = visibleTerminals();
     this.vegaTerminals = model.vegaTerminals = new Map(all.map(t => [t.address, t]));
     const membership = this.projectGroups(all);
+    diagMeta({ projects: membership.blocks.size, memberProjects: membership.projects.size });
     model.membership = membership;
     this.projectUacs = model.projectUacs = membership.uacs;
     // Memoize the membership walks queried per project and per agent below.
@@ -1921,6 +2054,7 @@ export default class Agents extends View {
       return true;
     });
     // One children index feeds every tree walk; full and visible trees are memoized per address.
+    diagPhase("derive:trees");
     model.index = this.treeIndex(all);
     model.trees = new Map();
     model.treeFull = addr => {
@@ -1983,6 +2117,7 @@ export default class Agents extends View {
     model.hiddenCount = filtering ? [...candidates.keys()].filter(a => !model.visibleSessions.has(a)).length : 0;
     list = list.filter(a => model.hasVisible(a));
     // Manual project order (per-id order indexes precomputed in orderedProjects).
+    diagPhase("derive:order");
     model.projectOrder = this.orderedProjects(membership.blocks);
     model.memberOrder = this.orderedProjects(membership.projects);
     const blockIndex = new Map(model.projectOrder.map((p, i) => [p, i]));
@@ -2004,6 +2139,7 @@ export default class Agents extends View {
     // agent's own title, never an automatic tab number unless two rows would
     // otherwise read the same.
     // Read the pane snapshot once: every host read copies the whole list into JS.
+    diagPhase("derive:rows");
     const leads = leadPanes(panes());
     const tabLabels = new Map(spaces().flatMap(s => s.tabs).map(tab => [tab.id, title(tab, leads.get(tab.id))]));
     const labels = new Map(list.map(a => [a.address, tabLabels.get(a.tab) ?? (a.title || a.program?.name || "")]));
@@ -2074,6 +2210,15 @@ export default class Agents extends View {
   }
 
   render(cx) {
+    diagBegin(`render:${copyKind()}`);
+    try {
+      const view = this.renderBody(cx);
+      diagFinish(true);
+      return view;
+    } catch (e) { diagFinish(false, String(e?.stack ?? e)); throw e; }
+  }
+
+  renderBody(cx) {
     const t = theme();
     if (props()?.mail) return v_flex().size_full().p(16).gap(12).bg(t.chrome).text_color(t.foreground)
       .child(h_flex().justify_between().child(`Mail · ${props().mail}`)
@@ -2120,6 +2265,7 @@ export default class Agents extends View {
 
     const rail = filtering || this.viewFilter().respect_pins ? list.flatMap(a => [a, ...m.treeFull(a.address).map(s => s.t)])
       .filter(a => m.visibleSessions.has(a.address)) : list;
+    diagPhase("elements");
     const rows = collapsed ? rail.map(railRow) : this.projectTree(t, m, Date.now());
 
     return v_flex()
@@ -2189,3 +2335,8 @@ export default class Agents extends View {
       );
   }
 }
+
+// One line per module evaluation: a fresh load after an interrupted render is
+// the detection point, and a version that never logged this marks where it died.
+// Skipped during `herdr-app check` (checking()).
+diagEvent("load", {});

@@ -5,6 +5,12 @@ import vm from 'node:vm';
 
 function load(name, {allowFocus=false}={}) {
   const state = new Map(), storage = new Map(), calls = [], tasks = [], commands = [];
+  const files = new Map(), fsCalls = [];
+  const fakeFs = {
+    mkdir: async p => { fsCalls.push(['mkdir', p]); },
+    readFile: async (p, enc) => { if (!files.has(p)) throw new Error('ENOENT'); return files.get(p); },
+    writeFile: async (p, text) => { fsCalls.push(['write', p]); files.set(p, text); },
+  };
   let props = {}, rendering = false, background = false;
   function el() {
     const obj={items:[],handlers:{}};let proxy;
@@ -31,6 +37,7 @@ function load(name, {allowFocus=false}={}) {
     closeOverlay:s=>calls.push(['close',s]),notify:s=>calls.push(['toast',s]),
     nextCommand:()=>{background=true;return new Promise(r=>commands.push(r));},watchFolder:()=>new Promise(()=>{}),
     exec:async (...a)=>{calls.push(['exec',...a]);return {code:0,stdout:'{}'};},
+    checking:()=>false, appHome:()=>'/scratch/app-home', fs: fakeFs,
     localStorage:{getItem:k=>storage.get(k)??null,removeItem:k=>storage.delete(k),setItem:(k,v)=>storage.set(k,v)},Date,Map,Set,JSON};
   let code=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
   code=code.replace(/^import .*;\n/gm,'').replace('export default class','globalThis.Mod = class');
@@ -42,7 +49,7 @@ function load(name, {allowFocus=false}={}) {
   }
   vm.runInContext(code,context);
   const mod=new context.Mod();
-  return {mod,state,storage,calls,cx,api:context,commands,newCopy:()=>new context.Mod(),setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
+  return {mod,state,storage,calls,cx,api:context,commands,files,fsCalls,newCopy:()=>new context.Mod(),setProps:p=>{props=p;},render(){rendering=true;try{return mod.render(cx);}finally{rendering=false;}},async flush(){await Promise.all(tasks.filter(p=>p));}};
 }
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
@@ -1115,6 +1122,90 @@ test('sidebar derivation is cached between renders and rebuilt exactly when an i
   all[1].labels={};
   h.render();
   assert(!elements(h.render()).some(n=>n.tooltipValue==='Pinned agent'));
+});
+
+test('sidebar diagnostics: breadcrumbs detect interrupted renders, record slow/failed ones, flush a capped ring file',async()=>{
+  const diagDir='/scratch/app-home/data/vega-sidebar-diagnostics',diagPath=`${diagDir}/render-log.jsonl`;
+  const h=load('vega-sidebar');projectFixture(h);
+  const d=h.mod.constructor.diagState();
+  h.mod.init({},h.cx);
+  // The module-eval load line flushes to the ring file.
+  await d.flush();
+  assert(h.files.get(diagPath)?.includes('"e":"load"'));
+  // Happy path: renders do no file I/O and leave no breadcrumb or events behind.
+  const writes=()=>h.fsCalls.filter(c=>c[0]==='write').length;
+  const before=writes();
+  h.render();h.render();
+  assert.equal(writes(),before,'no per-render file I/O');
+  assert.equal(d.current,null);assert.equal(d.pending.length,0);
+  // Phase breadcrumbs: a rebuild render walks signature -> derive -> elements,
+  // and the input sizes land in the in-flight breadcrumb's meta.
+  const seen=[];
+  const realTree=h.mod.projectTree.bind(h.mod);
+  h.mod.projectTree=(...a)=>{seen.push([d.current?.phase,d.current?.meta?.terminals]);return realTree(...a);};
+  h.render();
+  h.mod.projectTree=realTree;
+  assert.deepEqual([...seen.at(-1)],['elements',4]);
+  assert.equal(d.pending.length,0);
+  // A breadcrumb that never finished is detected by the next begin.
+  const stale={kind:'render:main',start:Date.now()-5130,phaseAt:Date.now()-4210,phase:'derive:order',
+    phases:[['begin',1],['signature',120],['derive',60],['derive:trees',4030]],
+    meta:{terminals:140,agents:110,panes:96,spaces:44,badges:12,projects:40,sigLen:28410,view:'all',filtering:false}};
+  d.current=stale;
+  h.render();
+  const interrupted=JSON.parse(d.pending.find(l=>l.includes('"e":"interrupted"')));
+  assert.equal(interrupted.kind,'render:main');assert.equal(interrupted.phase,'derive:order');
+  assert.equal(interrupted.by,'render:main');
+  assert.ok(interrupted.phaseMs>=4210&&interrupted.phaseMs<4300);
+  assert.ok(interrupted.sinceStartMs>=5130&&interrupted.sinceStartMs<5220);
+  assert.deepEqual(interrupted.phases.at(-1),['derive:trees',4030]);
+  assert.equal(interrupted.sizes.agents,110);assert.equal(interrupted.sizes.sigLen,28410);
+  await d.flush();
+  assert(h.files.get(diagPath).includes('"e":"interrupted"'),'interrupted render reaches the log');
+  // A thrown render records an exception with its phase, then clears the breadcrumb.
+  const realSpaces=h.api.spaces;
+  h.api.spaces=()=>{throw new Error('boom');};
+  assert.throws(()=>h.render());
+  const failed=JSON.parse(d.pending.find(l=>l.includes('"e":"exception"')));
+  assert.equal(failed.kind,'render:main');assert.equal(failed.phase,'signature');
+  assert.ok(failed.error.includes('boom'));assert.equal(failed.sizes,null,'sizes are whatever the render had reached');
+  assert.equal(d.current,null,'a caught render is not an interruption');
+  h.api.spaces=realSpaces;h.render();
+  // Slow renders carry the phase breakdown and input sizes.
+  d.slowMs=0;d.pending.length=0;
+  h.render();
+  const slow=JSON.parse(d.pending.find(l=>l.includes('"e":"slow"')));
+  d.slowMs=10;
+  assert.equal(slow.kind,'render:main');
+  assert.ok(slow.phases.some(([name])=>name==='signature'));
+  assert.ok(slow.phases.some(([name])=>name==='elements'));
+  assert.equal(slow.sizes.terminals,4);
+  // Flushes are rate-limited: events inside the window wait for a later one.
+  h.files.set(diagPath,'');
+  d.lastWrite=Date.now();d.pending.length=0;
+  d.current={...stale,start:Date.now(),phaseAt:Date.now()};
+  h.render();
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(writes(),before+1,'rate window holds the flush');
+  assert.equal(d.pending.length,1,'event stays pending');
+  d.lastWrite=0;
+  d.current={...stale,start:Date.now(),phaseAt:Date.now()};
+  h.render();
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal((h.files.get(diagPath).match(/"e":"interrupted"/g)||[]).length,2,'coalesced flush writes both');
+  // The ring file is size-capped, keeping the newest lines.
+  const filler=JSON.stringify({e:'fill',pad:'x'.repeat(120)});
+  h.files.set(diagPath,Array.from({length:1200},()=>filler).join('\n')+'\n');
+  d.lastWrite=0;d.pending.length=0;
+  d.current={...stale,kind:'render:main',start:Date.now(),phaseAt:Date.now()};
+  h.setProps({mail:'t7'});
+  h.render();
+  await new Promise(r=>setTimeout(r,10));
+  const ring=h.files.get(diagPath);
+  assert.ok(ring.length<=d.fileMax,'ring file stays capped');
+  assert.ok((ring.match(/"e":"fill"/g)||[]).length<1200,'oldest lines dropped');
+  assert.ok(ring.trimEnd().endsWith('"by":"render:mail"}'),'newest event kept and names the detecting copy');
+  h.setProps({});
 });
 
 test('inactive filter retains UAC context and active descendants; retains done sub-agents; hides idle and unknown rows and empty groups',()=>{

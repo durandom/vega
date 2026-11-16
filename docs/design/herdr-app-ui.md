@@ -699,3 +699,44 @@ a saved view boundary; an individual pinned terminal admits only itself and
 the group context, while a project pin admits the block's agents. Active still
 hides idle unpinned member agents. Folding the coordination header hides all
 members; a member subheader can fold its own rows without changing block order.
+
+## Sidebar render diagnostics (vega-0h4c.104)
+
+Even with the cached derivation (vega-0h4c.103) herdr-app still sometimes
+replaces the vega-sidebar with "This view could not be re-rendered; showing
+last good … interrupted" (the engine aborted `render()`, most likely its time
+budget) or "The sidebar could not be loaded" (module/init failure). An
+interrupted render cannot log itself, so `main.js` keeps breadcrumbs in module
+memory (shared by all copies, no I/O on the render path): the render or init
+in flight records its kind (`render:`/`init:` plus the copy kind:
+main, mail, attention, project, views, space-menu, agent-menu, settings), the
+current phase (`signature`, `derive` with the coarse buildModel phases
+`derive:trees`/`derive:order`/`derive:rows`, `elements`) and timings, plus the
+input sizes it has reached (terminals, agents, panes, spaces, badges,
+projects, signature length, view, Active filter).
+
+The next render or init that begins while a breadcrumb never finished records
+an `interrupted` event (last phase, ms spent in it, ms since start, phases so
+far, sizes, which copy detected it). A wrapper around `init`/`render` records
+caught exceptions (`exception`, with phase, ms and error; it rethrows so
+herdr-app behaviour is unchanged) and renders slower than 10 ms (`slow`, with
+the phase breakdown). Module evaluation records one `load` line.
+
+Events flush asynchronously via `fs/promises` (never awaited on the render
+path, never during `herdr-app check`: `checking()`), rate-limited to one write
+per 2 s, at most 100 pending lines, into a ring file capped at 128 KiB
+(trimmed to 64 KiB, oldest lines first):
+
+`~/.config/herdr-app/data/vega-sidebar-diagnostics/render-log.jsonl`
+(`$HERDR_APP_HOME`-relative; JSON Lines, one event per line).
+
+The path is app data, not mod code: `vega config apply` replaces the whole
+`mods/vega-sidebar` folder, but never writes under `data/`, so the log
+survives updates. Findings recorded with the bead: herdr-app keeps a "last
+good" render only in the window and surfaces load errors (files and mods) in
+`herdr-app status`'s `errors` array — readable, but the mod does not exec it
+per load; `console.log` goes to tracing under the `gpui_shell::script` target,
+gated by `RUST_LOG` on stderr, and is not persisted anywhere by default, so
+the ring file is the only durable record. Tests use fake `fs` in the vm
+loader: detection, phase wiring, exception/slow recording, rate limiting and
+the ring cap.

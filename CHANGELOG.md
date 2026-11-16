@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 222 · 2026-11-16
+
+- feature: The vega-sidebar keeps a diagnostics log for the intermittent "This
+  view could not be re-rendered … interrupted" / "The sidebar could not be
+  loaded" overlays: render/init phase breadcrumbs in memory, interrupted/slow/
+  failed renders recorded with phase, timings and input sizes, flushed to a
+  size-capped ring file at `~/.config/herdr-app/data/vega-sidebar-diagnostics/
+  render-log.jsonl` (app data survives `vega config apply`). No timers, no
+  per-frame file I/O; `herdr-app check` writes nothing.
+
 ## 221 · 2026-11-16
 
 - feature: The vega-sidebar no longer trips herdr-app's "This view could not be
