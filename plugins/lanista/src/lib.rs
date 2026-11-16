@@ -1,5 +1,6 @@
 //! Model pins shared by lanista's CLI and agent spawning.
 pub mod hosts;
+pub mod routes;
 pub mod seats;
 
 use std::path::Path;

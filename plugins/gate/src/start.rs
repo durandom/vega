@@ -285,9 +285,16 @@ fn harness_installed(kind: &str) -> bool {
 fn capacity_thin(kind: &str, args: &[String]) -> bool {
     use vega_herdr::capacity;
     let ledger = vega_herdr::resets::read().unwrap_or_default();
-    capacity::spawn_check(kind, args, capacity::read(), &ledger, capacity::now())
-        .1
-        .is_some()
+    capacity::spawn_check(
+        kind,
+        args,
+        capacity::read(),
+        &ledger,
+        capacity::now(),
+        None, // route facts never make capacity thin
+    )
+    .1
+    .is_some()
 }
 
 /// The reviewer is alive in its recorded backend.

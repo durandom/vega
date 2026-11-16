@@ -460,6 +460,9 @@ pub fn rows(host: &str, config: &Config, seats_pins: &[(String, Vec<seats::Pin>)
 }
 /// Overlay default then project, keeping host values above defaults. A limited
 /// target's rows must never inherit defaults even when inspected privately.
+/// `table` is lanista's routes (read once at the CLI boundary): each row's
+/// model carries the resolved route facts — cost class and origin — with
+/// the seats overlay's deprecated `canonical`/`cost` as the fallback.
 pub fn layered_rows(
     host: &str,
     config: &Config,
@@ -467,6 +470,7 @@ pub fn layered_rows(
     view: &vega_registry::View,
     project: Option<&str>,
     seats_pins: &[(String, Vec<seats::Pin>)],
+    table: &vega_herdr::routes::Table,
 ) -> Vec<Value> {
     let mut result = rows(host, config, seats_pins);
     let empty = Config::default();
@@ -493,11 +497,24 @@ pub fn layered_rows(
             row["source"] = json!(pin.source);
             row["resolved_lane"] = json!(pin.lane);
         }
+        let seat_pins = seats_pins
+            .iter()
+            .find(|(s, _)| s == row["seat"].as_str().unwrap())
+            .map(|(_, p)| p.as_slice())
+            .unwrap_or_default();
+        let model = row["model"].as_str().unwrap_or_default();
+        let (facts, warnings) = crate::routes::resolve(model, seat_pins, table);
+        for warning in warnings {
+            eprintln!("vega lanista: {warning}");
+        }
+        row["canonical"] = json!(facts.as_ref().and_then(|f| f.canonical.clone()));
+        row["cost"] = json!(facts.as_ref().and_then(|f| f.cost.clone()));
+        row["cost_origin"] = json!(facts.as_ref().map(|f| f.origin));
     }
     result
 }
 
-pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
+pub fn list(host: Option<&str>, table: &vega_herdr::routes::Table) -> Result<Vec<Value>, String> {
     let seats_pins = seats::effective_seats();
     let local = vega_herdr::state::post_host();
     if let Some(h) = host {
@@ -512,6 +529,7 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
             &vega_registry::View::default(),
             None,
             &seats_pins,
+            table,
         ));
     }
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -563,6 +581,7 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
                     &view,
                     project,
                     &seats_pins,
+                    table,
                 ));
             }
             Ok(result)
@@ -661,6 +680,7 @@ mod tests {
                 v,
                 Some("github.com/team/project"),
                 &repo_seats(),
+                &vega_herdr::routes::Table::default(),
             )
             .into_iter()
             .find(|r| r["lane"] == "codex" && r["tier"] == "budget")
@@ -911,6 +931,20 @@ mod tests {
                 cost: "subscription".into(),
             },
         );
+        let table = vega_herdr::routes::Table {
+            routes: [(
+                "enmaas/gome-3.1".to_string(),
+                vega_herdr::routes::Route {
+                    route_id: "enmaas/gome-3.1".into(),
+                    canonical: Some("gome-3.1".into()),
+                    cost: Some("budget".into()),
+                    cost_origin: "local".into(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
         let row = layered_rows(
             "puck",
             &Config::default(),
@@ -918,6 +952,7 @@ mod tests {
             &vega_registry::View::default(),
             None,
             &seats_pins,
+            &table,
         )
         .into_iter()
         .find(|r| r["lane"] == "pi" && r["tier"] == "flagship")
@@ -929,10 +964,32 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("enmaas/gome-3.1")));
+        // Route facts come from lanista (cost class and origin), not the
+        // seats overlay's deprecated canonical/cost.
+        assert_eq!(row["canonical"], "gome-3.1");
+        assert_eq!(row["cost"], "budget");
+        assert_eq!(row["cost_origin"], "local");
+        // A repo pin without a lanista entry carries no facts.
+        let row = layered_rows(
+            "puck",
+            &Config::default(),
+            &Config::default(),
+            &vega_registry::View::default(),
+            None,
+            &seats_pins,
+            &table,
+        )
+        .into_iter()
+        .find(|r| r["lane"] == "codex" && r["tier"] == "budget")
+        .unwrap();
+        assert_eq!(row["model"], "gpt-6-luna");
+        assert_eq!(row["cost"], Value::Null);
+        assert_eq!(row["cost_origin"], Value::Null);
     }
 
     /// The puck story end to end on a fake host: an overlay file pins pi
-    /// tiers to an EnMaaS gateway id and `hosts` resolves it without repo edits.
+    /// tiers to an EnMaaS gateway id and `hosts` resolves it without repo
+    /// edits, with route facts from a fake lanista (`lanista --json routes`).
     #[test]
     fn fake_host_listing_resolves_overlay_pins() {
         const MARKER: &str = "VEGA_HOSTS_OVERLAY_TEST";
@@ -948,6 +1005,27 @@ mod tests {
                 ]}}"#,
             )
             .unwrap();
+            let fake = dir.path().join("fake-lanista");
+            std::fs::write(
+                &fake,
+                format!(
+                    "#!/bin/sh\ncat <<'JSON'\n{}\nJSON\n",
+                    r#"{"overlay":{"loaded":true,"route_count":2},"routes":{
+                        "enmaas/gome-3.1":{"route_id":"enmaas/gome-3.1","canonical":"gome-3.1",
+                            "fields":{"cost":{"value":"subscription","origin":"local"}}},
+                        "enmaas/gome-2.4":{"route_id":"enmaas/gome-2.4","canonical":"gome-2.4",
+                            "fields":{"cost":{"value":"budget","origin":"local"}}}
+                    }}"#
+                    .replace('\n', "")
+                ),
+            )
+            .unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&fake, perms).unwrap();
+            }
             let cache = dir.path().join("vega/lanista");
             std::fs::create_dir_all(&cache).unwrap();
             std::fs::write(cache.join("puck.json"), "{\"schema\":1,\"seats\":{}}").unwrap();
@@ -960,6 +1038,7 @@ mod tests {
                 .env(MARKER, "1")
                 .env("XDG_CONFIG_HOME", dir.path())
                 .env("XDG_CACHE_HOME", dir.path())
+                .env("VEGA_LANISTA_BIN", &fake)
                 .env("VEGA_POST_HOST", "puck")
                 .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
                 .env("VEGA_NATS_NKEY", dir.path().join("missing"))
@@ -974,7 +1053,8 @@ mod tests {
             );
             return;
         }
-        let rows = list(None).unwrap();
+        let table = vega_herdr::routes::read().expect("fake lanista answers");
+        let rows = list(None, &table).unwrap();
         let row = rows
             .iter()
             .find(|r| r["lane"] == "pi" && r["tier"] == "flagship")
@@ -982,17 +1062,25 @@ mod tests {
         assert_eq!(row["model"], "enmaas/gome-3.1");
         assert_eq!(row["source"], "overlay");
         assert_eq!(row["resolved_lane"], "pi");
+        // Route facts through the fake lanista: cost class and origin.
+        assert_eq!(row["canonical"], "gome-3.1");
+        assert_eq!(row["cost"], "subscription");
+        assert_eq!(row["cost_origin"], "local");
         let row = rows
             .iter()
             .find(|r| r["lane"] == "pi" && r["tier"] == "balanced")
             .unwrap();
         assert_eq!(row["model"], "enmaas/gome-2.4");
-        // Untouched tiers keep the zai fallback.
+        // The seats overlay says budget here too; lanista's entry agrees.
+        assert_eq!(row["cost"], "budget");
+        assert_eq!(row["cost_origin"], "local");
+        // Untouched tiers keep the zai fallback, with no route facts.
         let row = rows
             .iter()
             .find(|r| r["lane"] == "pi" && r["tier"] == "budget")
             .unwrap();
         assert_eq!(row["model"], "glm-4.7");
         assert_eq!(row["resolved_lane"], "zai");
+        assert_eq!(row["cost"], serde_json::Value::Null);
     }
 }

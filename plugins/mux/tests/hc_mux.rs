@@ -11,7 +11,7 @@ impl Fixture {
         let d = tempfile::tempdir().unwrap();
         let bin = d.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for (name, text) in [("renice","#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/renice-calls\"\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app",include_str!("fixtures/app.py")),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n")] {
+        for (name, text) in [("renice","#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/renice-calls\"\n"),("hc",include_str!("fixtures/hc.py")),("herdr-app",include_str!("fixtures/app.py")),("herdr","#!/bin/sh\necho herdr-called >> \"$HOME/herdr-calls\"\necho '{\"error\":{\"code\":\"agent_not_found\"}}'\nexit 1\n"),("lanista","#!/bin/sh\necho '{\"overlay\":{\"loaded\":false,\"route_count\":0},\"routes\":{}}'\n")] {
             fs::write(bin.join(name),text).unwrap();fs::set_permissions(bin.join(name),fs::Permissions::from_mode(0o755)).unwrap();
         }
         fs::create_dir_all(d.path().join("config/herdr-app")).unwrap();
@@ -35,6 +35,7 @@ impl Fixture {
             .env("TEST_PARENT_PID", std::process::id().to_string())
             .env("VEGA_POST_HOST", "test")
             .env("VEGA_TOKEN_BURN", "/nonexistent/token-burn")
+            .env("VEGA_LANISTA_BIN", self.root().join("bin/lanista"))
             .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
             .current_dir(self.root());
         c

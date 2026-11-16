@@ -21,11 +21,16 @@ description: Installs and upgrades the lanista LLM model catalog, ships its seat
   and never read/edit registry defaults. Explicit project read grants use
   `VEGA_LANISTA_PIN_HOSTS`; no bucket enumeration is attempted.
 - `vega lanista hosts [--host <host>] --json`: effective models, source, expiry,
-  resolved lane and allowlists. Private views include the current project's pins.
+  resolved lane, allowlists and route facts (canonical, cost class, origin).
+  Private views include the current project's pins.
 - Host-local tier extensions live in `~/.config/vega/lanista/seats.local.json`
   (`{provider, pin, tier, canonical?, cost}` entries, e.g. pi pins to `enmaas/<id>`).
   Seats sync never touches it; invalid entries are reported and skipped; source
   shows `overlay`; an overlay pi pin beats the zai fallback for its tier.
+  `canonical`/`cost` there are deprecated fallbacks: lanista's
+  `~/.config/lanista/routes.local.json` owns route facts (one
+  `lanista --json routes` read per command; conflicts warn, lanista wins;
+  `vega lanista doctor` checks the mismatch).
 
 Pi project/host overrides may select allowlisted Google models; otherwise Pi
 uses the full zai chain: project > host > registry default > repo seats.

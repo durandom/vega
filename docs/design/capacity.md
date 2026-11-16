@@ -138,6 +138,18 @@ says `credits unknown` and preserves the existing warning behavior; known empty
 credits and overage limits also preserve it. Planned resets and overrides retain
 their existing independent behavior. Quota percentages remain unchanged.
 
+## Route facts in the capacity line (vega-777n)
+
+A spawned model that is a lanista route (an EnMaaS seats-overlay pin, read via one
+bounded `lanista --json routes` call, see [lanista-catalog.md](lanista-catalog.md))
+carries its route facts into an unknown capacity line:
+`capacity: unknown (no enmaas account window in the sample; route subscription,
+origin local)`. The facts come from lanista's `routes.local.json`; the seats
+overlay's deprecated `canonical`/`cost` are the fallback (origin
+`seats-overlay`) when lanista has no entry, and a missing/old lanista degrades
+to that fallback with a hint. With real headroom the route facts stay out: the
+binding window is the capacity. Unknown is never zero.
+
 Capacity JSON schema 1 adds `account_id`, `credits` (fresh state or null) and
 `on_credits` (binding windows only) to each window. Credit `observed_at` is Unix
 seconds, `balance` is a string or null, and the flags are booleans. The shared

@@ -1446,13 +1446,29 @@ fn spawn_inner(
     }
     let selection = tier::select(kind, tier, extra, cwd.as_deref())?;
     let extra = selection.args.as_slice();
-    // Headroom of the kind's provider, read while the agent starts.
+    // Headroom of the kind's provider, read while the agent starts. A model
+    // resolved to a lanista route also carries its route facts (cost class,
+    // origin) into the capacity line — one bounded `lanista --json routes`
+    // read, with the seats overlay fallback when lanista is missing.
     let capacity = {
-        let (kind, extra) = (kind.to_string(), extra.to_vec());
+        let (kind, extra, model) = (kind.to_string(), extra.to_vec(), selection.model.clone());
         std::thread::spawn(move || {
             // An unreadable ledger covers nothing: the warning stays.
             let ledger = vega_herdr::resets::read().unwrap_or_default();
-            capacity::spawn_check(&kind, &extra, capacity::read(), &ledger, capacity::now())
+            let route = model.as_deref().and_then(|m| {
+                let resolved =
+                    vega_lanista::routes::resolve_facts(m, vega_lanista::seats::DEFAULT_SEAT);
+                resolved.report();
+                resolved.facts
+            });
+            capacity::spawn_check(
+                &kind,
+                &extra,
+                capacity::read(),
+                &ledger,
+                capacity::now(),
+                route.as_ref(),
+            )
         })
     };
     if !valid_agent_name(name) {

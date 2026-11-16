@@ -279,7 +279,7 @@ pub fn spawn(
         session: None,
         extra: selection.args.clone(),
         tier: tier.map(String::from),
-        model: selection.model,
+        model: selection.model.clone(),
         ..Default::default()
     });
     record.pane = pane.clone();
@@ -336,12 +336,19 @@ pub fn spawn(
         println!("prompt: passed to harness at launch; use show to inspect startup");
     }
     let ledger = vega_herdr::resets::read().unwrap_or_default();
+    // Route facts for the spawned model, as the herdr spawn shows them.
+    let route = selection.model.as_deref().and_then(|m| {
+        let resolved = vega_lanista::routes::resolve_facts(m, vega_lanista::seats::DEFAULT_SEAT);
+        resolved.report();
+        resolved.facts
+    });
     let (field, warning) = capacity::spawn_check(
         kind,
         &selection.args,
         capacity::read(),
         &ledger,
         capacity::now(),
+        route.as_ref(),
     );
     println!("{field}");
     if let Some(w) = warning {

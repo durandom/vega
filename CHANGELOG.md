@@ -5,6 +5,23 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 224 · 2026-11-16
+
+- feature: Route facts now come from lanista, not the seats overlay. vega reads
+  `lanista --json routes` once per command (bounded, `VEGA_LANISTA_BIN` overrides
+  the binary): `~/.config/lanista/routes.local.json` (lanista's) owns route id →
+  canonical + cost class, and the `canonical`/`cost` keys in
+  `~/.config/vega/lanista/seats.local.json` are deprecated fallbacks — used only
+  when lanista has no entry; conflicts warn on stderr and lanista wins; unknown
+  stays unknown, never zero. `vega lanista hosts` shows `cost`/`origin` (JSON:
+  `canonical`, `cost`, `cost_origin`), `vega mux spawn` appends route facts to an
+  unknown capacity line (`capacity: unknown (no enmaas account window in the
+  sample; route subscription, origin local)`), `vega lanista pin` prints the
+  resolved facts, and `vega lanista doctor` checks seats.local canonical/cost
+  against lanista (warn on mismatch). A missing/old lanista degrades to the
+  fallback with a `vega lanista install` hint. See the route-facts section in
+  [docs/design/lanista-catalog.md](docs/design/lanista-catalog.md).
+
 ## 223 · 2026-11-16
 
 - feature: Hosts can extend their model tiers without repo edits through a host-local
