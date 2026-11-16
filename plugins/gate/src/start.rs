@@ -401,6 +401,51 @@ pub fn cleanup_detached(r: &Review) {
         .spawn();
 }
 
+/// A fresh reviewer is not judged dead before its pane has had this long to
+/// show up in the terminal's list.
+pub const REAP_GRACE_SECS: i64 = 15;
+
+/// Whether the reviewer is definitely gone: hc answered that its terminal is
+/// not found or not live. Any other outcome (timeout, daemon down, bad output)
+/// is not an answer, so the review is left alone. Only hc reviewers are
+/// reaped: herdr's `pane get` has no error shape that tells a missing pane
+/// from a down daemon, so those reviews end through the timeout.
+fn reviewer_gone(r: &Review) -> bool {
+    r.backend == Backend::Hc && terminal::liveness(&r.pane) == terminal::Liveness::Gone
+}
+
+/// Ends the reviews of `repo` whose reviewer terminal is definitely gone
+/// (exited) with no verdict written: their running beads become `abandoned` and the state,
+/// clone and pane are cleaned, so the next `vega gate start` starts a fresh
+/// review instead of waiting for the timeout. The state lock decides against
+/// a verdict in flight. Run by `vega gate start` only, never by the read-only
+/// home view. Returns the abandoned panes.
+pub fn reap_dead(dir: &Path, repo: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in state::all() {
+        if r.repo != repo || now() - r.started_at <= REAP_GRACE_SECS || !reviewer_gone(&r) {
+            continue;
+        }
+        let Ok(Some(guard)) = state::lock_current(&r) else {
+            continue;
+        };
+        for b in &r.beads {
+            let _ = record::finish(
+                dir,
+                b,
+                "abandoned",
+                &format!("abandoned: reviewer {} exited without a verdict", r.pane),
+                None,
+            );
+        }
+        state::remove(&r.pane);
+        drop(guard);
+        cleanup(&r, false);
+        out.push(r.pane.clone());
+    }
+    out
+}
+
 /// What a plan needs: a pass for every segment, else a running review.
 pub fn start(dir: &Path, plan: &Plan, cfg: &Config, branch: &str) -> Result<Outcome, String> {
     start_from(dir, plan, cfg, branch, lookup(dir, plan)?)

@@ -737,9 +737,42 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
         r#"{"argv":[],"labels":{},"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"t11","state":"finished"}"#,
     )
     .unwrap();
+    let sf = tmp.path().join("state/vega/gate/hc-743131.json");
+    let mut st: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&sf).unwrap()).unwrap();
+    st["started_at"] = (st["started_at"].as_i64().unwrap() - 100).into();
+    fs::write(&sf, st.to_string()).unwrap();
+    // The read-only home view never reaps, however old the review is.
     let home = run(&work, tmp.path(), &env, &[]);
     assert!(home.status.success(), "{}", out(&home));
     assert!(out(&home).contains(",gone"), "{}", out(&home));
+    assert!(!out(&home).contains("abandoned:"), "{}", out(&home));
+    assert!(sf.exists());
+    // A terminal.get error that is not a definite not-found (daemon down,
+    // timeout) is no answer: `vega gate start` leaves the review alone.
+    let err = tmp.path().join("hc-get-error");
+    fs::write(&err, "unavailable").unwrap();
+    let _ = run(&work, tmp.path(), &env, &["start"]);
+    assert!(sf.exists(), "an hc error must not end the review");
+    assert!(
+        !log(tmp.path(), "bd").contains("abandoned: reviewer t11"),
+        "{}",
+        log(tmp.path(), "bd")
+    );
+    // A finished terminal (or a definite not-found) ends it.
+    fs::remove_file(&err).unwrap();
+    let started = run(&work, tmp.path(), &env, &["start"]);
+    assert!(
+        out(&started).contains("abandoned: reviewer t11 exited without a verdict"),
+        "{}",
+        out(&started)
+    );
+    assert!(
+        log(tmp.path(), "bd").contains("abandoned: reviewer t11 exited"),
+        "{}",
+        log(tmp.path(), "bd")
+    );
+    assert!(!sf.exists());
 }
 
 fn two_abandons(tmp: &Path) {

@@ -27,3 +27,25 @@ pub fn get(pane: &str) -> Result<serde_json::Value, String> {
     )
     .map_err(|e| e.message)
 }
+
+/// What `hc get` says about a terminal. Only a definite answer is `Gone`; a
+/// timeout, a down daemon or unparsable output is `Unknown`.
+#[derive(Debug, PartialEq)]
+pub enum Liveness {
+    Live,
+    Gone,
+    Unknown,
+}
+
+pub fn liveness(pane: &str) -> Liveness {
+    match vega_herdr::hc_on(
+        None,
+        &["get", pane],
+        Some(std::time::Duration::from_secs(5)),
+    ) {
+        Ok(v) if v["state"] == "live" => Liveness::Live,
+        Ok(v) if v["state"].is_string() => Liveness::Gone,
+        Err(e) if e.code == "pane_not_found" => Liveness::Gone,
+        _ => Liveness::Unknown,
+    }
+}
