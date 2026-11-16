@@ -21,6 +21,7 @@ per project) and its sentinels, project identity, mail, vegad, beads, the gate a
 | [`uac`](plugins/uac/) | Coordinator mode: the role guide and the home view of the agents a session runs |
 | [`uber`](plugins/uber/) | The Uber-UAC: the Slayer's one channel to every UAC (estate-wide claim) |
 | [`review`](plugins/review/) | Live review in the owner's headed browser; notes arrive as mail |
+| [`browser`](plugins/browser/) | Named agent-browser sessions: the global Chromium, fallbacks, owner records, list and cleanup |
 | [`gate`](plugins/gate/) | LLM review before agent pushes; records a pass for each change |
 | [`ci`](plugins/ci/) | GitHub CI watch; the verdict arrives by mail |
 | [`bd`](plugins/bd/) | Beads sync: a project's bd database on a configured Dolt remote |
@@ -44,6 +45,7 @@ codes and only add commands and `stderr` hints, with denials documented in each 
 | [`bd`](shims/bd/) | Derives `BEADS_ACTOR` per worktree (`<host>/<worktree dir>`), then runs the real bd |
 | [`git`](shims/git/) | Gates agent pushes in repos with `.vega/gate.toml`; other calls pass through |
 | [`gh`](shims/gh/) | Passthrough; denies the watch loops, hints at `vega ci`, counts calls per pane |
+| [`agent-browser`](shims/agent-browser/) | Named calls pass through with an owner record; unnamed calls are refused (name your session) |
 | [`herdr`](shims/herdr/) | Passes every call through to the real herdr |
 | [`tea`](shims/tea/) | Passthrough; hints at `vega ci`, counts calls per pane |
 

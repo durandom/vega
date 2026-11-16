@@ -1,0 +1,28 @@
+[package]
+name = "vega-browser"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Named agent-browser sessions: the global Chromium, throwaway fallbacks, owner records, list and cleanup"
+publish = false
+
+[lib]
+name = "vega_browser"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vega-browser"
+path = "src/main.rs"
+
+[dependencies]
+vega-build = { path = "../../crates/vega-build" }
+vega-herdr = { path = "../../crates/vega-herdr" }
+vega-shim = { path = "../../crates/vega-shim" }
+serde_json = "1"
+
+[dev-dependencies]
+vega-plugin = { path = "../../crates/vega-plugin" }
+tempfile = "3"
+
+[build-dependencies]
+vega-build = { path = "../../crates/vega-build" }

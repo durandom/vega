@@ -95,6 +95,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-browser-shim"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "vega-browser",
+ "vega-shim",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2851,6 +2861,18 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vega-herdr",
+]
+
+[[package]]
+name = "vega-browser"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "vega-build",
+ "vega-herdr",
+ "vega-plugin",
+ "vega-shim",
 ]
 
 [[package]]

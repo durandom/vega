@@ -15,6 +15,7 @@ denials are documented exceptions. Principles: [agent-tooling-principles.md](../
 | [`git`](git/) | Gates `git push` in repos with `.vega/gate.toml` (LLM review, `vega gate`); everything else is a plain exec |
 | [`gh`](gh/) | Denies the CI watch loops, hints at `vega ci watch`, counts calls |
 | [`herdr`](herdr/) | Plain passthrough, the hook point for later additions |
+| [`agent-browser`](agent-browser/) | Named calls pass through with an owner record; unnamed calls are refused (name your session) |
 | [`tea`](tea/) | Hints at `vega ci watch`, counts calls, install hint |
 
 `activate.test.sh` tests the activation rules (`mise run check`).

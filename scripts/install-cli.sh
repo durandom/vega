@@ -25,6 +25,7 @@ shims="$HOME/.local/share/vega/shims/bin"
 pkgs="vega vega-service vega-mux vega-post vega-history vega-notify vega-deploy vega-skills
 vega-orchestration vega-uac vega-ci vega-theme vega-uber vega-config vega-onboard
 vega-lanista vega-capacity vega-janitor vega-review vega-gate vega-bd vega-secrets-cli
+vega-browser agent-browser-shim
 herdr-shim gh-shim tea-shim git-shim bd-shim ${VEGA_INSTALL_EXTRA:-}"
 args=""
 for p in $pkgs; do args="$args -p $p"; done
@@ -115,6 +116,18 @@ mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills"
 main=$(dirname "$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)")
 ln -sfn "$main/skills/vega" "$HOME/.agents/skills/vega"
 ln -sfn ../../.agents/skills/vega "$HOME/.claude/skills/vega"
+
+# Migration (docs/design/browser.md): the browser skill moved into the plugin
+# (`vega browser`, guide via `vega skills browser`); the library repo drops
+# it. The old skill paths stay as forwarding scripts until every hard-coded
+# caller switched (brainz); then this block and plugins/browser/forward/ go.
+mkdir -p "$HOME/.agents/skills/browser/scripts"
+rm -rf "$HOME/.agents/skills/browser/tests"
+for f in ab chromium.sh launch.sh cleanup.sh; do
+	install -m 755 "$root/plugins/browser/forward/$f" "$HOME/.agents/skills/browser/scripts/$f"
+done
+install -m 644 "$root/plugins/browser/forward/SKILL.md" "$HOME/.agents/skills/browser/SKILL.md"
+ln -sfn ../../.agents/skills/browser "$HOME/.claude/skills/browser"
 
 # Install record (docs/design/upgrade.md): vegad checks this checkout's
 # upstream daily and `vega upgrade` pulls it; `vega deploy` sets

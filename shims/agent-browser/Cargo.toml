@@ -1,0 +1,19 @@
+[package]
+name = "agent-browser-shim"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent-session shim for agent-browser: named calls pass through with an owner record, unnamed calls are refused"
+publish = false
+
+[[bin]]
+name = "agent-browser"
+path = "src/main.rs"
+
+[dependencies]
+vega-browser = { path = "../../plugins/browser" }
+vega-shim = { path = "../../crates/vega-shim" }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"

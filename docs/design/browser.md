@@ -1,6 +1,7 @@
 # vega-browser
 
-Status: design, 2026-11-16 (bead vega-nic.18). Replaces the global skill `browser`
+Status: implemented (phase 1, bead vega-nic.18), 2026-11-16. Phase 2 (panels, colours) is
+vega-nic.19. Replaces the global skill `browser`
 (`~/.agents/skills/browser`, symlinked as `~/.claude/skills/browser`).
 
 ## Problem

@@ -5,6 +5,21 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 225 · 2026-11-17
+
+- feature: Browser work moves into the `vega browser` plugin (guide: `vega skills browser`): the
+  global Chromium on 127.0.0.1:9223 (`ab`, `chromium`), the throwaway fallback for bot blockers
+  (`launch`, `cleanup`), and the session inventory `ls [--json]`/`gc`/`close` with owner pane, project,
+  age and state. Named agent-browser sessions are now the one rule: the `agent-browser` shim (agent
+  shells only) passes named calls (`--session <name>` or `AGENT_BROWSER_SESSION`) through unchanged and
+  records their owner; unnamed calls are refused with a hint (`--help`, `skills`, `session list` pass).
+  `vega review` is unaffected (it names its sessions). CI and human shells never see the shim.
+- migration: The global `browser` skill (~/.agents/skills/browser) is replaced by forwarding scripts to
+  the plugin (installed by `mise run install`); after the vega-skills repo drops the skill, run
+  `vega skills lib remove browser -g` to take it out of the global set. The forwarding scripts stay
+  until the remaining hard-coded callers (brainz) switched, then they go. See
+  [docs/design/browser.md](docs/design/browser.md).
+
 ## 224 · 2026-11-16
 
 - feature: Route facts now come from lanista, not the seats overlay. vega reads
