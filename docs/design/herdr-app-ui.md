@@ -576,6 +576,18 @@ vega-tabs. Apply its new `herdr-app.vega-services` whole-folder config unit befo
 the layout; no shipped layout or mod is edited in place. The original small
 implementation and prior-art licenses are documented in its UPSTREAM.md.
 
+A "Browsers" group (vega-nic.19) joins the panel from one local
+`vega browser ls --json` per refresh (first show and manual Refresh, no timer):
+sessions with their colour dot, owner pane/project, headed/headless, age and
+state, plus loose browser processes no session claims (listed without a close).
+Project-scoped sessions follow the panel's focus filter; unowned ones always
+show. Close is a two-step confirm running `vega browser close <session>` only.
+The same rows are published as shared state `vega.browsers` for the sidebar's
+agent-row browser dots (colour per session, up to three plus a count), so the
+sidebar never reads browsers itself; the payload is part of its render model's
+input signature. Colours and the headed-window mark come from vega-browser
+([browser.md](browser.md), phase 2).
+
 On first show and explicit Refresh it snapshots listeners (`ss -tlnpH` on Linux,
 `lsof` on macOS), parent PIDs and listener cwds through `exec` on each space’s hc
 machine. Python 3 plus ps and ss/lsof are required there. The panel groups by

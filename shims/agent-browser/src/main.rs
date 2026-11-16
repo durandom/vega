@@ -1,12 +1,14 @@
 //! Agent-session shim for `agent-browser` (docs/design/browser.md, Shim).
 //!
 //! One rule: a named call (`--session <name>` anywhere, or a non-empty
-//! `AGENT_BROWSER_SESSION`) passes through unchanged, every flag and
-//! subcommand allowed, and upserts the owner record
-//! (`$XDG_STATE_HOME/vega/browser/sessions.json`). An unnamed call is
-//! refused with a hint — a documented deviation from P2: default sessions
-//! are the unnamed leftovers nobody can attribute, and `close` without a
-//! name would close one of them. Exempt without a name: `--help`,
+//! `AGENT_BROWSER_SESSION`) passes through with every flag and subcommand
+//! allowed, upserts the owner record
+//! (`$XDG_STATE_HOME/vega/browser/sessions.json`) and carries the session's
+//! window mark (`--init-script`, phase 2: a coloured frame and a
+//! `[session]` title prefix on the pages the call navigates). An unnamed
+//! call is refused with a hint — a documented deviation from P2: default
+//! sessions are the unnamed leftovers nobody can attribute, and `close`
+//! without a name would close one of them. Exempt without a name: `--help`,
 //! `--version`, `skills …`, `session list`.
 //!
 //! The shim `exec`s the real binary by absolute path (`VEGA_AGENT_BROWSER_BIN`,
@@ -14,9 +16,10 @@
 //! the real binary the same way.
 
 use std::env;
+use std::ffi::OsString;
 use std::process::ExitCode;
 
-use vega_browser::{owner, real, session_name};
+use vega_browser::{mark, owner, real, session_name};
 
 const TOOL: &str = "agent-browser";
 
@@ -27,8 +30,14 @@ fn main() -> ExitCode {
         .collect();
     if let Some(session) = session_name(&args) {
         // Best effort: a call whose record cannot be written still passes.
-        owner::upsert(&session, owner::record_from_env(vega_shim::unix_now()));
-        return vega_shim::exec_real(TOOL, Some(real::ENV));
+        let record = owner::record_from_env(vega_shim::unix_now());
+        owner::upsert(&session, record.clone());
+        let marked = mark::with_mark(&args, &session, record.project.as_deref());
+        let argv: Vec<OsString> = std::iter::once(OsString::from(TOOL))
+            .chain(marked.into_iter().map(OsString::from))
+            .collect();
+        let (arg0, rest) = argv.split_first().expect("argv is nonempty");
+        return vega_shim::exec_real_with(TOOL, Some(real::ENV), arg0.clone(), rest.to_vec());
     }
     if exempt(&args) {
         return vega_shim::exec_real(TOOL, Some(real::ENV));

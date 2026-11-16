@@ -19,6 +19,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// and stdio, so stdout, TTY, signals and exit code are the original's. Only
 /// returns on failure: 127 when no real binary exists, 126 when exec fails.
 pub fn exec_real(tool: &str, env_var: Option<&str>) -> ExitCode {
+    let mut args = env::args_os();
+    let arg0 = args.next().unwrap_or_else(|| OsString::from(tool));
+    exec_real_with(tool, env_var, arg0, args.collect())
+}
+
+/// `exec_real` with explicit arguments (argv[0] included): a shim that
+/// rewrites the call before passing it through uses this.
+pub fn exec_real_with(
+    tool: &str,
+    env_var: Option<&str>,
+    arg0: OsString,
+    args: Vec<OsString>,
+) -> ExitCode {
     let self_path = env::current_exe().ok().and_then(|p| p.canonicalize().ok());
     let Some(real) = resolve_real(tool, env_var, self_path.as_deref()) else {
         let via = env_var
@@ -29,8 +42,6 @@ pub fn exec_real(tool: &str, env_var: Option<&str>) -> ExitCode {
         );
         return ExitCode::from(127);
     };
-    let mut args = env::args_os();
-    let arg0 = args.next().unwrap_or_else(|| OsString::from(tool));
     let err = Command::new(&real).arg0(arg0).args(args).exec();
     eprintln!(
         "{{\"error\":\"shim_exec_failed\",\"tool\":\"{tool}\",\"target\":\"{}\",\"message\":\"{}\"}}",

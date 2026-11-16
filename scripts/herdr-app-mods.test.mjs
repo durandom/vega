@@ -1063,6 +1063,40 @@ function projectFixture(h) {
   return project;
 }
 
+test('sidebar shows coloured browser dots on owning agent rows and derives once per payload',()=>{
+  const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
+  h.render();
+  assert(!elements(h.render()).some(n=>typeof n.idValue==='string'&&n.idValue.includes('browsers')),'no badge without browser data');
+  const model=h.mod.modelCache;
+  h.state.set('vega.browsers',{at:Date.now()/1000,sessions:[
+    {session:'classic-live',colour:'#d9465f',state:'live',pane:'t2',project:'spellkave',headed:true,age:60},
+    {session:'classic-p2',colour:'#0e8f6f',state:'live',pane:'t2',project:'spellkave',headed:false,age:60},
+    {session:'huk24',colour:'#3d73cc',state:'live',pane:'t3',project:'brainz',headed:true,age:60},
+    {session:'unowned-x',colour:'#9d6bf0',state:'unowned',pane:null,project:null,headed:null,age:null},
+    {session:'herdr-pane',colour:'#123456',state:'live',pane:'w1:p9',project:'x',headed:null,age:null}],
+    loose:[]});
+  h.render();
+  assert.notEqual(h.mod.modelCache,model,'a new browser payload rebuilds the model');
+  let cached=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,cached,'an unchanged payload reuses the cache');
+  const nodes=elements(h.render());
+  const badge=nodes.find(n=>n.idValue==='vega-t2-browsers');
+  assert(badge,'the owning sentinel row carries a badge');
+  const dots=badge.items.filter(n=>n.bgValue?.startsWith?.('#'));
+  assert.deepEqual(dots.map(n=>n.bgValue),['#d9465f','#0e8f6f'],'one dot per session in its colour');
+  assert.equal(badge.items.find(n=>n.tooltipValue).tooltipValue,'browser classic-live · live · headed');
+  assert(nodes.some(n=>n.idValue==='vega-t3-browsers'),'the other owner carries its badge');
+  assert(!nodes.some(n=>n.idValue==='vega-t4-browsers'),'a session-less agent has no badge');
+  // More than three sessions collapse into dots plus a count; the render
+  // itself never reads browsers (no exec of vega browser anywhere).
+  h.state.set('vega.browsers',{at:Date.now()/1000,sessions:[1,2,3,4,5].map(i=>
+    ({session:`s${i}`,colour:'#d9465f',state:'live',pane:'t2',project:'p',headed:true,age:1})),loose:[]});
+  h.render();
+  const capped=elements(h.render()).find(n=>n.idValue==='vega-t2-browsers');
+  assert.equal(capped.items.filter(n=>n.bgValue==='#d9465f').length,3);
+  assert(texts(capped).includes('+2'));
+  assert(!h.calls.some(c=>c[0]==='exec'&&c[1]?.[0]==='vega'&&c[1]?.[1]?.[0]==='browser'),'the sidebar never reads browsers itself');
+});
+
 test('sidebar derivation is cached between renders and rebuilt exactly when an input changes',()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
   h.render();
@@ -2476,6 +2510,76 @@ test('services displays registered metadata and toggles hidden agent ports witho
   assert(!JSON.stringify(h.render()).includes('codex :5000'));
 });
 
+
+test('services shows a Browsers group with colours, scope and a two-step close',async()=>{
+  const h=load('vega-services');
+  const terms=[{address:'t1',state:'live',pid:10,labels:{'herdr.space':'s1','vega.project-id':'org/a','vega.role':'uac'}},
+    {address:'t2',state:'live',pid:20,labels:{'herdr.space':'s2','vega.project-id':'org/b','vega.role':'uac'}}];
+  h.api.terminals=()=>terms;
+  h.api.focused=()=>({terminal:'t1',space:'s1'});
+  Object.assign(h.mod,{rows:[],errors:[],forwards:new Map(),pending:new Set(),targets:new Map(),
+    browserConfirm:new Set(),browserClosing:new Set(),browserError:null,
+    browsers:{at:Date.now()/1000,sessions:[
+      {session:'mine-live',colour:'#d9465f',state:'live',pane:'t1',project:'a',headed:true,age:120},
+      {session:'other-proj',colour:'#0e8f6f',state:'live',pane:'t2',project:'b',headed:false,age:120},
+      {session:'no-owner',colour:'#3d73cc',state:'unowned',pane:null,project:null,headed:null,age:null}],
+      loose:[{pid:900,headed:true,n:3}]}});
+  const nodes=root=>[root,...(root?.items??[]).filter(x=>x&&typeof x==='object').flatMap(nodes)];
+  const text=JSON.stringify(h.render());
+  assert(text.includes('Browsers'));
+  assert(text.includes('mine-live'));assert(text.includes('headed'));
+  assert(text.includes('no-owner'));assert(text.includes('unowned browser · pid 900'));
+  assert(!text.includes('other-proj'),'another project session is scoped out');
+  const dot=nodes(h.render()).find(n=>n.idValue==='browser-mine-live');
+  assert(dot.items[0].items[0].bgValue==='#d9465f','colour dot in the session colour');
+  // Two-step close: the first click asks, the second runs vega browser close.
+  const close=nodes(h.render()).find(n=>n.idValue==='browser-close-mine-live');
+  close.handlers.on_click({},h.cx);
+  assert.equal(h.calls.length,0,'no exec before the confirm');
+  assert(JSON.stringify(h.render()).includes('Close session?'));
+  h.api.exec=async(...args)=>{h.calls.push(args);return {code:0,stdout:''};};
+  const confirm=nodes(h.render()).find(n=>n.idValue==='browser-close-mine-live');
+  confirm.handlers.on_click({},h.cx);await h.flush();
+  assert(h.calls.some(c=>c[1]?.[0]==='browser'&&c[1]?.[1]==='close'&&c[1]?.[2]==='mine-live'),'runs vega browser close after the confirm');
+  assert(!h.mod.browserConfirm.has('mine-live'),'confirm resets after the action');
+});
+
+test('services refresh reads vega browser ls once and publishes the badge payload',async()=>{
+  const h=load('vega-services');
+  h.api.appHome=()=>'/temporary-home/herdr-app';
+  h.api.readTextFile=async()=> 'fake script';
+  h.api.hc=async()=>({code:0,stdout:JSON.stringify({machines:[]})});
+  h.api.spaces=()=>[];h.api.terminals=()=>[];h.api.focused=()=>null;
+  let browserReads=0;
+  h.api.exec=async(...args)=>{
+    h.calls.push(args);
+    if(args[1][0]==='browser') {
+      browserReads++;
+      return {code:0,stdout:JSON.stringify({schema:1,error:null,
+        sessions:[{session:'s1',state:'live',colour:'#d9465f',pane:'t7',project:'vega',headed:true,pid:11,age:5,idle:5},
+          {session:'s2',state:'closed',colour:'#0e8f6f',pane:null,project:null,headed:null,pid:null,age:5,idle:5}],
+        browsers:[{pid:11,kind:'chrome-for-testing',headed:true,age:5,port:0,user_data_dir:'/x/s1-profile',global:false},
+          {pid:12,kind:'chrome-for-testing',headed:true,age:5,port:0,user_data_dir:'/x/s1-profile',global:false},
+          {pid:20,kind:'chromium',headed:true,age:5,port:9223,user_data_dir:'/g',global:true},
+          {pid:30,kind:'chrome-for-testing',headed:false,age:5,port:0,user_data_dir:'/tmp/uuid',global:false}]})};
+    }
+    return {code:0,stdout:JSON.stringify({listeners:[],parents:{},cwds:{},home:'/temporary-home'})};
+  };
+  h.mod.init({},h.cx);await h.flush();
+  assert.equal(browserReads,1,'one browser read per refresh');
+  const shared=h.state.get('vega.browsers');
+  assert.equal(JSON.stringify(shared.sessions),JSON.stringify(
+    [{session:'s1',colour:'#d9465f',state:'live',pane:'t7',project:'vega',headed:true,age:5}]));
+  assert.equal(JSON.stringify(shared.loose),JSON.stringify([{pid:30,headed:false,n:1}]),'global and session-owned browsers are not loose');
+  // A failing read keeps the panel alive with an inline error.
+  h.api.exec=async(...args)=>{
+    if(args[1][0]==='browser') return {code:1,stderr:'vega browser ls failed'};
+    return {code:0,stdout:JSON.stringify({listeners:[],parents:{},cwds:{},home:'/h'})};
+  };
+  h.mod.refresh(h.cx);await h.flush();
+  assert.match(h.mod.browserError,/vega browser ls failed/);
+  assert(JSON.stringify(h.render()).includes('vega browser ls failed'));
+});
 
 test('keychain indicator includes agent count, fix hint and expires agent claims',async()=>{
   const h=load('vega'),now=Date.now()/1000;

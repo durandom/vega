@@ -1,7 +1,7 @@
 # vega-browser
 
-Status: implemented (phase 1, bead vega-nic.18), 2026-11-16. Phase 2 (panels, colours) is
-vega-nic.19. Replaces the global skill `browser`
+Status: implemented (phase 1, bead vega-nic.18; phase 2 panels/colours, vega-nic.19), 2026-11-17.
+Replaces the global skill `browser`
 (`~/.agents/skills/browser`, symlinked as `~/.claude/skills/browser`).
 
 ## Problem
@@ -65,19 +65,53 @@ vega browser close <session>                            # close one session on r
 marks rows `live`, `stale` (owner pane gone, or no call for more than a day) or `unowned`
 (no record: older sessions, Playwright).
 
-## Visibility and colour (phase 2, bead vega-nic.18 follow-up)
+## Visibility and colour (phase 2, vega-nic.19)
 
-- **Services panel (right):** a "Browsers" group from `vega browser ls --json`: session, colour
-  dot, owner agent and project, headed/headless, age, state. Unowned and stale rows show too;
-  closing a row needs a confirm and only offers what `gc`/`close` allow.
-- **Sidebar (left):** a small browser badge on the owning agent row, in the session's colour.
-- **Colour:** each session gets a colour, by default its owner project's colour from the theme
-  (fallback: a stable hash of the session name). A headed browser shows it in the window itself,
-  so the window on screen can be matched to the row. Candidates, to be verified before building:
-  an init script that sets a coloured frame and a `[session]` title prefix (works in any browser,
-  also on the global Chromium, where a per-session profile is not possible); for browsers vega
-  launches with their own `--user-data-dir`, the profile's theme colour as well. Headless
-  sessions have no window; they show the colour only in the panels.
+Built (2026-11-17), after verifying every mechanism against agent-browser 0.31.1
+with throwaway sessions on Chrome for Testing and the global Chromium (9223):
+
+- **What works:** `--init-script <file>` marks the navigations of the call that
+  carries it (the shim, `ab` and `launch` append it to every named call); a
+  generated per-session script draws a coloured frame, a session tag and prefixes
+  the tab title with `[session]`. It must defer all DOM work to DOMContentLoaded
+  (init scripts run before `document.documentElement` exists), guard itself
+  against duplicate registrations in one call, and re-prefix the title through a
+  `MutationObserver` when a page renames itself.
+- **What does not:** `addinitscript` (unknown command in 0.31.1 despite its own
+  help); `--init-script` on `tab new <url>` (the new tab's first navigation is not
+  marked); `eval` on a shared browser (it runs on the *active* tab, which can be
+  the user's — never used for marking); `vega browser ab`'s HTTP/1.0 CDP probe
+  (Chrome 146 closes 1.0 requests — fixed to HTTP/1.1).
+- **Not built:** the profile theme colour for vega-launched `--user-data-dir`
+  browsers. Chromium 146 accepts an unpacked theme via `--load-extension` and
+  records it in the profile's Preferences (verified structurally), but the frame
+  colour was not visually verifiable from an agent shell (no screen-recording
+  permission); revisit with one eyeball pass before wiring it into `launch`.
+
+The panels:
+
+- **Services panel (right):** a "Browsers" group from `vega browser ls --json`:
+  session, colour dot, owner pane and project, headed/headless, age, state;
+  unowned sessions and loose browser processes (Playwright leftovers, grouped by
+  profile) show too, with no close. Sessions whose owner resolves to a project
+  follow the panel's project scope; the rest always show. Closing is two-step
+  (Close → "Close session?") and runs `vega browser close <session>`, nothing
+  else. The read rides the panel's existing refresh (first show + manual
+  Refresh; no timer) and publishes `shared("vega.browsers")` for the sidebar.
+- **Sidebar (left):** up to three colour dots per owning agent row (more show
+  `+n`), read from that shared state — the sidebar never reads browsers itself;
+  the payload is part of the render model's input signature (vega-0h4c.103), so
+  it derives once per change. Headless sessions show the same colour in the
+  panels; their pages carry the mark harmlessly.
+- **Colour:** `vega browser ls --json` carries a `colour` per session: the owner
+  project's `[symbols.project_colors]` colour in `~/.config/vega/theme.toml`
+  (keyed by the worktree directory name, like host colours; validated
+  `#RRGGBB`), else a stable FNV-1a hash of the session name into a ten-colour
+  palette. The mark script uses the same colour, so window, panel row and badge
+  agree. `ls --json` also fills a session's `headed`/`pid` from the browser
+  whose `--user-data-dir` ends in `<session>-profile` (agent-browser's own
+  headed launches); helper processes share the browser's arguments, so the
+  group's lowest pid is the browser.
 
 ## Shim
 

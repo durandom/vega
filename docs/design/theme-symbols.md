@@ -22,6 +22,9 @@ example = "E"
 
 [symbols.host_colors] # optional, host name -> "#RRGGBB"
 example = "#2f7fd8"
+
+[symbols.project_colors] # optional, project name (worktree dir) -> "#RRGGBB";
+vega = "#d9465f"            # the colour of a browser session that project owns (vega-nic.19)
 ```
 
 - A missing file or section means `set = "nerd"` without overrides.
@@ -31,7 +34,8 @@ example = "#2f7fd8"
   key under `[symbols]`, an unknown topic or a non-string under `[symbols.icons]`, a topic outside
   the nine colourable ones (four badges, five agent kinds; below) or a value other than strict
   `#RRGGBB` under `[symbols.colors]`, a non-string
-  under `[symbols.hosts]`, a value other than strict `#RRGGBB` under `[symbols.host_colors]`, a
+  under `[symbols.hosts]`, a value other than strict `#RRGGBB` under `[symbols.host_colors]` or
+  `[symbols.project_colors]`, a
   file that is no TOML. vegad logs them once per change.
 - Readers re-read the file at most every 2 s; vegad on its next label refresh. No restart.
 

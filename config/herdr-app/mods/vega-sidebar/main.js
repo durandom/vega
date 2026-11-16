@@ -1726,6 +1726,7 @@ export default class Agents extends View {
           .tooltip(`Spawned by ${this.vegaTerminals.get(a.address).parent}`).child(`↑ ${this.vegaTerminals.get(a.address).parent.split("/").at(-1)}`)))
         .when(Boolean(name), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(a.status === "idle" ? t.muted : t.foreground).child(name)))
         .child(tokens(a.address, uac))
+        .when(Boolean(this.browserBadge(a.address, t)), el => el.child(this.browserBadge(a.address, t)))
         .child(div().flex_1())
         .when(!depth && subs.length > 0 && this.folded.has(a.address), el => el.child(div().text_size(11).text_color(t.dim).child(`+${subs.length}`)))
         .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
@@ -1932,6 +1933,19 @@ export default class Agents extends View {
     return { ...row, waiting_panes, waiting: waiting_panes.length };
   }
 
+  // Browser sessions (vega-nic.19): up to three colour dots on the owning
+  // agent row, in each session's colour.
+  browserBadge(address, t) {
+    const sessions = this.browsersByAddress?.get(address);
+    if (!sessions?.length) return null;
+    const shown = sessions.slice(0, 3);
+    return h_flex().id(`vega-${address}-browsers`).gap(3).flex_none()
+      .children(shown.map(s => div().id(`browser-${s.session}`).size(7).rounded(4).bg(s.colour)
+        .tooltip(`browser ${s.session} · ${s.state}${s.headed == null ? "" : s.headed ? " · headed" : " · headless"}`)))
+      .when(sessions.length > shown.length, el => el.child(div().text_size(10).text_color(t.dim)
+        .child(`+${sessions.length - shown.length}`)));
+  }
+
   // uac and kind are drawn before the name, as in the TUI row.
   // Per-agent signals only; project-wide notes and decisions sit in the project badge.
   // `waiting` comes from the model's per-address map; direct callers get a live scan.
@@ -1965,8 +1979,9 @@ export default class Agents extends View {
 
   // Signature of every input the sidebar derivation reads: terminals (labels,
   // turn, foreground), agents, panes, spaces, focus, badges and their 60-second
-  // freshness, waiting episodes, the resolved view and activity filter (including
-  // their localStorage fallbacks), project preferences and the manual order.
+  // freshness, waiting episodes, the browser session view (vega-nic.19), the
+  // resolved view and activity filter (including their localStorage
+  // fallbacks), project preferences and the manual order.
   inputSignature(badges) {
     const focus = focused();
     const terms = terminals(), ags = agents(), paneRows = panes(), spaceRows = spaces();
@@ -1986,6 +2001,7 @@ export default class Agents extends View {
       focus ? [focus.terminal ?? null, focus.agent ?? null, focus.space ?? null, focus.tab ?? null, focus.pane ?? null] : null,
       badges, badges.map(r => Date.now() / 1000 - r.at <= 60 ? 1 : 0),
       shared("vega.waiting-state") ?? null,
+      shared("vega.browsers") ?? null,
       view, hide,
       this.preferences ?? null, this.order ?? null,
     ]);
@@ -2091,6 +2107,16 @@ export default class Agents extends View {
         const open = model.waitingByAddress.get(pane);
         if (open) open.push(w); else model.waitingByAddress.set(pane, [w]);
       }
+    }
+    // Browser sessions by their owner terminal (vega-nic.19): one coloured
+    // dot per session on the owning agent row. Published by vega-services'
+    // refresh through shared state; the sidebar never reads browsers itself.
+    model.browsersByAddress = new Map();
+    for (const s of shared("vega.browsers")?.sessions ?? []) {
+      const pane = s.pane?.replace(/^hc:/, "");
+      if (!pane) continue;
+      const owned = model.browsersByAddress.get(pane);
+      if (owned) owned.push(s); else model.browsersByAddress.set(pane, [s]);
     }
     this.visibleSessions = model.visibleSessions = filtering ? new Set([...candidates.values()].filter(a =>
       this.isPinned(a.address) || a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
@@ -2246,6 +2272,7 @@ export default class Agents extends View {
     this.plainTerminals = m.plainTerminals;
     this.visibleSessions = m.visibleSessions;
     this.waitingByAddress = m.waitingByAddress;
+    this.browsersByAddress = m.browsersByAddress;
     this.rowLabel = m.rowLabel;
     this.activeView = m.activeView;
     const filtering = m.filtering;

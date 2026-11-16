@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use vega_browser::mark;
+
 const BIN: &str = env!("CARGO_BIN_EXE_vega-browser");
 
 struct Fix {
@@ -339,9 +341,19 @@ fn ab_attaches_passes_through_and_records_the_owner() {
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
     // The fake answers `get url` with a URL.
     assert_eq!(out(&o).trim(), "https://example.com/x");
+    // The window mark (phase 2) rides along, before the caller's args.
+    let mark = f.state.join("vega/browser/marks/me.js");
+    assert!(mark.is_file(), "mark script written");
+    assert!(fs::read_to_string(&mark)
+        .unwrap()
+        .contains("DOMContentLoaded"));
     assert_eq!(
         lines_of(&f, "ab-argv"),
-        [format!("--cdp {} --session me get url", f.port)]
+        [format!(
+            "--cdp {} --init-script {} --session me get url",
+            f.port,
+            mark.display()
+        )]
     );
     // Browser-picking env never reaches agent-browser.
     assert!(!fs::read_to_string(f.path("ab-env"))
@@ -452,7 +464,11 @@ fn launch_runs_a_throwaway_and_cleanup_closes_it() {
         argv.contains("--no-first-run https://example.com/deep/path"),
         "{argv}"
     );
-    assert!(lines_of(&f, "ab-argv").contains(&format!("--session fb connect {port}")));
+    let mark = f.state.join("vega/browser/marks/fb.js");
+    assert!(lines_of(&f, "ab-argv").contains(&format!(
+        "--session fb --init-script {} connect {port}",
+        mark.display()
+    )));
     assert!(records(&f)["fb"]["pane"] == "w1:p2");
 
     let o = run(
@@ -618,6 +634,54 @@ fn ls_merges_sessions_records_and_processes() {
     assert_eq!(leftover["global"], false);
     let global = browsers.iter().find(|b| b["pid"] == 4242).unwrap();
     assert_eq!(global["global"], true);
+}
+
+#[test]
+fn ls_json_attributes_session_browsers_and_colours() {
+    let f = fix();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    fs::write(f.path("sessions"), "s-own\ns-hid\ns-un\n").unwrap();
+    record(&f, "s-own", None, &hostname(), now - 60, now - 60);
+    record(&f, "s-hid", None, &hostname(), now - 60, now - 60);
+    // An owner project colour from the theme (the record helper writes
+    // project "vega-browser"), instead of the hashed fallback.
+    let config = f.home.join(".config/vega");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(
+        config.join("theme.toml"),
+        "[symbols.project_colors]\nvega-browser = \"#123456\"\n",
+    )
+    .unwrap();
+    // agent-browser's own headed launches profile under <session>-profile;
+    // helper processes share the main browser's arguments.
+    fs::write(
+        f.path("ps"),
+        format!(
+            "{}\n 5001 1:00 cft/chrome --remote-debugging-port=0 --user-data-dir=/ab/s-own-profile\n 5002 1:00 cft/chrome --remote-debugging-port=0 --user-data-dir=/ab/s-own-profile\n 5003 1:00 cft/chrome --headless --remote-debugging-port=0 --user-data-dir=/x/other-profile\n",
+            ours_line(&f)
+        ),
+    )
+    .unwrap();
+
+    let o = run(&f, &["ls", "--json"], &[]);
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    let v: Value = serde_json::from_str(&out(&o)).unwrap();
+    let sessions = v["sessions"].as_array().unwrap();
+    let own = sessions.iter().find(|s| s["session"] == "s-own").unwrap();
+    assert_eq!(own["pid"], 5001, "the group's lowest pid is the browser");
+    assert_eq!(own["headed"], true);
+    assert_eq!(own["colour"], "#123456");
+    let hid = sessions.iter().find(|s| s["session"] == "s-hid").unwrap();
+    assert!(hid["pid"].is_null() && hid["headed"].is_null());
+    // Both records name project vega-browser: the theme colour applies.
+    assert_eq!(hid["colour"], "#123456");
+    // An unowned session falls back to the stable hash of its name.
+    let un = sessions.iter().find(|s| s["session"] == "s-un").unwrap();
+    assert_eq!(un["colour"], mark::session_colour("s-un", None));
+    assert_ne!(un["colour"], "#123456");
 }
 
 #[test]

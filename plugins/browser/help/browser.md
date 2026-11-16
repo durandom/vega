@@ -28,14 +28,21 @@ Commands:
                               everything it closes.
   close <session>             Close one session on explicit request.
 
-`ls --json` (schema 1): {schema, sessions: [{session, state, pane, host,
-project, cwd, age, idle, headed, pid}], browsers: [{pid, kind, headed, age,
-port, user_data_dir, global}], error}. `pane` is null outside a pane;
-`headed`/`pid` are null when agent-browser keeps the mapping private.
+`ls --json` (schema 1): {schema, sessions: [{session, state, colour, pane,
+host, project, cwd, age, idle, headed, pid}], browsers: [{pid, kind, headed,
+age, port, user_data_dir, global}], error}. `pane` is null outside a pane;
+`headed`/`pid` come from the browser whose `--user-data-dir` ends in
+`<session>-profile` (agent-browser's own headed launches), else null. `colour`
+is the session's colour (below).
 
 Every named agent-browser call (shim, ab, launch) upserts the owner record
 `$XDG_STATE_HOME/vega/browser/sessions.json`:
-{session: {pane, host, project, cwd, first_seen, last_seen}}.
+{session: {pane, host, project, cwd, first_seen, last_seen}} and carries the
+session's window mark: `--init-script <marks dir>/<session>.js`, a coloured
+frame, a session tag and a `[session]` title prefix on the pages the call
+navigates (not the current page of an already-open tab, and never on another
+agent's tab). The colour is the owner project's `[symbols.project_colors]`
+colour in ~/.config/vega/theme.toml, else a stable hash of the session name.
 
 Environment: CDP_PORT (9223), CDP_PROFILE (~/.local/share/vega-chromium),
 CDP_CHROMIUM (/Applications/Chromium.app/Contents/MacOS/Chromium),

@@ -5,6 +5,24 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 226 · 2026-11-17
+
+- feature: Browser sessions are visible in the herdr-app panels and the windows themselves
+  (vega-nic.19). The Services panel gains a Browsers group from `vega browser ls --json` (colour dot,
+  owner, headed/headless, age, state; unowned sessions and loose browser processes included; close
+  is a two-step confirm that runs `vega browser close`), refreshed with the panel (first show and
+  manual Refresh — no new timer) and published as shared state for the sidebar, whose agent rows now
+  show up to three coloured browser dots for sessions their pane owns. Each session gets a colour:
+  its owner project's `[symbols.project_colors]` entry in `~/.config/vega/theme.toml` (new optional
+  section, validated `#RRGGBB` like host colours), else a stable hash of the session name; `ls
+  --json` carries it, and every named agent-browser call appends `--init-script` with a per-session
+  mark script (coloured frame + session tag + `[session]` title prefix, verified against
+  agent-browser 0.31.1 on Chrome for Testing and the global Chromium). Fixed: the CDP probe spoke
+  HTTP/1.0, which Chrome 146 silently drops, so `vega browser ab` failed with `port_held` against
+  the real global Chromium; it now speaks HTTP/1.1. Apply `herdr-app.vega-services` and
+  `herdr-app.vega-sidebar` to see the panels. See
+  [docs/design/browser.md](docs/design/browser.md).
+
 ## 225 · 2026-11-17
 
 - feature: Browser work moves into the `vega browser` plugin (guide: `vega skills browser`): the

@@ -13,7 +13,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use vega_browser::{cdp, cdp::Probe, owner, pane, procs, procs::Browser, real, session_name};
+use vega_browser::{cdp, cdp::Probe, mark, owner, pane, procs, procs::Browser, real, session_name};
 use vega_herdr::{capacity::duration, cell, print_failure, print_failure_json, Failure};
 
 const HELP: &str = include_str!("../help/browser.md");
@@ -138,9 +138,12 @@ fn ab(args: &[String]) -> Result<ExitCode, Failure> {
         )
     })?;
     let real = real::real_binary().ok_or_else(no_agent_browser)?;
-    owner::upsert(&session, owner::record_from_env(vega_shim::unix_now()));
+    let record = owner::record_from_env(vega_shim::unix_now());
+    owner::upsert(&session, record.clone());
     let mut cmd = Command::new(&real);
-    cmd.arg("--cdp").arg(g.port.to_string()).args(args);
+    cmd.arg("--cdp")
+        .arg(g.port.to_string())
+        .args(mark::with_mark(args, &session, record.project.as_deref()));
     for var in [
         "AGENT_BROWSER_AUTO_CONNECT",
         "AGENT_BROWSER_PROVIDER",
@@ -369,8 +372,16 @@ fn launch(args: &[String]) -> Result<ExitCode, Failure> {
         ));
     }
     let real = real::real_binary().ok_or_else(no_agent_browser)?;
+    let record = owner::record_from_env(vega_shim::unix_now());
+    let connect_args = mark::with_mark(
+        &["connect".to_owned(), port.to_string()],
+        &session,
+        record.project.as_deref(),
+    );
+    owner::upsert(&session, record);
     let attach = Command::new(&real)
-        .args(["--session", &session, "connect", &port.to_string()])
+        .args(["--session", &session])
+        .args(connect_args)
         .output()
         .map_err(|e| {
             Failure::new(
@@ -659,28 +670,51 @@ fn ls(json: bool) -> Result<(), Failure> {
     Ok(())
 }
 
-/// The stable JSON shape (design, phase 2): `headed` and `pid` are null when
-/// this host cannot know them (agent-browser keeps the mapping private).
+/// The stable JSON shape (design, phase 2): `headed` and `pid` are null
+/// when this host cannot know them. A browser whose
+/// `--user-data-dir` ends in `/<session>-profile` (agent-browser's own
+/// headed launches) attributes that session; helper processes share the
+/// main browser's arguments, so the group's lowest pid is the browser and
+/// `headed` is true when any of them shows a window.
 fn json_view(
     rows: &[(String, &str, Option<owner::Record>)],
     browsers: &[(Browser, bool)],
     error: &Option<String>,
     now: i64,
 ) -> serde_json::Value {
+    let owned = |session: &str| {
+        let suffix = format!("{session}-profile");
+        let group = browsers
+            .iter()
+            .filter(|(b, _)| {
+                b.user_data_dir
+                    .as_deref()
+                    .is_some_and(|dir| dir.rsplit_once('/').map_or(dir, |(_, last)| last) == suffix)
+            })
+            .collect::<Vec<_>>();
+        (!group.is_empty()).then(|| {
+            (
+                group.iter().map(|(b, _)| b.pid).min(),
+                group.iter().any(|(b, _)| b.headed),
+            )
+        })
+    };
     serde_json::json!({
         "schema": 1,
         "sessions": rows.iter().map(|(name, state, rec)| {
+            let browser = owned(name);
             serde_json::json!({
                 "session": name,
                 "state": state,
+                "colour": mark::session_colour(name, rec.as_ref().and_then(|r| r.project.as_deref())),
                 "pane": rec.as_ref().and_then(|r| r.pane.clone()),
                 "host": rec.as_ref().map(|r| r.host.clone()),
                 "project": rec.as_ref().and_then(|r| r.project.clone()),
                 "cwd": rec.as_ref().map(|r| r.cwd.clone()),
                 "age": rec.as_ref().map(|r| now - r.first_seen),
                 "idle": rec.as_ref().map(|r| now - r.last_seen),
-                "headed": serde_json::Value::Null,
-                "pid": serde_json::Value::Null,
+                "headed": browser.as_ref().map(|(_, headed)| *headed),
+                "pid": browser.and_then(|(pid, _)| pid),
             })
         }).collect::<Vec<_>>(),
         "browsers": browsers.iter().map(|(b, is_global)| {

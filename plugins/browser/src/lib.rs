@@ -5,6 +5,7 @@
 //! Design: docs/design/browser.md.
 
 pub mod cdp;
+pub mod mark;
 pub mod owner;
 pub mod pane;
 pub mod procs;

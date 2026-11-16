@@ -1,6 +1,8 @@
-//! CDP reachability of 127.0.0.1 ports without curl: a one-shot HTTP/1.0 GET
+//! CDP reachability of 127.0.0.1 ports without curl: a one-shot HTTP/1.1 GET
 //! of `/json/version` with a two-second deadline, the probe the old skill's
-//! scripts did with `curl -fsS -m 2` / `curl -s -m 2`.
+//! scripts did with `curl -fsS -m 2` / `curl -s -m 2`. HTTP/1.0 is not an
+//! option: Chrome 146 closes a 1.0 request without a response (vega-nic.19),
+//! which read as `Held` although CDP answers.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -32,7 +34,9 @@ pub fn probe(port: u16) -> Probe {
     };
     let _ = stream.set_read_timeout(Some(DEADLINE));
     let _ = stream.set_write_timeout(Some(DEADLINE));
-    let request = format!("GET /json/version HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    let request = format!(
+        "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
     if stream.write_all(request.as_bytes()).is_err() {
         return Probe::Held;
     }

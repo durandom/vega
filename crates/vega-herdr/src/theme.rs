@@ -279,6 +279,9 @@ pub struct Symbols {
     hosts: BTreeMap<String, String>,
     /// `[symbols.host_colors]`: host name (lowercase) -> colour.
     host_colors: BTreeMap<String, Rgb>,
+    /// `[symbols.project_colors]`: project name (lowercase) -> colour
+    /// (browser session colours, docs/design/browser.md phase 2).
+    project_colors: BTreeMap<String, Rgb>,
     /// What in the file was not applied, one line each.
     pub errors: Vec<String>,
 }
@@ -302,6 +305,7 @@ impl Symbols {
             uac_text: "UAC".into(),
             hosts: BTreeMap::new(),
             host_colors: BTreeMap::new(),
+            project_colors: BTreeMap::new(),
             errors: Vec::new(),
         }
     }
@@ -379,6 +383,13 @@ impl Symbols {
             .iter()
             .map(|(h, c)| (h.as_str(), self.host_label(h), *c))
             .collect()
+    }
+
+    /// The `[symbols.project_colors]` colour of `project`, if any. The key is
+    /// the owner project name of a browser session (the worktree directory
+    /// name, as the owner record keeps it), lowercased.
+    pub fn project_color(&self, project: &str) -> Option<Rgb> {
+        self.project_colors.get(&project.to_lowercase()).copied()
     }
 }
 
@@ -521,12 +532,31 @@ pub fn parse(text: &str) -> Symbols {
             )),
         }
     }
+    for (key, v) in host_table(section, "project_colors", &mut errors) {
+        match v.as_str().and_then(Rgb::parse) {
+            Some(c) => {
+                s.project_colors.insert(key.to_lowercase(), c);
+            }
+            None => errors.push(format!(
+                "theme.toml: symbols.project_colors.{key} {}: not \"#RRGGBB\"",
+                v.to_string().trim()
+            )),
+        }
+    }
     s.errors = errors;
     s
 }
 
 /// The keys `[symbols]` may hold.
-const KEYS: [&str; 6] = ["set", "uac_text", "icons", "colors", "hosts", "host_colors"];
+const KEYS: [&str; 7] = [
+    "set",
+    "uac_text",
+    "icons",
+    "colors",
+    "hosts",
+    "host_colors",
+    "project_colors",
+];
 
 /// The entries of the per-host table `[symbols.<name>]`; an error if it is
 /// no table.
@@ -679,6 +709,26 @@ mod tests {
             inline.errors,
             ["theme.toml: symbols.host_colors is not a table"]
         );
+    }
+
+    #[test]
+    fn project_colors_map_projects_to_session_colours() {
+        let s = parse("[symbols.project_colors]\nVega = \"#d9465f\"\nother = \"red\"\n");
+        assert!(s.errors.len() == 1, "{:?}", s.errors);
+        // Keys match lowercased, as the owner project names come in.
+        assert_eq!(s.project_color("vega"), Some(Rgb(0xd9, 0x46, 0x5f)));
+        assert_eq!(s.project_color("Vega"), Some(Rgb(0xd9, 0x46, 0x5f)));
+        assert_eq!(s.project_color("other"), None);
+        assert_eq!(s.project_color("unthemed"), None);
+        assert!(s
+            .errors
+            .iter()
+            .any(|e| e.contains("symbols.project_colors.other \"red\": not")));
+        assert_eq!(
+            parse("[symbols]\nproject_colors = 1\n").errors,
+            ["theme.toml: symbols.project_colors is not a table"]
+        );
+        assert_eq!(Symbols::default().project_color("vega"), None);
     }
 
     #[test]
