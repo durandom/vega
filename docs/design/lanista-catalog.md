@@ -18,6 +18,44 @@ Host reads work outside a project. `hosts [--host <host>] --json` returns rows w
 host, seat, lane, tier, model, source (`host` or `global`), until, and allowed models.
 Private hosts enumerate known registry hosts; inbox-only hosts list only self.
 
+### Host-local seats overlay (vega-weju)
+
+An inbox-only host that can reach pi only through a gateway (puck via EnMaaS) still needs
+`mux spawn --kind pi --tier X` to resolve a startable id, without repo edits. The host-local overlay
+`~/.config/vega/lanista/seats.local.json` (`$XDG_CONFIG_HOME/vega/lanista/seats.local.json`) provides it;
+`vega lanista install`/seats sync never touches this file (it syncs only `$XDG_CONFIG_HOME/lanista/seats.json`).
+
+```json
+{
+  "schema": 1,
+  "seats": {
+    "herdr-agents": [
+      {"provider": "pi", "pin": "enmaas/gome-3.1", "tier": "flagship", "canonical": "gome-3.1", "cost": "subscription"},
+      {"provider": "pi", "pin": "enmaas/gome-2.4", "tier": "balanced", "cost": "budget"}
+    ]
+  }
+}
+```
+
+Entries carry the lane (`provider`: a repo lane), the startable `pin` (gateway ids such as `enmaas/<id>`),
+a `tier`, optional `canonical` (the catalog's name for the model) and required `cost`
+(`subscription|budget|unknown`). Unknown fields, lanes, tiers, cost values, empty pins and unknown seats
+are reported on stderr and skipped — never silently used; a file that is not valid JSON disables the whole
+overlay with one diagnostic. `vega lanista doctor` prints the overlay state.
+
+The overlay merges once in `seats::effective()` — repo pins plus overlay pins, overlay first, so an overlay
+pin wins for its (provider, tier) — and feeds every resolution site (change validation, `resolve_cell`, the
+`hosts` rows, `lanista pin`, mux tier selection). Precedence stays project > host > registry default >
+overlay > repo global. For lane pi an overlay pin for the tier wins over the historical zai chain; project
+and host pi pins still outrank it. `hosts` rows show such cells with source `overlay` and the resolved
+lane `pi`; the lane allowlist includes the gateway id.
+
+Overlay pins are resolution-local: registry host/default writes validate on the receiver against its own
+seats, so a gateway id relays nowhere unless the control host also allows it. Capacity treats the `enmaas/`
+model prefix as its own provider with no quota window: `capacity: unknown (no enmaas account window in the
+sample)` — unknown, not zero. Follow-ups (availability probe, route pricing, rollback CLI) are filed as
+separate beads.
+
 ### Registry defaults
 
 `vega lanista pin <lane> --tier <tier> --default --set <model>` (or `--clear`)

@@ -5,6 +5,20 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 223 · 2026-11-16
+
+- feature: Hosts can extend their model tiers without repo edits through a host-local
+  seats overlay at `~/.config/vega/lanista/seats.local.json` (schema 1, entries
+  `{provider, pin, tier, canonical?, cost}` — e.g. puck pins its pi tiers to its
+  EnMaaS gateway with `enmaas/<id>`). `vega lanista install`/seats sync never touches
+  the overlay; invalid entries are reported on stderr and skipped. Resolution order is
+  project > host > registry default > overlay > repo seats; for lane pi an overlay pin
+  for a tier wins over the zai fallback, and `vega lanista hosts` shows such cells with
+  source `overlay`. `mux spawn --kind pi --tier X` on puck resolves `enmaas/<id>`, and
+  capacity reports the `enmaas/` prefix as its own provider with unknown (not zero)
+  headroom. See the overlay section in
+  [docs/design/lanista-catalog.md](docs/design/lanista-catalog.md).
+
 ## 222 · 2026-11-16
 
 - feature: The vega-sidebar keeps a diagnostics log for the intermittent "This

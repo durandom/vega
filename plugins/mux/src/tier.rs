@@ -105,6 +105,31 @@ mod tests {
         args.iter().map(|s| s.to_string()).collect()
     }
 
+    /// Re-run one test on a fake host (puck) with hermetic config/cache
+    /// homes (`home`), so no host-local seats overlay leaks into tier
+    /// resolution. Seed overlay and cache files under `home` first.
+    fn fake_host_rerun(marker: &str, test: &str, home: &std::path::Path) -> std::process::Output {
+        std::process::Command::new(env::current_exe().unwrap())
+            .args(["--exact", test, "--nocapture"])
+            .env(marker, "1")
+            .env("XDG_CONFIG_HOME", home)
+            .env("XDG_CACHE_HOME", home)
+            .env("VEGA_POST_HOST", "puck")
+            .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
+            .env("VEGA_NATS_NKEY", home.join("missing"))
+            .env_remove("VEGA_LANISTA_PIN_HOSTS")
+            .output()
+            .unwrap()
+    }
+    fn assert_ok(out: &std::process::Output) {
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     #[test]
     fn pi_host_override_reaches_spawn_model() {
         const MARKER: &str = "VEGA_PI_HOST_TIER_TEST";
@@ -113,26 +138,12 @@ mod tests {
             let cache = dir.path().join("vega/lanista");
             std::fs::create_dir_all(&cache).unwrap();
             std::fs::write(cache.join("puck.json"), r#"{"schema":1,"seats":{"herdr-agents":{"pi":{"budget":{"model":"google/gemini-3.8-flash","until":null}}}}}"#).unwrap();
-            let out = std::process::Command::new(env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "tier::tests::pi_host_override_reaches_spawn_model",
-                    "--nocapture",
-                ])
-                .env(MARKER, "1")
-                .env("XDG_CACHE_HOME", dir.path())
-                .env("VEGA_POST_HOST", "puck")
-                .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
-                .env("VEGA_NATS_NKEY", dir.path().join("missing"))
-                .env_remove("VEGA_LANISTA_PIN_HOSTS")
-                .output()
-                .unwrap();
-            assert!(
-                out.status.success(),
-                "{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+            let out = fake_host_rerun(
+                MARKER,
+                "tier::tests::pi_host_override_reaches_spawn_model",
+                dir.path(),
             );
+            assert_ok(&out);
             assert!(String::from_utf8_lossy(&out.stderr).contains("lane pi (host puck)"));
             return;
         }
@@ -146,6 +157,17 @@ mod tests {
 
     #[test]
     fn tiers_select_pins_and_provider_for_every_kind() {
+        const MARKER: &str = "VEGA_TIERS_SELECT_TEST";
+        if env::var_os(MARKER).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let out = fake_host_rerun(
+                MARKER,
+                "tier::tests::tiers_select_pins_and_provider_for_every_kind",
+                home.path(),
+            );
+            assert_ok(&out);
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_str();
         for kind in ["codex", "claude", "pi", "agy"] {
@@ -200,6 +222,17 @@ mod tests {
 
     #[test]
     fn missing_tier_is_usage_with_resolved_choices_and_exceptions() {
+        const MARKER: &str = "VEGA_MISSING_TIER_TEST";
+        if env::var_os(MARKER).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let out = fake_host_rerun(
+                MARKER,
+                "tier::tests::missing_tier_is_usage_with_resolved_choices_and_exceptions",
+                home.path(),
+            );
+            assert_ok(&out);
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let base = [
             "mux",
@@ -238,5 +271,58 @@ mod tests {
         assert!(
             Cli::try_parse_from(["mux", "spawn", "--resume", "w1:p1", "--tier", "budget"]).is_err()
         );
+    }
+
+    /// The puck story: an inbox-only host pins its pi tiers to its EnMaaS
+    /// gateway via ~/.config/vega/lanista/seats.local.json, and spawn tiers
+    /// resolve enmaas/<id> without any repo seats edit.
+    #[test]
+    fn overlay_pins_pi_tiers_to_the_enmaas_gateway() {
+        const MARKER: &str = "VEGA_PI_OVERLAY_TIER_TEST";
+        if env::var_os(MARKER).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let config = home.path().join("vega/lanista");
+            std::fs::create_dir_all(&config).unwrap();
+            std::fs::write(
+                config.join("seats.local.json"),
+                r#"{"schema":1,"seats":{"herdr-agents":[
+                    {"provider":"pi","pin":"enmaas/gome-3.1","tier":"flagship","canonical":"gome-3.1","cost":"subscription"},
+                    {"provider":"pi","pin":"enmaas/gome-2.4","tier":"balanced","cost":"budget"},
+                    {"provider":"pi","pin":"enmaas/gome-1.9","tier":"budget","cost":"unknown"}
+                ]}}"#,
+            )
+            .unwrap();
+            let out = fake_host_rerun(
+                MARKER,
+                "tier::tests::overlay_pins_pi_tiers_to_the_enmaas_gateway",
+                home.path(),
+            );
+            assert_ok(&out);
+            assert!(String::from_utf8_lossy(&out.stderr).contains("lane pi (overlay)"));
+            return;
+        }
+        for (tier, model) in [
+            ("flagship", "enmaas/gome-3.1"),
+            ("balanced", "enmaas/gome-2.4"),
+            ("budget", "enmaas/gome-1.9"),
+        ] {
+            let selected = select("pi", Some(tier), &[], None).unwrap();
+            assert_eq!(selected.model.as_deref(), Some(model));
+            assert_eq!(selected.args, strings(&["--model", model]));
+        }
+        // Non-pi kinds keep their repo pins.
+        assert_eq!(
+            select("codex", Some("budget"), &[], None).unwrap().model,
+            Some("gpt-6-luna".into())
+        );
+        // An explicit model flag still wins over the overlay.
+        let selected = select(
+            "pi",
+            Some("flagship"),
+            &strings(&["-m", "enmaas/other"]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(selected.model.as_deref(), Some("enmaas/other"));
     }
 }

@@ -77,7 +77,7 @@ Every provider the source reports shows and binds; the ledger accepts any of the
 in the ledger, so an entry stays editable when the source drops it; with the source unknown it checks none).
 
 What stays code in vega is vega's knowledge of its own kinds: the kind→provider map for spawns (`claude`,
-`codex`, `agy`→`antigravity`, `pi` by `--provider` or the `provider/` of `--model`: `xai`, `zai`).
+`codex`, `agy`→`antigravity`, `pi` by `--provider` or the `provider/` of `--model`: `xai`, `zai`, `enmaas`).
 
 ## vega capacity
 

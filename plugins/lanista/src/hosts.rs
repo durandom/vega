@@ -23,7 +23,7 @@ fn default_seat() -> String {
 
 impl Change {
     pub fn validate(&self, now: i64) -> Result<(), String> {
-        let pins = seats::pins(seats::SEATS, &self.seat)?;
+        let pins = seats::effective(&self.seat)?;
         if !seats::TIERS.contains(&self.tier.as_str())
             || !pins.iter().any(|p| p.provider == self.lane)
         {
@@ -375,6 +375,7 @@ pub fn resolve_cell(
     view: &vega_registry::View,
     config: &Config,
     defaults: &Config,
+    pins: &[seats::Pin],
     project: Option<&str>,
     seat: &str,
     lane: &str,
@@ -402,9 +403,20 @@ pub fn resolve_cell(
             writer: None,
         });
     }
-    // Pi is an override lane. Otherwise preserve the entire zai chain.
+    // Pi is an override lane: an overlay pi pin for the tier (e.g. an
+    // EnMaaS gateway) wins over the historical zai chain. Otherwise the
+    // entire zai chain is preserved.
     if lane == "pi" {
-        return resolve_cell(view, config, defaults, project, seat, "zai", tier);
+        if let Some(pin) = seats::pick(pins, "pi", tier) {
+            return Some(Resolution {
+                model: pin.model.clone(),
+                source: "overlay",
+                until: None,
+                lane: lane.into(),
+                writer: None,
+            });
+        }
+        return resolve_cell(view, config, defaults, pins, project, seat, "zai", tier);
     }
     if let Some(pin) = defaults.active(seat, lane, tier, vega_herdr::capacity::now()) {
         return Some(Resolution {
@@ -415,8 +427,7 @@ pub fn resolve_cell(
             writer: None,
         });
     }
-    let pins = seats::pins(seats::SEATS, seat).ok()?;
-    let pin = seats::global(&pins, lane, tier)?;
+    let pin = seats::global(pins, lane, tier)?;
     Some(Resolution {
         model: pin.model.clone(),
         source: "global",
@@ -426,22 +437,22 @@ pub fn resolve_cell(
     })
 }
 
-pub fn rows(host: &str, config: &Config) -> Vec<Value> {
+pub fn rows(host: &str, config: &Config, seats_pins: &[(String, Vec<seats::Pin>)]) -> Vec<Value> {
     let mut rows = Vec::new();
-    for seat in seats::seat_ids(seats::SEATS) {
-        let pins = seats::pins(seats::SEATS, &seat).unwrap();
-        for lane in seats::providers(&pins) {
+    for (seat, pins) in seats_pins {
+        let seat = seat.as_str();
+        for lane in seats::providers(pins) {
             let allowed: std::collections::BTreeSet<_> = pins
                 .iter()
                 .filter(|p| p.provider == lane)
                 .map(|p| p.model.clone())
                 .collect();
             for tier in seats::TIERS {
-                let selected = config.active(&seat, &lane, tier, vega_herdr::capacity::now());
+                let selected = config.active(seat, &lane, tier, vega_herdr::capacity::now());
                 let model = selected
                     .map(|p| p.model.as_str())
-                    .or_else(|| seats::global(&pins, &lane, tier).map(|p| p.model.as_str()));
-                rows.push(json!({"host":host,"seat":seat,"lane":lane,"tier":tier,"model":model,"source":if selected.is_some(){"host"}else{"global"},"resolved_lane":if lane == "pi" && selected.is_none(){"zai"}else{&lane},"until":selected.and_then(|p|p.until),"allowed":allowed}));
+                    .or_else(|| seats::global(pins, &lane, tier).map(|p| p.model.as_str()));
+                rows.push(json!({"host":host,"seat":seat,"lane":&lane,"tier":tier,"model":model,"source":if selected.is_some(){"host"}else{"global"},"resolved_lane":if lane == "pi" && selected.is_none(){"zai"}else{&lane},"until":selected.and_then(|p|p.until),"allowed":allowed}));
             }
         }
     }
@@ -455,8 +466,9 @@ pub fn layered_rows(
     defaults: &Config,
     view: &vega_registry::View,
     project: Option<&str>,
+    seats_pins: &[(String, Vec<seats::Pin>)],
 ) -> Vec<Value> {
-    let mut result = rows(host, config);
+    let mut result = rows(host, config, seats_pins);
     let empty = Config::default();
     let limited = vega_herdr::state::is_inbox_only(host);
     let defaults = if limited { &empty } else { defaults };
@@ -466,6 +478,11 @@ pub fn layered_rows(
             view,
             config,
             defaults,
+            seats_pins
+                .iter()
+                .find(|(s, _)| s == row["seat"].as_str().unwrap())
+                .map(|(_, p)| p.as_slice())
+                .unwrap_or_default(),
             project,
             row["seat"].as_str().unwrap(),
             row["lane"].as_str().unwrap(),
@@ -481,6 +498,7 @@ pub fn layered_rows(
 }
 
 pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
+    let seats_pins = seats::effective_seats();
     let local = vega_herdr::state::post_host();
     if let Some(h) = host {
         validate_host(h)?;
@@ -493,6 +511,7 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
             &Config::default(),
             &vega_registry::View::default(),
             None,
+            &seats_pins,
         ));
     }
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -537,7 +556,14 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
                 } else {
                     project.as_ref().map(|p| p.id.as_str())
                 };
-                result.extend(layered_rows(h, &config, &defaults, &view, project));
+                result.extend(layered_rows(
+                    h,
+                    &config,
+                    &defaults,
+                    &view,
+                    project,
+                    &seats_pins,
+                ));
             }
             Ok(result)
         })
@@ -549,6 +575,10 @@ pub fn list(host: Option<&str>) -> Result<Vec<Value>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Repo seats only: hermetic, no host-local overlay.
+    fn repo_seats() -> Vec<(String, Vec<seats::Pin>)> {
+        seats::effective_seats_at(std::path::Path::new("/nonexistent-overlay"))
+    }
     #[test]
     fn pi_override_then_entire_zai_chain_and_no_pi_default() {
         let seat = seats::DEFAULT_SEAT;
@@ -568,6 +598,11 @@ mod tests {
                 v,
                 h,
                 d,
+                &repo_seats()
+                    .into_iter()
+                    .find(|(s, _)| s == seat)
+                    .map(|(_, p)| p)
+                    .unwrap(),
                 Some("github.com/team/project"),
                 seat,
                 "pi",
@@ -619,10 +654,17 @@ mod tests {
         let mut defaults = Config::default();
         let mut view = vega_registry::View::default();
         let row = |host_name: &str, h: &Config, d: &Config, v: &vega_registry::View| {
-            layered_rows(host_name, h, d, v, Some("github.com/team/project"))
-                .into_iter()
-                .find(|r| r["lane"] == "codex" && r["tier"] == "budget")
-                .unwrap()
+            layered_rows(
+                host_name,
+                h,
+                d,
+                v,
+                Some("github.com/team/project"),
+                &repo_seats(),
+            )
+            .into_iter()
+            .find(|r| r["lane"] == "codex" && r["tier"] == "budget")
+            .unwrap()
         };
         assert_eq!(row("proteus", &host, &defaults, &view)["source"], "global");
         defaults.apply(&change("gpt-6.1-sol"));
@@ -644,11 +686,17 @@ mod tests {
         );
         view.entries.insert(key, json!({"schema":2,"project":"github.com/team/project","seat":seat,"lane":"codex","tier":"budget","model":"gpt-6-luna","at":1,"expires":null}));
         assert_eq!(row("proteus", &host, &defaults, &view)["source"], "project");
+        let seat_pins: Vec<seats::Pin> = repo_seats()
+            .into_iter()
+            .find(|(s, _)| s == seat)
+            .map(|(_, p)| p)
+            .unwrap();
         assert_eq!(
             crate::select_layers(
                 &view,
                 &host,
                 &defaults,
+                &seat_pins,
                 "github.com/team/project",
                 seat,
                 "codex",
@@ -659,12 +707,14 @@ mod tests {
         );
         view.entries.clear();
         assert_eq!(
-            crate::select_layers(&view, &host, &defaults, "p", seat, "codex", "budget").unwrap(),
+            crate::select_layers(&view, &host, &defaults, &seat_pins, "p", seat, "codex", "budget")
+                .unwrap(),
             "gpt-6-astra"
         );
         host.seats.clear();
         assert_eq!(
-            crate::select_layers(&view, &host, &defaults, "p", seat, "codex", "budget").unwrap(),
+            crate::select_layers(&view, &host, &defaults, &seat_pins, "p", seat, "codex", "budget")
+                .unwrap(),
             "gpt-6.1-sol"
         );
         defaults
@@ -740,7 +790,7 @@ mod tests {
                 .model,
             "gpt-6.1-sol"
         );
-        let row = rows("puck", &cached)
+        let row = rows("puck", &cached, &repo_seats())
             .into_iter()
             .find(|r| r["lane"] == "codex" && r["tier"] == "budget")
             .unwrap();
@@ -754,5 +804,195 @@ mod tests {
             .unwrap()
             .seats
             .is_empty());
+    }
+
+    #[test]
+    fn overlay_pi_wins_over_zai_chain_but_not_project_or_host() {
+        let seat = seats::DEFAULT_SEAT;
+        let mut pins = seats::pins(seats::SEATS, seat).unwrap();
+        pins.insert(
+            0,
+            seats::Pin {
+                provider: "pi".into(),
+                model: "enmaas/gome-3.1".into(),
+                engine: "pi".into(),
+                role: String::new(),
+                tier: "budget".into(),
+                canonical: Some("gome-3.1".into()),
+                cost: "subscription".into(),
+            },
+        );
+        let mut host = Config::default();
+        let mut defaults = Config::default();
+        let mut view = vega_registry::View::default();
+        let pick = |v: &vega_registry::View, h: &Config, d: &Config| {
+            resolve_cell(
+                v,
+                h,
+                d,
+                &pins,
+                Some("github.com/team/project"),
+                seat,
+                "pi",
+                "budget",
+            )
+            .unwrap()
+        };
+        // Overlay beats the entire zai chain, including a zai default.
+        defaults.apply(&Change {
+            seat: seat.into(),
+            lane: "zai".into(),
+            tier: "budget".into(),
+            model: Some("glm-5.2".into()),
+            clear: false,
+            until: None,
+        });
+        let resolved = pick(&view, &host, &defaults);
+        assert_eq!(
+            (
+                resolved.model.as_str(),
+                resolved.source,
+                resolved.lane.as_str()
+            ),
+            ("enmaas/gome-3.1", "overlay", "pi")
+        );
+        // Host and project pi pins still outrank the overlay.
+        host.apply(&Change {
+            seat: seat.into(),
+            lane: "pi".into(),
+            tier: "budget".into(),
+            model: Some("google/gemini-3.8-flash".into()),
+            clear: false,
+            until: None,
+        });
+        assert_eq!(
+            pick(&view, &host, &defaults).model,
+            "google/gemini-3.8-flash"
+        );
+        view.entries.insert(
+            vega_registry::pins::key("proteus", "github.com/team/project", seat, "pi", "budget"),
+            json!({"schema":2,"project":"github.com/team/project","seat":seat,"lane":"pi","tier":"budget","model":"google/gemini-4-argon","at":1,"expires":null}),
+        );
+        assert_eq!(pick(&view, &host, &defaults).model, "google/gemini-4-argon");
+        // Without the overlay pin the historical zai chain returns
+        // (default zai beats repo zai).
+        let repo = seats::pins(seats::SEATS, seat).unwrap();
+        assert_eq!(
+            resolve_cell(
+                &view,
+                &Config::default(),
+                &defaults,
+                &repo,
+                None,
+                seat,
+                "pi",
+                "budget"
+            )
+            .unwrap()
+            .model,
+            "glm-5.2"
+        );
+    }
+
+    #[test]
+    fn overlay_rows_list_gateway_pins_and_allowlist() {
+        let seat = seats::DEFAULT_SEAT;
+        let mut seats_pins = repo_seats();
+        let (_, pins) = seats_pins.iter_mut().find(|(s, _)| s == seat).unwrap();
+        pins.insert(
+            0,
+            seats::Pin {
+                provider: "pi".into(),
+                model: "enmaas/gome-3.1".into(),
+                engine: "pi".into(),
+                role: String::new(),
+                tier: "flagship".into(),
+                canonical: None,
+                cost: "subscription".into(),
+            },
+        );
+        let row = layered_rows(
+            "puck",
+            &Config::default(),
+            &Config::default(),
+            &vega_registry::View::default(),
+            None,
+            &seats_pins,
+        )
+        .into_iter()
+        .find(|r| r["lane"] == "pi" && r["tier"] == "flagship")
+        .unwrap();
+        assert_eq!(row["model"], "enmaas/gome-3.1");
+        assert_eq!(row["source"], "overlay");
+        assert_eq!(row["resolved_lane"], "pi");
+        assert!(row["allowed"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("enmaas/gome-3.1")));
+    }
+
+    /// The puck story end to end on a fake host: an overlay file pins pi
+    /// tiers to an EnMaaS gateway id and `hosts` resolves it without repo edits.
+    #[test]
+    fn fake_host_listing_resolves_overlay_pins() {
+        const MARKER: &str = "VEGA_HOSTS_OVERLAY_TEST";
+        if std::env::var_os(MARKER).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let config = dir.path().join("vega/lanista");
+            std::fs::create_dir_all(&config).unwrap();
+            std::fs::write(
+                config.join("seats.local.json"),
+                r#"{"schema":1,"seats":{"herdr-agents":[
+                    {"provider":"pi","pin":"enmaas/gome-3.1","tier":"flagship","cost":"subscription"},
+                    {"provider":"pi","pin":"enmaas/gome-2.4","tier":"balanced","cost":"budget"}
+                ]}}"#,
+            )
+            .unwrap();
+            let cache = dir.path().join("vega/lanista");
+            std::fs::create_dir_all(&cache).unwrap();
+            std::fs::write(cache.join("puck.json"), "{\"schema\":1,\"seats\":{}}").unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "hosts::tests::fake_host_listing_resolves_overlay_pins",
+                    "--nocapture",
+                ])
+                .env(MARKER, "1")
+                .env("XDG_CONFIG_HOME", dir.path())
+                .env("XDG_CACHE_HOME", dir.path())
+                .env("VEGA_POST_HOST", "puck")
+                .env("VEGA_NATS_URL", "nats://127.0.0.1:1")
+                .env("VEGA_NATS_NKEY", dir.path().join("missing"))
+                .env_remove("VEGA_LANISTA_PIN_HOSTS")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let rows = list(None).unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r["lane"] == "pi" && r["tier"] == "flagship")
+            .unwrap();
+        assert_eq!(row["model"], "enmaas/gome-3.1");
+        assert_eq!(row["source"], "overlay");
+        assert_eq!(row["resolved_lane"], "pi");
+        let row = rows
+            .iter()
+            .find(|r| r["lane"] == "pi" && r["tier"] == "balanced")
+            .unwrap();
+        assert_eq!(row["model"], "enmaas/gome-2.4");
+        // Untouched tiers keep the zai fallback.
+        let row = rows
+            .iter()
+            .find(|r| r["lane"] == "pi" && r["tier"] == "budget")
+            .unwrap();
+        assert_eq!(row["model"], "glm-4.7");
+        assert_eq!(row["resolved_lane"], "zai");
     }
 }

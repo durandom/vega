@@ -262,7 +262,13 @@ fn home() -> Result<ExitCode, Failure> {
         state.label(),
         tilde(&path.display().to_string())
     );
-    let pins = seats::pins(seats::SEATS, seats::DEFAULT_SEAT).unwrap_or_default();
+    let overlay = seats::overlay_path();
+    println!(
+        "seats_overlay: {} {}",
+        seats::overlay_summary(&overlay),
+        tilde(&overlay.display().to_string())
+    );
+    let pins = seats::effective(seats::DEFAULT_SEAT).unwrap_or_default();
     let lanes = seats::providers(&pins);
     println!(
         "global_pins[{}]{{seat,provider,flagship,balanced,budget}}:",
@@ -542,9 +548,10 @@ fn pin(
     target: Option<&str>,
     default: bool,
 ) -> Result<ExitCode, Failure> {
-    // vega's tiers: the repo copy, whatever a host's file says.
+    // vega's tiers: the repo copy, whatever a host's file says, plus this
+    // host's seats overlay.
     let blob = seats::SEATS;
-    let pins = seats::pins(blob, seat).map_err(|e| {
+    let pins = seats::effective(seat).map_err(|e| {
         Failure::new(
             "seat_unknown",
             e,
@@ -598,6 +605,7 @@ fn pin(
         &vega_registry::View::default(),
         &host_config,
         &defaults,
+        &pins,
         None,
         seat,
         provider,
@@ -677,6 +685,7 @@ fn pin(
                     &view,
                     &host_config,
                     &defaults,
+                    &pins,
                     Some(&project),
                     seat,
                     provider,
@@ -720,6 +729,12 @@ fn pin(
     println!("tier: {}", p.tier);
     println!("role: {}", p.role);
     println!("engine: {}", p.engine);
+    if let Some(canonical) = &p.canonical {
+        println!("canonical: {canonical}");
+    }
+    if p.cost != "unknown" {
+        println!("cost: {}", p.cost);
+    }
     println!("seat: {seat}");
     Ok(ExitCode::SUCCESS)
 }
@@ -729,6 +744,7 @@ fn resolution_source(pin: &vega_lanista::hosts::Resolution, local: &str) -> Stri
         "host" => format!("host ({local})"),
         "project" => format!("project ({})", pin.writer.as_deref().unwrap_or("unknown")),
         "global" => "global seats".into(),
+        "overlay" => "seats overlay".into(),
         other => other.into(),
     }
 }
@@ -831,10 +847,12 @@ fn host_pin(
     } else {
         vega_lanista::hosts::read_default(host).unwrap_or_default()
     };
+    let pins = seats::effective(seat).unwrap_or_default();
     let selected = vega_lanista::hosts::resolve_cell(
         &vega_registry::View::default(),
         if default { &empty } else { &config },
         &defaults,
+        &pins,
         None,
         seat,
         lane,

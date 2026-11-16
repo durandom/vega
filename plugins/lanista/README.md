@@ -13,6 +13,11 @@ use global seats; mutations require broker access. No repository pin file is wri
 
 Design: [lanista-catalog.md](../../docs/design/lanista-catalog.md).
 
+A host can extend its own tiers without repo edits in `~/.config/vega/lanista/seats.local.json`
+(entries: provider lane, gateway pin such as `enmaas/<id>`, tier, `cost`); seats sync never touches
+that file, invalid entries are reported and skipped, and an overlay pi pin for a tier wins over the
+zai fallback. Puck's EnMaaS gateway is configured this way; see the design doc's overlay section.
+
 Agent guide: `vega skills lanista`
 
 Project identity uses the flag-day v2 protocol; deployment and exact-grant

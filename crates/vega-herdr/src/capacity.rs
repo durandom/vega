@@ -141,8 +141,10 @@ pub fn providers(sample: &Sample) -> Vec<&str> {
 }
 
 /// The source's provider for a spawn: `claude`, `codex`, `agy`, and `pi`
-/// by its `--provider`, else by the prefix of a `--model provider/model`.
-/// A bare `--model` is not guessed. `None`: no provider vega maps the kind to.
+/// by its `--provider`, else by the prefix of a `--model provider/model`
+/// (e.g. an EnMaaS seats-overlay pin `enmaas/<id>`, which has no quota
+/// window and reports unknown). A bare `--model` is not guessed. `None`:
+/// no provider vega maps the kind to.
 pub fn provider_for(kind: &str, args: &[String]) -> Option<&'static str> {
     match kind {
         "claude" => Some("claude"),
@@ -166,6 +168,7 @@ pub fn provider_for(kind: &str, args: &[String]) -> Option<&'static str> {
             match p? {
                 "xai" => Some("xai"),
                 "zai" => Some("zai"),
+                "enmaas" => Some("enmaas"),
                 _ => None,
             }
         }
@@ -440,7 +443,7 @@ pub fn spawn_check(
 ) -> (String, Option<String>) {
     let Some(provider) = provider_for(kind, args) else {
         let why = if kind == "pi" {
-            "pi without --provider or --model of xai|zai".to_string()
+            "pi without --provider or --model of xai|zai|enmaas".to_string()
         } else {
             format!("vega maps kind {kind} to no provider")
         };
@@ -646,6 +649,10 @@ mod tests {
         );
         assert_eq!(provider_for("pi", &strs(&["--provider=zai"])), Some("zai"));
         assert_eq!(
+            provider_for("pi", &strs(&["--model", "enmaas/gome-3.1"])),
+            Some("enmaas")
+        );
+        assert_eq!(
             provider_for("pi", &strs(&["--provider", "openai-codex"])),
             None
         );
@@ -795,10 +802,19 @@ mod tests {
             ),
             ["capacity: unknown (no account window in the sample)"]
         );
-        let (f, w) = spawn_check("claude", &[], Ok(only_fable), &Ledger::default(), 0);
+        let (f, w) = spawn_check("claude", &[], Ok(only_fable.clone()), &Ledger::default(), 0);
         assert_eq!(
             f,
             "capacity: unknown (no claude account window in the sample)"
+        );
+        assert_eq!(w, None);
+        // An EnMaaS seats-overlay pin is its own provider with no window:
+        // capacity is unknown (not zero).
+        let args = strs(&["--model", "enmaas/gome-3.1"]);
+        let (f, w) = spawn_check("pi", &args, Ok(only_fable), &Ledger::default(), 0);
+        assert_eq!(
+            f,
+            "capacity: unknown (no enmaas account window in the sample)"
         );
         assert_eq!(w, None);
     }
@@ -988,7 +1004,7 @@ mod tests {
         );
         assert_eq!(
             f,
-            "capacity: unknown (pi without --provider or --model of xai|zai)"
+            "capacity: unknown (pi without --provider or --model of xai|zai|enmaas)"
         );
         assert_eq!(w, None);
         let (f, _) = spawn_check(
