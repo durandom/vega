@@ -1451,6 +1451,7 @@ export default class Agents extends View {
     // The owning vegad publishes the same per-project claims used by post --uac.
     // Only a live UAC can supply membership; an explicit own UAC wins.
     for (const x of live.filter(x => x.labels?.["vega.role"] === "uac")) {
+      if (!resolve(x.labels)) continue;
       let members;
       try { members = JSON.parse(x.labels["vega.group-members"] || "[]"); } catch (_) { continue; }
       if (!Array.isArray(members)) continue;
@@ -1459,6 +1460,10 @@ export default class Agents extends View {
         projects.set(id, x);
       }
     }
+    // Routing stays per project; layout/order belong to one coordination block.
+    const blockOf = p => resolve(uacs.get(p)?.labels ?? {}) || p;
+    const blocks = new Map([...projects].filter(([p]) => blockOf(p) === p));
+    const projectsInBlock = p => [...projects.keys()].filter(id => blockOf(id) === blockOf(p));
     const projectOfSpace = new Map();
     // UAC space wins over a sentinel's stale label in the same space.
     for (const x of [...uacs.values(), ...live]) {
@@ -1479,7 +1484,7 @@ export default class Agents extends View {
       const sp = this.spaceOfTerminal(x), p = projectOfAgent(x);
       if (sp && p && !projectOfSpace.has(sp)) projectOfSpace.set(sp, p);
     }
-    return { live, labelsOf, projects, uacs, projectOfSpace, projectOfAgent };
+    return { live, labelsOf, projects, blocks, blockOf, projectsInBlock, uacs, projectOfSpace, projectOfAgent };
   }
 
   viewFilter() {
@@ -1496,6 +1501,20 @@ export default class Agents extends View {
     // any: a chosen label OR a chosen machine; an empty dimension then adds nothing.
     if (view.match === "any") return byLabel || byMachine;
     return (!view.labels.length || byLabel) && (!view.machines.length || byMachine);
+  }
+
+  // A matching member admits the whole block, including members on other hosts.
+  matchesBlock(membership, project) {
+    const projects = membership.projectsInBlock(project);
+    return projects.some(p => {
+      const addresses = projects.length > 1 ? membership.live.filter(a => membership.projectOfAgent(a) === p) : [];
+      return [membership.projects.get(p), ...addresses].filter(Boolean)
+        .some(a => this.matchesView(p, machineOf(a.address)));
+    });
+  }
+
+  blockPinned(membership, project) {
+    return membership.projectsInBlock(project).some(p => this.preferences?.projects?.[p]?.pinned);
   }
 
   orderedProjects(projects) {
@@ -1517,18 +1536,17 @@ export default class Agents extends View {
   // when present, its sentinels as branches). Then the unlabelled spaces.
   // Symbols as in the herdr TUI sidebar (docs/design/theme-symbols.md).
   projectTree(t, all, list, shown, now) {
-    const { live, labelsOf, projects: groups, uacs, projectOfSpace, projectOfAgent } = this.projectGroups(all);
-    const projects = this.orderedProjects(groups).filter(p => {
-      const representative = groups.get(p);
-      // A project without a UAC whose agents all render under a parent elsewhere has no rows (vega-0h4c.80).
-      const empty = !uacs.has(p) && !this.preferences?.projects?.[p]?.pinned
-        && !list.some(a => projectOfAgent(a) === p)
-        && !(this.plainTerminals ?? []).some(x => projectOfAgent(x) === p);
-      return !empty && (this.matchesView(p, machineOf(representative.address))
-        || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a))
-        || (this.plainTerminals ?? []).some(x => projectOfAgent(x) === p))
-        && (!hideInactive() || this.preferences?.projects?.[p]?.pinned
-          || list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a)));
+    const membership = this.projectGroups(all);
+    const { live, labelsOf, projects: groups, blocks, blockOf, projectsInBlock, uacs, projectOfSpace, projectOfAgent } = membership;
+    const hasRows = p => list.some(a => projectOfAgent(a) === p && this.hasVisibleTree(all, a));
+    const projects = this.orderedProjects(blocks).filter(p => {
+      const ids = projectsInBlock(p);
+      const rows = ids.some(hasRows);
+      const pinned = this.blockPinned(membership, p);
+      const plain = (this.plainTerminals ?? []).some(x => ids.includes(projectOfAgent(x)));
+      return (uacs.has(p) || pinned || rows || plain)
+        && (this.matchesBlock(membership, p) || rows || plain)
+        && (!hideInactive() || pinned || rows);
     });
     const C = this.colors();
     const kindOf = (k) => {
@@ -1541,7 +1559,7 @@ export default class Agents extends View {
       return label ? div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[label] ?? t.dim).child(label) : div().w(22).flex_none();
     };
     const tokens = (address, uac) => this.vegaIcons(address, t, uac ? ["uac", "kind", "git"] : ["uac", "kind"]);
-    const agentRow = (a, subs, depth, lines = [], project = null) => {
+    const agentRow = (a, subs, depth, lines = []) => {
       const l = labelsOf(a.address);
       const uac = l["vega.role"] === "uac";
       const [glyph, color] = kindOf(a);
@@ -1552,13 +1570,13 @@ export default class Agents extends View {
         : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
       const on = a.address === shown;
       return h_flex()
-        .id(project ? `group-uac-${project}` : depth ? `sub-${a.address}` : `ag-${a.address}`)
+        .id(depth ? `sub-${a.address}` : `ag-${a.address}`)
         .pl(18).pr(6).h(24).flex_none().gap(6).items_center().rounded(6)
         .when(on, el => el.bg(t.selected))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
         .on_click(() => depth || !a.pane ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
-        .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx, project))
+        .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx))
         .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
           .when(x === "└" || x === "├", el => el.border_b(1.5).rounded_bl(6))))
@@ -1609,7 +1627,8 @@ export default class Agents extends View {
     const plainOf = (p) => (this.plainTerminals ?? []).filter(x => projectOfAgent(x) === p);
     const out = [];
     if (this.uberRow) out.push(this.uberRowView(t, C, host, shown, now));
-    for (const p of projects) {
+    const renderProject = (p, nested = false) => {
+      const rows = [];
       const gid = `uac-${p}`;
       const uac = uacs.get(p);
       const ul = uac?.labels ?? {};
@@ -1622,19 +1641,20 @@ export default class Agents extends View {
         .sort((a, b) => (labelsOf(b.address)["vega.role"] === "uac") - (labelsOf(a.address)["vega.role"] === "uac"));
       const open = !this.folded.has(gid);
       const git = !groupUac && ul["vega.git"];
-      out.push(h_flex().id(gid).on_mouse_down("right", (_e, cx) => this.openProject(project, cx)).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
+      rows.push(h_flex().id(gid).on_mouse_down("right", (_e, cx) => this.openProject(project, cx)).pl(2).pr(6).pt(8).h(30).flex_none().gap(6).items_center().rounded(6)
         .when(this.dragFrom === p && this.dragOver !== p, el => el.opacity(0.5))
         .when(Boolean(this.dragFrom) && this.dragOver === p && this.dragFrom !== p, el => el.border_t(2).border_color(t.accent))
-        .on_mouse_down("left", () => { this.dragFrom = p; this.dragOver = p; })
-        .on_mouse_move((_e, cx) => { if (this.dragFrom && this.dragOver !== p) { this.dragOver = p; cx.notify(); } })
+        .on_mouse_down("left", () => { if (!nested) { this.dragFrom = p; this.dragOver = p; } })
+        .on_mouse_move((_e, cx) => { if (!nested && this.dragFrom && this.dragOver !== p) { this.dragOver = p; cx.notify(); } })
         .on_mouse_up("left", (_e, cx) => {
+          if (nested) { open ? this.folded.add(gid) : this.folded.delete(gid); cx.notify(); return; }
           const from = this.dragFrom;
           this.dragFrom = null; this.dragOver = null;
           if (from && from !== p) this.move(projects, from, p);
           else if (from === p) open ? this.folded.add(gid) : this.folded.delete(gid);
           cx.notify();
         })
-        .child(div().flex_none().text_size(12).text_color(t.dim).child("⠿"))
+        .child(div().flex_none().text_size(12).text_color(t.dim).child(nested ? "└" : "⠿"))
         .child(div().min_w(0).flex_shrink_1().truncate().font_semibold().text_color(t.foreground).child(display))
         .when(!uac, el => el.child(div().flex_none().text_size(11).text_color(t.blocked).child("no UAC")))
         .when(Boolean(git), el => el.child(div().flex_none().text_size(11.5).text_color(git === "✓" ? C.git_clean : C.git_dirty).child(git)))
@@ -1658,26 +1678,34 @@ export default class Agents extends View {
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
             .cursor_pointer().on_click((_e, cx) => this.openAttention(project, address, cx)));
         })
-        .child(div().id(`pin-${gid}`).flex_none().text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim)
+        .when(!nested, el => el.child(div().id(`pin-${gid}`).flex_none().text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim)
           .cursor_pointer().tooltip(this.preferences?.projects?.[project]?.pinned ? "Unpin project" : "Pin project in Active view")
           .child(svg("mods/vega-sidebar/pin.svg").size(12).text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           // The click's cx dies after the handler: the awaiting toggle runs in cx.spawn.
-          .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => this.toggleProjectPin(project, cx)); }))
+          .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => this.toggleProjectPin(project, cx)); })))
         .child(div().id(`gear-${gid}`).flex_none().text_color(t.dim).cursor_pointer().tooltip("Project window")
           .child(svg("mods/workspace-chrome/settings.svg").size(12).text_color(t.dim))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => this.openProject(project, cx)))
         .when(!open, el => el.child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim))));
       if (open) {
-        if (groupUac) {
+        // The group UAC is context even if Active or an individual pin hid it.
+        if (!nested && uac && (!members.some(a => a.address === uac.address)
+          || !this.visibleSessions.has(uac.address))) {
           const row = agents().find(a => a.address === uac.address) ?? uac;
-          out.push(agentRow(row, [], 0, [], project));
+          rows.push(agentRow(row, [], 0));
         }
-        for (const a of members) out.push(...withTree(a));
-        out.push(...plainRows(plainOf(p), Boolean(this.preferences?.projects?.[project]?.pinned)));
+        for (const a of members) rows.push(...withTree(a));
+        rows.push(...plainRows(plainOf(p), this.blockPinned(membership, p)));
+        if (!nested) for (const member of this.orderedProjects(groups).filter(id => id !== p && blockOf(id) === p && hasRows(id))) {
+          rows.push(renderProject(member, true));
+        }
       }
-    }
+      return v_flex().id(`project-block-${p}`).flex_none()
+        .when(nested, el => el.ml(16).pl(6).border_l(1).border_color(t.input)).children(rows);
+    };
+    for (const p of projects) out.push(renderProject(p));
     const all_spaces = spaces();
     const rest = all_spaces.filter(s => !projectOfSpace.has(s.id) && (this.matchesView(null, s.machine || "local")
       || list.some(a => a.space === s.id && this.hasVisibleTree(all, a)))
@@ -1744,7 +1772,7 @@ export default class Agents extends View {
 
   // Drag one project above another; the order stays across restarts.
   move(projects, from, to) {
-    const all = this.orderedProjects(this.projectGroups(visibleTerminals()).projects);
+    const all = this.orderedProjects(this.projectGroups(visibleTerminals()).blocks);
     const visible = projects.filter(p => p !== from);
     visible.splice(visible.indexOf(to), 0, from);
     // Reorder only the visible slots, so hidden projects keep their positions.
@@ -1859,9 +1887,12 @@ export default class Agents extends View {
     });
     const membership = this.projectGroups(all);
     // A pinned child can cross the view boundary without admitting its siblings.
+    const blockViews = new Map([...membership.blocks.keys()].map(p => [p, this.matchesBlock(membership, p)]));
     const viewAllows = (a, grouped = true) => {
       const project = membership.projectOfAgent(a);
-      return this.matchesView(project, machineOf((grouped && membership.projects.get(project)?.address) || a.address))
+      const block = membership.blockOf(project);
+      const wholeBlock = grouped || membership.projectsInBlock(project).length > 1;
+      return (project && wholeBlock ? blockViews.get(block) : this.matchesView(project, machineOf(a.address)))
         || (this.viewFilter().respect_pins && this.isPinned(a.address));
     };
     const viewSessions = new Set(all.filter(a => viewAllows(a)).map(a => a.address));
@@ -1880,7 +1911,7 @@ export default class Agents extends View {
       this.isPinned(a.address) || a.address === shown || waitingAddresses.has(a.address) || ["working", "blocked", "done", "error"].includes(rowStatus(a))
     ).map(a => a.address)) : viewSessions;
     if (filtering) for (const uac of membership.uacs.values()) {
-      if (this.preferences?.projects?.[uac.labels?.["vega.project-id"]]?.pinned
+      if (this.blockPinned(membership, uac.labels?.["vega.project-id"])
         || this.tree(all, uac.address).some(s => this.visibleSessions.has(s.t.address))) this.visibleSessions.add(uac.address);
     }
     // Live terminals without an agent (token-burn tui, pdc, a dev server, a shell) list under their
@@ -1893,11 +1924,14 @@ export default class Agents extends View {
       .filter(x => viewAllows(x, false));
     const hiddenCount = filtering ? [...candidates.keys()].filter(a => !this.visibleSessions.has(a)).length : 0;
     list = list.filter(a => this.hasVisibleTree(all, a));
-    const projectOrder = this.orderedProjects(membership.projects);
+    const projectOrder = this.orderedProjects(membership.blocks);
+    const memberOrder = this.orderedProjects(membership.projects);
+    const memberIndex = p => membership.blockOf(p) === p ? -1 : memberOrder.indexOf(p);
     list.sort((a, b) => {
       const pa = membership.projectOfAgent(a), pb = membership.projectOfAgent(b);
-      const ia = projectOrder.indexOf(pa), ib = projectOrder.indexOf(pb);
+      const ia = projectOrder.indexOf(membership.blockOf(pa)), ib = projectOrder.indexOf(membership.blockOf(pb));
       return (ia < 0 ? Infinity : ia) - (ib < 0 ? Infinity : ib) ||
+        (ia >= 0 && ia === ib ? memberIndex(pa) - memberIndex(pb) : 0) ||
         (pa && pa === pb ? (membership.labelsOf(b.address)["vega.role"] === "uac") - (membership.labelsOf(a.address)["vega.role"] === "uac") : 0);
     });
     setAgentOrder(list.flatMap(a => [a.address, ...this.tree(all, a.address).map(s => s.t.address)])

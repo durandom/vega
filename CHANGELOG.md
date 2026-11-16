@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 219 · 2026-11-16
+
+- feature: Repo groups show as one sidebar block with a single UAC row. Only
+  members with live agents appear, nested with their own attention badges;
+  group views, pins and drag order apply to the whole block.
+- unit: apply `herdr-app.vega-sidebar` to use the grouped rendering.
+
 ## 218 · 2026-11-16
 
 - feature: `vega uac adopt hc:<host>/<pane>` confirms parent, mode and briefing

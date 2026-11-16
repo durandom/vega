@@ -675,13 +675,27 @@ unpinned agents within pinned projects. Fake-host tests exercise menu actions,
 markers, nested/remote agents, compact rows and combined view/Active filtering;
 CLI tests use temporary preference paths. Live deployment remains a UAC step.
 
-Repo-group member headers resolve their UAC from `vega.group-members`, a JSON
-array of canonical project IDs published by the owning vegad from its ordinary
-UAC claim records on each metadata refresh. This reuses the records behind
-registry publication and `post send --uac` without a UI registry query or timer;
-release clears the label. Only live UAC terminals participate, and an own UAC
-wins over group membership. Member groups show a context UAC row that focuses
-the shared terminal; its right-click menu opens the member project window.
-Headers and summary badges also keep the member project ID. Member attention
-is read from that project's badge on the UAC host, never from coordination totals;
-the coordination project's name and git status are not copied to member headers.
+Repo groups render as one sidebar block under the coordination project's single
+UAC row. Membership comes only from `vega.group-members`, a JSON array of
+canonical project IDs published by the owning vegad from its ordinary UAC claim
+records on each metadata refresh. This reuses routing records without a UI
+registry query or timer; release clears the label. Only live UAC terminals
+participate. A member with its own live UAC keeps its own top-level block.
+
+Within the group, members appear as indented subheaders only while they have
+visible live agents of their own, with those agents below. Empty members and
+members with only plain terminals have no subheader. Each member retains its
+name, labels, project-window action and attention badge; attention comes from
+that project's badge on the shared UAC host, never coordination totals. Member
+headers do not copy the coordination project's name or git status. The UAC row
+appears once, including when needed as context under Active or an individual
+agent pin; selecting it highlights only that row.
+
+Drag order and project pin controls belong to the top-level block. A view
+matching the coordination project or any member admits the block, including
+matches on remote member agent hosts. Existing member project pins also apply
+to the block. Respect pins still governs whether project or terminal pins cross
+a saved view boundary; an individual pinned terminal admits only itself and
+the group context, while a project pin admits the block's agents. Active still
+hides idle unpinned member agents. Folding the coordination header hides all
+members; a member subheader can fold its own rows without changing block order.

@@ -47,7 +47,7 @@ function load(name, {allowFocus=false}={}) {
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
 
-test('repo-group members resolve their remote UAC, member actions and badges',()=>{
+test('rally group nests io sentinels under one ganymede UAC with member actions and badges',()=>{
   const h=load('vega-sidebar'),coord='github.com/durandom/rally-ng-app',member='github.com/durandom/rally-ng-maps';
   const uac={address:'ganymede/t1j',state:'live',status:'idle',labels:{'vega.role':'uac','vega.project-id':coord,'vega.project':'rally-ng-app','vega.git':'dirty','vega.group-members':JSON.stringify([coord,member])}};
   const child={address:'io/t2',state:'live',status:'working',parent:uac.address,labels:{'vega.role':'sentinel','vega.project-id':member}};
@@ -62,7 +62,11 @@ test('repo-group members resolve their remote UAC, member actions and badges',()
   const nodes=elements(h.render()),header=nodes.find(n=>n.idValue===`uac-${member}`);
   assert(header);assert(texts(header).includes('rally-ng-maps'));
   assert(!texts(header).includes('no UAC'));assert(!texts(header).includes('dirty'));
-  const context=nodes.find(n=>n.idValue===`group-uac-${member}`);
+  const block=nodes.find(n=>n.idValue===`project-block-${coord}`);
+  assert(elements(block).includes(header),'member header is inside the coordination block');
+  assert.equal(nodes.filter(n=>n.idValue==='ag-ganymede/t1j').length,1);
+  assert(!nodes.some(n=>typeof n.idValue==='string'&&n.idValue.startsWith('group-uac-')));
+  const context=nodes.find(n=>n.idValue==='ag-ganymede/t1j');
   assert(context);assert(nodes.some(n=>n.idValue==='ag-io/t2'));
   const badge=nodes.find(n=>n.idValue===`total-uac-${member}`);
   assert(texts(badge).includes('2'));
@@ -78,16 +82,84 @@ test('repo-group members resolve their remote UAC, member actions and badges',()
   h.setProps({...overlay.props,overlay:'menu'});
   elements(h.render()).find(n=>n.idValue==='agent-project').handlers.on_click({},h.cx);
   overlay=h.calls.filter(c=>c[0]==='open').at(-1)[1];
-  assert.equal(overlay.props.projectConfig,member);assert.equal(overlay.props.uac,uac.address);
+  assert.equal(overlay.props.projectConfig,coord);assert.equal(overlay.props.uac,uac.address);
   h.setProps(overlay.props);
   assert(texts(h.mod.uacTab(h.mod.colors())).includes(uac.address));
   h.setProps({});h.state.set('vega.hide-inactive',true);
-  assert(elements(h.render()).some(n=>n.idValue===`group-uac-${member}`),'active member keeps its idle group UAC context');
+  assert(elements(h.render()).some(n=>n.idValue==='ag-ganymede/t1j'),'active member keeps its one idle group UAC context');
   h.mod.preferences={projects:{},views:{Remote:{machines:['ganymede'],labels:[]}}};
   h.state.set('vega.view','Remote');
-  assert(elements(h.render()).some(n=>n.idValue===`group-uac-${member}`),'machine view uses the group UAC host');
+  assert(elements(h.render()).some(n=>n.idValue==='ag-ganymede/t1j'),'machine view uses the group UAC host');
+  h.mod.preferences.views.Remote.machines=['io'];
+  assert(elements(h.render()).some(n=>n.idValue==='ag-ganymede/t1j'),'member host matches the entire group');
+  h.api.focused=()=>({terminal:uac.address});h.api.theme=()=>({selected:'#selected'});
+  assert.equal(elements(h.render()).filter(n=>n.bgValue==='#selected').length,1,'only one highlighted UAC row');
+  h.api.focused=()=>({terminal:child.address});
+  const selected=elements(h.render()).filter(n=>n.bgValue==='#selected');
+  assert.equal(selected.length,1);assert.equal(selected[0].idValue,'ag-io/t2');
+  h.api.agents=()=>[child];
+  assert.equal(elements(h.render()).filter(n=>n.idValue==='ag-ganymede/t1j').length,1,'missing UAC agent report still supplies one context row');
+  h.mod.folded.add(`uac-${member}`);
+  assert(!elements(h.render()).some(n=>n.idValue==='ag-io/t2'));
+  assert(elements(h.render()).some(n=>n.idValue==='ag-ganymede/t1j'));
+  h.mod.folded.clear();
   h.state.set('vega.view','all');uac.labels['vega.group-members']='';
   assert.equal(h.mod.projectGroups([uac,child]).uacs.has(member),false);
+});
+
+test('puck 27-member group hides empty members and keeps folds, order, views and pins at block scope',()=>{
+  const h=load('vega-sidebar'),coord='github.com/team/epic-creator';
+  const members=Array.from({length:27},(_,i)=>`github.com/team/member-${i}`);
+  const uac={address:'puck/t19',state:'live',status:'idle',labels:{'vega.role':'uac','vega.project-id':coord,'vega.harness':'pi','vega.group-members':JSON.stringify(members)}};
+  const agent=(address,project,status='working')=>({address,state:'live',status,labels:{'vega.project-id':project},program:{key:'codex'}});
+  const first=agent('io/t2',members[0]),second=agent('puck/t3',members[1],'idle');
+  const own={...agent('t4',members[2]),labels:{'vega.project-id':members[2],'vega.role':'uac'}};
+  const shell={...agent('puck/t5',members[3]),foreground:{name:'zsh'}};
+  const dead={...agent('puck/t6',members[4]),state:'exited'};
+  const all=[uac,first,second,own,shell,dead];
+  h.api.terminals=()=>all;h.api.agents=()=>[second,own,first,uac];h.mod.init({},h.cx);
+  h.api.theme=()=>({selected:'#selected'});h.api.focused=()=>({terminal:uac.address});
+  const nodes=()=>elements(h.render()),ids=()=>nodes().map(n=>n.idValue);
+  let tree=h.render(),block=elements(tree).find(n=>n.idValue===`project-block-${coord}`);
+  assert.equal(elements(block).filter(n=>typeof n.idValue==='string'&&n.idValue.startsWith('uac-')).length,3,'coord plus two members with agents');
+  assert(elements(block).some(n=>n.idValue==='ag-io/t2'));
+  assert(!elements(block).some(n=>n.idValue===`uac-${members[2]}`),'own UAC stays outside');
+  for(const member of members.slice(3))assert(!ids().includes(`uac-${member}`),'no agents: '+member);
+  assert.equal(nodes().filter(n=>n.bgValue==='#selected').length,1);
+  assert.equal(ids().filter(id=>id==='ag-puck/t19').length,1);
+  assert.deepEqual(Array.from(h.calls.filter(c=>c[0]==='order').at(-1)[1]),[uac.address,first.address,second.address,own.address],'navigation follows block/member render order');
+  h.mod.move([coord,members[2]],members[2],coord);
+  assert.deepEqual(JSON.parse(h.storage.get('project-order')),[members[2],coord],'drag persists block IDs only');
+  h.mod.folded.add(`uac-${coord}`);assert(!ids().includes('ag-io/t2'));assert(!ids().includes('ag-puck/t19'));
+  assert(ids().includes('ag-t4'));h.mod.folded.clear();
+  h.mod.preferences={projects:{[members[26]]:{labels:['work']}},views:{Work:{labels:['work'],machines:[]},Strict:{labels:['excluded'],machines:[],respect_pins:false}}};
+  h.state.set('vega.view','Work');assert(ids().includes('ag-io/t2'),'even an empty member label admits whole block');
+  assert(!ids().includes('ag-t4'),'own UAC no longer shares group views');
+  h.state.set('vega.view','Strict');first.labels['herdr.pinned']='true';
+  assert(!ids().includes(`uac-${coord}`),'strict view excludes pinned agent');
+  h.mod.preferences.views.Strict.respect_pins=true;
+  assert(ids().includes('ag-puck/t19'));assert(ids().includes('ag-io/t2'));
+  assert(!ids().includes('ag-puck/t3'),'individual pin does not admit siblings');
+  delete first.labels['herdr.pinned'];uac.labels['herdr.pinned']='true';
+  assert.equal(ids().filter(id=>id==='ag-puck/t19').length,1,'pinning UAC admits only one UAC row');
+  assert(!ids().includes('ag-io/t2'),'pinning UAC does not admit member agents');
+  delete uac.labels['herdr.pinned'];first.labels['herdr.pinned']='true';
+  h.mod.preferences.projects[coord]={pinned:true};
+  assert(ids().includes('ag-puck/t3'),'project pin admits whole group');
+  h.state.set('vega.hide-inactive',true);h.api.focused=()=>null;
+  assert(ids().includes('ag-puck/t19'));assert(ids().includes('ag-io/t2'));
+  assert(!ids().includes(`uac-${members[1]}`),'Active hides idle unpinned members');
+  h.api.layout=()=>({id:'sidebar',size:{px:76}});
+  assert.equal(ids().filter(id=>id==='ag-puck/t19').length,1,'compact rail has no UAC duplicates');
+  h.api.layout=()=>null;h.state.set('vega.hide-inactive',false);
+  delete h.mod.preferences.projects[coord].pinned;
+  h.mod.preferences.projects[members[26]].pinned=true;
+  assert(ids().includes('ag-puck/t3'),'legacy member project pin admits group');
+  h.state.set('vega.view','all');uac.labels['vega.group-members']='';
+  block=elements(h.render()).find(n=>n.idValue===`project-block-${coord}`);
+  assert(!elements(block).some(n=>n.idValue==='ag-io/t2'),'removed membership restores independent projects');
+  assert(ids().includes(`uac-${members[0]}`));
+  assert.equal(ids().filter(id=>id==='ag-puck/t19').length,1);
 });
 
 test('group membership ignores malformed, dead and foreign-role labels; own UAC wins',()=>{
@@ -98,6 +170,7 @@ test('group membership ignores malformed, dead and foreign-role labels; own UAC 
   const own={address:'t2',state:'live',labels:{'vega.role':'uac','vega.project-id':member}};
   assert.equal(resolve([group,own]),own.address);assert.equal(resolve([own,group]),own.address);
   assert.equal(resolve([{...group,state:'exited'}]),undefined);
+  assert.equal(resolve([{...group,labels:{...group.labels,'vega.project-id':''}}]),undefined,'a group needs a coordination project');
   for(const role of ['sentinel','uber'])assert.equal(resolve([{...group,labels:{...group.labels,'vega.role':role}}]),undefined);
   assert.equal(resolve([{...group,labels:{...group.labels,'vega.window':'status'}}]),undefined);
   for(const value of ['{broken','null','{}','"maps"','[null,42,{},""]']) {
