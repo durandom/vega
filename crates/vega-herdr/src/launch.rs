@@ -56,6 +56,17 @@ pub fn default_args(kind: &str) -> &'static [&'static str] {
     }
 }
 
+/// The argv words that hand an agent its first prompt. claude, codex and pi
+/// take it as a positional; agy rejects positionals ("Prompts are read only
+/// from -p/--print, -i/--prompt-interactive, or stdin") and needs `-i`, which
+/// runs the prompt and keeps the session interactive.
+pub fn prompt_args(kind: &str, prompt: &str) -> Vec<String> {
+    match kind {
+        "agy" => vec!["-i".into(), prompt.into()],
+        _ => vec![prompt.into()],
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Claude,
@@ -485,6 +496,15 @@ mod tests {
     use super::*;
 
     const CONFIG: &str = include_str!("../testdata/codex-config.toml");
+
+    #[test]
+    fn prompt_args_per_kind() {
+        let p = "Read /x/prompt.md and carry out the gate review.";
+        assert_eq!(prompt_args("agy", p), vec!["-i", p]);
+        for kind in ["claude", "codex", "pi", "unknown"] {
+            assert_eq!(prompt_args(kind, p), vec![p], "{kind}");
+        }
+    }
 
     fn repo(dir: &str, top: &str, root: &str, root_has_git: bool, main: Option<&str>) -> Repo {
         Repo {

@@ -211,11 +211,12 @@ pub fn spawn(
         .filter(|kv| !user.contains(kv))
         .collect();
     if let Some(p) = prompt {
-        args.push(if no_parent && own.is_none() {
+        let text = if no_parent && own.is_none() {
             p.into()
         } else {
             backend::body(p, handoff(no_parent, mode).0, machine().is_some())?
-        });
+        };
+        args.extend(vega_herdr::launch::prompt_args(kind, &text));
     }
     let v = vega_herdr::hc::rpc(
         "terminal.run",

@@ -131,6 +131,9 @@ fn home() -> Result<(), Failure> {
     if c.found.is_some() {
         segments_view(&c)?;
     }
+    for pane in start::reap_dead(&c.dir, &c.dir) {
+        println!("abandoned: reviewer {pane} exited without a verdict");
+    }
     let running = state::all();
     println!(
         "reviews_running[{}]{{tab,pane,reviewer,branch,since,state}}:",

@@ -737,7 +737,24 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
         r#"{"argv":[],"labels":{},"cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"t11","state":"finished"}"#,
     )
     .unwrap();
+    let sf = tmp.path().join("state/vega/gate/hc-743131.json");
+    let mut st: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&sf).unwrap()).unwrap();
+    st["started_at"] = (st["started_at"].as_i64().unwrap() - 100).into();
+    fs::write(&sf, st.to_string()).unwrap();
     let home = run(&work, tmp.path(), &env, &[]);
     assert!(home.status.success(), "{}", out(&home));
-    assert!(out(&home).contains(",gone"), "{}", out(&home));
+    // The reviewer exited without a verdict: `vega gate` ends the review
+    // once it is past the reap grace.
+    assert!(
+        out(&home).contains("abandoned: reviewer t11 exited without a verdict"),
+        "{}",
+        out(&home)
+    );
+    assert!(
+        log(tmp.path(), "bd").contains("abandoned: reviewer t11 exited"),
+        "{}",
+        log(tmp.path(), "bd")
+    );
+    assert!(!sf.exists());
 }
