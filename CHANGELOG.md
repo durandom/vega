@@ -15,9 +15,12 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   show up to three coloured browser dots for sessions their pane owns. Each session gets a colour:
   its owner project's `[symbols.project_colors]` entry in `~/.config/vega/theme.toml` (new optional
   section, validated `#RRGGBB` like host colours), else a stable hash of the session name; `ls
-  --json` carries it, and every named agent-browser call appends `--init-script` with a per-session
-  mark script (coloured frame + session tag + `[session]` title prefix, verified against
-  agent-browser 0.31.1 on Chrome for Testing and the global Chromium). Fixed: the CDP probe spoke
+  --json` carries it. Explicitly headed agent-browser calls (`--headed` flag or truthy
+  `AGENT_BROWSER_HEADED`) carry a per-session `--init-script` mark (coloured frame + session tag +
+  `[session]` title prefix, aria-hidden from `snapshot`; verified against agent-browser 0.31.1 on
+  Chrome for Testing and the global Chromium); headless and attaching calls stay unchanged,
+  `vega browser launch` never marks, and `VEGA_BROWSER_MARK=0` disables the mark everywhere.
+  Fixed: the CDP probe spoke
   HTTP/1.0, which Chrome 146 silently drops, so `vega browser ab` failed with `port_held` against
   the real global Chromium; it now speaks HTTP/1.1. Apply `herdr-app.vega-services` and
   `herdr-app.vega-sidebar` to see the panels. See

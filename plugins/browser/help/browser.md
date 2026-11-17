@@ -37,12 +37,15 @@ is the session's colour (below).
 
 Every named agent-browser call (shim, ab, launch) upserts the owner record
 `$XDG_STATE_HOME/vega/browser/sessions.json`:
-{session: {pane, host, project, cwd, first_seen, last_seen}} and carries the
+{session: {pane, host, project, cwd, first_seen, last_seen}}. Explicitly
+headed calls (--headed flag or truthy AGENT_BROWSER_HEADED) carry the
 session's window mark: `--init-script <marks dir>/<session>.js`, a coloured
 frame, a session tag and a `[session]` title prefix on the pages the call
-navigates (not the current page of an already-open tab, and never on another
-agent's tab). The colour is the owner project's `[symbols.project_colors]`
-colour in ~/.config/vega/theme.toml, else a stable hash of the session name.
+navigates (aria-hidden, so snapshot skips them; not the current page of an
+already-open tab, and never on another agent's tab). `launch` never marks
+and `VEGA_BROWSER_MARK=0` disables the mark everywhere. The colour is the
+owner project's `[symbols.project_colors]` colour in ~/.config/vega/theme.toml,
+else a stable hash of the session name.
 
 Environment: CDP_PORT (9223), CDP_PROFILE (~/.local/share/vega-chromium),
 CDP_CHROMIUM (/Applications/Chromium.app/Contents/MacOS/Chromium),

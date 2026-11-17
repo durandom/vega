@@ -373,15 +373,9 @@ fn launch(args: &[String]) -> Result<ExitCode, Failure> {
     }
     let real = real::real_binary().ok_or_else(no_agent_browser)?;
     let record = owner::record_from_env(vega_shim::unix_now());
-    let connect_args = mark::with_mark(
-        &["connect".to_owned(), port.to_string()],
-        &session,
-        record.project.as_deref(),
-    );
     owner::upsert(&session, record);
     let attach = Command::new(&real)
-        .args(["--session", &session])
-        .args(connect_args)
+        .args(["--session", &session, "connect", &port.to_string()])
         .output()
         .map_err(|e| {
             Failure::new(

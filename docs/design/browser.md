@@ -71,18 +71,26 @@ Built (2026-11-17), after verifying every mechanism against agent-browser 0.31.1
 with throwaway sessions on Chrome for Testing and the global Chromium (9223):
 
 - **What works:** `--init-script <file>` marks the navigations of the call that
-  carries it (the shim, `ab` and `launch` append it to every named call); a
-  generated per-session script draws a coloured frame, a session tag and prefixes
-  the tab title with `[session]`. It must defer all DOM work to DOMContentLoaded
-  (init scripts run before `document.documentElement` exists), guard itself
-  against duplicate registrations in one call, and re-prefix the title through a
-  `MutationObserver` when a page renames itself.
+  carries it; a generated per-session script draws a coloured frame, a session
+  tag and prefixes the tab title with `[session]`. It must defer all DOM work
+  to DOMContentLoaded (init scripts run before `document.documentElement`
+  exists), guard itself against duplicate registrations in one call, and
+  re-prefix the title through a `MutationObserver` when a page renames itself.
+  Frame and tag carry `aria-hidden="true"`, so `snapshot` does not list them
+  (screenshots still show the frame; title reads change).
+- **Review guard rails (Slayer, 2026-11-17):** the mark changes what callers
+  see — title asserts, `snapshot` text, screenshot pixels, injected DOM on
+  bot-wary sites — so it rides only explicitly headed calls: a `--headed`
+  flag on the call or a truthy `AGENT_BROWSER_HEADED` (the shim and `ab`
+  alike; `connect`/`--cdp`/plain attaching calls stay unmarked).
+  `VEGA_BROWSER_MARK=0` turns it off everywhere, and `launch` (the bot-blocker
+  fallback) never marks. Headless sessions show their colour in the panels
+  only, as the design says.
 - **What does not:** `addinitscript` (unknown command in 0.31.1 despite its own
   help); `--init-script` on `tab new <url>` (the new tab's first navigation is not
   marked); `eval` on a shared browser (it runs on the *active* tab, which can be
   the user's — never used for marking); `vega browser ab`'s HTTP/1.0 CDP probe
-  (Chrome 146 closes 1.0 requests — fixed to HTTP/1.1).
-- **Not built:** the profile theme colour for vega-launched `--user-data-dir`
+  (Chrome 146 closes 1.0 requests — fixed to HTTP/1.1).- **Not built:** the profile theme colour for vega-launched `--user-data-dir`
   browsers. Chromium 146 accepts an unpacked theme via `--load-extension` and
   records it in the profile's Preferences (verified structurally), but the frame
   colour was not visually verifiable from an agent shell (no screen-recording

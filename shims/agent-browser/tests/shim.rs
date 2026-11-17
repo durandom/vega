@@ -94,7 +94,7 @@ fn err(o: &Output) -> String {
 }
 
 #[test]
-fn a_named_call_passes_through_with_its_mark_and_records_the_owner() {
+fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() {
     let f = fix();
     let o = run(
         &f,
@@ -103,21 +103,64 @@ fn a_named_call_passes_through_with_its_mark_and_records_the_owner() {
     );
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
     assert_eq!(out(&o).trim(), "ok");
-    // The mark flag rides along before the caller's args; stdout stays the
-    // original's.
-    let mark = f.tmp.join("state/vega/browser/marks/vega-shim-test.js");
-    assert!(mark.is_file(), "the mark script is written");
-    assert_eq!(
-        argv(&f),
-        [format!(
-            "--init-script {} --session vega-shim-test get url",
-            mark.display()
-        )]
-    );
+    // A headless call (no --headed, no env) adds nothing to argv.
+    assert_eq!(argv(&f), ["--session vega-shim-test get url"]);
     let rec = &records(&f)["vega-shim-test"];
     assert_eq!(rec["pane"], "w1:p2");
     assert_eq!(rec["project"], "proj");
     assert!(rec["first_seen"].as_i64().unwrap() > 0);
+
+    // An explicit --headed flag marks: the mark flag rides along first.
+    let o = run(
+        &f,
+        &[
+            "--session",
+            "vega-shim-test",
+            "--headed",
+            "open",
+            "https://x",
+        ],
+        &[],
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    let mark = f.tmp.join("state/vega/browser/marks/vega-shim-test.js");
+    assert!(mark.is_file(), "the mark script is written");
+    assert_eq!(
+        argv(&f).last().unwrap(),
+        &format!(
+            "--init-script {} --session vega-shim-test --headed open https://x",
+            mark.display()
+        )
+    );
+
+    // AGENT_BROWSER_HEADED marks a flagless call too.
+    fs::remove_file(f.tmp.join("ab-argv")).ok();
+    let o = run(
+        &f,
+        &["--session", "vega-shim-test", "open", "https://y"],
+        &[("AGENT_BROWSER_HEADED", "1".into())],
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert!(argv(&f).last().unwrap().starts_with("--init-script "));
+
+    // VEGA_BROWSER_MARK=0 opts out even of a headed call.
+    fs::remove_file(f.tmp.join("ab-argv")).ok();
+    let o = run(
+        &f,
+        &[
+            "--session",
+            "vega-shim-test",
+            "--headed",
+            "open",
+            "https://z",
+        ],
+        &[("VEGA_BROWSER_MARK", "0".into())],
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(
+        argv(&f).last().unwrap(),
+        "--session vega-shim-test --headed open https://z"
+    );
 }
 
 #[test]
@@ -129,11 +172,7 @@ fn the_environment_names_a_session_too() {
         &[("AGENT_BROWSER_SESSION", "tile-clip-42".into())],
     );
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
-    let mark = f.tmp.join("state/vega/browser/marks/tile-clip-42.js");
-    assert_eq!(
-        argv(&f),
-        [format!("--init-script {} snapshot -i", mark.display())]
-    );
+    assert_eq!(argv(&f), ["snapshot -i"]);
     assert_eq!(records(&f)["tile-clip-42"]["pane"], Value::Null);
     // ... but an empty value does not (spellkave sets it per script).
     let f2 = fix();
@@ -221,10 +260,19 @@ fn named_calls_keep_every_flag_and_subcommand() {
         let refs: Vec<&str> = args.to_vec();
         let o = run(&f, &refs, &[]);
         assert!(o.status.success(), "{args:?}");
-        // Every flag and subcommand survives after the mark flag.
+        // Every flag and subcommand survives; only the --headed call carries
+        // the mark flag in front.
         let line = argv(&f).last().unwrap().clone();
         assert!(line.ends_with(&refs.join(" ")), "{line}");
-        assert!(line.starts_with("--init-script "), "{line}");
+        if refs.contains(&"--headed") {
+            assert!(line.starts_with("--init-script "), "{line}");
+        } else {
+            assert_eq!(
+                line,
+                refs.join(" "),
+                "headless and attach calls stay unchanged"
+            );
+        }
         fs::remove_file(f.tmp.join("ab-argv")).ok();
     }
     assert_eq!(records(&f).as_object().unwrap().len(), 2);

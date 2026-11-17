@@ -341,19 +341,10 @@ fn ab_attaches_passes_through_and_records_the_owner() {
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
     // The fake answers `get url` with a URL.
     assert_eq!(out(&o).trim(), "https://example.com/x");
-    // The window mark (phase 2) rides along, before the caller's args.
-    let mark = f.state.join("vega/browser/marks/me.js");
-    assert!(mark.is_file(), "mark script written");
-    assert!(fs::read_to_string(&mark)
-        .unwrap()
-        .contains("DOMContentLoaded"));
+    // A call without --headed (attaching to the global Chromium) is unchanged.
     assert_eq!(
         lines_of(&f, "ab-argv"),
-        [format!(
-            "--cdp {} --init-script {} --session me get url",
-            f.port,
-            mark.display()
-        )]
+        [format!("--cdp {} --session me get url", f.port)]
     );
     // Browser-picking env never reaches agent-browser.
     assert!(!fs::read_to_string(f.path("ab-env"))
@@ -365,6 +356,37 @@ fn ab_attaches_passes_through_and_records_the_owner() {
     assert_eq!(me["project"], "proj");
     assert!(me["first_seen"].as_i64().unwrap() > 0);
     assert_eq!(me["first_seen"], me["last_seen"]);
+
+    // An explicitly headed ab call carries the window mark; the opt-out wins.
+    let o = run(
+        &f,
+        &["ab", "--session", "me", "--headed", "open", "https://x"],
+        &[],
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    let mark = f.state.join("vega/browser/marks/me.js");
+    assert!(mark.is_file(), "the mark script is written");
+    assert!(fs::read_to_string(&mark)
+        .unwrap()
+        .contains("DOMContentLoaded"));
+    assert_eq!(
+        lines_of(&f, "ab-argv").last().unwrap(),
+        &format!(
+            "--cdp {} --init-script {} --session me --headed open https://x",
+            f.port,
+            mark.display()
+        )
+    );
+    let o = run(
+        &f,
+        &["ab", "--session", "me", "--headed", "open", "https://y"],
+        &[("VEGA_BROWSER_MARK", "0".into())],
+    );
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(
+        lines_of(&f, "ab-argv").last().unwrap(),
+        &format!("--cdp {} --session me --headed open https://y", f.port)
+    );
 }
 
 #[test]
@@ -464,11 +486,7 @@ fn launch_runs_a_throwaway_and_cleanup_closes_it() {
         argv.contains("--no-first-run https://example.com/deep/path"),
         "{argv}"
     );
-    let mark = f.state.join("vega/browser/marks/fb.js");
-    assert!(lines_of(&f, "ab-argv").contains(&format!(
-        "--session fb --init-script {} connect {port}",
-        mark.display()
-    )));
+    assert!(lines_of(&f, "ab-argv").contains(&format!("--session fb connect {port}")));
     assert!(records(&f)["fb"]["pane"] == "w1:p2");
 
     let o = run(

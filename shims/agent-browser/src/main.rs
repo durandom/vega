@@ -3,13 +3,15 @@
 //! One rule: a named call (`--session <name>` anywhere, or a non-empty
 //! `AGENT_BROWSER_SESSION`) passes through with every flag and subcommand
 //! allowed, upserts the owner record
-//! (`$XDG_STATE_HOME/vega/browser/sessions.json`) and carries the session's
-//! window mark (`--init-script`, phase 2: a coloured frame and a
-//! `[session]` title prefix on the pages the call navigates). An unnamed
-//! call is refused with a hint — a documented deviation from P2: default
-//! sessions are the unnamed leftovers nobody can attribute, and `close`
-//! without a name would close one of them. Exempt without a name: `--help`,
-//! `--version`, `skills …`, `session list`.
+//! (`$XDG_STATE_HOME/vega/browser/sessions.json`) and, when the call is
+//! explicitly headed (`--headed` or `AGENT_BROWSER_HEADED`; never with
+//! `VEGA_BROWSER_MARK=0`), carries the session's window mark
+//! (`--init-script`, phase 2: a coloured frame and a `[session]` title
+//! prefix on the pages the call navigates). An unnamed call is refused with
+//! a hint — a documented deviation from P2: default sessions are the
+//! unnamed leftovers nobody can attribute, and `close` without a name would
+//! close one of them. Exempt without a name: `--help`, `--version`,
+//! `skills …`, `session list`.
 //!
 //! The shim `exec`s the real binary by absolute path (`VEGA_AGENT_BROWSER_BIN`,
 //! then PATH skipping itself), so it never recurses; `vega browser` resolves

@@ -1,18 +1,24 @@
 //! Session colours and the window mark (design, phase 2): every named
 //! session gets a colour (its owner project's `[symbols.project_colors]`
-//! colour, else a stable hash of the session name), and calls carry an
+//! colour, else a stable hash of the session name), and headed calls carry an
 //! init script that colours the browser window's pages — a fixed frame, a
 //! session tag and a `[session]` title prefix, so the window on screen can
-//! be matched to its panel row. Headless sessions never show it; it is
-//! harmless there.
+//! be matched to its panel row. Headless sessions never show it; they show
+//! their colour in the panels only, and `launch` (bot blockers) never marks.
 //!
 //! What 0.31.1 really does (verified, vega-nic.19): `--init-script` applies
-//! only to the navigations of the call that carries it (so every named call
-//! gets the flag), init scripts run before `document.documentElement`
+//! only to the navigations of the call that carries it (so every headed named
+//! call gets the flag), init scripts run before `document.documentElement`
 //! exists (all DOM work defers to DOMContentLoaded), duplicate
 //! registrations in one call are possible (the script guards itself), and
 //! `eval` is never used on a shared browser (it runs on the active tab,
 //! which can be another agent's or the user's).
+//!
+//! Review (Slayer, 2026-11-17): the mark changes what callers see — title
+//! asserts, `snapshot` text, screenshot pixels, injected DOM on bot-wary
+//! sites — so it rides only explicitly headed calls (`--headed` flag or a
+//! truthy `AGENT_BROWSER_HEADED`), is invisible to the accessibility tree
+//! (`aria-hidden`), and `VEGA_BROWSER_MARK=0` turns it off everywhere.
 
 use std::env;
 use std::fs;
@@ -82,9 +88,11 @@ fn script(session: &str, colour: &str) -> String {
     root.dataset.vegaMark = name;
     const frame = document.createElement("div");
     frame.setAttribute("data-vega-session", name);
+    frame.setAttribute("aria-hidden", "true");
     frame.style.cssText = "position:fixed;inset:0;border:6px solid " + colour + ";box-sizing:border-box;pointer-events:none;z-index:2147483647;";
     const tag = document.createElement("div");
     tag.textContent = name;
+    tag.setAttribute("aria-hidden", "true");
     tag.style.cssText = "position:fixed;top:2px;left:50%;transform:translateX(-50%);background:" + colour + ";color:#fff;font:600 12px ui-sans-serif;padding:1px 8px;border-radius:0 0 8px 8px;z-index:2147483647;pointer-events:none;";
     (document.body || root).append(frame, tag);
     const prefix = () => {{
@@ -132,10 +140,34 @@ pub fn mark_for(session: &str, project: Option<&str>) -> Option<PathBuf> {
     ensure_mark(session, &colour)
 }
 
+/// Whether `name`'s call args ask for a headed browser: an explicit
+/// `--headed` flag, or agent-browser's `AGENT_BROWSER_HEADED` env set to
+/// anything but `0`/`false`/empty.
+fn headed(args: &[String]) -> bool {
+    if args.iter().any(|a| a == "--headed") {
+        return true;
+    }
+    matches!(std::env::var("AGENT_BROWSER_HEADED").ok().as_deref(), Some(v)
+        if !v.is_empty() && v != "0" && v != "false")
+}
+
+/// Whether the mark is on for this call: headed (above) and not opted out
+/// with `VEGA_BROWSER_MARK=0` (off everywhere: shim, ab).
+pub fn wanted(args: &[String]) -> bool {
+    if std::env::var("VEGA_BROWSER_MARK").ok().as_deref() == Some("0") {
+        return false;
+    }
+    headed(args)
+}
+
 /// `args` with the mark flag in front: agent-browser takes its options
 /// before the command, and a call without the flag does not mark its
-/// navigations. Sessions without a mark pass through unchanged.
+/// navigations. Calls that are not headed (or opted out) pass through
+/// unchanged; sessions without a mark file pass through unchanged too.
 pub fn with_mark(args: &[String], session: &str, project: Option<&str>) -> Vec<String> {
+    if !wanted(args) {
+        return args.to_vec();
+    }
     let Some(mark) = mark_for(session, project) else {
         return args.to_vec();
     };
@@ -186,6 +218,11 @@ mod tests {
         assert!(text.contains("DOMContentLoaded"));
         assert!(text.contains("vegaMark"));
         assert!(text.contains("MutationObserver"));
+        assert_eq!(
+            text.matches("aria-hidden").count(),
+            2,
+            "frame and tag hide from the a11y tree"
+        );
         // Unsafe names get no mark file.
         assert!(mark_for("../escape", None).is_none());
         assert!(mark_for("", None).is_none());
@@ -197,12 +234,38 @@ mod tests {
     fn with_mark_prepends_the_flag_or_passes_through() {
         let tmp = tempfile::tempdir().unwrap();
         env::set_var("XDG_STATE_HOME", tmp.path().join("state"));
+        env::remove_var("AGENT_BROWSER_HEADED");
+        env::remove_var("VEGA_BROWSER_MARK");
         let args = vec!["open".to_owned(), "https://example.com".to_owned()];
-        let marked = with_mark(&args, "vega-shim-test", None);
+        // Headless calls (no --headed, no env) stay unchanged.
+        assert_eq!(with_mark(&args, "vega-shim-test", None), args);
+        // An explicit --headed flag marks.
+        let headed = ["--headed".to_owned()]
+            .iter()
+            .chain(args.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let marked = with_mark(&headed, "vega-shim-test", None);
         assert_eq!(marked[0], "--init-script");
         assert!(marked[1].ends_with("vega-shim-test.js"));
+        assert_eq!(&marked[3..], &args[..]);
+        // So does a truthy AGENT_BROWSER_HEADED on a flagless call.
+        env::set_var("AGENT_BROWSER_HEADED", "1");
+        let marked = with_mark(&args, "vega-shim-test", None);
+        assert_eq!(marked[0], "--init-script");
         assert_eq!(&marked[2..], &args[..]);
-        assert_eq!(with_mark(&args, "../escape", None), args);
+        // Falsy env values do not.
+        for v in ["", "0", "false"] {
+            env::set_var("AGENT_BROWSER_HEADED", v);
+            assert_eq!(with_mark(&args, "vega-shim-test", None), args, "{v:?}");
+        }
+        env::remove_var("AGENT_BROWSER_HEADED");
+        // VEGA_BROWSER_MARK=0 opts out even of a headed call.
+        env::set_var("VEGA_BROWSER_MARK", "0");
+        assert_eq!(with_mark(&headed, "vega-shim-test", None), headed);
+        env::remove_var("VEGA_BROWSER_MARK");
+        // An unsafe session name never gets a mark, headed or not.
+        assert_eq!(with_mark(&headed, "../escape", None), headed);
         env::remove_var("XDG_STATE_HOME");
     }
 }

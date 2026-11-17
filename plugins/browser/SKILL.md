@@ -55,7 +55,9 @@ Named calls record their owner pane in
 `agent-browser session list` and the browser processes (states `live`,
 `stale`, `unowned`, `closed`; Playwright leftovers are `unowned` and listed,
 never killed). `gc` closes only recorded sessions whose owner pane is gone; a
-live owner's session is never touched, however old. Every named call also
-marks its session's windows: a coloured frame and a `[session]` title prefix
-in the session's colour (theme `[symbols.project_colors]`, else a name hash);
-the Services panel's Browsers group and the sidebar's dots show the same.
+live owner's session is never touched, however old. Every explicitly headed
+call (--headed or AGENT_BROWSER_HEADED) marks its session's windows: a
+coloured frame and a `[session]` title prefix in the session's colour
+(theme `[symbols.project_colors]`, else a name hash; `VEGA_BROWSER_MARK=0`
+disables it). The Services panel's Browsers group and the sidebar's dots
+show the same.
