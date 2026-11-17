@@ -4,6 +4,11 @@
 fn main() {}
 #[cfg(any(windows, feature = "client-only"))]
 fn main() {
+    #[cfg(windows)]
+    if std::env::args().nth(1).as_deref() == Some("--job-start") {
+        native::job_start();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("server") {
         assert_eq!(std::env::args().nth(2).as_deref(), Some("status"));
         println!("{{\"pid\":{}}}", std::env::var("FAKE_PID").unwrap());
@@ -25,6 +30,46 @@ mod native {
         time::{Duration, Instant},
     };
     struct Broker(Child);
+    #[cfg(windows)]
+    pub fn job_start() {
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::{JobObjects::*, Threading::GetCurrentProcess},
+        };
+        let args: Vec<_> = env::args().collect();
+        // The helper owns this job, like hc. Closing it after the starter
+        // returns must reap inherited workers, exposing false detachment.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            assert!(!job.is_null());
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if args[2] == "terminal" {
+                limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+            }
+            assert_ne!(
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    (&raw const limits).cast(),
+                    std::mem::size_of_val(&limits) as u32
+                ),
+                0
+            );
+            assert_ne!(AssignProcessToJobObject(job, GetCurrentProcess()), 0);
+            let result = Command::new(&args[3])
+                .args(["relay", "start"])
+                .output()
+                .unwrap();
+            print!("{}", String::from_utf8_lossy(&result.stdout));
+            eprint!("{}", String::from_utf8_lossy(&result.stderr));
+            assert!(result.status.success());
+            // Closing the last handle kills this helper too; flush the report first.
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
+            CloseHandle(job);
+        }
+    }
     impl Drop for Broker {
         fn drop(&mut self) {
             let _ = self.0.kill();
@@ -476,6 +521,47 @@ mod native {
         eprintln!("native relay: duplicate start confirmed");
         drop(_owned);
         eprintln!("native relay: owned worker cleanup finished");
+        #[cfg(windows)]
+        for mode in ["exec", "terminal"] {
+            eprintln!("native relay: survive {mode} job closure");
+            let source = win.cmd(&["relay", "start"], "t4");
+            let mut command = Command::new(env::current_exe().unwrap());
+            command
+                .args(["--job-start", mode])
+                .arg(source.get_program());
+            command.current_dir(source.get_current_dir().unwrap());
+            for (k, v) in source.get_envs() {
+                if let Some(v) = v {
+                    command.env(k, v);
+                } else {
+                    command.env_remove(k);
+                }
+            }
+            command.env("FAKE_STATE", &state).env("FAKE_SENDS", &sends);
+            // The helper itself is reaped with its job; its stdout is the evidence.
+            let report = command.output().unwrap();
+            let text = String::from_utf8_lossy(&report.stdout);
+            assert!(
+                text.contains("relay: started"),
+                "{text}: {}",
+                String::from_utf8_lossy(&report.stderr)
+            );
+            std::thread::sleep(Duration::from_millis(500));
+            let status: Value =
+                serde_json::from_str(&win.run(&["relay", "status", "--json"], "t4")).unwrap();
+            assert_eq!(status["running"], true, "worker died with {mode} job");
+            let _owned = OwnedWorker(status["pid"].to_string());
+            assert!(win
+                .run(&["relay", "start"], "t4")
+                .contains("already running"));
+            assert!(win.run(&["relay", "stop"], "t4").contains("relay: stopped"));
+            assert!(win
+                .run(&["relay", "status"], "t4")
+                .contains("relay: stopped"));
+            assert!(win
+                .run(&["relay", "stop"], "t4")
+                .contains("already stopped"));
+        }
     }
     pub fn suite() {
         let temp = tempfile::tempdir().unwrap();

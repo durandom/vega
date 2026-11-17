@@ -123,15 +123,17 @@ try {
     foreach ($package in $packages) { $buildArgs += @('-p', $package.package) }
     Invoke-Native $rustup $buildArgs
     $binaryCount = 0
+    $images = @()
     foreach ($package in $packages) {
         foreach ($binary in $package.binaries) {
             $source = Join-Path $env:CARGO_TARGET_DIR "x86_64-pc-windows-msvc\release\$binary.exe"
             if (-not (Test-Path -LiteralPath $source)) { throw "Missing built executable: $source" }
-            New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-            Copy-Item -LiteralPath $source -Destination (Join-Path $InstallDir "$binary.exe") -Force
+            $images += [pscustomobject]@{ Source=$source; Name="$binary.exe" }
             $binaryCount++
         }
     }
+    . (Join-Path $Checkout 'scripts\windows-replace.ps1')
+    Install-VegaImages -Images $images -InstallDir $InstallDir
     # Until executable ports land, success means a native library build only.
     if ($binaryCount -gt 0) {
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

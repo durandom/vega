@@ -107,10 +107,13 @@ jobs:
           foreach ($package in $manifest) { $packages += @('-p', $package.package) }
           cargo test @packages
       - name: Remote starter mod tests (hc launch error envelopes)
-        run: node --test --test-name-pattern="unprovisioned remote starters|missing sh starts" scripts/herdr-app-mods.test.mjs
+        run: node --test --test-name-pattern="unprovisioned remote starters|missing sh starts|native starter accepts|Git sh" scripts/herdr-app-mods.test.mjs
       - name: PowerShell 5.1 source installer
         shell: powershell
         run: .\scripts\windows-install.ps1 -Checkout $PWD.Path -SkipUpdate
+      - name: PowerShell 5.1 running worker update
+        shell: powershell
+        run: .\scripts\windows-replace.test.ps1
       - name: PowerShell 5.1 core autostart registration
         shell: powershell
         run: .\scripts\windows-core-autostart.test.ps1

@@ -1151,6 +1151,31 @@ test('Git sh without a Unix vega-post falls through to the native Windows worker
   assert.equal(h.mod.started.get('io-win').notProvisioned,false);
 });
 
+test('native starter accepts recorded hc exec envelopes and retries a worker error',async()=>{
+  // io-win hc 0.1.21: stdout/stderr are base64, signal is null; launch
+  // failures are a different envelope on hc stderr with process exit 1.
+  const h=load('vega'); let now=1e12,broken=false; const calls=[];
+  h.api.Date={now:()=>now};
+  const envelope=(code,stdout)=>({code,ms:242,signal:null,stderr:'',
+    stdout:Buffer.from(stdout).toString('base64'),timed_out:false,truncated:false});
+  h.api.exec=async(_bin,args)=>{
+    calls.push(Array.from(args));
+    const result=args.includes('sh')
+      ? envelope(77,'vega-not-provisioned\n')
+      : envelope(broken?1:0,broken?'error: relay_failed\n':'relay: started\r\npid: 1234\r\n');
+    return {code:0,stdout:JSON.stringify({code:0,stdout:JSON.stringify(result),stderr:''})};
+  };
+  h.mod.machines=[{name:'io-win',state:'connected'}];
+  await h.mod.startRemotes(h.cx);
+  assert.deepEqual(calls[1].slice(-3),['vega-post.exe','relay','start']);
+  assert.equal(h.mod.started.get('io-win').next,now+300000);
+  assert.equal(h.mod.startError,null);
+  broken=true;
+  for(let i=0;i<3;i++){now+=300001;await h.mod.startRemotes(h.cx);}
+  assert.equal(h.mod.startError,'hc io-win vegad start failed');
+  assert.equal(h.mod.started.get('io-win').notProvisioned,false);
+});
+
 test('missing sh starts the Windows worker with direct argv and retries real launch failures',async()=>{
   const h=load('vega',{crlf:true}); const calls=[]; let now=1e12, broken=false;
   h.api.Date={now:()=>now};

@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 244 · 2026-11-17
+
+- feature: Windows `relay start` survives hc exec and terminal shutdown using job
+  breakaway or a temporary per-user interactive task. `relay status [--json]` and
+  `relay stop` manage the native worker without killing unrelated processes.
+- feature: The Windows source installer replaces running images by renaming them
+  aside, then restarts a worker belonging to that install directory. Old foreground
+  workers need Ctrl-C once before upgrading (vega-nic.28.17).
+
 ## 243 · 2026-11-17
 
 - feature: Native Windows Claude spawns inherit repository trust using Claude's forward-slash

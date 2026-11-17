@@ -660,12 +660,34 @@ selects `vega-post.exe relay start`. An exact missing-executable launch error
 keeps the quiet not-provisioned state and five-minute recheck. Permission,
 connection and worker failures retain the ordinary failure/retry path.
 
-`relay start` creates a detached Windows process and waits for its lock/readiness
-handshake. `relay serve` runs in the foreground for diagnostics and Ctrl-C stop.
+`relay start` requests `CREATE_BREAKAWAY_FROM_JOB` and waits for its lock/readiness
+handshake. hc's terminal jobs allow breakaway, but its exec jobs do not
+(`repos/herdr-core/crates/herdr-core/src/platform/windows{,_exec}.rs`). On access
+denied, the starter registers and runs a temporary demand-only Task Scheduler
+task using the current user's interactive token and limited run level. No
+password, elevation, service, logon trigger or hc job change is involved. The
+temporary definition is deleted after readiness; its running instance survives.
+This fallback needs a logged-in desktop user and permission to register user tasks;
+failure is explicit. A short-lived profile-local launch file transfers the caller's
+environment (including XDG overrides and PATH), is consumed before readiness, and
+is also cleaned up on launch failure. Custom state directories require private ACLs.
+`relay serve` runs in the foreground for diagnostics and Ctrl-C stop.
 A user-state file lock (Windows native locking) lasts for the worker's lifetime;
 concurrent/repeated starts succeed without creating a second delivery loop.
 State and diagnostics live under `%LOCALAPPDATA%\vega\native-relay` (XDG overrides
-apply). Restart `relay start` after terminating a foreground/debug worker.
+apply). `relay status [--json]` reports the lock state and worker PID/executable.
+`relay stop` asks the lock holder to stop using its per-start token, so stale PID
+records never terminate unrelated processes. It works during broker/core outages;
+repeated stop is a successful no-op. Foreground workers predating this protocol
+need Ctrl-C once. Restart with `relay start` after a stop.
+
+The source installer stages every executable, renames existing images aside, then
+moves replacements into place. It stops/restarts a worker only when its recorded
+executable belongs to the selected install directory, using the replacement binary's
+protocol. Other install directories' workers are left running. Old foreground
+workers without metadata require Ctrl-C before installation. Failed updates retain
+renamed old images and print recovery paths; successful installs clean up old images
+that are no longer mapped. The opt-in core logon autostart remains independent.
 
 The worker polls only local live hc terminals, inspects per-pane unread counts
 and ack floors, and publishes its own host heartbeat and minimal hc agent keys.

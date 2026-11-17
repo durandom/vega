@@ -18,10 +18,20 @@ use vega_herdr::{platform, Failure};
 pub enum Action {
     /// Ensure one detached worker is running for this user
     Start,
+    /// Show whether the user-state worker lock is held
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask the lock-owning worker to exit (idempotent)
+    Stop,
     /// Run in the foreground (stop with Ctrl-C)
     Serve {
         #[arg(long, hide = true)]
         ready_file: Option<PathBuf>,
+        #[cfg(windows)]
+        #[arg(long, hide = true)]
+        launch_file: Option<PathBuf>,
     },
 }
 fn fail(e: impl std::fmt::Display) -> Failure {
@@ -52,15 +62,37 @@ fn lock() -> Result<Option<File>, Failure> {
 pub fn run(action: Action) -> Result<(), Failure> {
     match action {
         Action::Start => start(),
-        Action::Serve { ready_file } => {
+        Action::Status { json } => status(json),
+        Action::Stop => stop(),
+        Action::Serve {
+            ready_file,
+            #[cfg(windows)]
+            launch_file,
+        } => {
+            #[cfg(windows)]
+            if let Some(p) = launch_file {
+                scheduled::restore(&p)?;
+            }
             let held = lock()?;
+            let token = nuid::next().to_string();
+            if held.is_some() {
+                fs::write(
+                    root()?.join("worker.json"),
+                    json!({
+                        "pid": std::process::id(), "token": token,
+                        "exe": std::env::current_exe().map_err(fail)?
+                    })
+                    .to_string(),
+                )
+                .map_err(fail)?;
+            }
             if let Some(p) = ready_file {
                 fs::write(
                     p,
                     if held.is_some() {
-                        "started"
+                        format!("started\npid: {}", std::process::id())
                     } else {
-                        "already running"
+                        "already running".into()
                     },
                 )
                 .map_err(fail)?;
@@ -70,8 +102,68 @@ pub fn run(action: Action) -> Result<(), Failure> {
                 return Ok(());
             };
             vega_herdr::bound_daemon_calls();
-            crate::runtime()?.block_on(serve())
+            let stop_file = root()?.join("stop");
+            let result = crate::runtime()?.block_on(async {
+                tokio::select! {
+                    result = serve() => result,
+                    _ = async {
+                        loop {
+                            if fs::read_to_string(&stop_file).ok().as_deref() == Some(&token) { break; }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    } => Ok(())
+                }
+            });
+            let _ = fs::remove_file(root()?.join("worker.json"));
+            let _ = fs::remove_file(stop_file);
+            result
         }
+    }
+}
+fn worker() -> Result<Value, Failure> {
+    let p = root()?.join("worker.json");
+    match fs::read(p) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(fail),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
+        Err(e) => Err(fail(e)),
+    }
+}
+fn status(as_json: bool) -> Result<(), Failure> {
+    let running = lock()?.is_none();
+    let info = if running { worker()? } else { json!({}) };
+    if as_json {
+        println!(
+            "{}",
+            json!({"running": running, "pid": info["pid"], "exe": info["exe"]})
+        );
+    } else {
+        println!("relay: {}", if running { "running" } else { "stopped" });
+        if let Some(pid) = info["pid"].as_u64() {
+            println!("pid: {pid}");
+        }
+    }
+    Ok(())
+}
+fn stop() -> Result<(), Failure> {
+    if lock()?.is_some() {
+        println!("relay: already stopped");
+        return Ok(());
+    }
+    let info = worker()?;
+    let token = info["token"].as_str().ok_or_else(|| {
+        fail("running worker predates relay stop; stop its foreground terminal with Ctrl-C once")
+    })?;
+    fs::write(root()?.join("stop"), token).map_err(fail)?;
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if lock()?.is_some() || worker()?["token"].as_str() != Some(token) {
+            println!("relay: stopped");
+            return Ok(());
+        }
+        if std::time::Instant::now() >= until {
+            return Err(fail("worker did not stop within 10 seconds"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 fn start() -> Result<(), Failure> {
@@ -98,22 +190,25 @@ fn start() -> Result<(), Failure> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no console/session reexec.
-        c.creation_flags(0x00000008 | 0x00000200);
+        // hc terminal jobs allow breakaway; hc exec jobs do not.
+        // Never retry without breakaway: that reports success for a doomed worker.
+        c.creation_flags(0x00000008 | 0x00000200 | 0x01000000);
     }
     let mut child = {
         #[cfg(windows)]
         let _handles = DetachedHandles::new().map_err(fail)?;
-        c.spawn().map_err(fail)?
+        match c.spawn() {
+            Ok(child) => child,
+            #[cfg(windows)]
+            Err(e) if e.raw_os_error() == Some(5) => return scheduled::start(&ready),
+            Err(e) => return Err(fail(e)),
+        }
     };
     let until = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(status) = fs::read_to_string(&ready) {
             let _ = fs::remove_file(&ready);
             println!("relay: {status}");
-            if status == "started" {
-                println!("pid: {}", child.id());
-            }
             return Ok(());
         }
         if child.try_wait().map_err(fail)?.is_some() || std::time::Instant::now() >= until {
@@ -301,3 +396,7 @@ impl Drop for DetachedHandles {
         }
     }
 }
+
+#[cfg(windows)]
+#[path = "native_relay_scheduled.rs"]
+mod scheduled;

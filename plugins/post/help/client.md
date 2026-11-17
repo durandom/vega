@@ -13,5 +13,5 @@ Examples:
 Replies use send --re: copy the timestamped reply command from inbox.
 Fresh-host setup: keygen, operator provisioning, then identity enroll --checkout <path>.
 Only the public key leaves this host. Never reuse another host's seed or an admin seed.
-`vega post relay start` starts the single-instance local hc pointer worker; `relay serve` runs it in the foreground. Legacy cutover and admin commands stay Unix-only.
+`vega post relay start` starts the single-instance local hc pointer worker, surviving hc exec/terminal exit; `relay status [--json]` reports it and `relay stop` stops it. `relay serve` runs it in the foreground. Windows uses job breakaway or a temporary limited interactive-user task (requires a logged-in user). Legacy cutover and admin commands stay Unix-only.
 Runbook: docs/design/windows.md.
