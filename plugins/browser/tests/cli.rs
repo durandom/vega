@@ -210,6 +210,7 @@ fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
         .env("PATH", format!("{}:/usr/bin:/bin", f.bin.display()))
         .env("XDG_STATE_HOME", &f.state)
         .env("HOME", &f.home)
+        .env_remove("XDG_CONFIG_HOME")
         .env("TMPDIR", f.tmp.join("tmp"))
         .env("VEGA_FIX", &f.tmp)
         .env("CDP_PORT", f.port.to_string())

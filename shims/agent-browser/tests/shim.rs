@@ -59,6 +59,7 @@ fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
         .env("VEGA_FIX", &f.tmp)
         .env("XDG_STATE_HOME", f.tmp.join("state"))
         .env("HOME", f.tmp.join("home"))
+        .env_remove("XDG_CONFIG_HOME")
         .env_remove("VEGA_AGENT_BROWSER_BIN")
         .env_remove("AGENT_BROWSER_SESSION")
         .env_remove("HERDR_PANE_ID")
