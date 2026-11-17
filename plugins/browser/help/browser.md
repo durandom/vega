@@ -3,6 +3,10 @@ vega browser: named agent-browser sessions — the global Chromium, throwaway fa
 Usage: vega browser <command>
 
 Commands:
+  install                     Converge agent-browser to the repository pin (0.43.0)
+                              using npm global; install Chrome for Testing if missing.
+  status [--json]             Read-only current/differs/missing and Chrome cache status.
+  doctor [--json]             Same dependency status as status.
   ab --session <name> <args>  agent-browser on the global Chromium (127.0.0.1:9223).
                               Refuses connect/--cdp/--auto-connect/--provider/
                               --executable-path; requires a session name.
@@ -40,10 +44,10 @@ Every named agent-browser call (shim, ab, launch) upserts the owner record
 {session: {pane, host, project, cwd, first_seen, last_seen}}. Explicitly
 headed calls (--headed flag or truthy AGENT_BROWSER_HEADED) carry the
 session's window mark: `--init-script <marks dir>/<session>.js`, a coloured
-frame, a session tag and a `[session]` title prefix on the pages the call
-navigates (aria-hidden, so snapshot skips them; not the current page of an
-already-open tab, and never on another agent's tab). `launch` never marks
-and `VEGA_BROWSER_MARK=0` disables the mark everywhere. The colour is the
+frame, a session tag and a `[session]` title prefix (aria-hidden). In 0.43,
+registrations persist across later calls and cover `tab new` immediately.
+`launch` never registers a mark. `VEGA_BROWSER_MARK=0` prevents registration;
+set it before first use, or use a fresh session for unmarked work. The colour is the
 owner project's `[symbols.project_colors]` colour in ~/.config/vega/theme.toml,
 else a stable hash of the session name.
 
@@ -53,3 +57,16 @@ VEGA_AGENT_BROWSER_BIN (the real agent-browser binary).
 
 Design: docs/design/browser.md
 Agent guide: vega skills browser
+
+Install uses npm from PATH (run in your normal login shell; fnm/mise supported).
+An older binary must resolve to that npm prefix's agent-browser package; a
+foreign binary or mismatched VEGA_AGENT_BROWSER_BIN is refused, never shadowed.
+Chrome for Testing is checked under ~/.agent-browser/browsers; no session is
+started. Existing sessions continue using their already running daemon.
+`vega config apply browser.agent-browser` runs the same installer; deploy's
+config apply includes it. Examples: `vega browser status`, `vega browser install`.
+
+0.43 session names allow letters/numbers, hyphens and underscores (no dots).
+Tabs have stable ids (`t1`, `t2`, ...); use `tab` to list them. `--pin-tab` is
+sticky and retains the bound tab when another tab becomes active; `--no-pin-tab`
+clears it. Vega does not add either flag. `addinitscript` remains unsupported.

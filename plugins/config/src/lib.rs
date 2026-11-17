@@ -7,6 +7,7 @@
 //! override, else repo default) and the live files; [`apply`] writes it,
 //! refusing a unit while chezmoi manages one of its targets.
 
+mod browser;
 mod claude_plugin;
 pub mod evidence;
 pub mod fleet;
@@ -73,6 +74,7 @@ fn installed(home: &Path, name: &str) -> PathBuf {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
+    Browser,
     DcgConfig,
     DcgPacks,
     ClaudeMd,
@@ -102,7 +104,7 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub const ALL: [Unit; 26] = [
+    pub const ALL: [Unit; 27] = [
         Unit::DcgConfig,
         Unit::DcgPacks,
         Unit::ClaudeMd,
@@ -132,10 +134,12 @@ impl Unit {
         Unit::HerdrAppLayouts,
         Unit::HerdrAppProfiles,
         Unit::HerdrAppSettings,
+        Unit::Browser,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
+            Unit::Browser => "browser.agent-browser",
             Unit::DcgConfig => "dcg.config",
             Unit::DcgPacks => "dcg.packs",
             Unit::ClaudeMd => "claude.md",
@@ -168,6 +172,7 @@ impl Unit {
     /// The target, for display.
     pub fn target(self) -> &'static str {
         match self {
+            Unit::Browser => "npm global agent-browser; ~/.agent-browser/browsers/",
             Unit::DcgConfig => "~/.config/dcg/config.toml",
             Unit::DcgPacks => "~/.config/dcg/packs/",
             Unit::ClaudeMd => "~/.claude/CLAUDE.md",
@@ -216,6 +221,7 @@ impl Unit {
             Unit::ClaudeSettings | Unit::HerdrAppSettings => "seeded keys",
             Unit::ClaudeHooks => "plugin + legacy hook migration",
             Unit::ClaudeDcg | Unit::CodexHooks | Unit::PiPrefix => "key-merge",
+            Unit::Browser => "pinned runtime",
             Unit::Skills => "library",
         }
     }
@@ -346,6 +352,8 @@ pub struct Plan {
     pub skills: Option<(Vec<String>, Vec<String>)>,
     /// The supported Claude CLI must install, update or enable the hook plugin.
     pub plugin_pending: bool,
+    /// Pinned agent-browser or Chrome for Testing needs installing.
+    pub browser_pending: bool,
     /// Whole mod folder drift or first layout selection still needs applying.
     pub herdr_app_pending: bool,
     /// Directory replaced as a whole; include every descendant in ownership checks.
@@ -475,6 +483,7 @@ pub fn plan(ctx: &Ctx, unit: Unit) -> Result<Plan, String> {
     let home = &env.home;
     let mux = ctx.mux.display().to_string();
     match unit {
+        Unit::Browser => browser::plan(ctx),
         Unit::DcgConfig => {
             let src = sources::get(env, "dcg/config.toml")?;
             // The default's pack glob must follow the targets under XDG_CONFIG_HOME.
@@ -919,6 +928,9 @@ pub fn state(plan: &Plan, managed: &[PathBuf]) -> String {
             format!("missing: {}", missing.join(" "))
         };
     }
+    if plan.browser_pending {
+        return "differs (agent-browser or Chrome for Testing)".into();
+    }
     if plan.herdr_app_pending {
         return "differs (herdr-app folder or layout selection pending)".into();
     }
@@ -1084,6 +1096,9 @@ fn apply_inner(
     }
     if unit == Unit::ClaudeHooks {
         return claude_plugin::apply(ctx, &plan, evidence);
+    }
+    if unit == Unit::Browser {
+        return browser::apply(ctx, &plan);
     }
     if unit == Unit::Skills {
         return sync_skills(&ctx.skills);

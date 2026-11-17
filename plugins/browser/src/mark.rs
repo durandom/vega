@@ -3,22 +3,21 @@
 //! colour, else a stable hash of the session name), and headed calls carry an
 //! init script that colours the browser window's pages — a fixed frame, a
 //! session tag and a `[session]` title prefix, so the window on screen can
-//! be matched to its panel row. Headless sessions never show it; they show
+//! be matched to its panel row. Fresh headless sessions have no mark; they show
 //! their colour in the panels only, and `launch` (bot blockers) never marks.
 //!
-//! What 0.31.1 really does (verified, vega-nic.19): `--init-script` applies
-//! only to the navigations of the call that carries it (so every headed named
-//! call gets the flag), init scripts run before `document.documentElement`
-//! exists (all DOM work defers to DOMContentLoaded), duplicate
-//! registrations in one call are possible (the script guards itself), and
-//! `eval` is never used on a shared browser (it runs on the active tab,
-//! which can be another agent's or the user's).
+//! Verified on 0.43.0 (vega-nic.22): init scripts persist across calls and
+//! cover tab new's first navigation. Repeating a script path is deduplicated.
+//! Scripts run before document.documentElement exists; defer DOM work and
+//! retain the page guard. Only headed calls register the mark, but omitting
+//! the flag later does not remove a registration. Opt out before the first
+//! marked call; use a fresh session for unmarked work. Never eval a shared tab.
 //!
 //! Review (Slayer, 2026-11-17): the mark changes what callers see — title
 //! asserts, `snapshot` text, screenshot pixels, injected DOM on bot-wary
 //! sites — so it rides only explicitly headed calls (`--headed` flag or a
 //! truthy `AGENT_BROWSER_HEADED`), is invisible to the accessibility tree
-//! (`aria-hidden`), and `VEGA_BROWSER_MARK=0` turns it off everywhere.
+//! (`aria-hidden`), and `VEGA_BROWSER_MARK=0` prevents new registrations.
 
 use std::env;
 use std::fs;
@@ -151,8 +150,8 @@ fn headed(args: &[String]) -> bool {
         if !v.is_empty() && v != "0" && v != "false")
 }
 
-/// Whether the mark is on for this call: headed (above) and not opted out
-/// with `VEGA_BROWSER_MARK=0` (off everywhere: shim, ab).
+/// Whether this call registers a mark: headed and not opted out.
+/// An existing upstream registration persists even when this returns false.
 pub fn wanted(args: &[String]) -> bool {
     if std::env::var("VEGA_BROWSER_MARK").ok().as_deref() == Some("0") {
         return false;
@@ -161,8 +160,8 @@ pub fn wanted(args: &[String]) -> bool {
 }
 
 /// `args` with the mark flag in front: agent-browser takes its options
-/// before the command, and a call without the flag does not mark its
-/// navigations. Calls that are not headed (or opted out) pass through
+/// before the command. In 0.43 registrations persist across calls.
+/// Calls that are not headed (or opted out) pass through
 /// unchanged; sessions without a mark file pass through unchanged too.
 pub fn with_mark(args: &[String], session: &str, project: Option<&str>) -> Vec<String> {
     if !wanted(args) {

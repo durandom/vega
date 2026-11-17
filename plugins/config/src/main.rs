@@ -275,6 +275,13 @@ fn diff(ctx: &Ctx, names: &[String]) -> Result<ExitCode, Failure> {
             continue;
         }
         let m = vega_config::managed_targets(&plan, &managed);
+        if plan.browser_pending {
+            changed += 1;
+            println!("unit: browser.agent-browser");
+            for note in &plan.notes {
+                println!("note: {note}");
+            }
+        }
         if plan.herdr_app_pending {
             changed += 1;
             println!(

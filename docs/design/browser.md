@@ -65,16 +65,66 @@ vega browser close <session>                            # close one session on r
 marks rows `live`, `stale` (owner pane gone, or no call for more than a day) or `unowned`
 (no record: older sessions, Playwright).
 
+## Pinned runtime installation (vega-nic.22)
+
+`plugins/browser/agent-browser.version` pins **0.43.0**. `vega browser status`
+(or `doctor`, both support `--json`) reports agent-browser current/differs/missing,
+installed and pinned versions, and Chrome for Testing cache presence. These are
+read-only probes: `--version` and filesystem inspection, no browser or session.
+
+`vega browser install` converges the pin with `npm install --global --prefix
+<prefix> agent-browser@0.43.0`. It uses npm on PATH; invoke it in the host's normal
+login shell. Deploy already runs its remote script in a login shell, so fnm on
+proteus/ganymede and mise Node on puck keep selecting their own Node; io uses its
+Linux/WSL npm. This reuses the existing package instead of adding a native binary
+in another directory that would shadow it. No Node manager is installed or changed.
+
+Before upgrading, the real binary selected by `real.rs` (including an explicit
+`VEGA_AGENT_BROWSER_BIN`) must canonicalize inside that npm global package and
+match the prefix's `bin/agent-browser`. A foreign install or prefix mismatch
+fails before npm mutation, with a repair hint. npm failure, unexpected version,
+or changed resolution fails explicitly. A current version does not need npm.
+The shim continues to bypass its own directory and use the same real-binary
+resolution; neither PATH nor the override is rewritten.
+
+Chrome for Testing detection follows [upstream 0.43.0 install.rs](https://github.com/vercel-labs/agent-browser/blob/v0.43.0/cli/src/install.rs):
+`~/.agent-browser/browsers/chrome-*`, with macOS app bundle (direct or under
+`chrome-mac-arm64`/`chrome-mac-x64`) or Linux `chrome`/`chrome-linux64/chrome`.
+Only absence runs the real `agent-browser install`; the result is verified.
+Chrome itself is not pinned or upgraded when present. Global Chromium on 9223
+and its profile are unrelated and untouched. No existing daemon is restarted.
+
+Config unit **`browser.agent-browser`** plans through `vega-browser status --json`
+and applies through `vega-browser install`, verifying convergence again. It has
+no rendered file and no local source override; dependency failures are failed
+units, never a successful no-op. `vega config diff` shows pending work. Default
+`vega config apply`, hence `vega deploy apply --all`, includes it. Deploy retains
+its existing behavior of reporting config failure without failing the binary
+rollout; the UAC must check the config summary and browser status on each host.
+
+Rollout: install the vega build, then config apply in each host's normal login
+shell. Proteus/ganymede reuse fnm's current global prefix; puck reuses mise Node
+LTS; io needs node/npm on its Linux PATH and Chrome's normal runtime libraries.
+If the prefix conflicts, select the Node owning the existing install or explicitly
+remove/migrate the old install before retrying; never fix by adding another copy.
+Owners of dotted session names should close them before upgrading and use hyphens
+for new sessions: 0.43 refuses dotted names, including on close. Other existing
+sessions keep their old daemon until their owner closes them normally;
+new sessions use the upgraded executable. No fleet sessions are forcibly closed.
+
 ## Visibility and colour (phase 2, vega-nic.19)
 
-Built (2026-11-17), after verifying every mechanism against agent-browser 0.31.1
-with throwaway sessions on Chrome for Testing and the global Chromium (9223):
+Initially built against 0.31.1; re-verified on **0.43.0** on proteus
+(2026-11-17, vega-nic.22), with isolated socket directories, named headless
+sessions, data-URL fixtures and a separately launched Chrome for Testing
+152 with a temporary profile and ephemeral CDP port. The global Chromium
+and other agents' sessions were not used; all probe sessions were closed.
 
-- **What works:** `--init-script <file>` marks the navigations of the call that
-  carries it; a generated per-session script draws a coloured frame, a session
-  tag and prefixes the tab title with `[session]`. It must defer all DOM work
+- **What works:** `--init-script <file>` persists across calls and marks later
+  navigations, including the first navigation of `tab new <url>`; a generated
+  per-session script draws a coloured frame, a session tag and prefixes the tab title with `[session]`. It must defer all DOM work
   to DOMContentLoaded (init scripts run before `document.documentElement`
-  exists), guard itself against duplicate registrations in one call, and
+  exists), retain its page guard (0.43 deduplicates repeated script paths), and
   re-prefix the title through a `MutationObserver` when a page renames itself.
   Frame and tag carry `aria-hidden="true"`, so `snapshot` does not list them
   (screenshots still show the frame; title reads change).
@@ -83,18 +133,36 @@ with throwaway sessions on Chrome for Testing and the global Chromium (9223):
   bot-wary sites — so it rides only explicitly headed calls: a `--headed`
   flag on the call or a truthy `AGENT_BROWSER_HEADED` (the shim and `ab`
   alike; `connect`/`--cdp`/plain attaching calls stay unmarked).
-  `VEGA_BROWSER_MARK=0` turns it off everywhere, and `launch` (the bot-blocker
-  fallback) never marks. Headless sessions show their colour in the panels
-  only, as the design says.
-- **What does not:** `addinitscript` (unknown command in 0.31.1 despite its own
-  help); `--init-script` on `tab new <url>` (the new tab's first navigation is not
-  marked); `eval` on a shared browser (it runs on the *active* tab, which can be
-  the user's — never used for marking); `vega browser ab`'s HTTP/1.0 CDP probe
-  (Chrome 146 closes 1.0 requests — fixed to HTTP/1.1).- **Not built:** the profile theme colour for vega-launched `--user-data-dir`
+  `VEGA_BROWSER_MARK=0` prevents registration, and `launch` (the bot-blocker
+  fallback) never registers a mark. **Omitting the flag or setting the opt-out
+  later does not remove an existing upstream registration.** Set the opt-out
+  before first use, or use a fresh session for unmarked work. New headless
+  sessions have no mark registration; previously marked sessions retain it.
+- **What does not:** `addinitscript` still exits 1 with `Unknown command` in
+  0.43.0. No marking via `eval` on a shared browser. The old 0.31.1 failure of
+  `--init-script` on `tab new` is fixed upstream. The HTTP/1.0 CDP probe failure
+  was fixed in vega by using HTTP/1.1.
+- **Not built:** profile theme colour for vega-launched `--user-data-dir`
   browsers. Chromium 146 accepts an unpacked theme via `--load-extension` and
   records it in the profile's Preferences (verified structurally), but the frame
   colour was not visually verifiable from an agent shell (no screen-recording
   permission); revisit with one eyeball pass before wiring it into `launch`.
+
+Re-verification details:
+
+| Contract | 0.43.0 observed result |
+| --- | --- |
+| `--init-script` | First page gets marker once before DOM exists; later `open` without flag still gets it. Repeated path remains once. |
+| `tab new` | Fresh session with init flag marks the new tab's first navigation. Stable tab ids start at `t1`; integer `0` and `t0` fail. |
+| `addinitscript` | Unknown command, exit 1. |
+| `--pin-tab` | Accepted, sticky; after externally creating/activating another tab of our temporary browser, `get title` still reads the bound tab. `tab new` intentionally rebinds to the new tab; `--no-pin-tab` accepted. Vega passes these flags through, never injects them. |
+| `session list` | `Active sessions:` followed by indented names; after close, `No active sessions`. Existing `parse_session_list` handles both unchanged. |
+| `--session` / env | Named daemon isolation and `AGENT_BROWSER_SESSION` both work. Dots now fail: letters/numbers, hyphens and underscores only. Vega's own validation now matches that character set. |
+| `connect <port>` | Attaches our named session to the separately launched temporary headless browser. Subsequent calls need only the session. |
+| `close` | Owned launch closes successfully; attached session disconnects and leaves the external browser's CDP endpoint alive. Repeated close succeeds. All probe session inventories ended empty; the external test process was then terminated by its creator. |
+
+Raw probe logs were retained during implementation in `/tmp/vega-nic22-{live,fresh,connect}.log`;
+the table is the durable record. No global CDP endpoint, real hc terminal or fleet host was changed.
 
 The panels:
 
@@ -110,7 +178,7 @@ The panels:
   `+n`), read from that shared state — the sidebar never reads browsers itself;
   the payload is part of the render model's input signature (vega-0h4c.103), so
   it derives once per change. Headless sessions show the same colour in the
-  panels; their pages carry the mark harmlessly.
+  panels; new headless sessions have no page mark.
 - **Colour:** `vega browser ls --json` carries a `colour` per session: the owner
   project's `[symbols.project_colors]` colour in `~/.config/vega/theme.toml`
   (keyed by the worktree directory name, like host colours; validated

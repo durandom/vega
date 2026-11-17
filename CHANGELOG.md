@@ -5,6 +5,23 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 227 · 2026-11-17
+
+- unit: `browser.agent-browser` converges agent-browser to the repository pin 0.43.0
+  and installs Chrome for Testing only when its cache is missing. `vega browser install`
+  runs it directly; `status`/`doctor` report dependency drift without opening a browser.
+  Deploy's config apply includes the unit (vega-nic.22).
+- migration: Use the normal login shell's npm global (fnm on proteus/ganymede,
+  mise Node on puck, Linux npm on io). The resolved real agent-browser must belong
+  to that prefix; conflicting installs or `VEGA_AGENT_BROWSER_BIN` fail visibly
+  instead of creating a shadowing copy. Resolve the conflict and retry
+  `vega config apply browser.agent-browser`. Existing sessions are not restarted.
+  Owners of dotted session names must close them before upgrading and use hyphens.
+- feature: Verified 0.43 browser contracts: init scripts now persist across calls and
+  cover `tab new` immediately; opt out before first registration or use a fresh
+  session for unmarked work. Session names no longer accept dots; tabs use stable
+  `t1`/`t2` ids. `addinitscript` remains unsupported. See docs/design/browser.md.
+
 ## 226 · 2026-11-17
 
 - feature: Browser sessions are visible in the herdr-app panels and the windows themselves

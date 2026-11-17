@@ -5,9 +5,9 @@ description: Browses web pages with agent-browser through named sessions, on the
 
 # vega browser: named sessions
 
-One rule: **name your session**. Every agent-browser call carries
+**Name your session.** Every call carries
 `--session <name>` (or `AGENT_BROWSER_SESSION=<name>`); the shim refuses
-unnamed calls. Name it `<project>-<task>` (e.g. `--session vega-shim-test`).
+unnamed calls. Use `<project>-<task>`.
 
 ```sh
 vega browser ab --session <name> <agent-browser args>   # the global Chromium
@@ -17,21 +17,26 @@ vega browser gc                                         # close sessions of dead
 vega browser close <session>                            # close one on request
 ```
 
+## Install and health
+
+`vega browser install`: pinned 0.43.0 via login-shell npm, Chrome for Testing
+only if missing. `doctor`/`status --json`: read-only dependency status.
+Config unit `browser.agent-browser` converges during deploy. Conflicting
+npm prefixes or `VEGA_AGENT_BROWSER_BIN` fail rather than shadow an install.
+
 ## The global Chromium
 
 All vega agents share one Chromium: CDP 127.0.0.1:9223, profile
 `~/.local/share/vega-chromium` (the user's logins persist). `vega browser ab`
 starts or attaches it, then runs agent-browser with `--cdp 9223`; it never
 launches another browser and refuses `connect`, `--cdp`, `--auto-connect`,
-`--provider` and `--executable-path`. Open a tab of your own (`tab new`); do
-not navigate tabs other agents opened. `ab --session <name> close`
+`--provider` and `--executable-path`. Use your own tab (`tab new`). `ab --session <name> close`
 disconnects only; the browser stays up. Load agent-browser's own guides
 before the first call: `agent-browser skills get core`, `skills list`.
 
 ## Fallback: throwaway Chromium (bot blockers only)
 
-Only when a site blocks the global browser (Cloudflare check, endless
-captcha); never for logins:
+For blockers only; never for logins:
 
 ```sh
 vega browser launch <url> [--session s] [--port p]   # ungoogled Chromium, temp profile
@@ -50,14 +55,11 @@ network log without asking. To find the API calls behind a page:
 
 ## Ownership
 
-Named calls record their owner pane in
-`~/.local/state/vega/browser/sessions.json`; `ls` merges that with
-`agent-browser session list` and the browser processes (states `live`,
-`stale`, `unowned`, `closed`; Playwright leftovers are `unowned` and listed,
-never killed). `gc` closes only recorded sessions whose owner pane is gone; a
+`ls` merges owner records, sessions and processes; Playwright leftovers stay
+unowned, never killed. `gc` closes only recorded sessions whose owner pane is gone; a
 live owner's session is never touched, however old. Every explicitly headed
 call (--headed or AGENT_BROWSER_HEADED) marks its session's windows: a
 coloured frame and a `[session]` title prefix in the session's colour
 (theme `[symbols.project_colors]`, else a name hash; `VEGA_BROWSER_MARK=0`
-disables it). The Services panel's Browsers group and the sidebar's dots
-show the same.
+prevents registration). In 0.43 marks persist across calls, including `tab new`;
+use a fresh session for unmarked work.

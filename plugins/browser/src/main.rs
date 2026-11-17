@@ -39,6 +39,17 @@ fn main() -> ExitCode {
             print!("{SKILL}");
             Ok(ExitCode::SUCCESS)
         }
+        [a] if a == "install" => vega_browser::install::install().map(|_| ExitCode::SUCCESS),
+        [a] if a == "doctor" || a == "status" => vega_browser::install::status().map(|s| {
+            vega_browser::install::print_status(&s, false);
+            ExitCode::SUCCESS
+        }),
+        [a, b] if (a == "doctor" || a == "status") && b == "--json" => {
+            vega_browser::install::status().map(|s| {
+                vega_browser::install::print_status(&s, true);
+                ExitCode::SUCCESS
+            })
+        }
         [a] if a == "ls" => ls(false).map(|_| ExitCode::SUCCESS),
         [a] if a == "--json" => ls(true).map(|_| ExitCode::SUCCESS),
         [a, b] if a == "ls" && b == "--json" => ls(true).map(|_| ExitCode::SUCCESS),
@@ -98,7 +109,7 @@ fn no_agent_browser() -> Failure {
     Failure::new(
         "no_agent_browser",
         "the real agent-browser binary was not found",
-        "install agent-browser (npm i -g agent-browser), or set VEGA_AGENT_BROWSER_BIN",
+        "run vega browser install, or set VEGA_AGENT_BROWSER_BIN",
     )
 }
 
@@ -155,7 +166,7 @@ fn ab(args: &[String]) -> Result<ExitCode, Failure> {
         Failure::new(
             "agent_browser_failed",
             format!("{}: {e}", real.display()),
-            "install agent-browser (npm i -g agent-browser)",
+            "run vega browser install",
         )
     })?;
     if !status.success() && cdp::probe(g.port) != Probe::Cdp {
@@ -381,7 +392,7 @@ fn launch(args: &[String]) -> Result<ExitCode, Failure> {
             Failure::new(
                 "agent_browser_failed",
                 format!("{}: {e}", real.display()),
-                "install agent-browser (npm i -g agent-browser)",
+                "run vega browser install",
             )
         })?;
     if !attach.status.success() {
@@ -524,13 +535,13 @@ fn first_positional(args: &[String]) -> Option<&str> {
 
 fn valid_session(s: &str) -> Result<(), Failure> {
     let plain = !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-'));
     plain.then_some(()).ok_or_else(|| {
         Failure::new(
             "bad_session",
             format!("bad session name: {s}"),
-            "letters, digits, dot, underscore and hyphen only",
+            "letters, digits, underscore and hyphen only (agent-browser 0.43)",
         )
     })
 }
@@ -846,7 +857,8 @@ mod tests {
     #[test]
     fn session_names_validate() {
         assert!(valid_session("review-t7m").is_ok());
-        assert!(valid_session("wt.journey_2").is_ok());
+        assert!(valid_session("wt-journey_2").is_ok());
+        assert!(valid_session("wt.journey_2").is_err());
         assert!(valid_session("").is_err());
         assert!(valid_session("../x").is_err());
         assert!(valid_session("a b").is_err());
