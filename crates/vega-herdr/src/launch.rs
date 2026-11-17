@@ -825,15 +825,22 @@ mod tests {
 
     #[test]
     fn set_trust_touches_only_the_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        fs::create_dir(&a).unwrap();
+        fs::create_dir(&b).unwrap();
+        let a = claude_key(a.to_str().unwrap());
+        let b = claude_key(b.to_str().unwrap());
         let mut c =
-            json!({"x": 1, "projects": {"/a": {"lastCost": 2, "hasTrustDialogAccepted": false}}});
-        assert!(set_trust(&mut c, "/a"));
-        assert!(set_trust(&mut c, "/b"));
+            json!({"x": 1, "projects": {&a: {"lastCost": 2, "hasTrustDialogAccepted": false}}});
+        assert!(set_trust(&mut c, &a));
+        assert!(set_trust(&mut c, &b));
         assert_eq!(
             c,
             json!({"x": 1, "projects": {
-                "/a": {"lastCost": 2, "hasTrustDialogAccepted": true},
-                "/b": {"hasTrustDialogAccepted": true},
+                &a: {"lastCost": 2, "hasTrustDialogAccepted": true},
+                &b: {"hasTrustDialogAccepted": true},
             }})
         );
         assert!(set_trust(&mut json!({}), "/a"));
