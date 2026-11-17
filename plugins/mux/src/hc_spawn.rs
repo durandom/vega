@@ -15,6 +15,7 @@ pub fn spawn(
     mode: Mode,
     extra: &[String],
     tier: Option<&str>,
+    policy: Option<&tier::Policy>,
     old: Option<&SpawnRecord>,
 ) -> Result<String, Failure> {
     if !valid_agent_name(name) {
@@ -73,6 +74,9 @@ pub fn spawn(
         cwd = expand_home(&cwd, &env::var("HOME").unwrap_or_default());
     }
     let selection = tier::select(kind, tier, extra, Some(&cwd))?;
+    if let Some(policy) = policy {
+        policy.record(selection.model.as_deref(), Some(&cwd))?;
+    }
     // Space IDs belong to the local app; they do not identify remote spaces.
     let mut space = if let Some(Terminal::Hc(p)) = &own.as_ref().filter(|_| machine().is_none()) {
         hc_local(&["get", p])?["labels"]["herdr.space"]
@@ -178,6 +182,18 @@ pub fn spawn(
     }
     if let Some(model) = &selection.model {
         labels["vega.model"] = model.clone().into();
+    }
+    if let Some(why) = policy
+        .and_then(|p| p.why.as_deref())
+        .or_else(|| old.and_then(|r| r.tier_why.as_deref()))
+    {
+        labels["vega.tier-why"] = why.into();
+    }
+    if let Some(bead) = policy
+        .and_then(|p| p.bead.as_deref())
+        .or_else(|| old.and_then(|r| r.bead.as_deref()))
+    {
+        labels["vega.bead"] = bead.into();
     }
     if let Some(s) = space {
         labels["herdr.space"] = s.into();
@@ -286,6 +302,8 @@ pub fn spawn(
         extra: selection.args.clone(),
         tier: tier.map(String::from),
         model: selection.model.clone(),
+        tier_why: policy.and_then(|p| p.why.clone()),
+        bead: policy.and_then(|p| p.bead.clone()),
         ..Default::default()
     });
     record.pane = pane.clone();
@@ -557,6 +575,7 @@ pub fn reopen(r: &SpawnRecord, extra: &[String]) -> Result<(), Failure> {
         Mode::parse(&r.mode).unwrap_or(Mode::Headed),
         extra,
         r.tier.as_deref(),
+        None,
         Some(r),
     )
     .map(|_| ())

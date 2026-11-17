@@ -54,13 +54,19 @@ workspace.
 ## Agent kinds
 
 The kind is the herdr agent kind of a pane: `claude`, `codex`, `pi`, `agy` (`herdr agent` lists them).
-`vega mux spawn --kind <kind> --tier balanced` starts one with its default args (approval prompts off, see `vega mux spawn
+`vega mux spawn <name> --kind <kind> --bead <id>` starts one with its default args (approval prompts off, see `vega mux spawn
 --help`); `vega mux reopen` resumes a closed claude or codex session. Delivery, the draft guard and the done
 report work the same for every kind. `vega capacity` shows subscription headroom per provider, to choose a kind.
 
 - Show: `vega mux` (kind column), `vega capacity`.
 - Design: [vegad.md](design/vegad.md) (Goal, draft guard), [vega-mux-battletest.md](design/vega-mux-battletest.md),
   [capacity.md](design/capacity.md).
+
+Spawn tier policy: a `tier:*` bead label wins; otherwise decision/research use flagship,
+task/bug/feature/epic balanced, chore budget. A differing `--tier` needs `--why`;
+flagship needs `--why` unless labelled `tier:flagship`. Notes and `mux show` retain
+tier/model/reason. Without a bead, select `--tier` as described in `mux spawn --help`.
+
 
 ## UAC and sentinels
 

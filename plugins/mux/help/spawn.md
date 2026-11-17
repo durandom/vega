@@ -9,11 +9,21 @@ hc receives env separately through terminal.run and the task at launch;
 show reports startup output. Session IDs are captured by ancestry-verified vega calls
 from the child, for commands such as mux and post.
 
-Choose --tier flagship|balanced|budget (no default): flagship for design/root-cause,
-balanced for normal implementation, budget for mechanical work. Models resolve through
-`vega lanista pin <lane> --tier <tier>` including active project overrides; Pi uses zai.
-An explicit -m/--model after `--` wins over the tier and needs no tier. --no-parent
-also permits the harness default. Spawn records retain tier and model for show and reopen.
+Use --bead <id> to derive the tier: a tier:flagship|balanced|budget label wins;
+otherwise decision/research -> flagship, task/bug/feature/epic -> balanced, chore -> budget.
+Unknown types need a tier label. Beads are read with `bd show <id> --json` in the local
+checkout (--cwd locally, caller's checkout with --machine); bd must be available.
+A differing explicit --tier requires --why "<reason>". Flagship also requires --why,
+unless the bead's tier:flagship label authorizes it. Blank reasons are rejected.
+Without --bead, choose --tier flagship|balanced|budget: flagship for design/root-cause,
+balanced for implementation, budget for mechanical work. Flagship still needs --why.
+Models resolve through `vega lanista pin <lane> --tier <tier>` including active project
+overrides; Pi uses zai. Explicit -m/--model after `--` wins over the model pin and needs
+no tier without --bead; --no-parent also permits the harness default. These exceptions
+do not waive bead policy or the flagship reason requirement.
+Before launch, spawn appends tier/model/reason to the bead notes; failed reads or appends
+abort the spawn. The brief names the bead, even without --prompt. Spawn records retain
+bead, tier, model and reason for show/reopen; hc publishes vega.tier-why and vega.bead labels.
 Local --cwd selects the project; remote spawns use the caller's project pins.
 
 Spawns are headed by default: the user answers questions in the pane. Add --headless
@@ -32,10 +42,11 @@ Default agent args (extra args after `--` are appended):
   pi      --approve
 
 Examples:
-  vega mux spawn rev --kind codex --tier balanced
+  vega mux spawn rev --kind codex --bead <id>
+  vega mux spawn analysis --kind codex --tier flagship --why "Investigate a cross-service root cause"
   vega mux spawn helper --kind claude --tier balanced --headless --at split --prompt "Run the tests and report failures."
   vega mux spawn api --kind pi --cwd ~/src/api --at workspace -- --model zai/glm-5.3
-  vega mux spawn fix --kind claude --tier balanced --worktree fix-login --base origin/main --prompt-file /tmp/task.md
+  vega mux spawn fix --kind claude --bead <id> --worktree fix-login --base origin/main --prompt-file /tmp/task.md
   vega mux spawn gate-rev --kind codex --env VEGA_GATE_ROLE=reviewer -- -m gpt-6-luna
 
 --env K=V (repeatable) sets env through herdr's env flags or hc's API environment. Tool shells also

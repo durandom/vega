@@ -1466,12 +1466,16 @@ fn remote_show_uses_live_metadata_without_local_spawn_records() {
     terminal["labels"]["vega.mode"] = "headless".into();
     terminal["labels"]["vega.tier"] = "balanced".into();
     terminal["labels"]["vega.model"] = "published-model".into();
+    terminal["labels"]["vega.tier-why"] = "remote justification".into();
+    terminal["labels"]["vega.bead"] = "work-1".into();
     save(&terminal);
     let output = f.run(&["show", "hc:io/t36"]);
     for expected in [
         "parent: ganymede/t1j",
         "mode: headless",
         "tier: balanced",
+        "tier_why: remote justification",
+        "bead: work-1",
         "model: published-model",
     ] {
         assert!(output.contains(expected), "{output}");
@@ -1486,4 +1490,327 @@ fn remote_show_uses_live_metadata_without_local_spawn_records() {
         .calls()
         .iter()
         .all(|c| ["connect", "get", "read"].contains(&c[0].as_str().unwrap())));
+}
+
+fn fake_bd(f: &Fixture) {
+    let path = f.root().join("bin/bd");
+    fs::write(&path, include_str!("fixtures/bd.py")).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn bead_policy_types_labels_overrides_notes_and_show() {
+    for (kind, labels, explicit, why, expected, reason) in [
+        ("task", "[]", None, None, "balanced", "bead type task"),
+        ("bug", "[]", None, None, "balanced", "bead type bug"),
+        ("feature", "[]", None, None, "balanced", "bead type feature"),
+        ("epic", "[]", None, None, "balanced", "bead type epic"),
+        ("chore", "[]", None, None, "budget", "bead type chore"),
+        (
+            "decision",
+            "[]",
+            None,
+            Some("architecture"),
+            "flagship",
+            "architecture",
+        ),
+        (
+            "research",
+            "[]",
+            None,
+            Some("root cause"),
+            "flagship",
+            "root cause",
+        ),
+        (
+            "task",
+            r#"["tier:budget"]"#,
+            None,
+            None,
+            "budget",
+            "bead label tier:budget",
+        ),
+        (
+            "chore",
+            r#"["tier:flagship"]"#,
+            None,
+            None,
+            "flagship",
+            "bead label tier:flagship",
+        ),
+        (
+            "task",
+            "[]",
+            Some("budget"),
+            Some("mechanical"),
+            "budget",
+            "mechanical",
+        ),
+        (
+            "task",
+            "[]",
+            Some("flagship"),
+            Some("deep analysis"),
+            "flagship",
+            "deep analysis",
+        ),
+        (
+            "task",
+            "[]",
+            Some("balanced"),
+            None,
+            "balanced",
+            "bead type task",
+        ),
+    ] {
+        let f = Fixture::new();
+        fake_bd(&f);
+        let mut cmd = f.cmd();
+        cmd.env("TEST_BD_TYPE", kind)
+            .env("TEST_BD_LABELS", labels)
+            .args([
+                "spawn",
+                "worker",
+                "--kind",
+                "codex",
+                "--bead",
+                "work-1",
+                "--prompt",
+                "implement",
+            ]);
+        if let Some(tier) = explicit {
+            cmd.args(["--tier", tier]);
+        }
+        if let Some(why) = why {
+            cmd.args(["--why", why]);
+        }
+        cmd.args(["--", "-m", "chosen"]);
+        success(cmd.output().unwrap());
+        let calls = f.calls();
+        let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+        assert_eq!(run["labels"]["vega.tier"], expected);
+        assert_eq!(run["labels"]["vega.model"], "chosen");
+        assert_eq!(run["labels"]["vega.tier-why"], reason);
+        assert_eq!(run["labels"]["vega.bead"], "work-1");
+        assert!(run.to_string().contains("Bead: work-1"));
+        assert!(run["argv"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .starts_with("implement\n\nBead: work-1"));
+        let bd_calls: Vec<Value> = fs::read_to_string(f.root().join("bd-calls"))
+            .unwrap()
+            .lines()
+            .map(|s| serde_json::from_str(s).unwrap())
+            .collect();
+        assert_eq!(bd_calls.len(), 2);
+        assert_eq!(
+            bd_calls[1][3],
+            format!("mux spawn selection: tier={expected}, model=chosen, reason={reason}")
+        );
+        let shown = f.run(&["show", "worker"]);
+        assert!(shown.contains(&format!("tier: {expected}")), "{shown}");
+        assert!(shown.contains(&format!("tier_why: {reason}")), "{shown}");
+        assert!(shown.contains("bead: work-1"), "{shown}");
+        let record: Value = serde_json::from_str(
+            &fs::read_to_string(
+                fs::read_dir(f.root().join("state/vega/spawns"))
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .path(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(record["tier_why"], reason);
+        assert_eq!(record["bead"], "work-1");
+        if kind == "task" && explicit.is_none() && labels == "[]" {
+            success(
+                f.cmd()
+                    .env("HC_TERMINAL_ID", "t8")
+                    .env("CODEX_THREAD_ID", "session-8")
+                    .args(["show", "t8"])
+                    .output()
+                    .unwrap(),
+            );
+            f.run(&["close", "worker"]);
+            f.run(&["reopen", "worker"]);
+            let shown = f.run(&["show", "worker"]);
+            assert!(shown.contains("tier_why: bead type task"), "{shown}");
+            assert!(shown.contains("bead: work-1"), "{shown}");
+            assert_eq!(
+                fs::read_to_string(f.root().join("bd-calls"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                2
+            );
+        }
+    }
+}
+
+#[test]
+fn bead_policy_errors_precede_briefs_and_terminal_calls() {
+    for (kind, labels, tier, why, mode, error) in [
+        ("task", "[]", Some("budget"), None, "", "--why"),
+        ("decision", "[]", None, None, "", "--why"),
+        ("task", "[]", Some("flagship"), None, "", "--why"),
+        ("task", "[]", None, Some("  "), "", "nonempty"),
+        ("other", "[]", None, None, "", "no tier policy"),
+        (
+            "task",
+            r#"["tier:invalid"]"#,
+            None,
+            None,
+            "",
+            "valid tier label",
+        ),
+        (
+            "task",
+            r#"["tier:budget","tier:balanced"]"#,
+            None,
+            None,
+            "",
+            "valid tier label",
+        ),
+        ("task", "[]", None, None, "missing", "bead_not_found"),
+        ("task", "[]", None, None, "invalid", "bead_read_failed"),
+        ("task", "[]", None, None, "fail", "bead_command_failed"),
+        ("task", "[]", None, None, "hang", "bead_timeout"),
+    ] {
+        let f = Fixture::new();
+        fake_bd(&f);
+        let mut cmd = f.cmd();
+        cmd.env("TEST_BD_TYPE", kind)
+            .env("TEST_BD_LABELS", labels)
+            .env("TEST_BD_MODE", mode)
+            .args([
+                "spawn",
+                "worker",
+                "--kind",
+                "codex",
+                "--bead",
+                "work-1",
+                "--prompt-file",
+                "/nonexistent/brief",
+            ]);
+        if let Some(tier) = tier {
+            cmd.args(["--tier", tier]);
+        }
+        if let Some(why) = why {
+            cmd.args(["--why", why]);
+        }
+        let out = cmd.output().unwrap();
+        assert!(!out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(error),
+            "{text} lacks {error}; status={:?}; stderr={}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!f.calls().iter().any(|v| v[0] == "run"));
+    }
+}
+
+#[test]
+fn missing_bd_and_failed_note_append_never_launch() {
+    for missing in [true, false] {
+        let f = Fixture::new();
+        if !missing {
+            fake_bd(&f);
+        }
+        let out = f
+            .cmd()
+            .env("TEST_BD_MODE", "update-fail")
+            .args([
+                "spawn", "worker", "--kind", "codex", "--bead", "work-1", "--", "-m", "chosen",
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(if missing {
+                "cannot run bd"
+            } else {
+                "bead_command_failed"
+            }),
+            "{text}"
+        );
+        if !missing {
+            assert!(!f.calls().iter().any(|v| v[0] == "run"));
+        }
+    }
+}
+
+#[test]
+fn flagship_without_bead_requires_why_even_with_model_or_no_parent() {
+    for extra in [vec![], vec!["--no-parent"], vec!["--", "-m", "chosen"]] {
+        let f = Fixture::new();
+        let out = f
+            .cmd()
+            .args(["spawn", "worker", "--kind", "codex", "--tier", "flagship"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("--why"));
+        assert!(!f.calls().iter().any(|v| v[0] == "run"));
+    }
+    let f = Fixture::new();
+    f.run(&[
+        "spawn",
+        "worker",
+        "--kind",
+        "codex",
+        "--tier",
+        "flagship",
+        "--why",
+        "architecture",
+        "--",
+        "-m",
+        "chosen",
+    ]);
+    assert!(f
+        .run(&["show", "worker"])
+        .contains("tier_why: architecture"));
+}
+
+#[test]
+fn bead_uses_local_cwd_and_derived_tier_resolves_the_pin() {
+    let f = Fixture::new();
+    fake_bd(&f);
+    let checkout = f.root().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let out = f
+        .cmd()
+        .args([
+            "spawn",
+            "worker",
+            "--kind",
+            "codex",
+            "--bead",
+            "work-1",
+            "--cwd",
+            checkout.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    success(out);
+    assert_eq!(
+        fs::read_to_string(f.root().join("bd-cwd")).unwrap(),
+        checkout.canonicalize().unwrap().to_str().unwrap()
+    );
+    let shown = f.run(&["show", "worker"]);
+    assert!(shown.contains("tier: balanced"), "{shown}");
+    assert!(shown.contains("model: gpt-6.1-sol"), "{shown}");
+    assert!(fs::read_to_string(f.root().join("bd-calls"))
+        .unwrap()
+        .contains("model=gpt-6.1-sol"));
 }

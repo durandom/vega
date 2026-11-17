@@ -182,6 +182,7 @@ pub fn run(target: &str) -> Result<(), Failure> {
         Mode::parse(&r.mode).unwrap_or(Mode::Headed),
         &extra,
         r.tier.as_deref(),
+        None,
         Some(&r),
     )?;
     Ok(())
@@ -278,6 +279,11 @@ mod tests {
                     mode,
                     &["--model".into(), "chosen-model".into()],
                     Some("budget"),
+                    Some(&tier::Policy {
+                        tier: Some("budget".into()),
+                        why: Some("mechanical".into()),
+                        bead: None,
+                    }),
                     None,
                 );
                 if no_parent {
@@ -319,6 +325,7 @@ mod tests {
                 assert_eq!(r.mode, mode.as_str());
                 assert_eq!(r.tier.as_deref(), Some("budget"));
                 assert_eq!(r.model.as_deref(), Some("chosen-model"));
+                assert_eq!(r.tier_why.as_deref(), Some("mechanical"));
                 assert_eq!(r.cwd, dir.display().to_string());
                 assert_eq!(run("fix").unwrap_err().code, "agent_running");
                 // A renamed agent still owns the recorded session in its pane.
@@ -358,6 +365,7 @@ mod tests {
                 assert_eq!(new.extra, r.extra);
                 assert_eq!(new.tier, r.tier);
                 assert_eq!(new.model, r.model);
+                assert_eq!(new.tier_why, r.tier_why);
                 assert_eq!(new.task.as_deref(), Some("original task"));
                 assert_eq!(mode_of(None, &new.pane, &new.name), mode);
                 assert_eq!(parent_of(&new.pane, &new.name), r.parent);
@@ -413,6 +421,7 @@ mod tests {
                 true,
                 Mode::Headed,
                 &[],
+                None,
                 None,
                 None
             )

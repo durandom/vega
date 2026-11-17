@@ -18,16 +18,17 @@ Brief Slayer.
 
 ## Work quietly
 
-Choose kind (`capacity`), tier, machine, base, done-when.
-`--tier flagship|balanced|budget`: design, implementation, mechanical.
-Lanista resolves models: `vega lanista pin <lane> --tier <tier>`.
-Explicit `-m`/`--model` after `--` wins; it and `--no-parent` need no tier.
-Brief: bead/file (goal, scope, done-when, gate).
-Spawn/adopt default headed; unattended: `vega mux spawn <name> --kind claude --tier balanced --headless`.
+Kind (`capacity`), bead, machine, base.
+`spawn --bead <id>`: tier label wins; else decision/research flagship,
+task/bug/feature/epic balanced, chore budget. Overrides need `--why`;
+flagship needs it unless labelled `tier:flagship`. Without beads choose `--tier`.
+Lanista resolves models; explicit `-m`/`--model` wins.
+Notes/show: tier/model/reason. Brief: goal, scope, done-when, gate.
+Headed default; unattended: `vega mux spawn <name> --kind claude --bead <id> --headless`.
 
-Reports: mail. Wakes: actionable blocks, questions, stalls, TUI exits.
+Reports: mail. Wakes: blocks, questions, stalls, TUI exits.
 Done, gate/CI waits, parks, hc exits add no wake.
-Sentinels mail done, blocked, requested CI verdicts only; no acknowledgement/progress.
+Sentinels mail done, blocked, requested CI verdicts; no acknowledgement/progress.
 Never poll. Wakes/messages: act, record, end with ≤10 words (overrides style);
 more only for urgent blockers.
 
@@ -37,7 +38,7 @@ Slayer may appoint leads. `vega uac adopt <pane>` preserves their sentinels/Slay
 
 ## Keep the state in beads
 
-Record progress in beads. Slayer questions: `slayer-decision` children of the `claim`
+Beads: Slayer questions: `slayer-decision` children of the `claim`
 tracker (options, recommendation, blocks), in the Slayer's language, overriding project rules.
 Answer `asking` sentinels when possible; after 30 min waiting on Slayer, file that bead,
 quoting the question. Park the sentinel:

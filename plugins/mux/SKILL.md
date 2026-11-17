@@ -9,18 +9,20 @@ Help: `--help`.
 
 - `vega mux [--all]` lists agents in your TUI workspace or hc space.
   `herdr:w1:p2`, `hc:t7`, `hc:machine/t7` select the target's world.
-- `vega mux show <target>`: status, parent, tier/model and output.
+- `vega mux show <target>`: status, parent, bead, tier/model/reason and output.
   `transcript <target> [--last|--since N|--count]`: session log.
 - `vega mux send <target> "<text>"` (or `--file <path>`) mails it;
   `--now` pastes directly. Replies arrive; do not poll.
 - `vega mux dialog <target> [--json]` classifies dialogs (exit 1: none).
   `answer <target> --option N | --text "…"` answers questions only.
-- `vega mux spawn <name> --kind claude|codex|pi|agy --tier flagship|balanced|budget --prompt-file <brief>`
-  follows the caller's verified world; `--backend herdr|hc` overrides it.
-  hc uses `--outlive-parent` and the caller's herdr-app space.
+- `vega mux spawn <name> --kind claude|codex|pi|agy --bead <id> --prompt-file <brief>`
+  follows the caller; `--backend herdr|hc` overrides it.
+  hc uses `--outlive-parent` and the caller's space.
   Headed by default; `--headless` redirects questions to the parent.
-  Tiers: flagship design; balanced implementation; budget mechanical.
-  Lanista resolves pins; explicit `-m`/`--model` after `--` or `--no-parent` needs no tier.
+  Tier label wins; else decision/research flagship, task/bug/feature/epic balanced, chore budget.
+  A differing --tier needs --why; flagship needs --why unless labelled tier:flagship.
+  Without --bead choose --tier. Notes record tier/model/reason; the brief names the bead.
+  Lanista resolves pins; explicit `-m`/`--model` after `--` or `--no-parent` needs no tier without a bead; flagship still needs a reason.
   `vega post done` wakes the parent. Inbox-only targets ask the user.
 - `--worktree <branch> --base <ref>` uses worktrunk and a TUI workspace or local app space;
   without a local app, or with `--machine`, hc starts a tab in the worktree instead.
@@ -28,15 +30,15 @@ Help: `--help`.
 - `vega mux close <target>` closes the agent; then `wt remove <branch>`.
   `dismiss <child>` drops a headed child's waiting hand the user handled (on the parent's host).
   `reopen <target>` resumes local Claude/Codex spawns; keep their cwd.
-  hc sessions are captured by ancestry-verified vega calls from the child.
+  hc sessions are captured by child calls.
 - Remote: `--machine <label>`, spawn needs `--cwd`. Fleet: `hc machine ls`,
-  falling back to `herdr machine list` when hc is absent/empty.
+  fallback: `herdr machine list`.
   The hc machine name must equal its registry host: `send machine/t7 "<text>"`
-  needs no --host. Unknown hosts fail; `vega config infra --fleet` diagnoses names.
+  needs no --host; `vega config infra --fleet` diagnoses names.
 - `vega mux next` focuses the oldest waiter; hc uses herdr-app.
 - Trust/permission/hook approvals stay with the Slayer; never approve them.
   Remote hc spawn inherits existing trust on the target via its vega helper;
-  deploy matching vega versions on both ends. Unknown/changed trust still asks.
+  deploy matching vega versions. Changed trust still asks.
   After the user resolves startup, `spawn --resume <pane>` sends a saved undelivered brief.
 
 ## Receiving

@@ -1,6 +1,146 @@
 //! Deliberate spawn model selection, backed by lanista's project pins.
 use super::*;
 
+/// Task policy belongs to vega; lanista remains the tier-to-model authority.
+#[derive(Default)]
+pub struct Policy {
+    pub tier: Option<String>,
+    pub why: Option<String>,
+    pub bead: Option<String>,
+}
+
+fn bd(args: &[&str], cwd: Option<&str>) -> Result<Vec<u8>, Failure> {
+    let mut cmd = Command::new("bd");
+    cmd.args(args).current_dir(checkout(cwd)?);
+    let hint = "ensure bd is installed and the bead exists in the local checkout";
+    let out = vega_herdr::output_within(&mut cmd, std::time::Duration::from_secs(10))
+        .map_err(|e| Failure::new("bead_read_failed", format!("cannot run bd: {e}"), hint))?
+        .ok_or_else(|| Failure::new("bead_timeout", "bd exceeded 10 seconds", hint))?;
+    if !out.status.success() {
+        return Err(Failure::new(
+            "bead_command_failed",
+            format!("bd {} failed for bead {}", args[0], args[1]),
+            hint,
+        ));
+    }
+    Ok(out.stdout)
+}
+
+fn bead_tier(bead: &Value) -> Result<(&str, String, bool), Failure> {
+    let labels: Vec<_> = bead["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(|s| s.strip_prefix("tier:"))
+        .collect();
+    if !labels.is_empty() {
+        if labels.len() != 1 || !["flagship", "balanced", "budget"].contains(&labels[0]) {
+            return Err(Failure::new(
+                "usage",
+                "bead needs exactly one valid tier label",
+                "set one tier:flagship|balanced|budget label",
+            ));
+        }
+        return Ok((labels[0], format!("bead label tier:{}", labels[0]), true));
+    }
+    let kind = bead["issue_type"].as_str().unwrap_or("");
+    let tier = match kind {
+        "decision" | "research" => "flagship",
+        "task" | "bug" | "feature" | "epic" => "balanced",
+        "chore" => "budget",
+        _ => {
+            return Err(Failure::new(
+                "usage",
+                format!("no tier policy for bead type {kind:?}"),
+                "set a tier:flagship|balanced|budget label on the bead",
+            ))
+        }
+    };
+    Ok((tier, format!("bead type {kind}"), false))
+}
+
+pub fn policy(
+    tier: Option<&str>,
+    bead: Option<&str>,
+    why: Option<&str>,
+    cwd: Option<&str>,
+) -> Result<Policy, Failure> {
+    if bead.is_some_and(|s| s.trim().is_empty() || s.starts_with('-'))
+        || why.is_some_and(|s| s.trim().is_empty())
+    {
+        return Err(Failure::new(
+            "usage",
+            "--bead and --why must be nonempty",
+            "pass --bead <id> and --why <reason>",
+        ));
+    }
+    let mut selected = tier.map(String::from);
+    let mut reason = why.map(String::from);
+    let mut authorized_flagship = false;
+    if let Some(id) = bead {
+        let bytes = bd(&["show", id, "--json"], cwd)?;
+        let value: Value = serde_json::from_slice(&bytes).map_err(|_| {
+            Failure::new(
+                "bead_read_failed",
+                "bd returned invalid JSON",
+                "run bd show <id> --json",
+            )
+        })?;
+        let item = value
+            .as_array()
+            .filter(|a| a.len() == 1)
+            .and_then(|a| a.first())
+            .filter(|v| v["id"].as_str() == Some(id))
+            .ok_or_else(|| {
+                Failure::new(
+                    "bead_not_found",
+                    format!("bd did not return bead {id}"),
+                    "run bd show <id> --json in the local checkout",
+                )
+            })?;
+        let (derived, source, labelled) = bead_tier(item)?;
+        if tier.is_some_and(|t| t != derived) && why.is_none() {
+            return Err(Failure::new(
+                "usage",
+                format!("--tier differs from bead tier {derived}"),
+                "pass --why <reason> to override the bead tier",
+            ));
+        }
+        selected = Some(tier.unwrap_or(derived).into());
+        authorized_flagship =
+            labelled && derived == "flagship" && selected.as_deref() == Some("flagship");
+        reason = reason.or(Some(source));
+    }
+    if selected.as_deref() == Some("flagship") && !authorized_flagship && why.is_none() {
+        return Err(Failure::new(
+            "usage",
+            "flagship requires a recorded reason",
+            "pass --why <reason> (or use a bead labelled tier:flagship)",
+        ));
+    }
+    Ok(Policy {
+        tier: selected,
+        why: reason,
+        bead: bead.map(String::from),
+    })
+}
+
+impl Policy {
+    pub fn record(&self, model: Option<&str>, cwd: Option<&str>) -> Result<(), Failure> {
+        if let Some(id) = &self.bead {
+            let note = format!(
+                "mux spawn selection: tier={}, model={}, reason={}",
+                self.tier.as_deref().unwrap_or("-"),
+                model.unwrap_or("-"),
+                self.why.as_deref().unwrap_or("-")
+            );
+            bd(&["update", id, "--append-notes", &note], cwd)?;
+        }
+        Ok(())
+    }
+}
+
 pub struct Selection {
     pub args: Vec<String>,
     pub model: Option<String>,
@@ -59,7 +199,7 @@ pub fn required(kind: &str, cwd: Option<&str>) -> Failure {
     .join("; ");
     Failure::new(
         "usage",
-        "spawn requires --tier flagship|balanced|budget (no default)",
+        "spawn requires --bead <id> or --tier flagship|balanced|budget (no default)",
         &choices,
     )
 }

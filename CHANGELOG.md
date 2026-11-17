@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 231 · 2026-11-17
+
+- feature: `mux spawn --bead <id>` derives its tier from the bead label or type.
+  A differing `--tier` requires `--why`; flagship also requires a reason unless
+  the bead labels it `tier:flagship`. Bead notes and `mux show` retain the chosen
+  tier, model and reason; the brief names the bead.
+
 ## 230 · 2026-11-17
 
 - feature: Cross-machine hc children without an app space appear in the sidebar's

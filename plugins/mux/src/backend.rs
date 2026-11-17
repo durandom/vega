@@ -96,6 +96,7 @@ pub fn normalize(t: &Value) -> Value {
         .map(String::from)
         .or_else(|| tier::explicit_model(&argv));
     json!({"parent":t["parent"].as_str().or(t["labels"]["vega.parent"].as_str()),
+        "tier_why":t["labels"]["vega.tier-why"],"bead":t["labels"]["vega.bead"],
         "mode":t["labels"]["vega.mode"],"tier":t["labels"]["vega.tier"],"model":model,
         "pane_id":pane,"name":name,"agent":kind,"agent_status":t["status"]["state"],"backend":"hc",
         "cwd":t["foreground"]["cwd"].as_str().or(t["cwd"].as_str()).unwrap_or(""),

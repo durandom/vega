@@ -18,8 +18,12 @@ Unknown does not prove an empty inbox. Inspect `vega post log --pane <pane>`
 on the owning host for broker read status without acknowledging mail.
 
 Spawn and adopt default to headed. For unattended sentinels, use
-`vega mux spawn <name> --kind claude --tier balanced --headless` or `vega uac adopt --headless` so questions go to
+`vega mux spawn <name> --kind claude --bead <id> --headless` or `vega uac adopt --headless` so questions go to
 the parent. Older children without a valid mode record remain headless.
+
+Spawn derives tier from the bead label, then type; differing --tier and flagship
+need --why (a tier:flagship label authorizes flagship). See `vega mux spawn --help`.
+
 
 attention (from vegad and `vega post done`): input (blocked on a question or
 approval), failure (done --outcome failed), silent (idle after its prompt

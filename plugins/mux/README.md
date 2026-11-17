@@ -40,13 +40,22 @@ Commands: `vega mux`, `show`, `transcript`, `send`, `dialog`, `answer`, `spawn`,
 hc targets focus through `herdr-app do agent.focus`. In the TUI, use herdr's goto
 overlay (`prefix+g`, then `d`) to list done agents across machines and switch to one.
 
-`spawn` requires `--tier flagship|balanced|budget` with no default: flagship for
-design/root-cause, balanced for normal implementation, budget for mechanical work.
-Lanista's project pins resolve the model per kind (Pi uses zai);
-`vega lanista pin <lane> --tier <tier>` shows the selected pin. An explicit
-`-m`/`--model` after `--` wins and needs no tier; `--no-parent` is also exempt.
-Spawn records retain tier and model for `show` and `reopen`; the UAC agent table
-shows them too. Local `--cwd` selects the pin project; remote spawns use the caller's project.
+`spawn --bead <id>` derives the tier from a `tier:flagship|balanced|budget` label,
+then from type: decision/research -> flagship, task/bug/feature/epic -> balanced,
+chore -> budget. Unknown types need a tier label. A differing explicit `--tier`
+requires `--why "<reason>"`. Flagship requires `--why` unless the bead labels it
+`tier:flagship`; that label is recorded as the reason. Bead lookup and note appends
+use the local `bd` CLI with a 10-second timeout and fail before launch on error.
+The brief names the bead; notes record tier/model/reason before launch.
+Without `--bead`, choose `--tier flagship|balanced|budget`: design/root-cause,
+implementation, mechanical. Flagship still needs `--why`.
+Lanista project pins resolve the model per kind (Pi uses zai);
+`vega lanista pin <lane> --tier <tier>` shows the selected pin. Explicit
+`-m`/`--model` after `--` wins over pins; without a bead it and `--no-parent` need
+no tier. Neither bypasses bead policy or the flagship reason requirement.
+Spawn records retain bead/tier/model/reason for `show` and `reopen`; hc publishes
+`vega.tier-why` and `vega.bead` labels. The UAC agent table shows tier/model.
+Local `--cwd` selects the pin and bead project; remote spawns use the caller's project.
 
 `spawn` records your pane as the agent's parent: its brief carries the done-report footer, and vegad and `vega uac`
 track it. `spawn --no-parent` records none and sends the brief with the origin line only, for an agent that reports

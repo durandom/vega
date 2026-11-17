@@ -47,8 +47,14 @@ Findings from the live test:
 
 ### `spawn` (added 2026-10-06)
 
-`vega mux spawn <name> --kind K --tier T [--cwd D] [--at tab|split|workspace] [--prompt TEXT] [-- extra args]` is a thin wrapper over herdr:
+`vega mux spawn <name> --kind K --bead ID [--cwd D] [--at tab|split|workspace] [--prompt TEXT] [-- extra args]` is a thin wrapper over herdr:
 `tab create --workspace <mine>` (default), `pane split`, or `workspace create`, then `agent start`. `--prompt` goes through `send`, so it carries the reply footer.
+
+Current spawn policy: `--bead <id>` derives tier from its `tier:*` label or type
+(decision/research flagship; task/bug/feature/epic balanced; chore budget). Differing
+`--tier` needs `--why`; flagship needs `--why` unless labelled `tier:flagship`.
+Notes and `show` retain tier/model/reason. See `plugins/mux/help/spawn.md`.
+
 
 Deviations from section 3 below:
 

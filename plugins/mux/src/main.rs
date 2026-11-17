@@ -21,6 +21,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use clap::builder::TypedValueParser;
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::Value;
@@ -225,11 +226,17 @@ enum Cmd {
         /// herdr agent kind, e.g. codex, claude, pi, agy (see `herdr agent`)
         #[arg(long, required_unless_present = "resume")]
         kind: Option<String>,
-        /// Deliberate model choice (required unless --no-parent or extra args set a model)
-        #[arg(long, value_parser = ["flagship", "balanced", "budget"])]
-        tier: Option<String>,
+        /// Override the bead tier, or choose a tier without --bead
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["flagship", "balanced", "budget"]).map(String::into_boxed_str))]
+        tier: Option<Box<str>>,
+        /// Derive the tier from this bead (label overrides type)
+        #[arg(long)]
+        bead: Option<Box<str>>,
+        /// Reason for a tier override or flagship selection
+        #[arg(long)]
+        why: Option<Box<str>>,
         /// Deliver the saved brief of a spawn that stopped at a dialog, once the user answered it
-        #[arg(long, value_name = "PANE", conflicts_with_all = ["name", "kind", "tier", "cwd", "at", "prompt", "prompt_file", "worktree", "env", "no_parent", "headless", "args"])]
+        #[arg(long, value_name = "PANE", conflicts_with_all = ["name", "kind", "tier", "bead", "why", "cwd", "at", "prompt", "prompt_file", "worktree", "env", "no_parent", "headless", "args"])]
         resume: Option<String>,
         /// Working directory of the new agent [default: current directory]
         #[arg(long)]
@@ -476,6 +483,8 @@ fn main() -> ExitCode {
             name,
             kind,
             tier,
+            bead,
+            why,
             cwd,
             at,
             prompt,
@@ -489,7 +498,19 @@ fn main() -> ExitCode {
             resume,
         }) => match resume {
             Some(pane) => resume_spawn(&pane),
-            None => read_text(prompt.as_deref(), prompt_file.as_ref(), "prompt").and_then(|p| {
+            None => tier::policy(
+                tier.as_deref(),
+                bead.as_deref(),
+                why.as_deref(),
+                cwd.as_deref(),
+            )
+            .and_then(|policy| {
+                let p = read_text(prompt.as_deref(), prompt_file.as_ref(), "prompt")?;
+                let p = match (&policy.bead, p) {
+                    (Some(id), Some(text)) => Some(format!("{text}\n\nBead: {id}")),
+                    (Some(id), None) => Some(format!("Bead: {id}")),
+                    (None, p) => p,
+                };
                 let place = match worktree {
                     Some(branch) => Place::Worktree { branch, base },
                     None => Place::At(at.unwrap_or(At::Tab)),
@@ -505,7 +526,7 @@ fn main() -> ExitCode {
                     no_parent,
                     spawn_mode(headless),
                     &args,
-                    tier.as_deref(),
+                    &policy,
                 )
             }),
         },
@@ -554,6 +575,7 @@ fn validate(cmd: &Cmd) -> Option<Failure> {
         Cmd::Spawn {
             kind: Some(kind),
             tier: None,
+            bead: None,
             args,
             no_parent: false,
             resume: None,
@@ -926,6 +948,24 @@ fn show(target: &str, lines: u32) -> Result<(), Failure> {
             a["model"]
                 .as_str()
                 .or_else(|| selection.as_ref().and_then(|r| r.model.as_deref()))
+                .unwrap_or("-")
+        )
+    );
+    println!(
+        "tier_why: {}",
+        cell(
+            a["tier_why"]
+                .as_str()
+                .or_else(|| selection.as_ref().and_then(|r| r.tier_why.as_deref()))
+                .unwrap_or("-")
+        )
+    );
+    println!(
+        "bead: {}",
+        cell(
+            a["bead"]
+                .as_str()
+                .or_else(|| selection.as_ref().and_then(|r| r.bead.as_deref()))
                 .unwrap_or("-")
         )
     );
@@ -1410,16 +1450,38 @@ fn spawn(
     no_parent: bool,
     mode: Mode,
     extra: &[String],
-    tier: Option<&str>,
+    policy: &tier::Policy,
 ) -> Result<(), Failure> {
     if backend::spawn_hc()? {
         return hc_spawn::spawn(
-            name, kind, cwd, place, prompt, user_env, no_parent, mode, extra, tier, None,
+            name,
+            kind,
+            cwd,
+            place,
+            prompt,
+            user_env,
+            no_parent,
+            mode,
+            extra,
+            policy.tier.as_deref(),
+            Some(policy),
+            None,
         )
         .map(|_| ());
     }
     spawn_inner(
-        name, kind, cwd, place, prompt, user_env, no_parent, mode, extra, tier, None,
+        name,
+        kind,
+        cwd,
+        place,
+        prompt,
+        user_env,
+        no_parent,
+        mode,
+        extra,
+        policy.tier.as_deref(),
+        Some(policy),
+        None,
     )
     .map(|_| ())
 }
@@ -1436,6 +1498,7 @@ fn spawn_inner(
     mode: Mode,
     extra: &[String],
     tier: Option<&str>,
+    policy: Option<&tier::Policy>,
     reopening: Option<&vega_herdr::state::SpawnRecord>,
 ) -> Result<String, Failure> {
     if machine().is_some() && matches!(place, Place::Worktree { .. }) {
@@ -1453,6 +1516,9 @@ fn spawn_inner(
         ));
     }
     let selection = tier::select(kind, tier, extra, cwd.as_deref())?;
+    if let Some(policy) = policy {
+        policy.record(selection.model.as_deref(), cwd.as_deref())?;
+    }
     let extra = selection.args.as_slice();
     // Headroom of the kind's provider, read while the agent starts. A model
     // resolved to a lanista route also carries its route facts (cost class,
@@ -1676,6 +1742,8 @@ fn spawn_inner(
             extra: extra.to_vec(),
             tier: tier.map(String::from),
             model: selection.model.clone(),
+            tier_why: policy.and_then(|p| p.why.clone()),
+            bead: policy.and_then(|p| p.bead.clone()),
             ..Default::default()
         });
     lineage.pane = pane.clone();

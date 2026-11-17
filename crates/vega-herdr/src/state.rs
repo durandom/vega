@@ -1016,6 +1016,10 @@ pub struct SpawnRecord {
     pub tier: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub tier_why: Option<String>,
+    #[serde(default)]
+    pub bead: Option<String>,
     /// Launch argv without the task (harness first), for an in-place resume.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argv: Vec<String>,
