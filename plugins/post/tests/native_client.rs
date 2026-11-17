@@ -186,8 +186,33 @@ mod native {
         }
     }
     fn output(mut c: Command, success: bool) -> String {
-        let o = c.output().unwrap();
+        let label = c
+            .get_args()
+            .map(|a| a.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut child = c
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(40);
+        let mut timed_out = false;
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= until {
+                timed_out = true;
+                child.kill().unwrap();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let o = child.wait_with_output().unwrap();
         let text = String::from_utf8(o.stdout).unwrap();
+        assert!(
+            !timed_out,
+            "native command timed out ({label}): {text}\n{}",
+            String::from_utf8_lossy(&o.stderr)
+        );
         assert_eq!(
             o.status.success(),
             success,
@@ -237,6 +262,7 @@ mod native {
         broker: &mut Broker,
         conf: &Path,
     ) {
+        eprintln!("native relay: guarded delivery and ack ownership");
         let state = win.root.join("hc-state.json");
         let sends = win.root.join("sends.jsonl");
         let set = |status: &str, screen: &str| {
@@ -318,6 +344,7 @@ mod native {
             .unwrap()
             .is_none());
         });
+        eprintln!("native relay: pointer state and lock restart");
         // Killing the worker releases its lock; persisted pointer state survives restart.
         worker.0.kill().unwrap();
         worker.0.wait().unwrap();
@@ -334,6 +361,7 @@ mod native {
         wait_for(|| ready.exists());
         std::thread::sleep(Duration::from_secs(3));
         assert_eq!(lines(), 1, "restart does not duplicate unread pointer");
+        eprintln!("native relay: broker restart and hc outage recovery");
         // A broker restart retains inbox state; the same worker reconnects/rescans.
         rt.block_on(async {
             broker.0.kill().unwrap();
@@ -348,7 +376,10 @@ mod native {
                 .unwrap();
             // Drive the test observer's current-thread runtime through reconnect too.
             tokio::time::sleep(Duration::from_secs(3)).await;
-            client.flush().await.unwrap();
+            tokio::time::timeout(Duration::from_secs(15), client.flush())
+                .await
+                .expect("test observer did not reconnect to the restarted broker")
+                .unwrap();
         });
         set("outage", "❯ ");
         std::thread::sleep(Duration::from_secs(3));
@@ -365,6 +396,7 @@ mod native {
         win.run(&["inbox"], "t4");
         peer.run(&["send", "--host", win.host, "t4", "next mail"], "t2");
         wait_for(|| lines() == 2);
+        eprintln!("native relay: detached start lifetime");
         drop(_again);
         let mut start = win.cmd(&["relay", "start"], "t4");
         start.env("FAKE_STATE", &state).env("FAKE_SENDS", &sends);
