@@ -3136,6 +3136,7 @@ dependencies = [
  "vega-theme-sync",
  "vega-transcript",
  "vega-uber-msg",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

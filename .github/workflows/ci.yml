@@ -100,6 +100,7 @@ jobs:
           foreach ($package in $manifest) { $packages += @('-p', $package.package) }
           cargo clippy @packages --all-targets -- -D warnings
       - name: Native client and mux target tests
+        timeout-minutes: 5
         run: |
           $packages = @()
           $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json

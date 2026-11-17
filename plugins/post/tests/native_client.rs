@@ -191,9 +191,12 @@ mod native {
             .map(|a| a.to_string_lossy())
             .collect::<Vec<_>>()
             .join(" ");
+        use std::io::{Read, Seek};
+        let mut stdout = tempfile::tempfile().unwrap();
+        let mut stderr = tempfile::tempfile().unwrap();
         let mut child = c
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(stdout.try_clone().unwrap())
+            .stderr(stderr.try_clone().unwrap())
             .spawn()
             .unwrap();
         let until = Instant::now() + Duration::from_secs(40);
@@ -206,19 +209,24 @@ mod native {
             }
             std::thread::sleep(Duration::from_millis(25));
         }
-        let o = child.wait_with_output().unwrap();
-        let text = String::from_utf8(o.stdout).unwrap();
+        let status = child.wait().unwrap();
+        stdout.rewind().unwrap();
+        stderr.rewind().unwrap();
+        let mut text = String::new();
+        let mut diagnostics = String::new();
+        stdout.read_to_string(&mut text).unwrap();
+        stderr.read_to_string(&mut diagnostics).unwrap();
         assert!(
             !timed_out,
             "native command timed out ({label}): {text}\n{}",
-            String::from_utf8_lossy(&o.stderr)
+            diagnostics
         );
         assert_eq!(
-            o.status.success(),
+            status.success(),
             success,
             "status {:?}: {text}\n{}",
-            o.status,
-            String::from_utf8_lossy(&o.stderr)
+            status,
+            diagnostics
         );
         text
     }
@@ -237,11 +245,28 @@ mod native {
     impl Drop for OwnedWorker {
         fn drop(&mut self) {
             #[cfg(windows)]
-            let _ = Command::new("taskkill.exe")
-                .args(["/PID", &self.0, "/F"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            {
+                use windows_sys::Win32::{
+                    Foundation::CloseHandle,
+                    System::Threading::{
+                        OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+                        PROCESS_TERMINATE,
+                    },
+                };
+                // SAFETY: this PID came from the owned starter, and the handle is closed.
+                unsafe {
+                    let h = OpenProcess(
+                        PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
+                        0,
+                        self.0.parse().unwrap(),
+                    );
+                    if !h.is_null() {
+                        TerminateProcess(h, 1);
+                        WaitForSingleObject(h, 5000);
+                        CloseHandle(h);
+                    }
+                }
+            }
             #[cfg(unix)]
             let _ = Command::new("kill").args(["-TERM", &self.0]).status();
         }
@@ -400,7 +425,32 @@ mod native {
         drop(_again);
         let mut start = win.cmd(&["relay", "start"], "t4");
         start.env("FAKE_STATE", &state).env("FAKE_SENDS", &sends);
-        let started = output(start, true);
+        // Read lines and EOF separately: a detached worker must not keep the
+        // starter's capture pipe alive after the starter has exited.
+        let mut starter = start
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdout = starter.stdout.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stdout).lines() {
+                if tx.send(Some(line.unwrap())).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(None);
+        });
+        let mut started = String::new();
+        while !started.contains("pid: ") {
+            let line = rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("starter did not report readiness")
+                .expect("starter exited without a PID");
+            started.push_str(&line);
+            started.push('\n');
+        }
         assert!(started.contains("relay: started"), "{started}");
         let pid = started
             .lines()
@@ -408,10 +458,21 @@ mod native {
             .unwrap()
             .to_string();
         let _owned = OwnedWorker(pid);
+        assert!(starter.wait().unwrap().success());
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2))
+                .expect("detached worker inherited starter stdout pipe"),
+            None
+        );
+        reader.join().unwrap();
+        eprintln!("native relay: starter returned and capture reached EOF");
         // Starter exited, but its detached child still owns the lock.
         assert!(win
             .run(&["relay", "start"], "t4")
             .contains("already running"));
+        eprintln!("native relay: duplicate start confirmed");
+        drop(_owned);
+        eprintln!("native relay: owned worker cleanup finished");
     }
     pub fn suite() {
         let temp = tempfile::tempdir().unwrap();
