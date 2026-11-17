@@ -390,16 +390,27 @@ fn origin_name_within(project: &str, budget: Duration) -> Option<String> {
         Some(rest) => vega_herdr::platform::home()?.join(rest),
         None => std::path::PathBuf::from(project),
     };
-    let out = vega_herdr::output_within(
-        std::process::Command::new("git")
-            .arg("--git-dir")
-            .arg(dir)
-            .args(["config", "--get", "remote.origin.url"])
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0"),
-        budget,
-    )
-    .ok()??;
+    let mut command = std::process::Command::new("git");
+    #[cfg(unix)]
+    command
+        .arg("--git-dir")
+        .arg(dir)
+        .args(["config", "--get", "remote.origin.url"]);
+    #[cfg(windows)]
+    command.arg("-C").arg(dir).args([
+        // As in the project resolver, Git's config reader needs a relative
+        // filename rather than a verbatim Win32 --git-dir argument.
+        "config",
+        "--file",
+        "config",
+        "--includes",
+        "--get",
+        "remote.origin.url",
+    ]);
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    let out = vega_herdr::output_within(&mut command, budget).ok()??;
     if !out.status.success() {
         return None;
     }
