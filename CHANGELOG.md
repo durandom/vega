@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 236 · 2026-11-17
+
+- feature: The app's not-provisioned check for remote vegad starts now reads hc's launch error from stderr, where
+  hc prints it; io-win no longer shows "vegad start failed" (vega-nic.28.11).
+
 ## 235 · 2026-11-17
 
 - feature: Connected machines without vega's runtime are reported as not provisioned.

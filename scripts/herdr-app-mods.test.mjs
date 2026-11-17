@@ -1111,7 +1111,10 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
   ]) {
     const h=load('vega'); let now=1e12, current=result; const logs=[];
     h.api.Date={now:()=>now}; h.api.console={log:s=>logs.push(s)};
-    h.api.exec=async()=>({code:0,stdout:JSON.stringify({code:current.error?1:0,stdout:JSON.stringify(current)})});
+    // Real hc shape: launch errors go to stderr with exit 1 and an empty stdout.
+    h.api.exec=async()=>({code:0,stdout:JSON.stringify(current.error
+      ?{code:1,stdout:'',stderr:JSON.stringify(current)}
+      :{code:0,stdout:JSON.stringify(current),stderr:''})});
     h.mod.machines=[{name:'io-win',state:'connected'}];
     for(let i=0;i<4;i++) {
       await h.mod.startRemotes(h.cx);

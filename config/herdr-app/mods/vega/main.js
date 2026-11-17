@@ -426,8 +426,10 @@ export default class Vega extends View {
         try {
           const r = await exec("python3", ["-c", startRelay, "hc", "exec", "--json", "--on", name, "--timeout", "20", "--", "sh", "-c", remoteStart]);
           const outer = r.code === 0 ? JSON.parse(r.stdout) : {code: -1};
-          const result = outer.stdout ? JSON.parse(outer.stdout) : {};
-          // hc returns launch errors as JSON with exit 1; command results use exit 0.
+          // hc prints command results as JSON on stdout (exit 0) and launch errors as
+          // JSON on stderr (exit 1).
+          const raw = outer.stdout || (outer.code === 1 ? outer.stderr : "");
+          const result = raw ? JSON.parse(raw) : {};
           // Match only missing sh, not permission, connection or relay errors.
           notProvisioned = (outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal) ||
             ([0, 1].includes(outer.code) && result.error?.kind === "spawn_failed" && result.error?.message === "cannot start sh: program not found");
