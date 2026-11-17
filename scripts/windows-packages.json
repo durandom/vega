@@ -40,5 +40,11 @@
     "binaries": [
       "vega-skills"
     ]
+  },
+  {
+    "package": "vega-mux",
+    "binaries": [
+      "vega-mux"
+    ]
   }
 ]

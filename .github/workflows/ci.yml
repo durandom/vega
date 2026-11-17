@@ -87,19 +87,19 @@ jobs:
           Invoke-WebRequest "https://github.com/nats-io/nats-server/releases/download/v$version/$archive.zip" -OutFile "$env:RUNNER_TEMP/nats.zip"
           Expand-Archive "$env:RUNNER_TEMP/nats.zip" "$env:RUNNER_TEMP/nats"
           "$env:RUNNER_TEMP/nats/$archive" >> $env:GITHUB_PATH
-      - name: Native client check
+      - name: Native client and mux target check
         run: |
           $packages = @()
           $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json
           foreach ($package in $manifest) { $packages += @('-p', $package.package) }
           cargo check @packages --all-targets
-      - name: Native client clippy
+      - name: Native client and mux target clippy
         run: |
           $packages = @()
           $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json
           foreach ($package in $manifest) { $packages += @('-p', $package.package) }
           cargo clippy @packages --all-targets -- -D warnings
-      - name: Native client tests
+      - name: Native client and mux target tests
         run: |
           $packages = @()
           $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json

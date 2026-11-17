@@ -59,8 +59,8 @@ if cmd=='run':
  (root/'counter').write_text(i[1:])
  if p.get('on'): i=p['on']+'/'+i
  labels=p['labels']
- assert p['argv'][0]==labels['vega.kind']
- t=terminal({'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':p['argv'][0],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0})
+ assert p['argv'][0]==(os.environ.get('TEST_WINDOWS_EXE',labels['vega.kind']))
+ t=terminal({'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':labels['vega.kind'],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0})
  ts[i]=t;save()
  if p.get('on') and (root/'remote-home').exists():
   local=dict(t,address=i.split('/')[-1])
@@ -80,7 +80,11 @@ elif cmd=='exec':
  elif a[a.index('--')+2]=='record-spawn':
   import base64
   out,errb,rc=base64.b64decode(a[-1]),b'',0
- else: out,errb,rc=(json.dumps({'schema':1,'trust':None})+'\n').encode(),b'',0
+ else:
+  prepared={'schema':1,'trust':None}
+  if os.environ.get('TEST_WINDOWS_EXE'):
+   prepared.update(platform='windows',executable=os.environ['TEST_WINDOWS_EXE'],cwd=a[a.index('--cwd')+1])
+  out,errb,rc=(json.dumps(prepared)+'\n').encode(),b'',0
  # machine.exec wraps the program's output: base64 stdout/stderr plus its exit code.
  import base64
  failure=os.environ.get('TEST_RECORD_FAILURE') if a[a.index('--')+2]=='record-spawn' else os.environ.get('TEST_MODE_FAILURE')

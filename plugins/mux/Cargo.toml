@@ -7,14 +7,12 @@ description = "Agent-to-agent messaging over herdr"
 publish = false
 
 [dependencies]
-vega-lanista = { path = "../lanista" }
 vega-build = { path = "../../crates/vega-build" }
 clap = { version = "4", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 base64 = "0.22"
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-registry = { path = "../../crates/vega-registry" }
-vega-transcript = { path = "../../crates/vega-transcript" }
 vega-plugin = { path = "../../crates/vega-plugin" }
 
 [build-dependencies]
@@ -22,3 +20,10 @@ vega-build = { path = "../../crates/vega-build" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+vega-lanista = { path = "../lanista" }
+vega-transcript = { path = "../../crates/vega-transcript" }
+
+[features]
+target-only = []

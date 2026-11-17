@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "target-only")))]
 use serde_json::Value;
 use std::{
     fs,
@@ -1813,4 +1814,136 @@ fn bead_uses_local_cwd_and_derived_tier_resolves_the_pin() {
     assert!(fs::read_to_string(f.root().join("bd-calls"))
         .unwrap()
         .contains("model=gpt-6.1-sol"));
+}
+
+#[test]
+fn windows_remote_spawn_preserves_native_argv_env_and_policy_records() {
+    use base64::Engine;
+    for (kind, exe) in [
+        (
+            "codex",
+            r"C:\ProgramData\orrery\codex\0.166.0\bin\codex.exe",
+        ),
+        ("claude", r"C:\Users\hild\.local\bin\claude.exe"),
+    ] {
+        let f = Fixture::new();
+        let cwd = r"G:\checkout Grüße with spaces\$literal";
+        success(
+            f.cmd()
+                .env("TEST_MACHINES", REMOTE_MACHINES)
+                .env("TEST_WINDOWS_EXE", exe)
+                .args([
+                    "spawn",
+                    "worker",
+                    "--kind",
+                    kind,
+                    "--machine",
+                    "remote",
+                    "--cwd",
+                    cwd,
+                    "--tier",
+                    "balanced",
+                    "--why",
+                    "Windows native validation",
+                    "--headless",
+                    "--prompt",
+                    "native task",
+                    "--env",
+                    "SPECIAL=a b $literal Grüße",
+                    "--",
+                    "--model",
+                    "coordinator-choice",
+                ])
+                .output()
+                .unwrap(),
+        );
+        let calls = f.calls();
+        let run = calls.iter().find(|v| v[0] == "run").unwrap();
+        let p = &run[1];
+        assert_eq!(p["argv"][0], exe);
+        assert_eq!(p["cwd"], cwd);
+        assert_eq!(p["env"]["SPECIAL"], "a b $literal Grüße");
+        assert_eq!(p["labels"]["vega.kind"], kind);
+        assert_eq!(p["labels"]["vega.tier"], "balanced");
+        assert_eq!(p["labels"]["vega.model"], "coordinator-choice");
+        assert_eq!(p["labels"]["vega.mode"], "headless");
+        assert_eq!(p["labels"]["vega.tier-why"], "Windows native validation");
+        assert!(p["labels"].get("herdr.space").is_none());
+        assert!(p["argv"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("vega post done"));
+        let exec = calls
+            .iter()
+            .find(|v| v.as_array().unwrap().iter().any(|x| x == "record-spawn"))
+            .unwrap();
+        let payload = exec.as_array().unwrap().last().unwrap().as_str().unwrap();
+        let request: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::STANDARD
+                .decode(payload)
+                .unwrap(),
+        )
+        .unwrap();
+        let record = &request["record"];
+        assert_eq!(record["cwd"], cwd);
+        assert_eq!(record["argv"][0], exe);
+        assert_eq!(
+            record["parent"],
+            serde_json::json!({"pane":"t7","host":"test"})
+        );
+        assert_eq!(record["model"], "coordinator-choice");
+        assert_eq!(record["tier_why"], "Windows native validation");
+        assert!(record["started_ms"].as_u64().unwrap() > 0);
+        assert!(!record["env"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().unwrap().starts_with("SPECIAL=")));
+        assert!(!f.root().join("app-calls").exists());
+        assert!(!f.root().join("renice-calls").exists());
+    }
+}
+
+#[test]
+fn windows_remote_refuses_worktrees_and_bad_executable_before_launch() {
+    for (exe, worktree) in [
+        (r"C:\bin\codex.exe", true),
+        ("codex.exe", false),
+        (r"C:\bin\codex.cmd", false),
+    ] {
+        let f = Fixture::new();
+        let mut c = f.cmd();
+        c.env("TEST_MACHINES", REMOTE_MACHINES)
+            .env("TEST_WINDOWS_EXE", exe)
+            .args([
+                "spawn",
+                "worker",
+                "--kind",
+                "codex",
+                "--machine",
+                "remote",
+                "--cwd",
+                r"G:\repo",
+            ]);
+        if worktree {
+            c.args(["--worktree", "branch"]);
+        }
+        let out = c.args(["--", "-m", "chosen"]).output().unwrap();
+        assert!(!out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(if worktree {
+                "Windows targets do not support --worktree"
+            } else {
+                "invalid Windows preparation"
+            }),
+            "{text}"
+        );
+        assert!(!f.calls().iter().any(|v| v[0] == "run"));
+        assert!(!f.root().join("app-calls").exists());
+    }
 }

@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "target-only")))]
 #[path = "../../../crates/vega-herdr/tests/fixtures/own-terminal.rs"]
 mod common;
 use std::io::Write;

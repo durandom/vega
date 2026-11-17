@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "target-only")))]
 //! After a reboot hc restores kept terminals with a shell: reopen and the
 //! vegad boot pass resume claude, codex and pi in place (vega-0h4c.72).
 //! One test: the in-process boot pass sets process-wide env.

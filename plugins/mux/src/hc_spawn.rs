@@ -161,6 +161,12 @@ pub fn spawn(
     if machine().is_none() && !no_parent {
         vega_herdr::project::resolve_optional(Path::new(&cwd), &vega_herdr::state::post_host())?;
     }
+    let executable = remote_prepared
+        .as_ref()
+        .filter(|v| v["platform"] == "windows")
+        .and_then(|v| v["executable"].as_str())
+        .unwrap_or(kind)
+        .to_string();
     let trust_line = if let Some(prepared) = remote_prepared {
         prepared["trust"].as_str().map(String::from)
     } else {
@@ -212,7 +218,7 @@ pub fn spawn(
             launch_env.insert(k.into(), v.into());
         }
     }
-    let mut args = vec![kind.to_string()];
+    let mut args = vec![executable];
     let mut agent_args = spawn_args(kind, &[("SSH_AUTH_SOCK", socket.as_deref())], user, &[]);
     if kind == "codex" {
         // The child ID/socket are created by hc, not the parent's environment.
@@ -425,7 +431,40 @@ fn prepare_remote(target: &str, kind: &str, cwd: &str, place: &Place) -> Result<
             "deploy the matching vega version to the target before spawning",
         ));
     }
+    if prepared["platform"] == "windows" {
+        if matches!(place, Place::Worktree { .. }) {
+            return Err(Failure::new(
+                "unsupported",
+                "Windows targets do not support --worktree",
+                "create the checkout separately and spawn with --cwd <absolute Windows path>",
+            ));
+        }
+        let executable = prepared["executable"].as_str().unwrap_or("");
+        if !matches!(kind, "codex" | "claude")
+            || !windows_absolute(executable)
+            || !executable.to_ascii_lowercase().ends_with(".exe")
+            || !windows_absolute(cwd)
+            || prepared["cwd"] != cwd
+        {
+            return Err(Failure::new(
+                "remote_prepare_failed",
+                "target returned an invalid Windows preparation result",
+                "deploy matching vega binaries and pass an absolute Windows checkout path",
+            ));
+        }
+    }
     Ok(prepared)
+}
+
+// Validate target paths using Windows syntax, independent of the coordinator OS.
+fn windows_absolute(path: &str) -> bool {
+    let b = path.as_bytes();
+    (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
+        || path.strip_prefix("\\\\").is_some_and(|p| {
+            let mut parts = p.split('\\');
+            parts.next().is_some_and(|s| !s.is_empty())
+                && parts.next().is_some_and(|s| !s.is_empty())
+        })
 }
 
 /// Check the configured socket before invoking a CLI that emits plain-text
@@ -471,7 +510,10 @@ fn exec_output(target: &str, wrapped: &Value) -> Result<Value, Failure> {
         return Err(fail(format!(
             "{target}: vega-mux prepare exited {}: {}",
             wrapped["code"],
-            String::from_utf8_lossy(&stderr).trim()
+            serde_json::from_slice::<Value>(&stdout)
+                .ok()
+                .and_then(|v| v["error"]["message"].as_str().map(String::from))
+                .unwrap_or_else(|| String::from_utf8_lossy(&stderr).trim().to_string())
         )));
     }
     serde_json::from_slice(&stdout)

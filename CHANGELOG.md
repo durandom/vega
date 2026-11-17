@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 238 · 2026-11-17
+
+- feature: Unix coordinators can spawn native Codex and Claude agents on Windows
+  hc machines with an absolute Windows `--cwd`. The Windows installer includes
+  `vega-mux.exe` for native executable preparation and launch/parent records;
+  tier/model selection stays on the coordinator. Windows targets reject
+  `--worktree`; create the checkout separately first.
+
 ## 237 · 2026-11-17
 
 - feature: Native Windows `vega post` supports status, send/reply, inbox, log,

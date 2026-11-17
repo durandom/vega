@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "target-only")))]
 //! Public CLI validation must happen before reading briefs or creating panes.
 use std::process::Command;
 
