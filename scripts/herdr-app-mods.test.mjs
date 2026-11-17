@@ -2599,3 +2599,42 @@ test('keychain indicator includes agent count, fix hint and expires agent claims
   assert(lock.tooltipValue.includes('agent.sock: unknown'));
   assert(!lock.tooltipValue.includes('3 keys'));
 });
+
+test('registered services retain project ownership across fleet scans and legacy entries degrade',()=>{
+  const h=load('vega-services'), attribute=vm.runInContext('attribute',h.api);
+  const terms=['a','b'].map((p,i)=>({address:`ganymede/t${i}`,state:'live',pid:10+i,
+    labels:{'herdr.space':p,'vega.project-id':`git:example/${p}`},foreground:{cwd:`/repo/${p}`}}));
+  const spaces=['a','b'].map(p=>({id:`ganymede/${p}`,name:p}));
+  const listeners=[
+    {pid:100,project:'git:example/a',title:'Explicit A'},
+    {pid:101,cwd:'/repo/a/src',title:'Legacy cwd A'},
+    {pid:102,title:'Legacy pid B'},
+    {pid:103,title:'Unknown global'},
+    {pid:104,project:'git:example/absent',title:'Absent project'},
+  ].map((r,i)=>({...r,registered:true,port:5300+i,host:'127.0.0.1',name:'node'}));
+  const snapshot={parents:{100:11,102:11},cwds:{},listeners};
+  const rows=attribute(snapshot,'ganymede',terms,spaces,[]);
+  assert.equal(rows[0].project,'git:example/a','explicit owner overrides foreign ancestry');
+  assert.equal(rows[0].space,'');
+  assert.equal(rows[1].project,'git:example/a');assert.equal(rows[2].project,'git:example/b');
+  assert.equal(rows[3].global,true);assert.equal(rows[4].global,false);
+  Object.assign(h.mod,{rows,errors:[],forwards:new Map(),pending:new Set(),targets:new Map()});
+  h.api.terminals=()=>terms;h.api.focused=()=>({terminal:'ganymede/t1'});
+  let text=JSON.stringify(h.render());
+  assert(text.includes('Legacy pid B'));assert(text.includes('Global services (owner unknown)'));
+  for(const title of ['Explicit A','Legacy cwd A','Absent project']) assert(!text.includes(title),title);
+  h.mod.showAgentPorts=true;assert(!JSON.stringify(h.render()).includes('Explicit A'));
+  h.api.focused=()=>({terminal:'ganymede/t0'});text=JSON.stringify(h.render());
+  assert(text.includes('Explicit A'));assert(text.includes('Legacy cwd A'));assert(!text.includes('Legacy pid B'));
+  assert.equal(h.calls.length,0);
+});
+
+test('browser listeners and daemon descendants never become services',()=>{
+  const h=load('vega-services'), attribute=vm.runInContext('attribute',h.api);
+  const processes={100:'/opt/agent-browser-darwin-arm64 --daemon',101:'/opt/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --remote-debugging-port=0',102:'node node /lib/agent-browser/dist/daemon.js',103:'worker',104:'node node /repo/server.js --title chrome',105:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',106:'/usr/bin/chromium --remote-debugging-port=0'};
+  const snapshot={parents:{100:10,101:10,102:10,103:100,104:10,105:10,106:10},cwds:{},processes,
+    listeners:Object.keys(processes).map(pid=>({pid:Number(pid),port:60000+Number(pid),name:'node',host:'127.0.0.1',registered:true,title:'Registered'}))};
+  const terms=[{address:'t1',state:'live',pid:10,labels:{'herdr.space':'s','vega.project-id':'a'}}];
+  const rows=attribute(snapshot,null,terms,[{id:'s',name:'A'}],[]);
+  assert.deepEqual(Array.from(rows,r=>r.pid),[104]);
+});

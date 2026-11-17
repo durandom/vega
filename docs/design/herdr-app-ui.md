@@ -596,7 +596,7 @@ Only the focused project's services appear, across all its machines/spaces;
 the focused live `vega.role=uber` terminal alone enables the unscoped list.
 Project resolution follows sidebar identity rules: full IDs, unambiguous legacy
 names, UAC space labels and live ancestors. An unresolved focus shows only
-unattributed registrations in their explicit host group.
+registrations with no resolvable project in the labelled global group.
 Herdr's live focus renders update the filter without timers or rescanning. Owned
 forwards survive a scope switch and become visible again with their project.
 Attribution follows PID ancestry to a live terminal, then the most specific pane
@@ -645,9 +645,14 @@ listener. Stop removes it; a second forward followed by layout teardown exercise
 cleanup. This sentinel only used fake tests, never started that live flow.
 
 Registered services use host/port identities, retaining titles and owned forwards
-across listener restarts. When ancestry/cwd attribution fails they appear under
-Registered services / Host registrations across project filters, explicitly host
-scoped rather than guessed into a project. A still-live registered process without
+across listener restarts. New registrations persist the registering checkout's
+canonical project and cwd. That owner wins over live ancestry, including on fleet
+scans (`exec` on ganymede runs the same helper and carries ownership fields).
+Legacy entries fall back to PID/cwd attribution; only unresolved project owners
+appear in one Global services (owner unknown) group. Re-register from the owning
+checkout to migrate old entries without requiring an agent pane to stay alive.
+Agent-browser daemons, Chrome/Chromium and their descendants are excluded from
+Services even with Show agent ports enabled; Browsers owns their display. A still-live registered process without
 a listener shows Stopped. Rows independently label running/forwarded/stopped,
 host, and remote port versus local forward; only owned forwards offer Stop.
 

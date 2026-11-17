@@ -15,13 +15,23 @@ Entries are atomic JSON files keyed by port under `$XDG_STATE_HOME/vega/services
 PID plus process start identity prevents metadata surviving process exit or PID
 reuse. Registration must match a live listener; listing and panel Refresh prune
 expired entries. JSON schema 1 has `services` entries with `port`, `pid`, `start`,
-`title`, `description`, `url`, and optional `also_forward` port array; the default list is compact TOON. Errors are
+`title`, `description`, `url`, `project` (canonical UAC identity), `cwd`, and optional `also_forward` port array; the default list is compact TOON. Errors are
 structured with usage exit 2 or runtime exit 1.
 
-The panel keeps its project/space attribution and explicit SSH forwarding.
+Register from the owning project checkout on the service host. The CLI resolves
+its canonical identity (including linked worktrees) without network access; outside
+a repository it records cwd with an empty project. Project resolution errors fail
+registration rather than silently making it global. Re-register existing entries
+from their owning checkout to persist ownership. Legacy entries still use live
+PID/cwd attribution, otherwise one labelled Global services (owner unknown) group.
+The panel scopes explicit owners even when no live project pane remains; fleet
+scans carry these fields from each host, including ganymede.
+
+The panel keeps explicit SSH forwarding.
 Metadata is matched by PID and port, never port alone. Recognized runtime
 executables/package paths are hidden until **Show agent ports** is selected;
-registered services remain visible. No deployment, service start, forwarding or
+registered services remain visible within their project. Browser and agent-browser
+process listeners are excluded entirely; they belong in Browsers. No deployment, service start, forwarding or
 browser action happens during registration.
 
 Agent guide: `vega skills service`.

@@ -92,14 +92,14 @@ def scan(enrich=True):
                 listener["agent"] = agent_runtime(processes.get(str(listener["pid"]), listener["name"]))
                 entry = entries.get(listener["port"])
                 if entry and entry["pid"] == listener["pid"]:
-                    listener.update({k: entry[k] for k in ("title", "description", "url")})
+                    listener.update({k: entry[k] for k in ("title", "description", "url", "project", "cwd") if k in entry})
                     listener["registered"] = True
                     listener["also_forward"] = entry.get("also_forward", [])
         for port, entry in entries.items():
             if not any(r["port"] == port and r["pid"] == entry["pid"] for r in listeners):
                 listeners.append({**entry, "registered": True, "gone": True,
                                   "host": "127.0.0.1", "name": entry["title"], "scheme": "tcp"})
-    return dict(listeners=listeners, parents=parents, cwds=cwds, home=str(Path.home()))
+    return dict(listeners=listeners, parents=parents, cwds=cwds, processes=processes, home=str(Path.home()))
 
 
 def agent_runtime(process):
@@ -154,6 +154,8 @@ def read_entries(folder):
                 or not isinstance(entry.get("start"), str) or not entry["start"]
                 or any(not isinstance(entry.get(k), str) for k in ("title", "description", "url"))):
             raise ValueError(f"Invalid service entry {path}; remove or repair it")
+        if any(k in entry and not isinstance(entry[k], str) for k in ("project", "cwd")):
+            raise ValueError(f"Invalid service ownership {path}; remove or repair it")
         extra = entry.get("also_forward", [])
         if (not isinstance(extra, list) or any(type(p) is not int or not 0 < p < 65536 for p in extra)
                 or len(set([entry["port"], *extra])) != len(extra) + 1):
@@ -249,6 +251,8 @@ def cli(args):
                 valid = False
             if not valid:
                 raise UsageError("--url must be an HTTP(S) loopback URL with the registered port (paths allowed)")
+        if os.environ.get("VEGA_SERVICE_PROJECT_ERROR"):
+            raise ValueError(os.environ["VEGA_SERVICE_PROJECT_ERROR"])
         owners = {r["pid"] for r in scan(enrich=False)["listeners"] if r["port"] == options.port}
         pid = options.pid
         if pid is None:
@@ -262,7 +266,8 @@ def cli(args):
             raise ValueError("Listener process has exited; retry after starting the service")
         entry = dict(schema=1, port=options.port, pid=pid, start=start,
                      title=options.title, description=options.description, url=options.url,
-                     also_forward=options.also_forward)
+                     also_forward=options.also_forward, cwd=os.getcwd(),
+                     project=os.environ.get("VEGA_SERVICE_PROJECT", ""))
         with registry_lock() as folder:
             with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as out:
                 temp = Path(out.name)

@@ -60,6 +60,15 @@ export function serviceAddress(row, forward) {
   if (!forward || !/^(https?|tcp):\/\//i.test(address)) return address;
   return address.replace(/^((?:https?|tcp):\/\/)[^/?#]+/i, (_match, scheme) => `${scheme}127.0.0.1:${forward.local}`);
 }
+// ps includes comm plus argv; inspect executable/package positions, not arbitrary args.
+export function browserProcess(process) {
+  const words = (process ?? "").trim().split(/\s+/);
+  const executable = words[0]?.split("/").at(-1) ?? "";
+  if (/^(?:agent-browser(?:-[a-z0-9-]+)?|chrome|chromium|chromium-browser|chrome-headless-shell|headless_shell)$/i.test(executable)) return true;
+  // macOS comm/argv paths can contain spaces, including the executable name.
+  if (/^(?:\S*\/)?(?:Google Chrome|Chromium)(?: for Testing)?(?: Helper[^/]*)?(?=\s|$|\/|\.app\/)/.test(process)) return true;
+  return /^(?:node|bun)$/.test(executable) && words.slice(1, 3).some(word => /\/agent-browser\/dist\/daemon\.js$/.test(word));
+}
 export function attribute(snapshot, machine, allTerms, allSpaces, allPanes) {
   const terms = allTerms.filter(t => t.state === "live" && machineOf(t.address) === machine);
   const candidates = terms.map(term => ({term, space: spaceOf(term, allSpaces)})).filter(x => x.space);
@@ -68,7 +77,16 @@ export function attribute(snapshot, machine, allTerms, allSpaces, allPanes) {
   const context = projectContext(allTerms);
   const rows = new Map();
   for (const listener of snapshot.listeners) {
-    let owner = null, pid = listener.pid;
+    let owner = null, pid = listener.pid, browser = false;
+    const project = listener.registered && listener.project;
+    const browserSeen = new Set();
+    while (pid > 1 && !browserSeen.has(pid)) {
+      browserSeen.add(pid);
+      if (browserProcess(snapshot.processes?.[pid] ?? (pid === listener.pid ? listener.name : ""))) { browser = true; break; }
+      pid = snapshot.parents[pid];
+    }
+    if (browser) continue;
+    pid = listener.pid;
     const visited = new Set();
     while (pid > 1 && !visited.has(pid)) {
       visited.add(pid);
@@ -76,23 +94,25 @@ export function attribute(snapshot, machine, allTerms, allSpaces, allPanes) {
       pid = snapshot.parents[pid];
     }
     if (!owner) {
-      const cwd = snapshot.cwds[listener.pid];
+      const cwd = listener.cwd || snapshot.cwds[listener.pid];
       const matches = candidates.flatMap(c => {
         const pane = allPanes.find(p => p.terminal === c.term.address);
-        const dir = pane?.cwd || c.term.foreground?.cwd;
+        const dir = pane?.cwd || c.term.foreground?.cwd || c.space.folder;
         return dir && dir !== "/" && dir !== snapshot.home && cwd && (cwd === dir || cwd.startsWith(`${dir}/`)) ? [{...c, dir}] : [];
       }).sort((a,b) => b.dir.length - a.dir.length);
       // Equal specificity in different spaces is ambiguous: leave it unassigned.
       if (matches.length && !matches.some(c => c.dir.length === matches[0].dir.length && c.space.id !== matches[0].space.id)) owner = matches[0];
     }
+    if (project && owner && context.ofTerm(owner.term) !== project) owner = null;
     if (!owner && !listener.registered) continue;
+    const ownerProject = project || (owner && context.ofTerm(owner.term));
     const host = listener.host === "::1" || listener.host === "::" ? "::1" : "127.0.0.1";
     // Only loopback or wildcard listeners are reachable at the loopback destination.
     if (!["127.0.0.1", "::1", "::", "0.0.0.0", "*"].includes(listener.host)) continue;
     const key = JSON.stringify(listener.registered ? [machine, "registered", listener.port] : [machine, listener.pid, listener.port, host]);
     rows.set(key, {...listener, host, key, machine, space: owner?.space.id ?? "",
-      spaceName: owner?.space.name ?? "Host registrations", unattributed: !owner,
-      project: owner ? context.ofTerm(owner.term) ?? "Other spaces" : "Registered services"});
+      spaceName: owner?.space.name ?? "Host registrations", global: !ownerProject && listener.registered,
+      project: ownerProject || (listener.registered ? "Global services (owner unknown)" : "Other spaces")});
   }
   return [...rows.values()];
 }

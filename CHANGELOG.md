@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 229 · 2026-11-17
+
+- feature: Services scopes registrations to their owning project across hosts and
+  excludes agent-browser/Chrome listeners (shown in Browsers).
+- migration: Re-register existing services from their owning checkout on each host
+  to persist project and cwd. Older entries still use PID/cwd attribution; unknown
+  owners appear in one labelled global group. Refresh the panel after registration.
+
 ## 228 · 2026-11-17
 
 - unit: `browser.agent-browser` skips a host that has neither agent-browser nor npm on PATH

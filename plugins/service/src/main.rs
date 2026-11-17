@@ -17,9 +17,32 @@ fn main() -> ExitCode {
         }
         _ => {}
     }
+    // Resolve once on the registering host, using the same identity as UAC labels.
+    // Pass failures to the backend so argument validation/help still comes first.
+    let mut project = String::new();
+    let mut project_error = String::new();
+    if args
+        .iter()
+        .find(|arg| arg.as_str() != "--json")
+        .is_some_and(|arg| arg == "register")
+        && !args.iter().any(|arg| arg == "--help")
+    {
+        match env::current_dir() {
+            Ok(cwd) => {
+                match vega_herdr::project::resolve_optional(&cwd, &vega_herdr::state::post_host()) {
+                    Ok(Some(owner)) => project = owner.id.to_string(),
+                    Ok(None) => {}
+                    Err(error) => project_error = format!("{}; {}", error.message, error.hint),
+                }
+            }
+            Err(error) => project_error = format!("Could not read registration cwd: {error}"),
+        }
+    }
     let error = Command::new("python3")
         .args(["-c", BACKEND, "cli"])
         .args(args)
+        .env("VEGA_SERVICE_PROJECT", project)
+        .env("VEGA_SERVICE_PROJECT_ERROR", project_error)
         .env("VEGA_SERVICE_BIN", env::current_exe().unwrap_or_default())
         .exec();
     println!("error: python3 could not start ({error})\nhelp: install Python 3 and retry vega service ls");

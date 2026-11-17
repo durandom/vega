@@ -5,7 +5,7 @@ description: Registers host-local service titles, descriptions and URLs for the 
 
 # vega service
 
-Run on the service's host; this never starts services or tunnels.
+Run from the owning project checkout on the service's host; this never starts services or tunnels.
 
 - `vega service register --port <port> --title "<title>" [--description "<text>"] [--url <url>] [--pid <pid>] [--also-forward <port>]`
   replaces that port's metadata. PID defaults to its unique listener owner; use
@@ -19,15 +19,18 @@ Run on the service's host; this never starts services or tunnels.
 - URLs must be HTTP(S) loopback URLs with the registered port. Paths, queries
   and fragments survive SSH forwarding. Omit URL to use protocol detection.
 - Refresh the Services panel to read each machine's metadata. Titles and
-  descriptions replace process-only labels. Without terminal ancestry or cwd
-  attribution, registrations appear in Host registrations across project filters.
+  descriptions replace process-only labels. Registrations persist canonical project
+  and cwd; only that project's scope shows them. Re-register old entries from the
+  owning checkout to persist ownership. Legacy PID/cwd attribution still works;
+  unresolved owners appear in one labelled global group.
 - Repeat `--also-forward <port>` for dependent loopback ports (for example 5320
   plus 8367). One Forward/Stop controls the entire bundle. Registered services
   always use matching local port numbers, preserving URLs baked into web pages.
   A local port conflict fails the whole action; stop its owner and retry. Extra
   ports may belong to different processes; the primary PID owns registration lifetime.
 - Agent runtimes are hidden by default; **Show agent ports** reveals them.
-  Registered ports remain visible. Forward uses private-host SSH `-L` to
+  Registered ports remain visible within their project. Browser/agent-browser
+  listeners are excluded from Services (see Browsers). Forward uses private-host SSH `-L` to
   loopback only; Stop or panel close ends its tunnel.
 
 Spire on ganymede (after installing the CLI there):

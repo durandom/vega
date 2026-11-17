@@ -219,7 +219,7 @@ export default class Services extends View {
     const button = (id, text, action) => div().id(id).px(7).py(3).rounded(4).text_color(t.accent).hover(s => s.bg(t.hover))
       .on_mouse_down("left", (_e,cx) => cx.stop_propagation()).on_click((_e,cx) => action(cx)).child(text);
     const scope = selectedProject(focused(), terminals());
-    const rows = this.rows.filter(row => (row.unattributed || scope.all || (scope.project && row.project === scope.project)) && (this.showAgentPorts || !row.agent || row.title || this.forwards.has(row.key)));
+    const rows = this.rows.filter(row => (row.global || scope.all || (scope.project && row.project === scope.project)) && (this.showAgentPorts || !row.agent || row.title || this.forwards.has(row.key)));
     const browsers = this.browserSection(t, scope);
     let group = "";
     return v_flex().size_full().min_h(0).bg(t.background).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.foreground)
@@ -229,7 +229,7 @@ export default class Services extends View {
       .children(this.errors.map(e => div().px(12).py(4).text_color(t.blocked).child(e)))
       .child(v_flex().id("services-list").flex_1().min_h(0).overflow_y_scroll().p(10).gap(6)
         .children(rows.map(row => {
-          const header = `${row.project} · ${row.spaceName} · ${row.machine ?? "local"}`;
+          const header = row.global ? "Global services (owner unknown)" : `${row.project} · ${row.spaceName} · ${row.machine ?? "local"}`;
           const changed = group !== header; group = header;
           const f = this.forwardFor(row), busy = this.pending.has(row.key) || this.pending.has(this.forwardKey(row));
           const allowed = row.machine && privateTarget(row.machine) && privateTarget(this.targets.get(row.machine));

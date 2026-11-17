@@ -147,12 +147,15 @@ class ServicesTest(unittest.TestCase):
                 return result("100 10 /bin/codex codex app-server\n101 10 node vite\n")
             return result('LISTEN 0 128 127.0.0.1:5187 0.0.0.0:* users:(("node",pid=100,fd=4))\n'
                           'LISTEN 0 128 127.0.0.1:9000 0.0.0.0:* users:(("node",pid=101,fd=5))\n')
-        entries = {5187: dict(pid=100, title="Spire", description="Evidence", url="https://127.0.0.1:5187/path"),
+        entries = {5187: dict(pid=100, title="Spire", description="Evidence", url="https://127.0.0.1:5187/path", project="github.com/example/a", cwd="/repo/a"),
                    9000: dict(pid=999, title="Wrong process", description="", url="")}
         with patch.object(helper, "registrations", return_value=entries), patch.object(helper, "command", processes), patch.object(helper.shutil, "which", return_value="ss"), patch.object(helper.os, "readlink", return_value="/repo"), patch.object(helper, "protocol", return_value="http"):
             rows = helper.scan()["listeners"]
             self.assertEqual(rows[0]["title"], "Spire")
             self.assertTrue(rows[0]["registered"])
+            self.assertEqual(rows[0]["project"], "github.com/example/a")
+            self.assertEqual(rows[0]["cwd"], "/repo/a")
+            self.assertEqual(helper.scan()["processes"]["100"], "/bin/codex codex app-server")
             self.assertTrue(rows[0]["agent"])
             self.assertNotIn("title", rows[1])
             self.assertFalse(rows[1]["agent"])
