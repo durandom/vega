@@ -1113,7 +1113,7 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
     const h=load('vega'); let now=1e12, current=result; const logs=[];
     h.api.Date={now:()=>now}; h.api.console={log:s=>logs.push(s)};
     // Real hc shape: launch errors go to stderr with exit 1 and an empty stdout.
-    h.api.exec=async(_bin,args)=>{ const reply = args.includes('vega-post.exe') && current.error?.message === 'cannot start sh: program not found' ? {error:{kind:'spawn_failed',message:'cannot start vega-post.exe: program not found'}} : current; return {code:0,stdout:JSON.stringify(reply.error
+    h.api.exec=async(_bin,args)=>{ const reply = args.includes('vega-post.exe') && (current.error?.message === 'cannot start sh: program not found' || (current.code === 77 && current.stdout)) ? {error:{kind:'spawn_failed',message:'cannot start vega-post.exe: program not found'}} : current; return {code:0,stdout:JSON.stringify(reply.error
       ?{code:1,stdout:'',stderr:JSON.stringify(reply)}
       :{code:0,stdout:JSON.stringify(reply),stderr:''})}; };
     h.mod.machines=[{name:'io-win',state:'connected'}];
@@ -1134,6 +1134,21 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
     assert.equal(h.mod.startError,null);
     assert.equal(h.mod.started.get('io-win').notProvisioned,false);
   }
+});
+
+test('Git sh without a Unix vega-post falls through to the native Windows worker',async()=>{
+  const h=load('vega'); const calls=[];
+  h.api.exec=async(_bin,args)=>{
+    calls.push(Array.from(args));
+    const reply=args.includes('sh') ? {code:77,stdout:Buffer.from('vega-not-provisioned\n').toString('base64')} : {code:0};
+    return {code:0,stdout:JSON.stringify({code:0,stdout:JSON.stringify(reply),stderr:''})};
+  };
+  h.mod.machines=[{name:'io-win',state:'connected'}];
+  await h.mod.startRemotes(h.cx);
+  assert.equal(calls.length,2);
+  assert.deepEqual(calls[1].slice(-3),['vega-post.exe','relay','start']);
+  assert.equal(h.mod.startError,null);
+  assert.equal(h.mod.started.get('io-win').notProvisioned,false);
 });
 
 test('missing sh starts the Windows worker with direct argv and retries real launch failures',async()=>{

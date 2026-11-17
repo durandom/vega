@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 240 · 2026-11-17
+
+- feature: The app starts the native Windows pointer worker (`vega-post.exe relay start`) also on a Windows
+  host whose PATH has Git's `sh` but no Unix vega-post; before, Git's `sh` made it report the host as not
+  provisioned (vega-nic.28.9).
+
 ## 239 · 2026-11-17
 
 - feature: Native Windows `vega-post.exe relay start` runs one local hc pointer

@@ -432,11 +432,11 @@ export default class Vega extends View {
           };
           let {outer, result} = await start(["sh", "-c", remoteStart]);
           const missing = (program) => [0, 1].includes(outer.code) && result.error?.kind === "spawn_failed" && result.error?.message === `cannot start ${program}: program not found`;
-          if (missing("sh")) {
+          // A Windows host has no sh, or has Git's sh without a Unix vega-post: try the native worker.
+          const unixMissing = outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal;
+          if (missing("sh") || unixMissing) {
             ({outer, result} = await start(["vega-post.exe", "relay", "start"]));
             notProvisioned = missing("vega-post.exe");
-          } else {
-            notProvisioned = outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal;
           }
           ok = Boolean(outer.skipped) || (outer.code === 0 && result.code === 0 && !result.timed_out && !result.signal);
         } catch (_) {}
