@@ -1,6 +1,7 @@
 // Native mail client and minimal local pointer worker; no full vegad jobs.
 mod client_identity;
 mod client_key;
+mod core_doctor;
 #[allow(dead_code)] // Shared policy also includes Unix daemon features.
 mod delivery;
 mod native_relay;
@@ -40,6 +41,8 @@ struct Cli {
 enum Cmd {
     /// Broker, host, verified caller and unread count
     Status,
+    /// Inspect the local hc core session without starting it or needing a broker
+    Doctor,
     /// Send mail, or reply with the timestamped --re token from inbox
     #[command(
         after_help = "Examples:\n  vega post send --host proteus t7 \"<text>\"\n  vega post send --uac . \"<text>\"\n  vega post send --host proteus t7 --re <thread>/<hop>@<ms> \"<reply>\""
@@ -138,6 +141,7 @@ fn main() -> ExitCode {
     }
     let result = match cli.command {
         None | Some(Cmd::Status) => home(),
+        Some(Cmd::Doctor) => core_doctor::doctor(),
         Some(Cmd::Relay { action }) => native_relay::run(action),
         Some(Cmd::Keygen) => client_key::keygen(),
         Some(Cmd::Identity { action }) => client_identity::run(action),

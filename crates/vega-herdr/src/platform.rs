@@ -241,7 +241,7 @@ impl ProcessTree {
 #[cfg(windows)]
 pub(crate) use windows::ProcessTree;
 #[cfg(windows)]
-pub use windows::{parent_of, processes};
+pub use windows::{parent_of, processes, session_id};
 
 #[cfg(windows)]
 mod windows {
@@ -316,6 +316,18 @@ mod windows {
                 let _ = child.wait();
             }
             result
+        }
+    }
+
+    /// Windows login session of a known process (0 is the Services session).
+    pub fn session_id(pid: u32) -> io::Result<u32> {
+        use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+        let mut session = 0;
+        // SAFETY: session is a valid writable DWORD for the duration of the call.
+        if unsafe { ProcessIdToSessionId(pid, &mut session) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(session)
         }
     }
 

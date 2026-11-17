@@ -111,3 +111,6 @@ jobs:
       - name: PowerShell 5.1 source installer
         shell: powershell
         run: .\scripts\windows-install.ps1 -Checkout $PWD.Path -SkipUpdate
+      - name: PowerShell 5.1 core autostart registration
+        shell: powershell
+        run: .\scripts\windows-core-autostart.test.ps1

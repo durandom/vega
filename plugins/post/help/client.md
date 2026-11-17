@@ -4,6 +4,7 @@ State: %LOCALAPPDATA%\vega. Use a private user profile or owner-restricted XDG d
 
 Examples:
   vega post status
+  vega post doctor                 # Windows: local core session, no broker needed
   vega post send --host proteus t7 "<text>"
   vega post inbox
   vega post log --since 2h

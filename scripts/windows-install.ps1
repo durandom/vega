@@ -14,11 +14,20 @@ param(
     [string]$Ref = 'main',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\vega'),
     [switch]$SkipUpdate,
-    [switch]$NativeTls
+    [switch]$NativeTls,
+    [switch]$CoreAutostart,
+    [switch]$CoreAutostartOnly,
+    [string]$HcPath = (Join-Path $env:LOCALAPPDATA 'Programs\herdr-core\hc.exe')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Opt-in: mail clients can be installed without hc. Registration never starts it.
+if ($CoreAutostartOnly) {
+    & (Join-Path $PSScriptRoot 'windows-core-autostart.ps1') -HcPath $HcPath
+    exit 0
+}
 
 function Invoke-Native {
     param([string]$Program, [string[]]$Arguments)
@@ -128,6 +137,9 @@ try {
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $newPath = Add-PathEntry $userPath $InstallDir
         if ($newPath -cne $userPath) { [Environment]::SetEnvironmentVariable('Path', $newPath, 'User') }
+    }
+    if ($CoreAutostart) {
+        & (Join-Path $Checkout 'scripts\windows-core-autostart.ps1') -HcPath $HcPath
     }
     Write-Output "Built $($packages.Count) Windows packages; installed $binaryCount executables in $InstallDir."
     if ($binaryCount -gt 0) { Write-Output 'Open a new shell to use the user PATH entry; running hc cores retain their environment.' }

@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 241 · 2026-11-17
+
+- optional: Windows installer `-CoreAutostart` registers hidden, non-elevated hc desktop startup
+  at logon; `-CoreAutostartOnly` registers without building or starting a core.
+- feature: Windows `vega post doctor` and `status` detect a Services/session-0 core or pipe access
+  denied and give recovery steps. See `docs/design/windows.md` for logon verification and ownership repair.
+
 ## 240 · 2026-11-17
 
 - feature: The app starts the native Windows pointer worker (`vega-post.exe relay start`) also on a Windows

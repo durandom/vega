@@ -680,3 +680,123 @@ job, UAC election, config deployment or administrative provisioning is included.
 CI uses an owned Rust hc fake and temporary restricted NATS broker. Logout/core
 lifetime and real native harness delivery remain acceptance work in 28.9; no live
 io/io-win run is part of this implementation.
+
+## Desktop core at logon and session-0 recovery (vega-nic.28.15)
+
+The intended core runs as **hild in a normal desktop session**, never as an
+administrator or from SSH. `hc.exe serve` is the server; `hc.exe hold` and
+`herdr-core.exe connect` are separate processes. A session-0 transport process
+alone is not evidence that the core is in session 0. On 2026-11-17, core PID
+46296 was confirmed in desktop session 1 without changing the running core.
+
+Register hidden user logon startup from a checkout containing both scripts:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-install.ps1 -CoreAutostartOnly
+```
+
+Or add `-CoreAutostart` to the normal source installer command. This is **opt-in**:
+vega mail clients do not require a local hc installation, and installing clients
+should not silently introduce another program at logon. `-HcPath <absolute-path>`
+overrides `%LOCALAPPDATA%\Programs\herdr-core\hc.exe`. The registration-only mode
+does no build, update, PATH change or core start, so it can be run over SSH.
+For a downloaded standalone installer, normal installation reads the helper from
+the resulting checkout; registration-only mode requires the sibling helper.
+
+The installer writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+value `VegaHcDesktopCore`, pointing at hidden `wscript.exe` and
+`%LOCALAPPDATA%\vega\core-autostart\logon.vbs`. WScript launches Windows
+PowerShell without a window; its encoded payload refuses session 0 and an
+elevated token, then runs the absolute `hc.exe server start`. No scheduled task,
+service, administrator grant or machine registry entry is involved. Reinstalling
+overwrites the same value/file; `hc server start` reuses an existing core and
+hc's core lock prevents a second server. An inaccessible core is left alone.
+Startup errors are logged to `core-autostart\last-start.log`; a session/elevation
+refusal exits before invoking hc. This does not guarantee startup before an SSH
+client connects, before login, or if Windows disables this Startup App.
+
+At the **next normal desktop logon**, the user verifies (do not log out active
+agents just to test):
+
+```powershell
+Get-ItemPropertyValue HKCU:\Software\Microsoft\Windows\CurrentVersion\Run VegaHcDesktopCore
+Get-Content "$env:LOCALAPPDATA\vega\core-autostart\last-start.log"
+vega post doctor
+$core = hc server status --json | ConvertFrom-Json
+Get-Process -Id $core.pid | Select-Object Id,SessionId,ProcessName
+```
+
+Expect one server with a nonzero desktop SessionId (Console is usually 1; RDP
+can differ), no startup window, and `hc_core: pid ..., session ... (desktop)`.
+`vega post doctor` needs no broker or hc terminal. It uses the existing-only
+Windows `hc server status`, then `ProcessIdToSessionId` in vega-herdr's platform
+layer. Session 0 returns `hc_core_session_zero`; pipe access denied returns
+`hc_core_access_denied` with an elevated/session-0 warning and recovery hint.
+Neither probe starts a core. `vega post status` runs it before caller/broker
+lookup, so a broken pipe is reported even when caller verification would fail.
+Other probe failures are explicit, never a healthy result. This requires Windows
+hc with existing-only `server status` (validated against io's 0.1.21).
+
+To remove only the autostart (does not stop a running core):
+
+```powershell
+Remove-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run VegaHcDesktopCore -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\vega\core-autostart" -Recurse -Force
+```
+
+### Recovery: user-operated, after coordinating active agents
+
+Stopping the core interrupts shared work. Arrange a maintenance window first.
+In an **elevated Windows terminal**, run:
+
+```powershell
+hc server stop
+```
+
+Close that elevated terminal. In a **normal desktop terminal as hild**, run:
+
+```powershell
+hc server start
+vega post doctor
+```
+
+Files created under the SSH/elevated token can belong to
+`BUILTIN\Administrators`, causing Git dubious ownership and harness login/state
+problems. After reviewing the affected directory, repair ownership from an
+appropriately privileged terminal, scoped to that directory:
+
+```powershell
+icacls <dir> /setowner io\hild /T /C /Q
+```
+
+`/C` continues after failures: inspect the summary and repair remaining failures.
+Do not apply this indiscriminately to a whole drive, system directories, or
+another user's data. Ownership repair does not reset ACLs or recover missing
+credentials; verify Git and harness login again from a normal desktop terminal.
+
+### Can SSH connect be prevented from starting the core?
+
+Reviewed `repos/herdr-core` at `de97ea5`, especially `cli.rs` (`Connect`),
+`client.rs` (`connect_starting`), `platform/windows.rs`,
+`platform/windows_session.rs`, and `machines.rs` (`connect_command`). There is
+no `hc connect --no-start` flag or machine-entry setting for existing-only
+connect. The existing guard refuses implicit elevated SSH startup **when the
+same user has a desktop session**; explicit `server start` bypasses it. With no
+desktop session, implicit SSH startup can still create a session-0 core. Logon
+autostart reduces that window but does not close it. io's installed 0.1.21
+`connect --help` likewise offers only `--session` and `--json`.
+
+No proteus/ganymede machine entries were changed. Proposed upstream issue:
+
+> Add existing-only remote connect for Windows desktop hosts. When a Windows
+> core is absent, SSH `hc connect` can implicitly create it in Services/session
+> 0 with an elevated network token. Desktop terminals then get pipe access
+> denied, harness credentials differ, and generated files can be owned by
+> Administrators. Add `hc connect --no-start` (using `require_existing`) and a
+> per-machine `autostart = false` setting passed by `connect_command`. Preserve
+> `--session`, return a structured unavailable error with a desktop-start hint,
+> and never create state, spawn a server or request UAC on this path. Test absent,
+> inaccessible and healthy cores, including SSH with no logged-in desktop.
+
+Once supported, enable existing-only connect for the **io-win entries only** on
+proteus and ganymede. Do not disable implicit startup for unrelated headless hosts.
