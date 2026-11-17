@@ -231,14 +231,21 @@ fn read_claude(file: &Path) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn claude_trusts(config: &Value, path: &str) -> bool {
+/// Claude's Windows project keys use disk-canonical case and forward slashes
+/// (observed with native Claude Code 2.1.296 on io-win). `real` resolves the
+/// directory, removing verbatim prefixes and non-root trailing separators.
+/// Keep this separate from the native paths used for git and Codex.
+fn claude_key(path: &str) -> String {
     #[cfg(windows)]
-    if let Some(projects) = config["projects"].as_object() {
-        return projects.iter().any(|(key, value)| {
-            real(key) == real(path) && value["hasTrustDialogAccepted"] == json!(true)
-        });
-    }
-    config["projects"][path]["hasTrustDialogAccepted"] == json!(true)
+    return real(path).replace('\\', "/");
+    #[cfg(not(windows))]
+    path.to_string()
+}
+
+fn claude_trusts(config: &Value, path: &str) -> bool {
+    // Do not canonicalize stored keys: Claude does an exact key lookup, so
+    // an old native-backslash entry cannot vouch for trust or pass read-back.
+    config["projects"][claude_key(path)]["hasTrustDialogAccepted"] == json!(true)
 }
 
 /// Claude's own check: `dir` or a parent of it up to the git toplevel.
@@ -290,7 +297,7 @@ fn set_trust(config: &mut Value, path: &str) -> bool {
         return false;
     };
     match projects
-        .entry(path)
+        .entry(claude_key(path))
         .or_insert_with(|| json!({}))
         .as_object_mut()
     {
@@ -614,12 +621,63 @@ mod tests {
             assert!(trusted(&text, plain), "{spelling}");
             assert!(has_project(&text, verbatim), "{spelling}");
             assert_eq!(hook_approvals(&text, plain), hooks, "{spelling}");
-            let claude = json!({"projects": {spelling: {"hasTrustDialogAccepted": true}}});
-            assert!(claude_trusts(&claude, verbatim));
         }
         let text = entries(plain, &[]).replace("\"trusted\"", "\"untrusted\"");
         assert!(has_project(&text, verbatim));
         assert!(!trusted(&text, verbatim));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn claude_windows_keys_match_native_claude_not_native_rust_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let checkout = dir.path().join("rally-ng-maps.win-native");
+        fs::create_dir(&checkout).unwrap();
+        let plain = dunce::canonicalize(&checkout).unwrap();
+        let plain = plain.to_str().unwrap();
+        let verbatim = fs::canonicalize(&checkout).unwrap();
+        let expected = plain.replace('\\', "/");
+        let mut lower_drive = plain.to_string();
+        lower_drive.replace_range(..1, &plain[..1].to_ascii_lowercase());
+        for spelling in [
+            plain.to_string(),
+            expected.clone(),
+            verbatim.to_str().unwrap().to_string(),
+            format!("{plain}\\"),
+            format!("{expected}/"),
+            lower_drive,
+        ] {
+            let mut config = json!({"projects": {}});
+            assert!(set_trust(&mut config, &spelling));
+            // Assert what Claude reads, independently of vega's lookup helper.
+            assert_eq!(config["projects"].as_object().unwrap().len(), 1);
+            assert_eq!(
+                config["projects"][&expected]["hasTrustDialogAccepted"],
+                true
+            );
+            assert!(claude_trusts(&config, &spelling));
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn claude_windows_repairs_old_backslash_trust_without_losing_project_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dunce::canonicalize(dir.path()).unwrap();
+        let plain = plain.to_str().unwrap();
+        let key = plain.replace('\\', "/");
+        let file = dir.path().join(".claude.json");
+        let mut config = json!({"other": 7, "projects": {
+            plain: {"hasTrustDialogAccepted": true, "lastCost": 2},
+            &key: {"hasTrustDialogAccepted": false, "mcpServers": {"keep": {}}}
+        }});
+        assert!(!claude_trusts(&config, plain));
+        assert!(!claude_walk(&config, plain, plain));
+        fs::write(&file, serde_json::to_vec(&config).unwrap()).unwrap();
+        trust_claude(&file, plain).unwrap();
+        config["projects"][&key]["hasTrustDialogAccepted"] = json!(true);
+        assert_eq!(read_claude(&file), config);
+        assert!(claude_walk(&read_claude(&file), plain, plain));
     }
 
     #[test]

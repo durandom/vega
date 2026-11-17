@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 243 · 2026-11-17
+
+- feature: Native Windows Claude spawns inherit repository trust using Claude's forward-slash
+  project keys. Old backslash entries no longer falsely report trust or prevent their repair
+  (vega-nic.28.16).
+
 ## 242 · 2026-11-17
 
 - feature: Headed `vega mux spawn --machine` children get tabs in a target-folder space,
