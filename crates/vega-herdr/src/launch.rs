@@ -513,8 +513,12 @@ fn with_suffix(file: &Path, suffix: &str) -> PathBuf {
 
 /// The path as the agents key it: symlinks resolved (`/tmp` is `/private/tmp`).
 fn real(path: &str) -> String {
+    // Verbatim Win32 paths require backslashes even when a config writer
+    // appended a forward-slash hook suffix. Normalize before opening the path.
     #[cfg(windows)]
-    let canonical = dunce::canonicalize(path);
+    let native = path.replace('/', "\\");
+    #[cfg(windows)]
+    let canonical = dunce::canonicalize(&native);
     #[cfg(not(windows))]
     let canonical = fs::canonicalize(path);
     let path = canonical
