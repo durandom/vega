@@ -360,11 +360,15 @@ impl Delivery {
     /// Listed without a status for STALE: the pointer may go into an empty
     /// input box (the relay checks the screen).
     pub fn unknown_long(&self, pane: &str) -> bool {
+        self.unknown_long_at(pane, Instant::now())
+    }
+
+    fn unknown_long_at(&self, pane: &str, now: Instant) -> bool {
         self.status_of(pane) == "unknown"
             && self
                 .unknown_since
                 .get(pane)
-                .is_some_and(|t| t.elapsed() >= STALE)
+                .is_some_and(|t| now.saturating_duration_since(*t) >= STALE)
     }
 
     pub fn is_urgent(&self, pane: &str) -> bool {
@@ -376,6 +380,10 @@ impl Delivery {
     /// and free ones the safety net re-points. `ignore_status` (`--once`)
     /// treats every pending pane as free.
     pub fn candidates(&self, ignore_status: bool) -> Vec<String> {
+        self.candidates_at(ignore_status, Instant::now())
+    }
+
+    fn candidates_at(&self, ignore_status: bool, instant: Instant) -> Vec<String> {
         let now = now_ms();
         let panes: HashSet<&String> = self.pending.iter().chain(self.arrivals.keys()).collect();
         let mut out: Vec<String> = panes
@@ -389,8 +397,10 @@ impl Delivery {
                 if !self.pending.contains(*p) {
                     return !ignore_status && is_free(status) && !held && self.stale(p, now);
                 }
-                let free =
-                    ignore_status || is_free(status) || status == "working" || self.unknown_long(p);
+                let free = ignore_status
+                    || is_free(status)
+                    || status == "working"
+                    || self.unknown_long_at(p, instant);
                 free && !held
                     && self
                         .pointed
@@ -1085,10 +1095,11 @@ mod tests {
         d.mail("w1:p1", Sender::Other);
         assert!(d.candidates(false).is_empty(), "fresh unknown waits");
         assert!(!d.unknown_long("w1:p1"));
-        let past = Instant::now().checked_sub(STALE).unwrap();
-        d.unknown_since.insert("w1:p1".into(), past);
-        assert!(d.unknown_long("w1:p1"));
-        assert_eq!(d.candidates(false), vec!["w1:p1"]);
+        // Windows Instant may be younger than STALE on a fresh CI runner.
+        // Advance the query clock instead of subtracting before its origin.
+        let later = Instant::now() + STALE;
+        assert!(d.unknown_long_at("w1:p1", later));
+        assert_eq!(d.candidates_at(false, later), vec!["w1:p1"]);
         assert!(d.may_queue("w1:p1"));
         // A status again ends it; unknown restarts the clock.
         d.status("w1:p1", "blocked");
