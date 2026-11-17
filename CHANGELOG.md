@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 233 · 2026-11-17
+
+- feature: Windows clients resolve common Git configuration, recognize existing
+  agent trust across native path spellings, and reliably clear a child's waiting
+  hand after a reply or dismissal.
+
 ## 232 · 2026-11-17
 
 - feature: The shared plugin and hc client libraries support native Windows

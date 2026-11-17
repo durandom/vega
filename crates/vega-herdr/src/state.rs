@@ -101,6 +101,10 @@ pub fn save_brief(machine: Option<&str>, pane: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
+    // Windows wall-clock ticks can coincide. Keep successive briefs distinct
+    // so a reply acknowledges exactly the brief that preceded it.
+    #[cfg(windows)]
+    let ms = ms.max(brief_of(machine, pane).unwrap_or(0).saturating_add(1));
     write(&state_file_on("briefs", machine, pane), &ms.to_string());
 }
 
@@ -601,7 +605,11 @@ pub fn settle(machine: Option<&str>, pane: &str) {
 /// The child sent its parent a message since its last new work: it is not
 /// silent, whatever channel it used.
 pub fn set_replied(machine: Option<&str>, pane: &str) {
-    write(&state_file_on("replied", machine, pane), "");
+    #[cfg(windows)]
+    let text = brief_of(machine, pane).unwrap_or(0).to_string();
+    #[cfg(not(windows))]
+    let text = String::new();
+    write(&state_file_on("replied", machine, pane), &text);
 }
 
 pub fn has_replied(machine: Option<&str>, pane: &str) -> bool {
@@ -616,6 +624,16 @@ pub fn owes(machine: Option<&str>, pane: &str) -> bool {
     let Some(brief) = brief_of(machine, pane) else {
         return false;
     };
+    // NTFS mtimes may lag the wall clock and are not a causal ordering. New
+    // Windows records name the answered brief; retain mtime reads for legacy
+    // empty records. Unix keeps its existing on-disk contract.
+    #[cfg(windows)]
+    if let Some(answered) = state_file_on("replied", machine, pane)
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|text| text.parse::<u128>().ok())
+    {
+        return brief > answered;
+    }
     let replied = state_file_on("replied", machine, pane)
         .and_then(|f| std::fs::metadata(f).ok())
         .and_then(|m| m.modified().ok())
@@ -1145,7 +1163,10 @@ mod tests {
             );
             return;
         }
-        let tick = || std::thread::sleep(std::time::Duration::from_millis(5));
+        let tick = || {
+            #[cfg(not(windows))]
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
         let pane = "hc:t1w";
         assert!(!owes(None, pane), "no brief: nothing owed");
         save_parent_on(None, pane, "fable-chat", "hc:t1n");

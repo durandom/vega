@@ -406,13 +406,15 @@ pub fn resolve(path: &Path, host: &str) -> Result<Project, Failure> {
             &["rev-parse", "--show-toplevel"],
         )?))?
     };
-    let config = common_dir.join("config");
     let output = git(
         &common_dir,
         &[
             "config",
             "--file",
-            path_text(&config)?,
+            // Git for Windows does not accept every verbatim Win32 path here.
+            // -C already selects the common directory; relative includes still
+            // resolve beside this file, including for linked worktrees.
+            "config",
             "--includes",
             "--null",
             "--list",
@@ -1076,6 +1078,35 @@ mod tests {
             resolve(tmp.path(), "host").unwrap_err().code,
             "project_git_failed"
         );
+    }
+
+    #[test]
+    fn common_config_resolves_relative_nested_includes() {
+        let tmp = TempDir::new().unwrap();
+        let path = repo(tmp.path(), "repo with spaces", false);
+        let config_dir = path.join(".git/config fragments");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("remote.cfg"),
+            "[include]\npath = nested.cfg\n",
+        )
+        .unwrap();
+        std::fs::write(
+            config_dir.join("nested.cfg"),
+            "[remote \"origin\"]\nurl = https://github.com/Team/Repo.git\n",
+        )
+        .unwrap();
+        config(&path, "include.path", "config fragments/remote.cfg");
+        for input in [
+            path.clone(),
+            path.canonicalize().unwrap(),
+            path.join(".git"),
+        ] {
+            assert_eq!(
+                resolve(&input, "host").unwrap().id.as_str(),
+                "github.com/team/repo"
+            );
+        }
     }
 
     #[test]
