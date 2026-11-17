@@ -9,6 +9,7 @@ mod hook;
 mod next;
 mod remote_mode;
 mod remote_spawn;
+mod remote_space;
 mod reopen;
 mod spawn_record;
 mod tier;

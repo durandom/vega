@@ -105,6 +105,7 @@ pub fn spawn(
         None
     };
     let mut placeholder = None;
+    let mut remote_placement = None;
     let mut tab_fallback = false;
     if let Place::Worktree { branch, base } = place {
         let (path, how) = if let Some(prepared) = &remote_prepared {
@@ -158,6 +159,13 @@ pub fn spawn(
         }
     }
 
+    if let Some(target) = machine().filter(|_| mode == Mode::Headed) {
+        match remote_space::prepare(target, &cwd, name) {
+            Ok(placement) => remote_placement = Some(placement),
+            Err(f) => println!("placement: child remains unplaced ({}); open herdr-app on a saved hc host connected to {target} and retry placement there", cell(&f.message)),
+        }
+    }
+
     if machine().is_none() && !no_parent {
         vega_herdr::project::resolve_optional(Path::new(&cwd), &vega_herdr::state::post_host())?;
     }
@@ -203,6 +211,10 @@ pub fn spawn(
     }
     if let Some(s) = space {
         labels["herdr.space"] = s.into();
+    }
+    if let Some(placement) = &remote_placement {
+        labels["herdr.space"] = placement.space.clone().into();
+        labels["herdr.tab"] = placement.tab.clone().into();
     }
     let mut launch_env = serde_json::Map::new();
     for k in ["TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "COLORTERM"] {
@@ -252,7 +264,7 @@ pub fn spawn(
             "name":name, "on":machine(), "outlive_parent":true, "die_with_parent":false,
             "no_parent":no_parent || !matches!(own, Some(Terminal::Hc(_))),
             "caller":own.as_ref().and_then(|t| match t { Terminal::Hc(p) => Some(p), _ => None }),
-            "wait":false,
+            "wait":false, "keep":remote_placement.is_some(),
         }),
         std::time::Duration::from_secs(30),
     )?;
@@ -275,6 +287,9 @@ pub fn spawn(
             )
         })?
         .to_string();
+    if let Some(placement) = &remote_placement {
+        placement.cleanup(&pane);
+    }
     // The agent is now in the space, so the shell that space.new made is
     // surplus: remove it so the agent is the space's only terminal. Removing
     // it earlier would close the space. Failure leaves a harmless extra shell.
@@ -355,7 +370,7 @@ pub fn spawn(
     if undelivered.is_some() {
         return Err(Failure::new("brief_not_delivered", format!("terminal {pane} started, but hc did not deliver its first message"), &format!("inspect `vega mux show {pane}`; after resolving startup, use `vega mux spawn --resume {pane}`")));
     }
-    if tab_fallback {
+    if tab_fallback && machine().is_none() {
         println!("placement: no local herdr-app; started as a tab in the caller's space");
     }
     println!(

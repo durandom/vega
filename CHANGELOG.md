@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 242 · 2026-11-17
+
+- feature: Headed `vega mux spawn --machine` children get tabs in a target-folder space,
+  reused or created with `focus:false`. Mux can reach an app window on another saved hc host
+  with direct argv, including Windows targets. Headless children stay unplaced; unreachable
+  placement prints a hint. Parent nesting in the sidebar is preserved.
+
 ## 241 · 2026-11-17
 
 - optional: Windows installer `-CoreAutostart` registers hidden, non-elevated hc desktop startup

@@ -4,6 +4,35 @@ Slice 5b of the [hc migration](hc-migration.md) (vega-0h4c.10): what vega shows 
 Slayer acts on it. Decided with the Slayer on 2026-11-07. Background: the herdr TUI sidebar (machines tree,
 priority-sorted agents list, vega tokens from `report-metadata`) and the former dashboard Inbox (preserved at `herdr-tui-final`).
 
+## Remote sentinel placement (vega-nic.27)
+
+A headed `vega mux spawn --machine <target> --cwd <folder>` starts a pane in
+its own target-machine tab. Mux reuses a space on that machine with the exact
+folder (including a remotely prepared worktree), or creates one. Both
+`space.new` and `tab.new` use `focus:false`. Machine-local IDs from the response
+become `herdr.space` and `herdr.tab` labels on `terminal.run`, with `keep:true`.
+Herdr adopts labelled terminals automatically; no user `terminal.keep` is needed.
+The placeholder shell is removed only after the window reports the child's pane;
+if confirmation fails, it remains with a warning rather than risking the space.
+
+The spawning host need not run the window: mux tries local `herdr-app ls`, then
+saved hc machines in inventory order, observing the command-direction policy.
+Remote probes use bounded `machine.exec` with direct `herdr-app` argv; commands
+run on the selected window host, not automatically on the child host. Thus a
+UAC on ganymede can ask the window on proteus to place a child on io or io-win.
+If the window itself runs on the target, its local spaces and bare IDs are used.
+The window must have the target saved under the same hc machine name; there is
+no hard-coded window host and no shell dependency on Windows. Discovery targets
+the default app home on remote hosts (the local CLI honours `HERDR_APP_HOME`).
+
+Without a reachable window, or after a failed placement command, spawning still
+succeeds without layout labels and prints a placement hint. A lost mutation
+response is not retried on another window, avoiding duplicate spaces. Headless
+remote children deliberately skip placement and discovery. Native hc parent
+lineage is unchanged: the sidebar's existing parent-address tree keeps children
+under the UAC even when they have panes in other spaces or on other machines.
+Tests use fake hc/herdr-app only; no live layout mutations are needed.
+
 ## Profile windows (vega-0h4c.85, vega-0h4c.86)
 
 `config/herdr-app/profiles/<name>.toml` declares `layout`, `mods`, `[settings]`,

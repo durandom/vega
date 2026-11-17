@@ -4,7 +4,14 @@ and uses --outlive-parent. --worktree uses wt and, with a local app, a new app s
 in the background: the space shown before is selected again (a warning on stderr when that fails). Explicit --at split
 or --at workspace is currently TUI-only. Without a local app binary, socket or window,
 worktree agents start as tabs in the caller's space with cwd set to the worktree.
-Remote --machine worktrees run wt on the target and use the ordinary tab path without local app space IDs.
+Remote --machine worktrees run wt on the target. Headed remote children get their own tab
+in a target-machine space matched by exact folder, or a new space, using focus:false.
+Mux finds a window with herdr-app ls locally, then on saved hc hosts via direct
+machine.exec argv (no shell, including Windows). It uses that window for placement,
+strips target-machine prefixes from space/tab IDs, and starts the child with both
+labels and core keep enabled. The sidebar still nests it under its parent across machines.
+Headless remote children stay unplaced. Without a reachable window, or when placement
+fails, spawn continues unplaced with a hint; it never borrows the parent's space IDs.
 hc receives env separately through terminal.run and the task at launch;
 show reports startup output. Session IDs are captured by ancestry-verified vega calls
 from the child, for commands such as mux and post.

@@ -17,15 +17,15 @@ Help: `--help`.
   `answer <target> --option N | --text "…"` answers questions only.
 - `vega mux spawn <name> --kind claude|codex|pi|agy --bead <id> --prompt-file <brief>`
   follows the caller; `--backend herdr|hc` overrides it.
-  hc uses `--outlive-parent` and the caller's space.
-  Headed by default; `--headless` redirects questions to the parent.
+  Remote headed children get target-folder tabs; headless stays unplaced.
+  `--headless` redirects questions to parent.
   Tier label wins; else decision/research flagship, task/bug/feature/epic balanced, chore budget.
   A differing --tier needs --why; flagship needs --why unless labelled tier:flagship.
   Without --bead choose --tier. Notes record tier/model/reason; the brief names the bead.
   Lanista resolves pins; explicit `-m`/`--model` after `--` or `--no-parent` needs no tier without a bead; flagship still needs a reason.
   `vega post done` wakes the parent. Inbox-only targets ask the user.
 - `--worktree <branch> --base <ref>` uses worktrunk and a TUI workspace or local app space;
-  without a local app, or with `--machine`, hc starts a tab in the worktree instead.
+  without an app, hc uses the worktree cwd.
   hc explicit split/workspace placement is unsupported; use tabs or worktrees.
 - `vega mux close <target>` closes the agent; then `wt remove <branch>`.
   `dismiss <child>` drops a headed child's waiting hand the user handled (on the parent's host).

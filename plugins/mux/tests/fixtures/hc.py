@@ -67,6 +67,14 @@ if cmd=='run':
   (root/'remote-home/terminals.json').write_text(json.dumps({local['address']:local}))
  if os.environ.get('TEST_UNDELIVERED'): t['first_message']={'sent':False,'reason':'blocked'}
  emit(t)
+elif cmd=='exec' and a[a.index('--')+1]=='herdr-app':
+ import base64, subprocess
+ host=p['on']
+ if host==os.environ.get('TEST_APP_HOST'):
+  r=subprocess.run([str(root/'bin/herdr-app')]+p['argv'][1:],capture_output=True,env=dict(os.environ,TEST_REMOTE_APP=host))
+  out,errb,rc=r.stdout,r.stderr,r.returncode
+ else: out,errb,rc=b'',b'no Herdr window',1
+ emit({'code':rc,'ms':1,'signal':None,'stderr':base64.b64encode(errb).decode(),'stdout':base64.b64encode(out).decode(),'timed_out':False,'truncated':False})
 elif cmd=='exec':
  if os.environ.get('TEST_PREPARE_FAIL') or (os.environ.get('TEST_RECORD_FAILURE')=='unavailable' and a[a.index('--')+2]=='record-spawn'): err('unavailable')
  assert a[a.index('--')+1]=='vega-mux'

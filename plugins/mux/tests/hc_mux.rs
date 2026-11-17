@@ -514,7 +514,7 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
         .env("TEST_MUX_EXE", env!("CARGO_BIN_EXE_vega-mux"))
         .env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.18","state":"connected","target":"user@remote","via":false}]}"#)
         .args(["spawn", "worker", "--kind", "codex", "--machine", "remote", "--cwd", "/remote/repo", "--worktree", "fix-branch", "--base", "main", "--prompt", "remote task", "--", "-m", "chosen"]).output().unwrap());
-    assert!(text.contains("no local herdr-app"), "{text}");
+    assert!(text.contains("child remains unplaced"), "{text}");
     let calls = f.calls();
     let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
     assert_eq!(run["cwd"], remote.join("worktree").to_str().unwrap());
@@ -530,7 +530,6 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
         .as_str()
         .unwrap()
         .contains("remote task"));
-    assert!(!f.root().join("app-calls").exists());
     let wt_calls = fs::read_to_string(remote.join("wt-calls")).unwrap();
     assert!(
         wt_calls.contains("fix-branch") && wt_calls.contains("--base") && wt_calls.contains("main"),
@@ -673,6 +672,7 @@ else: print(json.dumps({'path':str(root/'worktree'),'action':'created','base_bra
 #[test]
 fn remote_hc_spawn_routes_to_machine_without_local_space_label() {
     let f = Fixture::new();
+    fs::write(f.root().join("app-unavailable"), "structured").unwrap();
     let out = success(
         f.cmd()
             .env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.18","state":"connected","target":"user@remote","via":false}]}"#)
@@ -689,7 +689,7 @@ fn remote_hc_spawn_routes_to_machine_without_local_space_label() {
     assert_eq!(run["labels"]["vega.kind"], "codex");
     assert_eq!(run["labels"]["vega.mode"], "headed");
     assert_eq!(run["labels"]["vega.role"], "sentinel");
-    assert!(!f.root().join("app-calls").exists());
+    assert!(out.contains("child remains unplaced"));
     assert!(!f.root().join("renice-calls").exists());
 }
 
@@ -1945,5 +1945,144 @@ fn windows_remote_refuses_worktrees_and_bad_executable_before_launch() {
         );
         assert!(!f.calls().iter().any(|v| v[0] == "run"));
         assert!(!f.root().join("app-calls").exists());
+    }
+}
+
+#[test]
+fn remote_headed_placement_uses_target_ids_and_background_tabs() {
+    for window in ["local", "proteus", "remote"] {
+        for reuse in [false, true] {
+            for windows in [false, true] {
+                let f = Fixture::new();
+                let cwd = if windows {
+                    r"C:\src\repo"
+                } else {
+                    "/remote/repo"
+                };
+                let app_machine = if window == "remote" { "" } else { "remote" };
+                let prefix = if app_machine.is_empty() {
+                    ""
+                } else {
+                    "remote/"
+                };
+                let spaces = if reuse {
+                    serde_json::json!([
+                        {"id":"other/s1","machine":"other","folder":cwd},
+                        {"id":format!("{prefix}s9"),"machine":app_machine,"folder":cwd,"tabs":[]}
+                    ])
+                } else {
+                    serde_json::json!([])
+                };
+                fs::write(
+                    f.root().join("app-ls.json"),
+                    serde_json::json!({"spaces":spaces}).to_string(),
+                )
+                .unwrap();
+                let mut c = f.cmd();
+                c.env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.19","state":"connected","target":"user@remote","via":false},{"name":"proteus","host":"proteus","id":"id2","version":"0.1.19","state":"connected","target":"user@proteus","via":false}]}"#);
+                if window != "local" {
+                    // Local CLI absent; the same executable is available on the window host.
+                    fs::write(f.root().join("app-unavailable"), "structured").unwrap();
+                    c.env("TEST_APP_HOST", window);
+                }
+                if windows {
+                    c.env("TEST_WINDOWS_EXE", r"C:\bin\codex.exe");
+                }
+                let out = success(
+                    c.args([
+                        "spawn",
+                        "worker",
+                        "--kind",
+                        "codex",
+                        "--machine",
+                        "remote",
+                        "--cwd",
+                        cwd,
+                        "--",
+                        "-m",
+                        "chosen",
+                    ])
+                    .output()
+                    .unwrap(),
+                );
+                assert!(
+                    !out.contains("remains unplaced"),
+                    "{window} {reuse} {windows}: {out}"
+                );
+                let calls = f.calls();
+                let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+                assert_eq!(
+                    run["labels"]["herdr.space"],
+                    if reuse { "s9" } else { "s2" }
+                );
+                assert_eq!(run["labels"]["herdr.tab"], "tb2");
+                assert_eq!(run["keep"], true);
+                assert_eq!(run["caller"], "t7");
+                assert_eq!(run["no_parent"], false);
+                assert_eq!(run["cwd"], cwd);
+                assert!(
+                    calls.iter().any(|v| v[0] == "kill" && v[1] == "remote/t0"),
+                    "{calls:?}"
+                );
+                assert!(calls.iter().any(|v| v[0] == "rm" && v[1] == "remote/t0"));
+                let app = fs::read_to_string(f.root().join("app-calls")).unwrap();
+                assert!(app.contains(if reuse { "tab.new" } else { "space.new" }));
+                assert!(app.contains("\"focus\":false"));
+                if window != "local" {
+                    assert!(calls.iter().any(|v| v[0] == "exec"
+                        && v[2] == window
+                        && v.as_array().unwrap().iter().any(|a| a == "herdr-app")));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn remote_headless_skips_window_and_space_mutations() {
+    let f = Fixture::new();
+    success(f.cmd().env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.19","state":"connected","target":"user@remote","via":false}]}"#)
+        .args(["spawn","worker","--kind","codex","--machine","remote","--cwd","/remote/repo","--headless","--","-m","chosen"]).output().unwrap());
+    let calls = f.calls();
+    let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+    assert!(run["labels"].get("herdr.space").is_none());
+    assert_eq!(run["keep"], false);
+    assert!(!f.root().join("app-calls").exists());
+    assert!(!calls
+        .iter()
+        .any(|v| v.as_array().unwrap().iter().any(|a| a == "herdr-app")));
+}
+
+#[test]
+fn remote_placement_failure_and_unconfirmed_adoption_are_safe() {
+    for failure in ["mutation", "wrong-namespace", "adoption"] {
+        let f = Fixture::new();
+        fs::write(f.root().join("app-ls.json"), r#"{"spaces":[]}"#).unwrap();
+        fs::write(f.root().join("app-failure"), failure).unwrap();
+        let mut c = f.cmd();
+        if failure == "adoption" {
+            c.env("TEST_NO_ADOPTION", "1");
+        }
+        let o=c.env("TEST_MACHINES", r#"{"machines":[{"name":"remote","host":"remote","id":"id","version":"0.1.19","state":"connected","target":"user@remote","via":false}]}"#)
+            .args(["spawn","worker","--kind","codex","--machine","remote","--cwd","/remote/repo","--","-m","chosen"]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+        let out = success(o);
+        let calls = f.calls();
+        let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+        assert!(!calls.iter().any(|v| v[0] == "kill" || v[0] == "rm"));
+        if failure == "adoption" {
+            assert_eq!(run["labels"]["herdr.space"], "s2");
+            assert!(
+                stderr.contains("placement shell remote/t0 retained"),
+                "{stderr}"
+            );
+        } else {
+            assert!(run["labels"].get("herdr.space").is_none());
+            assert!(out.contains("child remains unplaced"));
+            // A mutation failure must not be retried at another window.
+            assert!(!calls
+                .iter()
+                .any(|v| v[0] == "exec" && v.as_array().unwrap().iter().any(|a| a == "herdr-app")));
+        }
     }
 }
