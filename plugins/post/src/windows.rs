@@ -22,7 +22,8 @@ include!("client_common.rs");
     name = "vega post",
     bin_name = "vega post",
     disable_version_flag = true,
-    about = "Native agent mail client"
+    about = "Native agent mail client",
+    after_help = include_str!("../help/client.md")
 )]
 struct Cli {
     #[arg(long)]
@@ -37,6 +38,9 @@ enum Cmd {
     /// Broker, host, verified caller and unread count
     Status,
     /// Send mail, or reply with the timestamped --re token from inbox
+    #[command(
+        after_help = "Examples:\n  vega post send --host proteus t7 \"<text>\"\n  vega post send --uac . \"<text>\"\n  vega post send --host proteus t7 --re <thread>/<hop>@<ms> \"<reply>\""
+    )]
     Send {
         #[arg(value_names = ["TARGET", "TEXT"], num_args = 1..=2, required = true)]
         args: Vec<String>,
@@ -54,6 +58,9 @@ enum Cmd {
         kind: Option<String>,
     },
     /// Read mail and ack it; --keep and --show preserve read state
+    #[command(
+        after_help = "Examples:\n  vega post inbox\n  vega post inbox --keep\n  vega post inbox --show <id>"
+    )]
     Inbox {
         #[arg(long)]
         keep: bool,
@@ -63,6 +70,9 @@ enum Cmd {
         max: u16,
     },
     /// Read the archive without acknowledging messages
+    #[command(
+        after_help = "Examples:\n  vega post log --since 2h\n  vega post log --pane t7 --full\n  vega post log --json --limit 50"
+    )]
     Log {
         #[arg(long)]
         pane: Option<String>,
@@ -78,6 +88,9 @@ enum Cmd {
         json: bool,
     },
     /// Report completion to the recorded parent or explicit --to
+    #[command(
+        after_help = "Examples:\n  vega post done --outcome succeeded \"<summary>\"\n  vega post done --to t7 --host proteus --outcome failed \"<blocker>\""
+    )]
     Done {
         #[arg(long, value_parser = ["succeeded", "failed"])]
         outcome: String,
@@ -198,7 +211,14 @@ async fn connect(
                         std::process::exit(1);
                     }
                 }
-            }).connect(&url).await.map_err(|e| Failure::new("broker_unreachable", e.to_string(), "check the endpoint and this host's own provisioned public key"))
+            }).connect(&url).await.map_err(|e| {
+                let code = if e.to_string().contains("authorization violation") {
+                    "auth_failed"
+                } else {
+                    "broker_unreachable"
+                };
+                Failure::new(code, e.to_string(), "check the endpoint and this host's own provisioned public key")
+            })
     }).await
 }
 mod outage {
@@ -223,5 +243,13 @@ mod outage {
                     "check the configured broker and network",
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn native_guide_has_valid_frontmatter() {
+        vega_plugin::assert_guide(include_str!("../CLIENT-SKILL.md"), "post");
     }
 }

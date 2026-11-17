@@ -12,6 +12,8 @@
 //! - `<host>.beat` = {"schema": 2, "at": unix, human_at?}: the host's vegad ran a reconcile; entries
 //!   of a host without a fresh beat are not trusted (absence proves nothing). `human_at`:
 //!   the host's last herdr pane focus (`uber_engaged`).
+//! - `<host>.identity.v2` = fresh native enrollment (schema, host, public_key,
+//!   projects with v2 IDs and owner-local locations); CLI-managed, not a live beat.
 //! - `<host>.agent.<pane>` = {pane, name, kind, status, cwd, repo_key,
 //!   waiting?}: `waiting` = {status, since} while the agent waits for the
 //!   Slayer (vega_herdr::waiting).
@@ -982,7 +984,8 @@ pub fn uac_entry(host: &str, record: &Value) -> Result<Value, String> {
 
 /// Makes this host's keys equal `desired` plus a fresh beat: puts what
 /// changed since `last` (the previous reconcile's values), deletes this
-/// host's keys that are no longer desired, except CLI-managed project pins.
+/// host's keys that are no longer desired, except CLI-managed project pins
+/// and the fresh native identity enrollment.
 /// Returns the new `last`.
 pub async fn reconcile(
     kv: &async_nats::jetstream::kv::Store,
