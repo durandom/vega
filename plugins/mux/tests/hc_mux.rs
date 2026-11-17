@@ -1435,3 +1435,55 @@ print(json.dumps({'result':result}))
         }
     }
 }
+
+#[test]
+fn remote_show_uses_live_metadata_without_local_spawn_records() {
+    let f = Fixture::new();
+    let mut terminal = serde_json::json!({
+        "address":"io/t36", "name":"guide", "state":"live", "pid":1,
+        "argv":["claude", "--model", "claude-fable-5-2"],
+        "cwd":"/remote/repo", "created_ms":0, "screen":"exact", "cols":80,"rows":24,
+        "status":{"app":"claude-code","state":"done"}, "parent":"ganymede/t1j",
+        "labels":{"vega.mode":"headed","vega.parent":"↑ t1j","vega.harness":"claude"}
+    });
+    let save = |t: &Value| {
+        fs::write(
+            f.root().join("terminals.json"),
+            serde_json::json!({"io/t36":t}).to_string(),
+        )
+        .unwrap()
+    };
+    save(&terminal);
+    let output = f.run(&["show", "io/t36"]);
+    for expected in [
+        "parent: ganymede/t1j",
+        "mode: headed",
+        "tier: -",
+        "model: claude-fable-5-2",
+    ] {
+        assert!(output.contains(expected), "{output}");
+    }
+    terminal["labels"]["vega.mode"] = "headless".into();
+    terminal["labels"]["vega.tier"] = "balanced".into();
+    terminal["labels"]["vega.model"] = "published-model".into();
+    save(&terminal);
+    let output = f.run(&["show", "hc:io/t36"]);
+    for expected in [
+        "parent: ganymede/t1j",
+        "mode: headless",
+        "tier: balanced",
+        "model: published-model",
+    ] {
+        assert!(output.contains(expected), "{output}");
+    }
+    terminal["labels"] = serde_json::json!({});
+    terminal["argv"] = serde_json::json!(["claude"]);
+    save(&terminal);
+    let output = f.run(&["show", "io/t36"]);
+    assert!(output.contains("mode: -"), "{output}");
+    assert!(output.contains("model: -"), "{output}");
+    assert!(f
+        .calls()
+        .iter()
+        .all(|c| ["connect", "get", "read"].contains(&c[0].as_str().unwrap())));
+}

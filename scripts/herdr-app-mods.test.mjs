@@ -54,6 +54,45 @@ function load(name, {allowFocus=false}={}) {
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
 
+test('unspaced remote core agents join project rows without a native agent entry',()=>{
+  const h=load('vega-sidebar'),coord='github.com/durandom/rally-ng-app',member='github.com/durandom/rally-ng-maps';
+  const uac={address:'ganymede/t1j',state:'live',status:'idle',labels:{'vega.role':'uac','vega.project-id':coord,'herdr.space':'s1','vega.group-members':JSON.stringify([member])}};
+  const child={address:'io/t36',state:'live',status:'done',parent:uac.address,name:'guide',labels:{'vega.role':'sentinel','vega.harness':'claude','vega.mode':'headed','vega.project-id':member}};
+  h.api.terminals=()=>[uac,child];
+  h.api.agents=()=>[{...uac,pane:uac.address,space:'ganymede/s1'}];
+  h.mod.init({},h.cx);
+  let nodes=elements(h.render());
+  assert(nodes.some(n=>n.idValue==='ag-io/t36'));
+  assert(nodes.some(n=>n.idValue===`project-block-${member}`));
+  assert(!nodes.some(n=>n.idValue==='term-io/t36'));
+  const cached=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,cached);
+  // Core status participates in the existing cache and Active filtering.
+  h.state.set('vega.hide-inactive',true);
+  child.status='idle';nodes=elements(h.render());
+  assert(!nodes.some(n=>n.idValue==='ag-io/t36'));
+  child.status='working';h.render();assert.notEqual(h.mod.modelCache,cached);
+  // Native adoption supplies the richer row, never a duplicate.
+  h.api.agents=()=>[{...uac,pane:uac.address,space:'ganymede/s1'},{...child,pane:child.address}];
+  nodes=elements(h.render());assert.equal(nodes.filter(n=>n.idValue==='ag-io/t36').length,1);
+  h.api.agents=()=>[{...uac,pane:uac.address,space:'ganymede/s1'}];
+  // Without a group claim the child remains reachable through its parent tree.
+  delete uac.labels['vega.group-members'];
+  nodes=elements(h.render());assert(nodes.some(n=>n.idValue==='sub-io/t36'));
+  // Parent/project inheritance also works without the child's own project label.
+  delete child.labels['vega.project-id'];
+  nodes=elements(h.render());assert(nodes.some(n=>n.idValue==='sub-io/t36'));
+  assert.equal(h.mod.modelCache.membership.projectOfAgent(child),coord);
+  // If its parent disappears, its own project still supplies a top-level row.
+  child.labels['vega.project-id']=member;uac.state='exited';h.api.agents=()=>[];
+  nodes=elements(h.render());assert(nodes.some(n=>n.idValue==='ag-io/t36'));
+  // Saved views retain authority over these synthetic rows.
+  h.mod.preferences={projects:{},views:{hidden:{labels:['other'],machines:[]}}};
+  h.state.set('vega.view','hidden');nodes=elements(h.render());
+  assert(!nodes.some(n=>['ag-io/t36','sub-io/t36'].includes(n.idValue)));
+  h.state.set('vega.view','all');child.state='exited';
+  nodes=elements(h.render());assert(!nodes.some(n=>n.idValue==='ag-io/t36'));
+});
+
 test('rally group nests io sentinels under one ganymede UAC with member actions and badges',()=>{
   const h=load('vega-sidebar'),coord='github.com/durandom/rally-ng-app',member='github.com/durandom/rally-ng-maps';
   const uac={address:'ganymede/t1j',state:'live',status:'idle',labels:{'vega.role':'uac','vega.project-id':coord,'vega.project':'rally-ng-app','vega.git':'dirty','vega.group-members':JSON.stringify([coord,member])}};

@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 230 · 2026-11-17
+
+- feature: Cross-machine hc children without an app space appear in the sidebar's
+  project trees. `vega mux show` uses their live parent/mode and model metadata;
+  new hc spawns also publish tier/model labels for inspection from other hosts.
+
 ## 229 · 2026-11-17
 
 - feature: Services scopes registrations to their owning project across hosts and

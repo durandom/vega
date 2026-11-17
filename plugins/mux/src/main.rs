@@ -901,23 +901,31 @@ fn show(target: &str, lines: u32) -> Result<(), Failure> {
     println!("mail: relay metadata; unknown does not mean empty. Check `vega post log --pane {pane}` on the owning host.");
     println!(
         "parent: {}",
-        parent_of(pane, &name).map_or("-".into(), |p| p.label(&vega_herdr::state::post_host()))
+        a["parent"]
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| parent_of(pane, &name)
+                .map_or("-".into(), |p| p.label(&vega_herdr::state::post_host())))
     );
-    println!("mode: {}", mode_of(machine(), pane, &name).as_str());
+    let mode = a["mode"]
+        .as_str()
+        .and_then(Mode::parse)
+        .or_else(|| vega_herdr::state::known_mode_of(machine(), pane, &name));
+    println!("mode: {}", mode.map_or("-", |m| m.as_str()));
     let selection = vega_herdr::state::spawn_of_on(machine(), pane, &name, str_of(a, "agent"));
     println!(
         "tier: {}",
-        selection
-            .as_ref()
-            .and_then(|r| r.tier.as_deref())
+        a["tier"]
+            .as_str()
+            .or_else(|| selection.as_ref().and_then(|r| r.tier.as_deref()))
             .unwrap_or("-")
     );
     println!(
         "model: {}",
         cell(
-            selection
-                .as_ref()
-                .and_then(|r| r.model.as_deref())
+            a["model"]
+                .as_str()
+                .or_else(|| selection.as_ref().and_then(|r| r.model.as_deref()))
                 .unwrap_or("-")
         )
     );

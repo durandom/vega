@@ -1991,7 +1991,7 @@ export default class Agents extends View {
     const sig = JSON.stringify([
       terms.map(x => [x.address, x.state, x.parent ?? null, x.pane ?? null, x.turn ?? null,
         x.status ?? null, x.status_ms ?? null, x.name ?? null, x.title ?? null, x.agent ?? null, x.app ?? null, x.cwd ?? null,
-        x.program?.key ?? null, x.foreground?.name ?? null, x.foreground?.argv ?? null, x.foreground?.cwd ?? null, x.labels ?? null]),
+        x.program?.key ?? null, x.program?.agent ?? null, x.report?.app ?? null, x.foreground?.name ?? null, x.foreground?.argv ?? null, x.foreground?.cwd ?? null, x.labels ?? null]),
       ags.map(a => [a.address, a.status ?? null, a.pane ?? null, a.tab ?? null, a.space ?? null,
         a.space_name ?? null, a.title ?? null, a.name ?? null, a.template ?? null, a.program?.name ?? null]),
       paneRows.map(p => [p.terminal ?? null, p.tab ?? null, Boolean(p.focused), p.program?.name ?? null,
@@ -2027,8 +2027,15 @@ export default class Agents extends View {
     const model = { sig };
     const windowAddresses = new Set(terminals().filter(t => Object.hasOwn(t.labels ?? {}, "vega.window")).map(t => t.address));
     let list = agents().filter(a => !windowAddresses.has(a.address));
-    this.listed = model.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = model.all = visibleTerminals();
+    // agents() covers native spaces; remote hc children may have no herdr.space.
+    // Derive their rows from core status, once per data change, without adopting panes.
+    const nativeAddresses = new Set(list.map(a => a.address));
+    list = [...list, ...all.filter(a => a.state === "live" && !nativeAddresses.has(a.address)
+      && (a.program?.agent || a.labels?.["vega.harness"] || a.report?.app)
+      && ["working", "blocked", "idle", "done"].includes(a.status))
+      .map(a => ({ ...a, space: this.spaceOfTerminal(a) }))];
+    this.listed = model.listed = new Map(list.map((a) => [a.address, a.status]));
     this.vegaTerminals = model.vegaTerminals = new Map(all.map(t => [t.address, t]));
     const membership = this.projectGroups(all);
     diagMeta({ projects: membership.blocks.size, memberProjects: membership.projects.size });

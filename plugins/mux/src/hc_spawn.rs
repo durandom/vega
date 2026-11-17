@@ -173,6 +173,12 @@ pub fn spawn(
     let mut labels = serde_json::json!({
         "vega.kind":kind, "vega.harness":kind, "vega.mode":mode.as_str(), "vega.role":"sentinel"
     });
+    if let Some(tier) = tier {
+        labels["vega.tier"] = tier.into();
+    }
+    if let Some(model) = &selection.model {
+        labels["vega.model"] = model.clone().into();
+    }
     if let Some(s) = space {
         labels["herdr.space"] = s.into();
     }

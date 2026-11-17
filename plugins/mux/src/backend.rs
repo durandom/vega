@@ -74,6 +74,7 @@ pub fn info(target: &str) -> Result<Value, Failure> {
 pub fn normalize(t: &Value) -> Value {
     let kind = match t["status"]["app"]
         .as_str()
+        .or(t["labels"]["vega.harness"].as_str())
         .or(t["labels"]["vega.kind"].as_str())
         .unwrap_or("")
     {
@@ -84,7 +85,19 @@ pub fn normalize(t: &Value) -> Value {
     let name = t["name"].as_str().unwrap_or("");
     let session =
         vega_herdr::state::spawn_of_on(machine(), pane, name, kind).and_then(|r| r.session);
-    json!({"pane_id":pane,"name":name,"agent":kind,"agent_status":t["status"]["state"],"backend":"hc",
+    let argv: Vec<String> = t["argv"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    let model = t["labels"]["vega.model"]
+        .as_str()
+        .map(String::from)
+        .or_else(|| tier::explicit_model(&argv));
+    json!({"parent":t["parent"].as_str().or(t["labels"]["vega.parent"].as_str()),
+        "mode":t["labels"]["vega.mode"],"tier":t["labels"]["vega.tier"],"model":model,
+        "pane_id":pane,"name":name,"agent":kind,"agent_status":t["status"]["state"],"backend":"hc",
         "cwd":t["foreground"]["cwd"].as_str().or(t["cwd"].as_str()).unwrap_or(""),
         "agent_session":{"value":session},"completion_seq":t["turn"]})
 }

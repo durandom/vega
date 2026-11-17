@@ -757,3 +757,13 @@ gated by `RUST_LOG` on stderr, and is not persisted anywhere by default, so
 the ring file is the only durable record. Tests use fake `fs` in the vm
 loader: detection, phase wiring, exception/slow recording, rate limiting and
 the ring cap.
+
+### Unspaced cross-machine children (vega-nic.25)
+
+The sidebar merges live core agents from `terminals()` into the native `agents()`
+rows during cached model derivation. Remote hc spawns intentionally have no
+`herdr.space`: source-host space IDs cannot identify destination-host spaces.
+Core status plus harness/program/report evidence supplies an agent row without
+adopting a pane. Native rows win on address; existing project labels, group
+claims and ancestor project/space resolution decide placement. The same view,
+Active and pin filters apply, and input changes invalidate the render cache.
