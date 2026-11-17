@@ -42,6 +42,16 @@ pub struct Lookup<'a> {
     pub reviews: Vec<Review>,
 }
 
+/// `--retry`: ignore every abandon recorded so far for the keys of `plan`.
+/// Nothing is rewritten: the new beads carry the count (`record::RETRY_KEY`).
+pub fn mark_retry(dir: &Path, plan: &mut Plan) -> Result<(), String> {
+    for s in &plan.segments {
+        let n = record::abandons(&record::lookup(dir, &s.key)?);
+        plan.retry.insert(s.key.clone(), n);
+    }
+    Ok(())
+}
+
 pub fn lookup<'a>(dir: &Path, plan: &'a Plan) -> Result<Lookup<'a>, String> {
     let mut l = Lookup {
         missing: Vec::new(),
@@ -52,7 +62,8 @@ pub fn lookup<'a>(dir: &Path, plan: &'a Plan) -> Result<Lookup<'a>, String> {
         reviews: state::all(),
     };
     for s in &plan.segments {
-        match record::status(record::lookup(dir, &s.key)?) {
+        let floor = plan.retry.get(&s.key).copied().unwrap_or(0);
+        match record::status(record::lookup(dir, &s.key)?, floor) {
             Status::Pass(_) => {}
             Status::Running(b) => l.running.push((s, b)),
             Status::Missing { abandoned } => {
@@ -95,6 +106,14 @@ fn title(branch: &str, head: &str, who: &str) -> String {
 }
 
 fn base_meta(plan: &Plan, s: &Segment, branch: &str, verdict: &str, review: &str) -> Value {
+    let mut m = base_fields(plan, s, branch, verdict, review);
+    if let Some(n) = plan.retry.get(&s.key) {
+        m[record::RETRY_KEY] = Value::String(n.to_string());
+    }
+    m
+}
+
+fn base_fields(plan: &Plan, s: &Segment, branch: &str, verdict: &str, review: &str) -> Value {
     record::meta(&[
         ("head", plan.head.clone()),
         ("base", plan.base.clone()),
@@ -498,7 +517,7 @@ pub fn start_from(
             skip_reviewers.push((r.kind.clone(), r.model.clone()));
             cleanup(r, alive);
         }
-        abandoned = abandoned.max(record_abandons(dir, &s.key));
+        abandoned = abandoned.max(record_abandons(dir, plan, &s.key));
         missing.push(s);
     }
     if missing.is_empty() {
@@ -507,7 +526,7 @@ pub fn start_from(
     if abandoned >= 2 {
         let labels: Vec<String> = missing.iter().map(|s| s.label()).collect();
         return Ok(Outcome::FailOpen(format!(
-            "review abandoned twice for {}; push not reviewed",
+            "review abandoned twice for {}; push not reviewed; infrastructure fixed? vega gate start --retry",
             labels.join(", ")
         )));
     }
@@ -593,9 +612,10 @@ pub fn start_from(
     }
 }
 
-fn record_abandons(dir: &Path, key: &str) -> usize {
+fn record_abandons(dir: &Path, plan: &Plan, key: &str) -> usize {
+    let floor = plan.retry.get(key).copied().unwrap_or(0);
     record::lookup(dir, key)
-        .map(|bs| bs.iter().filter(|b| b.verdict() == "abandoned").count())
+        .map(|bs| record::live_abandons(&bs, floor))
         .unwrap_or(0)
 }
 

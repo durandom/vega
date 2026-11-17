@@ -414,7 +414,7 @@ impl Services for Live {
             let records = vega_gate::record::lookup(dir, &s.key).map_err(error)?;
             // The gate owns diff-key reuse across merge segments. The plan is
             // computed from this exact head, never from a moving branch name.
-            match vega_gate::record::status(records) {
+            match vega_gate::record::status(records, 0) {
                 vega_gate::record::Status::Pass(b) => passes.push(b.id),
                 _ => pending = true,
             }

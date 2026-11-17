@@ -36,7 +36,11 @@ fn main() -> ExitCode {
         }
         [] => home(),
         ["check", rest @ ..] => target_opt(rest).and_then(|t| check(t.as_deref())),
-        ["start", rest @ ..] => target_opt(rest).and_then(|t| start_cmd(t.as_deref())),
+        ["start", rest @ ..] => {
+            let retry = rest.contains(&"--retry");
+            let rest: Vec<&str> = rest.iter().copied().filter(|a| *a != "--retry").collect();
+            target_opt(&rest).and_then(|t| start_cmd(t.as_deref(), retry))
+        }
         ["verdict", v @ ("pass" | "fail"), rest @ ..] => verdict_cmd(*v == "pass", rest),
         ["log"] => log(None),
         ["log", "--since", d] => log(Some(d)),
@@ -178,7 +182,7 @@ fn segments_view(c: &Ctx) -> Result<usize, Failure> {
     let mut running = 0;
     for s in &p.segments {
         let st = record::lookup(&c.dir, &s.key).map_err(fail("bd", "bd list --label gate"))?;
-        let status = match record::status(st) {
+        let status = match record::status(st, 0) {
             Status::Pass(b) => format!("pass {}", b.id),
             Status::Running(b) => {
                 running += 1;
@@ -213,9 +217,9 @@ fn check(target: Option<&str>) -> Result<(), Failure> {
     segments_view(&c).map(|_| ())
 }
 
-fn start_cmd(target: Option<&str>) -> Result<(), Failure> {
-    let c = ctx(target)?;
-    let Some((cfg, p)) = &c.found else {
+fn start_cmd(target: Option<&str>, retry: bool) -> Result<(), Failure> {
+    let mut c = ctx(target)?;
+    let Some((cfg, p)) = &mut c.found else {
         println!("result: not gated (no .vega/gate.toml at {})", c.target);
         return Ok(());
     };
@@ -226,6 +230,9 @@ fn start_cmd(target: Option<&str>) -> Result<(), Failure> {
     if p.segments.is_empty() {
         println!("result: pass (no relevant diff against {})", c.target);
         return Ok(());
+    }
+    if retry {
+        start::mark_retry(&c.dir, p).map_err(fail("start", "bd list --label gate"))?;
     }
     match start::start(&c.dir, p, cfg, &c.branch).map_err(fail("start", "vega gate check"))? {
         Outcome::Passed => println!("result: pass (every segment has one)"),

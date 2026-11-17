@@ -282,7 +282,7 @@ seconds, pulled every 60 s), so a pass on one host counts on all.
 | type, label | `task`, label `gate` (not bd's own `gate` issue type, which bd hides as an async wait gate) |
 | title | `gate: <branch>@<head:8> (<reviewer kind>/<model>)` |
 | external_ref | `gate:<key>`: the lookup key |
-| metadata | `head`, `base`, `target`, `diff_sha256`, `key`, `author_kinds`, `author_models`, `reviewer_kind`, `reviewer_model`, `reviewer_pane`, `reviewer_host`, `segment` (`run <a>..<b>`, `branch <P2>`, `merge <M>`), `review` (shared by the beads of one review), `verdict` (`running`, `pass`, `fail`, `skipped`, `unreviewed`, `abandoned`, `superseded`, `no-reviewer`, `spawn-failed`), `started_at` |
+| metadata | `head`, `base`, `target`, `diff_sha256`, `key`, `author_kinds`, `author_models`, `reviewer_kind`, `reviewer_model`, `reviewer_pane`, `reviewer_host`, `segment` (`run <a>..<b>`, `branch <P2>`, `merge <M>`), `review` (shared by the beads of one review), `abandons_before_retry` (section 7), `verdict` (`running`, `pass`, `fail`, `skipped`, `unreviewed`, `abandoned`, `superseded`, `no-reviewer`, `spawn-failed`), `started_at` |
 | notes | findings, one line each: `file:line rubric/principle score: fix` |
 | close reason | verdict, reviewer, findings count, head sha |
 
@@ -301,7 +301,8 @@ closed bead with `verdict=pass`. Only a pass lets the push through; `fail` beads
 | Push again, same head and key, review running | exit 1 at once, `review running in tab gate-<branch> since 6 min`; no second reviewer |
 | Reviewer idle without ever taking its prompt (no prompt in its session log), or at a dialog | `vega gate` and the running line say `stuck` or `blocked` with `vega mux show <pane>` for TUI or `hc read <terminal>` for hc; the timeout still applies |
 | Push again or `vega gate start`, new head, review running | lock the old review, mark its beads `superseded`, revoke its state, close the old pane and start a fresh reviewer bound to the new head/generation. Include unchanged running segments; never re-point a reviewer by mail. A stale verdict cannot apply to the new generation |
-| Reviewer dies (pane gone) or silent past `timeout` | on the next push: bead `abandoned`, cleanup, start a new review with the next candidate. A second abandon for the same key fails open (infrastructure, spike input 7) |
+| Reviewer dies (pane gone) or silent past `timeout` | on the next push: bead `abandoned`, cleanup, start a new review with the next candidate. A second abandon for the same key fails open (infrastructure, spike input 7); the line names `vega gate start --retry` |
+| `vega gate start --retry` (the abandons came from broken infrastructure, now fixed) | ignores every earlier abandon of the keys of this start, with no attempt to tell infrastructure from reviewer. Nothing is rewritten: each bead the start creates carries `abandons_before_retry` = the abandons the key had then. A key counts only its abandons beyond the highest such marker on its beads, so a later start without `--retry` sees one fresh abandon, not three, and the old beads stay as evidence. A retry that creates no bead (pass, review already running) records nothing and changes nothing |
 | Target ref missing locally | uses `<remote>/HEAD`; none either: fail open |
 | Reviewer pushes | refused (section 1) |
 

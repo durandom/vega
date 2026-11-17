@@ -9,9 +9,12 @@ reviews running on this host.
 Commands:
   check [--target <ref>]    what the git shim would do on a push, without pushing:
                             target, base, each segment's key and pass state
-  start [--target <ref>]    start a reviewer for every segment without a pass:
+  start [--target <ref>] [--retry]
+                            start a reviewer for every segment without a pass:
                             TUI tab gate-<branch> or hc terminal gate-<review id>,
-                            in the author's backend; verdict sent to the author
+                            in the author's backend; verdict sent to the author.
+                            --retry ignores earlier abandons of these segments
+                            (use after fixing the reviewer's login or API key)
   verdict pass|fail [--findings <file.jsonl>]
                             the reviewer's verdict; only the pane `start` spawned
                             may give it; sends the verdict, closes the terminal
