@@ -39,7 +39,19 @@ print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}))
 "#),
             (
                 "ssh",
-                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/ssh-calls\"\nexport XDG_CONFIG_HOME=\"$HOME/.config\"\nexec /bin/sh -s\n",
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> "$HOME/ssh-calls"
+case "$*" in
+  *windows*)
+    case "$*" in *'cmd.exe /d /c exit 77') exit 77 ;; esac
+    echo 'operable program or batch file.' >&2; exit 1 ;;
+  *offline*) echo 'connection refused' >&2; exit 255 ;;
+  *empty*) cat >/dev/null; echo 'vega-deploy:vega=missing'; exit 0 ;;
+  *broken*) cat >/dev/null; echo 'vega-deploy:vega=broken'; echo 'install failed' >&2; exit 1 ;;
+esac
+export XDG_CONFIG_HOME="$HOME/.config"
+exec /bin/sh -s
+"#,
             ),
             ("hostname", "#!/bin/sh\necho deploying-host\n"),
             (
@@ -468,4 +480,53 @@ fn corp_deploy_refuses_private_ssh_target_before_remote_actions() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("machine_direction"));
     assert!(f.actions().is_empty());
     assert!(!f.home.join("ssh-calls").exists());
+}
+
+#[test]
+fn apply_all_skips_unprovisioned_but_preserves_real_failures() {
+    for (target, success, expected) in [
+        ("windows", true, "not provisioned"),
+        ("empty", true, "not provisioned"),
+        ("offline", false, "connection refused"),
+        ("broken", false, "install failed"),
+    ] {
+        let f = Fixture::new();
+        fs::write(f.home.join("machines.json"), format!(
+            r#"{{"machines":[{{"name":"target","host":"target","id":"id1","version":"0.1.18","state":"connected","target":"{target}","via":false}}]}}"#
+        )).unwrap();
+        let out = f.command().args(["apply", "--all"]).output().unwrap();
+        assert_eq!(
+            out.status.success(),
+            success,
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(String::from_utf8_lossy(&out.stdout).contains(expected));
+        assert!(f.actions().is_empty());
+        let event = history(&f);
+        assert_eq!(event["data"]["success"], success);
+        if success {
+            assert_eq!(event["data"]["machines"][0]["skipped"], "not provisioned");
+        }
+        let calls = fs::read_to_string(f.home.join("ssh-calls")).unwrap();
+        assert_eq!(
+            calls.contains("cmd.exe"),
+            matches!(target, "windows" | "offline")
+        );
+    }
+}
+
+#[test]
+fn native_windows_status_is_not_provisioned() {
+    let f = Fixture::new();
+    fs::write(
+        f.home.join("machines.json"),
+        r#"{"machines":[{"name":"io-win","host":"io-win","id":"id1","version":"0.1.18","state":"connected","target":"windows","via":false}]}"#,
+    )
+    .unwrap();
+    let out = f.command().output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("io-win,-,-,-,not provisioned"), "{text}");
+    assert!(!text.contains("operable program"));
 }

@@ -10,6 +10,13 @@ via machines with a warning and continues with SSH targets. If all selected targ
 use via, apply reports zero deployments. Corporate/inbox-only hosts cannot deploy to
 private hosts. This plugin never adds machines or changes their transport profiles.
 
+Before changing a target, deploy runs a read-only provisioning probe. `apply --all`
+reports machines without vega as `not provisioned` and skips them. An explicit
+Unix target can still bootstrap a fresh install. Native Windows without the Unix
+runtime is also `not provisioned` until a native deploy lane is available; a failed
+Unix probe is classified this way only after confirming `cmd.exe` with a reserved
+exit-code probe. Connection, probe and installation failures remain failures.
+
 Commands: `vega deploy`, `vega deploy apply <machine>|--all [--from-branch <branch>]`.
 
 `apply` fetches and fast-forwards the selected pushed branch, defaulting to `main`. It checks out an

@@ -990,6 +990,17 @@ for (const source of ['machines','ganymede']) test(`badge failures retain last g
   await h.mod.badges(h.cx);assert.equal(h.mod.error,null,'success resets the streak');
 });
 
+test('unprovisioned hosts do not produce a second badge failure in the status bar',async()=>{
+  const h=load('vega');h.mod.seen=new Set();h.mod.watching=true;
+  h.mod.started=new Map([['io-win',{notProvisioned:true}]]);
+  h.api.exec=async()=>({code:0,stdout:JSON.stringify({rows:[],errors:[{source:'io-win',message:'hc io-win badges unavailable'}]})});
+  for(let i=0;i<4;i++) await h.mod.badges(h.cx);
+  assert.equal(h.mod.error,null);
+  h.mod.started.set('io-win',{notProvisioned:false});
+  for(let i=0;i<3;i++) await h.mod.badges(h.cx);
+  assert.equal(h.mod.error,'hc io-win badges unavailable','provisioned reader failures still surface');
+});
+
 test('whole reader failures keep badges and report a short error only after three failures',async()=>{
   const h=load('vega');h.mod.seen=new Set();h.mod.watching=true;
   h.state.set('vega.badges',[row()]);
@@ -1064,6 +1075,10 @@ print(json.dumps({'stdout':base64.b64encode(p.stdout).decode(),'stderr':base64.b
     const outer=run({}),inner=JSON.parse(outer.stdout);
     assert.equal(outer.code,0);assert.equal(inner.code,0);
     assert.equal(fs.readFileSync(log,'utf8').trim(),'relay start');
+    fs.unlinkSync(path.join(dir,'.local/bin/vega-post'));
+    assert.equal(JSON.parse(run({}).stdout).code,77,'missing binary is explicit');
+    fs.writeFileSync(path.join(dir,'.local/bin/vega-post'),'#!/bin/sh\nexit 1\n',{mode:0o755});
+    assert.equal(JSON.parse(run({}).stdout).code,1,'present broken binary remains a failure');
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -1077,7 +1092,7 @@ test('vega mod starts vegad on connected machines now, then slowly; failures sho
   await h.mod.startRemotes(h.cx);
   assert.deepEqual(starts(),['ganymede'],'connected machines only');
   const call=h.calls.find(c=>c[0]==='exec');
-  assert.deepEqual(Array.from(call[2].slice(2)),['hc','exec','--json','--on','ganymede','--timeout','20','--','sh','-c','exec "$HOME/.local/bin/vega-post" relay start']);
+  assert.deepEqual(Array.from(call[2].slice(2)),['hc','exec','--json','--on','ganymede','--timeout','20','--','sh','-c',vm.runInContext('remoteStart',h.api)]);
   await h.mod.startRemotes(h.cx);assert.equal(starts().length,1,'not every refresh');
   now+=300001;await h.mod.startRemotes(h.cx);assert.equal(starts().length,2,'slow period');
   h.mod.machines=[{name:'ganymede',state:'disconnected'}];await h.mod.startRemotes(h.cx);
@@ -1087,6 +1102,34 @@ test('vega mod starts vegad on connected machines now, then slowly; failures sho
   for(let i=0;i<3;i++){await h.mod.startRemotes(h.cx);assert.equal(h.mod.startError,i<2?null:'hc ganymede vegad start failed');now+=60001;}
   assert(texts(h.render()).includes('vega: hc ganymede vegad start failed'));
   fail=false;await h.mod.startRemotes(h.cx);assert.equal(h.mod.startError,null);
+});
+
+test('unprovisioned remote starters stay quiet, diagnose once and recover on slow recheck',async()=>{
+  for (const result of [
+    {error:{kind:'spawn_failed',message:'cannot start sh: program not found'}},
+    {code:77,stdout:Buffer.from('vega-not-provisioned\n').toString('base64')},
+  ]) {
+    const h=load('vega'); let now=1e12, current=result; const logs=[];
+    h.api.Date={now:()=>now}; h.api.console={log:s=>logs.push(s)};
+    h.api.exec=async()=>({code:0,stdout:JSON.stringify({code:current.error?1:0,stdout:JSON.stringify(current)})});
+    h.mod.machines=[{name:'io-win',state:'connected'}];
+    for(let i=0;i<4;i++) {
+      await h.mod.startRemotes(h.cx);
+      assert.equal(h.mod.startError,null);
+      assert.equal(h.mod.started.get('io-win').next,now+300000);
+      now+=300001;
+    }
+    assert.equal(logs.length,1);
+    assert.match(logs[0],/io-win not provisioned/);
+    assert(!texts(h.render()).includes('vegad start failed'));
+    for (current of [{code:1},{code:77},{error:{kind:'spawn_failed',message:'cannot start sh: permission denied'}},{code:0,timed_out:true}]) {
+      for(let i=0;i<3;i++){await h.mod.startRemotes(h.cx); now+=60001;}
+      assert.equal(h.mod.startError,'hc io-win vegad start failed');
+    }
+    current={code:0};await h.mod.startRemotes(h.cx);
+    assert.equal(h.mod.startError,null);
+    assert.equal(h.mod.started.get('io-win').notProvisioned,false);
+  }
 });
 
 function projectFixture(h) {

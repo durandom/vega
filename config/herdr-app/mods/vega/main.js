@@ -95,7 +95,9 @@ else: print(json.dumps({'skipped':True}))`;
 
 // Idempotent starter on a machine. argv runs without a shell, so sh resolves the remote home;
 // relay start reads that host's vegad.env, so a host pin (io-wsl registered as io) applies.
-const remoteStart = 'exec "$HOME/.local/bin/vega-post" relay start';
+// Exit 77 is reserved for the preflight; a present but broken binary still fails normally.
+// A future Windows worker can supply a native starter here.
+const remoteStart = '[ -e "$HOME/.local/bin/vega-post" ] || { echo vega-not-provisioned; exit 77; }; exec "$HOME/.local/bin/vega-post" relay start';
 const START_OK_MS = 300000, START_RETRY_MS = 60000;
 
 export default class Vega extends View {
@@ -347,7 +349,9 @@ export default class Vega extends View {
     if (result.code !== 0) throw new Error("badge reader unavailable");
     const data = JSON.parse(result.stdout);
     this.machines = data.machines ?? this.machines;
-    const errors = data.errors ?? [];
+    // A host with no starter has no supported badge runtime yet either (native
+    // Windows may lack python3). Keep its diagnostic in the provisioning state.
+    const errors = (data.errors ?? []).filter(e => !this.started?.get(e.source)?.notProvisioned);
     this.readErrors(errors);
     const failed = new Set(errors.map(e => e.source));
     // Keep only failed sources; successful empty reads and removed machines clear old rows.
@@ -418,14 +422,20 @@ export default class Vega extends View {
       for (const name of [...this.started.keys()]) if (!live.includes(name)) this.started.delete(name);
       const due = live.filter(name => (this.started.get(name)?.next ?? 0) <= Date.now());
       await Promise.all(due.map(async name => {
-        let ok = false;
+        let ok = false, notProvisioned = false;
         try {
           const r = await exec("python3", ["-c", startRelay, "hc", "exec", "--json", "--on", name, "--timeout", "20", "--", "sh", "-c", remoteStart]);
           const outer = r.code === 0 ? JSON.parse(r.stdout) : {code: -1};
-          ok = Boolean(outer.skipped) || (outer.code === 0 && JSON.parse(outer.stdout).code === 0);
+          const result = outer.stdout ? JSON.parse(outer.stdout) : {};
+          // hc returns launch errors as JSON with exit 1; command results use exit 0.
+          // Match only missing sh, not permission, connection or relay errors.
+          notProvisioned = (outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal) ||
+            ([0, 1].includes(outer.code) && result.error?.kind === "spawn_failed" && result.error?.message === "cannot start sh: program not found");
+          ok = Boolean(outer.skipped) || (outer.code === 0 && result.code === 0 && !result.timed_out && !result.signal);
         } catch (_) {}
-        const fails = ok ? 0 : (this.started.get(name)?.fails ?? 0) + 1;
-        this.started.set(name, {next: Date.now() + (ok ? START_OK_MS : START_RETRY_MS), fails});
+        if (notProvisioned && !this.started.get(name)?.notProvisioned) console.log(`vega: hc ${name} not provisioned (vega starter unavailable)`);
+        const fails = ok || notProvisioned ? 0 : (this.started.get(name)?.fails ?? 0) + 1;
+        this.started.set(name, {next: Date.now() + (ok || notProvisioned ? START_OK_MS : START_RETRY_MS), fails, notProvisioned});
       }));
       const bad = [...this.started].filter(([, v]) => v.fails >= 3).map(([name]) => `hc ${name} vegad start failed`);
       this.startError = bad.join("; ") || null;

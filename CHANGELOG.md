@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 235 · 2026-11-17
+
+- feature: Connected machines without vega's runtime are reported as not provisioned.
+  The app keeps them out of failure status, and `vega deploy apply --all` skips them;
+  startup and deployment errors on provisioned hosts still surface. Explicit Unix
+  deployment can still bootstrap a fresh installation.
+
 ## 234 · 2026-11-17
 
 - feature: `scripts/windows-install.ps1` builds the approved Windows package list
@@ -12,6 +19,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   a separate Cargo home and installs listed executables to the user PATH as
   Windows executable ports become available; today it builds the two libraries.
 
+||||||| parent of 60c5a0b6 (Treat hosts without vega runtime as not provisioned)
 ## 233 · 2026-11-17
 
 - feature: Windows clients resolve common Git configuration, recognize existing

@@ -241,7 +241,7 @@ fn probe_script() -> String {
 dir="$HOME/{REMOTE_DIR}"
 echo "vega-deploy:arch=$(uname -m)"
 echo "vega-deploy:commit=$(git -C "$dir" rev-parse --short=7 HEAD 2>/dev/null || echo missing)"
-echo "vega-deploy:vega=$(vega --version 2>/dev/null || echo missing)"
+echo "vega-deploy:vega=$(if command -v vega >/dev/null 2>&1; then vega --version 2>/dev/null || echo broken; else echo missing; fi)"
 echo "vega-deploy:relay=$(relay_state)"
 "#
     )
@@ -250,6 +250,15 @@ echo "vega-deploy:relay=$(relay_state)"
 /// Runs `script` on `target` in a login shell (so Homebrew/cargo are on PATH).
 /// Returns (success, parsed `vega-deploy:` fields, last stderr line).
 fn remote(target: &str, script: &str) -> (bool, Vec<(String, String)>, String) {
+    let (code, fields, err) = remote_command(target, r#"exec "${SHELL:-/bin/sh}" -l -s"#, script);
+    (code == Some(0), fields, err)
+}
+
+fn remote_command(
+    target: &str,
+    command: &str,
+    script: &str,
+) -> (Option<i32>, Vec<(String, String)>, String) {
     let child = Command::new("ssh")
         .args([
             "-o",
@@ -257,20 +266,20 @@ fn remote(target: &str, script: &str) -> (bool, Vec<(String, String)>, String) {
             "-o",
             "ConnectTimeout=10",
             target,
-            r#"exec "${SHELL:-/bin/sh}" -l -s"#,
+            command,
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
     let Ok(mut child) = child else {
-        return (false, vec![], "ssh not found".into());
+        return (None, vec![], "ssh not found".into());
     };
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(script.as_bytes());
     }
     let Ok(out) = child.wait_with_output() else {
-        return (false, vec![], "ssh failed".into());
+        return (None, vec![], "ssh failed".into());
     };
     let fields = String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -285,7 +294,27 @@ fn remote(target: &str, script: &str) -> (bool, Vec<(String, String)>, String) {
         .unwrap_or("")
         .trim()
         .to_string();
-    (out.status.success(), fields, err)
+    (out.status.code(), fields, err)
+}
+
+/// Read-only capability check. Native Windows has no Unix deploy lane yet; verify
+/// cmd.exe by its requested exit code, independent of localized error text.
+/// Keep this separate so a future native Windows deploy lane can replace the skip.
+fn provisioning(target: &str, require_vega: bool) -> Result<bool, String> {
+    let (ok, fields, err) = remote(target, &probe_script());
+    if ok {
+        if field(&fields, "vega") == "-" {
+            return Err("provisioning probe returned no vega result".into());
+        }
+        return Ok(!require_vega || field(&fields, "vega") != "missing");
+    }
+    if fields.is_empty() {
+        let (code, _, _) = remote_command(target, "cmd.exe /d /c exit 77", "");
+        if code == Some(77) {
+            return Ok(false);
+        }
+    }
+    Err(err)
 }
 
 fn field<'a>(fields: &'a [(String, String)], key: &str) -> &'a str {
@@ -338,6 +367,10 @@ fn status() -> Result<ExitCode, Failure> {
                 field(&f, "vega"),
                 field(&f, "relay")
             );
+        } else if f.is_empty()
+            && remote_command(&m.target, "cmd.exe /d /c exit 77", "").0 == Some(77)
+        {
+            println!("  {},-,-,-,not provisioned", cell(&m.label));
         } else {
             println!("  {},unreachable,-,-,{}", m.label, cell(&err));
         }
@@ -498,7 +531,18 @@ echo "vega-deploy:relay=$(relay_ensure)"
     let mut evidence = Vec::new();
     for m in chosen {
         let started = std::time::Instant::now();
-        let (ok, f, err) = remote(&m.target, &script);
+        let (ok, f, err) = match provisioning(&m.target, all) {
+            Ok(false) => {
+                println!("  {},-,-,-,-,-,-,not provisioned", cell(&m.label));
+                history["machines"].as_array_mut().unwrap().push(json!({
+                    "machine": m.label, "success": true, "skipped": "not provisioned",
+                    "duration_ms": started.elapsed().as_millis()
+                }));
+                continue;
+            }
+            Ok(true) => remote(&m.target, &script),
+            Err(err) => (false, vec![], err),
+        };
         history["machines"].as_array_mut().unwrap().push(json!({
             "machine": m.label, "success": ok, "duration_ms": started.elapsed().as_millis(),
             "commit": optional_field(&f, "revision"),

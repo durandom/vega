@@ -201,11 +201,15 @@ it upgrades itself in place. No login job starts it (amendment vega-0h4c.42; the
 systemd unit of vega-0h4c.25 are gone, and a corp Mac without GUI login could not load one). The
 app host owns startup, like the hc core: the herdr-app vega mod runs `vega-post relay start`
 locally (real default homes only) and, through `hc exec --on <machine>`, on every connected hc
-machine: at start, when a machine turns connected, then every five minutes. The starter runs
-`sh -c 'exec "$HOME/.local/bin/vega-post" relay start'` there, so that host's `vegad.env` pin
+machine: at start, when a machine turns connected, then every five minutes. The Unix starter checks
+for `$HOME/.local/bin/vega-post` before executing it through `sh -c`, so that host's `vegad.env` pin
 (for example `VEGA_POST_HOST=io` on WSL `io-wsl`) applies: `relay start` loads `vegad.env` before
 it takes the lock. A failed start retries after one minute; the status line shows
 `hc <machine> vegad start failed` after three failures in a row, and nothing blocks the UI.
+A missing binary (reserved preflight marker and exit 77), or hc's explicit missing-`sh`
+spawn error, is `not provisioned`: one log diagnostic per episode, no status-bar error,
+and another check after five minutes or reconnection. A present binary's startup errors
+still count as failures. The starter is the extension point for a future native Windows worker.
 The lock arbitrates simultaneous starts. `relay stop` on a machine holds at most five minutes
 while the app host runs; on the app host itself it holds until the next app start, herdr hook or explicit relay start.
 
