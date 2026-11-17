@@ -2,7 +2,6 @@
 use crate::notes::{Note, Store};
 use std::fs::File;
 use std::io;
-use std::os::fd::AsRawFd;
 
 pub fn rank(level: &str) -> Option<u8> {
     match level {
@@ -17,9 +16,20 @@ pub fn rank(level: &str) -> Option<u8> {
 struct Lock(File);
 impl Drop for Lock {
     fn drop(&mut self) {
-        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+        #[cfg(windows)]
+        {
+            let _ = &self.0;
+        } // Close releases the native byte-range lock.
     }
 }
+
 fn lock(store: &Store) -> io::Result<Lock> {
     std::fs::create_dir_all(&store.dir)?;
     let file = File::options()
@@ -28,9 +38,7 @@ fn lock(store: &Store) -> io::Result<Lock> {
         .create(true)
         .truncate(false)
         .open(store.dir.join("ask.lock"))?;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    crate::platform::lock(&file)?;
     Ok(Lock(file))
 }
 

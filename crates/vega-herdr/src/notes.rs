@@ -16,6 +16,7 @@
 //! Notes from before these fields have neither.
 
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -184,10 +185,7 @@ pub struct Store {
 impl Store {
     /// `$XDG_STATE_HOME/vega/notes` (default `~/.local/state`).
     pub fn local() -> Option<Store> {
-        let state = env::var("XDG_STATE_HOME")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.local/state")))?;
+        let state = crate::platform::state_home()?;
         Some(Store {
             dir: Path::new(&state).join("vega").join("notes"),
         })
@@ -270,7 +268,7 @@ impl Store {
             let f = self.dir.join(format!("{}.json", note.id));
             let tmp = self.dir.join(format!("{}.json.tmp", note.id));
             if std::fs::write(&tmp, note.to_json().to_string()).is_ok()
-                && std::fs::rename(&tmp, &f).is_ok()
+                && crate::platform::replace(&tmp, &f).is_ok()
             {
                 n += 1;
             }
@@ -312,7 +310,7 @@ impl Store {
             &tmp,
             json!({"read": seen.read, "cleared": seen.cleared}).to_string(),
         )?;
-        std::fs::rename(tmp, self.seen_file())?;
+        crate::platform::replace(tmp, self.seen_file())?;
         Ok(seen)
     }
 

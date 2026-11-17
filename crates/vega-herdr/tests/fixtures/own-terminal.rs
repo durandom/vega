@@ -1,3 +1,4 @@
+#![cfg(unix)]
 // Shared subprocess fixture: no real hc core, herdr server, broker, or user state.
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 pub fn fixture(binary: &str) -> (tempfile::TempDir, Command) {

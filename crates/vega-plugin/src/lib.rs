@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 use std::env;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -30,8 +31,7 @@ pub fn run_plugin(name: &str, args: &[&str]) -> std::process::ExitCode {
     let bin = format!("{PREFIX}{name}");
     let path = env::current_exe()
         .ok()
-        .and_then(|e| Some(e.parent()?.join(&bin)))
-        .filter(|p| is_executable(p))
+        .and_then(|e| find_in_dir(e.parent()?, &bin))
         .or_else(|| find_on_path(&bin));
     let Some(path) = path else {
         eprintln!("error: {bin} not found; install vega (mise run install)");
@@ -54,12 +54,7 @@ pub fn plugins() -> BTreeSet<String> {
         .flatten()
         .flatten()
         .filter(|e| is_executable(&e.path()))
-        .filter_map(|e| {
-            e.file_name()
-                .to_str()?
-                .strip_prefix(PREFIX)
-                .map(str::to_owned)
-        })
+        .filter_map(|e| plugin_name(e.file_name().to_str()?))
         .collect()
 }
 
@@ -69,14 +64,23 @@ pub fn plugins() -> BTreeSet<String> {
 pub fn bd_path() -> String {
     path_dirs()
         .filter(|d| !d.to_string_lossy().contains("shim"))
-        .map(|d| d.join("bd"))
-        .find(|f| f.is_file())
+        .find_map(|d| {
+            #[cfg(unix)]
+            {
+                let path = d.join("bd");
+                path.is_file().then_some(path)
+            }
+            #[cfg(windows)]
+            {
+                find_in_dir(&d, "bd")
+            }
+        })
         .map_or_else(|| "bd".into(), |f| f.display().to_string())
 }
 
 /// First executable named `bin` on PATH.
 pub fn find_on_path(bin: &str) -> Option<PathBuf> {
-    path_dirs().map(|d| d.join(bin)).find(|p| is_executable(p))
+    path_dirs().find_map(|d| find_in_dir(&d, bin))
 }
 
 fn path_dirs() -> impl Iterator<Item = PathBuf> {
@@ -86,6 +90,7 @@ fn path_dirs() -> impl Iterator<Item = PathBuf> {
         .into_iter()
 }
 
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     path.metadata()
         .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
@@ -286,6 +291,56 @@ pub fn assert_guide(guide: &str, plugin: &str) {
     );
 }
 
+fn plugin_name(file: &str) -> Option<String> {
+    #[cfg(windows)]
+    let file = {
+        let (stem, ext) = file.rsplit_once('.')?;
+        if !extensions()
+            .iter()
+            .any(|e| e.eq_ignore_ascii_case(&format!(".{ext}")))
+        {
+            return None;
+        }
+        stem
+    };
+    file.strip_prefix(PREFIX).map(str::to_owned)
+}
+
+fn find_in_dir(dir: &Path, bin: &str) -> Option<PathBuf> {
+    let path = dir.join(bin);
+    if is_executable(&path) {
+        return Some(path);
+    }
+    #[cfg(windows)]
+    if path.extension().is_none() {
+        return extensions()
+            .into_iter()
+            .map(|ext| dir.join(format!("{bin}{ext}")))
+            .find(|p| is_executable(p));
+    }
+    None
+}
+
+#[cfg(windows)]
+fn extensions() -> Vec<String> {
+    env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+        .split(';')
+        .filter(|s| s.starts_with('.') && !s.contains(['/', '\\']))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[cfg(windows)]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
+        && path.extension().is_some_and(|ext| {
+            extensions()
+                .iter()
+                .any(|e| e[1..].eq_ignore_ascii_case(&ext.to_string_lossy()))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +353,23 @@ mod tests {
         );
         assert_eq!(unwrap_bd_envelope(r#"[{"id":"a"}]"#), r#"[{"id":"a"}]"#);
         assert_eq!(unwrap_bd_envelope("no json"), "no json");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_executables_use_pathext_and_plugins_lose_the_suffix() {
+        let dir = env::temp_dir().join(format!("vega-discovery-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("vega-example.EXE");
+        std::fs::write(&exe, []).unwrap();
+        std::fs::write(dir.join("vega-not-a-plugin.txt"), []).unwrap();
+        assert_eq!(find_in_dir(&dir, "vega-example"), Some(exe.clone()));
+        assert_eq!(find_in_dir(&dir, "vega-example.EXE"), Some(exe));
+        assert_eq!(plugin_name("vega-example.EXE").as_deref(), Some("example"));
+        assert_eq!(plugin_name("vega-not-a-plugin.txt"), None);
+        assert!(find_in_dir(&dir, "vega-not-a-plugin").is_none());
+        assert!(find_in_dir(&dir, "missing").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     const OK: &str = "---\nname: vega-x\ndescription: Does x. Use when y.\n---\n\n# vega x\n";

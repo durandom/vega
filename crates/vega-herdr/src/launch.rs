@@ -29,7 +29,6 @@
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -221,7 +220,7 @@ fn source<'r>(kind: Kind, repo: &'r Repo, claude: &Value, codex: &str) -> Option
 fn claude_file() -> PathBuf {
     env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env::var("HOME").unwrap_or_default()))
+        .unwrap_or_else(|_| crate::platform::home().unwrap_or_default())
         .join(".claude.json")
 }
 
@@ -258,7 +257,7 @@ fn trust_claude(file: &Path, path: &str) -> Result<(), String> {
         let tmp = with_suffix(file, &format!(".tmp.vega.{}", std::process::id()));
         let out = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
         write_new(&tmp, out.as_bytes())
-            .and_then(|()| fs::rename(&tmp, file))
+            .and_then(|()| crate::platform::replace(&tmp, file))
             .map_err(|e| {
                 let _ = fs::remove_file(&tmp);
                 e.to_string()
@@ -298,11 +297,9 @@ fn set_trust(config: &mut Value, path: &str) -> bool {
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut f = crate::platform::private_options(&mut options).open(path)?;
     f.write_all(bytes)?;
     f.sync_all()
 }
@@ -313,7 +310,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
 fn codex_file() -> PathBuf {
     env::var("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env::var("HOME").unwrap_or_default()).join(".codex"))
+        .unwrap_or_else(|_| crate::platform::home().unwrap_or_default().join(".codex"))
         .join("config.toml")
 }
 
@@ -624,7 +621,7 @@ mod tests {
         assert_eq!(r.shared.as_deref(), Some(o.as_str()));
         assert_eq!(r.codex_key(), c);
         assert_eq!(r.hooks_from(&c), Some(o.as_str()));
-        let config = format!("[projects.\"{o}\"]\ntrust_level = \"trusted\"\n");
+        let config = format!("[projects.{}]\ntrust_level = \"trusted\"\n", json!(o));
         let s = source(Kind::Codex, &r, &Value::Null, &config).map(|(k, p)| (k.name(), p));
         assert_eq!(s, Some(("codex", o.as_str())));
         fs::remove_dir_all(&dir).unwrap();

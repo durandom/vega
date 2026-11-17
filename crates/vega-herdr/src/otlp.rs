@@ -65,10 +65,7 @@ pub fn load() -> Result<Option<Config>, String> {
 }
 
 fn config_path() -> Option<PathBuf> {
-    let root = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    let root = crate::platform::config_home()?;
     Some(root.join("vega/otlp.toml"))
 }
 

@@ -226,7 +226,7 @@ pub fn save_decisions(
         .map(std::fs::create_dir_all)
         .and_then(Result::ok)
         .and_then(|_| std::fs::write(&tmp, body.to_string()).ok())
-        .and_then(|_| std::fs::rename(&tmp, &f).ok());
+        .and_then(|_| crate::platform::replace(&tmp, &f).ok());
 }
 
 /// The inbox: project `key`'s counts, `None` when vegad has not saved them

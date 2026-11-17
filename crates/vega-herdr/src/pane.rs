@@ -7,10 +7,13 @@
 //! pane on another machine is focused there and the user switches to that
 //! machine themselves (upstream: vega-8m7).
 
+#[cfg(unix)]
 use std::env;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(unix)]
 use serde_json::json;
 
 /// Characters that wrap a path in prose, markdown or compiler output.
@@ -278,6 +281,7 @@ pub fn focus(hit: &Hit) -> Result<(), String> {
 
 /// `pane.focus` over the socket: herdr's CLI only focuses agents
 /// (`agent focus`) or neighbours (`pane focus --direction`).
+#[cfg(unix)]
 fn focus_local(pane: &str) -> Result<(), String> {
     let path = socket_path().ok_or("no herdr socket (HOME unset)")?;
     let mut conn = crate::socket::Client::connect(&path, HERDR_TIMEOUT)
@@ -309,15 +313,17 @@ fn focus_remote(machine: &str, pane: &str) -> Result<(), String> {
 }
 
 /// `$HERDR_SOCKET_PATH`, else herdr's default under the config dir.
+#[cfg(unix)]
 fn socket_path() -> Option<PathBuf> {
     if let Some(p) = env::var_os("HERDR_SOCKET_PATH").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
-    env::var_os("XDG_CONFIG_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .map(|c| c.join("herdr/herdr.sock"))
+    crate::platform::config_home().map(|c| c.join("herdr/herdr.sock"))
+}
+
+#[cfg(windows)]
+fn focus_local(_: &str) -> Result<(), String> {
+    Err("herdr-app sockets are Unix-only; use an hc terminal".into())
 }
 
 #[cfg(test)]

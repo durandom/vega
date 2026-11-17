@@ -20,9 +20,10 @@ pub struct Health {
 }
 
 pub fn path() -> Option<PathBuf> {
-    health_path(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+    crate::platform::state_home().map(|p| p.join("vega/vegad-health.json"))
 }
 
+#[cfg(test)]
 fn health_path(
     xdg: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
@@ -64,7 +65,7 @@ impl Health {
         }
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, serde_json::to_vec(self)?)?;
-        std::fs::rename(tmp, path)
+        crate::platform::replace(tmp, path)
     }
 }
 

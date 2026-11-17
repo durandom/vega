@@ -117,7 +117,7 @@ fn atomic_write(file: &std::path::Path, text: &str) -> bool {
     file.parent()
         .is_some_and(|p| std::fs::create_dir_all(p).is_ok())
         && std::fs::write(&tmp, text).is_ok()
-        && std::fs::rename(&tmp, file).is_ok()
+        && crate::platform::replace(&tmp, file).is_ok()
 }
 pub fn save_open(thread: &str, ask: &Ask) -> bool {
     open_file(thread).is_some_and(|f| atomic_write(&f, &ask.to_json()))

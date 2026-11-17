@@ -41,11 +41,7 @@ pub fn parse_mode(text: &str) -> Mode {
 }
 
 fn config_dir() -> Option<PathBuf> {
-    env::var_os("XDG_CONFIG_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| Path::new(&h).join(".config")))
-        .map(|d| d.join("vega"))
+    crate::platform::config_home().map(|d| d.join("vega"))
 }
 
 /// The harness arguments that resume `session`.
@@ -92,7 +88,7 @@ pub fn shell_idle(t: &Value) -> bool {
 }
 
 fn pi_dir(cwd: &str) -> Option<PathBuf> {
-    let home = env::var_os("HOME")?;
+    let home = crate::platform::home().map(PathBuf::into_os_string)?;
     let folder = format!("--{}--", cwd.trim_start_matches('/').replace('/', "-"));
     Some(Path::new(&home).join(".pi/agent/sessions").join(folder))
 }
@@ -390,11 +386,7 @@ pub fn boot_epoch() -> Option<String> {
 }
 
 fn epoch_file() -> Option<PathBuf> {
-    env::var_os("XDG_STATE_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| Path::new(&h).join(".local/state")))
-        .map(|d| d.join("vega/resume/epoch"))
+    crate::platform::state_home().map(|d| d.join("vega/resume/epoch"))
 }
 
 /// What one boot pass did.
@@ -657,7 +649,10 @@ mod tests {
                     "resume::tests::pi_sessions_pick_the_spawns_own_file",
                 ])
                 .env("VEGA_RESUME_PI_TEST", "1")
-                .env("HOME", home.path())
+                .env(
+                    if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                    home.path(),
+                )
                 .output()
                 .unwrap();
             assert!(

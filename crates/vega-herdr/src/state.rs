@@ -42,10 +42,7 @@ pub fn state_file(kind: &str, pane: &str) -> Option<PathBuf> {
 
 /// `state_file` for an explicit machine (`None`: this one).
 pub fn state_file_on(kind: &str, machine: Option<&str>, pane: &str) -> Option<PathBuf> {
-    let state = env::var("XDG_STATE_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.local/state")))?;
+    let state = crate::platform::state_home()?;
     let machine = machine.unwrap_or("local");
     let encoded = crate::pane::hc_storage_token(pane);
     let pane = encoded
@@ -299,11 +296,8 @@ pub fn inbox_only_hosts() -> Vec<String> {
     if let Ok(v) = env::var("VEGA_POST_INBOX_ONLY") {
         return parse_hosts(&v.replace(',', "\n"));
     }
-    let file = env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|c| !c.is_empty())
-        .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.config")))
-        .map(|c| Path::new(&c).join("vega").join("inbox-only"));
+    let file =
+        crate::platform::config_home().map(|c| Path::new(&c).join("vega").join("inbox-only"));
     match file.and_then(|f| std::fs::read_to_string(f).ok()) {
         Some(text) => parse_hosts(&text),
         None => DEFAULT_INBOX_ONLY.iter().map(|h| h.to_string()).collect(),
@@ -430,7 +424,7 @@ pub fn save_mode_checked(
     let record = json!({"name": name, "mode": mode.as_str()});
     let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, record.to_string())?;
-    let result = std::fs::rename(&tmp, &file);
+    let result = crate::platform::replace(&tmp, &file);
     if result.is_err() {
         let _ = std::fs::remove_file(tmp);
     }
@@ -1053,7 +1047,7 @@ pub fn save_spawn(record: &SpawnRecord) -> std::io::Result<()> {
     std::fs::create_dir_all(file.parent().expect("state file has parent"))?;
     let temporary = file.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&temporary, serde_json::to_vec(record)?)?;
-    std::fs::rename(temporary, file)
+    crate::platform::replace(temporary, file)
 }
 
 pub fn spawn_records() -> Vec<SpawnRecord> {

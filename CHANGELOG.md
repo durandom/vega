@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 232 · 2026-11-17
+
+- feature: The shared plugin and hc client libraries support native Windows
+  executable discovery, user paths, verified process ancestry, process cleanup,
+  file locks and atomic state replacement. Windows CI checks and tests
+  `vega-plugin` and `vega-herdr`; herdr-app sockets and daemon storage stay Unix-only.
+
 ## 231 · 2026-11-17
 
 - feature: `mux spawn --bead <id>` derives its tier from the bead label or type.

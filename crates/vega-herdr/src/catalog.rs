@@ -55,32 +55,22 @@ pub fn builder() -> String {
 /// lanista's index: `$XDG_CACHE_HOME/lanista/model_index.json` (lanista's
 /// paths.py).
 pub fn index_path() -> PathBuf {
-    xdg("XDG_CACHE_HOME", ".cache")
+    crate::platform::cache_home()
+        .unwrap_or_else(|| PathBuf::from(".cache"))
         .join("lanista")
         .join("model_index.json")
 }
 
 /// `$XDG_STATE_HOME/vega/lanista.json`, written by vegad only.
 pub fn state_path() -> PathBuf {
-    xdg("XDG_STATE_HOME", ".local/state")
+    crate::platform::state_home()
+        .unwrap_or_else(|| PathBuf::from(".local/state"))
         .join("vega")
         .join("lanista.json")
 }
 
 fn config_home() -> Option<PathBuf> {
-    env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|c| !c.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| env::var("HOME").ok().map(|h| Path::new(&h).join(".config")))
-}
-
-fn xdg(var: &str, rel: &str) -> PathBuf {
-    env::var(var)
-        .ok()
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(&env::var("HOME").unwrap_or_default()).join(rel))
+    crate::platform::config_home()
 }
 
 /// What vegad last did with the catalog on this host. Times are Unix
@@ -116,7 +106,7 @@ impl State {
         }
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
-        std::fs::rename(tmp, path)
+        crate::platform::replace(tmp, path)
     }
 }
 

@@ -436,3 +436,38 @@ completed with **exit 0**: 1,519 Rust tests passed, six skipped, and the remaini
 script/format/lint checks passed. Gate start is disabled by
 the spike brief. No install, merge, push, deploy, remote configuration or
 terminal interaction was performed. The spike bead remains open for the UAC.
+
+## Platform foundation (vega-nic.28.5)
+
+The first Windows-clean package set is `vega-plugin` and `vega-herdr`.
+`vega-herdr::platform` owns host paths, process isolation, ancestry, locking and
+replacement. XDG overrides remain supported. Windows defaults are `USERPROFILE`
+for home (nonempty `HOME` overrides it), `APPDATA` for config, `LOCALAPPDATA` for state and
+`LOCALAPPDATA/cache` for cache; each consumer appends its existing application
+subdirectory. Plugin discovery recognizes PATHEXT (including `.exe`) and removes
+the executable suffix from plugin names.
+
+hc uses its existing newline-delimited JSON-RPC CLI transport (`hc connect`),
+which supports native Windows named pipes internally. Vega does not connect to
+those pipes itself. The herdr-app Unix socket client, SQLite daemon wait store
+and cutover migration code are compiled only on Unix.
+The remaining shared clients compile on both platforms.
+
+Windows ancestry uses ToolHelp process snapshots and checks parent/child
+creation times to reject reused parent PIDs. Owned bounded commands start
+suspended, enter a kill-on-close Job Object, then resume their primary thread.
+This prevents descendants escaping between spawn and job assignment. Assignment
+failure kills the suspended child and fails the call. Cleanup closes only that
+owned job; it never targets an hc server or an unrelated terminal.
+
+Ask mutations use native exclusive byte-range locks on Windows, released when
+the handle closes; Unix keeps its existing flock contract. State replacement
+uses MoveFileExW with replace-existing and write-through, without a delete gap;
+Unix keeps rename. Windows private-file mode is deliberately a documented
+no-op: files inherit the current user's profile directory ACL, since Unix mode
+bits/Windows readonly flags cannot express equivalent confidentiality. Owners
+of custom XDG directories must provide their own restrictive directory ACLs.
+
+The `windows` CI job runs native all-targets check/clippy and tests for both
+packages. Cross-checking on macOS validates Rust types and lints but cannot
+execute the MSVC test binaries or prove native file/process behavior.

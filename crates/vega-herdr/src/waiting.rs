@@ -13,7 +13,6 @@
 //! agent entries and `vega mux next` picks the oldest.
 
 use std::collections::BTreeMap;
-use std::env;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -139,10 +138,7 @@ pub fn pick<'a>(candidates: &'a [Candidate], statuses: &[String]) -> Option<&'a 
 
 /// `$XDG_STATE_HOME/vega/waiting.json` (default `~/.local/state`).
 pub fn path() -> Option<PathBuf> {
-    let state = env::var("XDG_STATE_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.local/state")))?;
+    let state = crate::platform::state_home()?;
     Some(Path::new(&state).join("vega").join("waiting.json"))
 }
 
@@ -168,7 +164,7 @@ pub fn save(file: &Path, ledger: &Ledger) -> std::io::Result<()> {
     let tmp = file.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(ledger).expect("ledger serializes");
     std::fs::write(&tmp, json + "\n")?;
-    std::fs::rename(tmp, file)
+    crate::platform::replace(tmp, file)
 }
 
 #[cfg(test)]

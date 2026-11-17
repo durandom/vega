@@ -14,7 +14,12 @@ serde = { version = "1", features = ["derive"] }
 regex = "1"
 toml_edit = { version = "0.25", features = ["serde"] }
 url = "2"
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 socket2 = "0.6"
-tempfile = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_Security", "Win32_System_IO"] }

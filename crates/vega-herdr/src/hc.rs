@@ -105,7 +105,7 @@ pub fn own_terminal() -> Result<Terminal, Failure> {
                     let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
                     if let Ok(bytes) = serde_json::to_vec(&r) {
                         if std::fs::write(&tmp, bytes).is_ok() {
-                            let _ = std::fs::rename(tmp, file);
+                            let _ = crate::platform::replace(tmp, file);
                         }
                     }
                 }

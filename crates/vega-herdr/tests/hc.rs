@@ -1,3 +1,4 @@
+#![cfg(unix)]
 use std::{env, fs, os::unix::fs::PermissionsExt, process::Command, time::Duration};
 use vega_herdr::{hc_local, hc_on, own_terminal, Terminal};
 

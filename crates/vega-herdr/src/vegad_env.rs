@@ -1,16 +1,8 @@
 //! The unquoted KEY=value environment pinned when vegad is installed.
-use std::{env, fs, path::PathBuf};
+use std::fs;
 
 pub fn read() -> Vec<(String, String)> {
-    let state = env::var("XDG_STATE_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".local/state"))
-        });
+    let state = crate::platform::state_home();
     state
         .and_then(|p| fs::read_to_string(p.join("vega/vegad.env")).ok())
         .map(|text| parse(&text))

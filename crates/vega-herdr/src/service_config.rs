@@ -3,10 +3,7 @@
 use std::path::Path;
 
 pub fn get(variable: &str, file: &str) -> Option<String> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config")));
+    let config = crate::platform::config_home();
     resolve(
         std::env::var(variable).ok().as_deref(),
         config.as_deref(),

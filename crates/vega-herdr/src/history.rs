@@ -2,10 +2,8 @@
 //! CLI producers write one receipt; daemon producers use a nonblocking channel.
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -14,14 +12,10 @@ pub const MAX_EVENT_BYTES: usize = 256 * 1024;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 pub fn root() -> Option<PathBuf> {
-    std::env::var_os("XDG_STATE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-        .map(|p| {
-            p.join("vega/history-outbox")
-                .join(crate::state::post_host())
-        })
+    crate::platform::state_home().map(|p| {
+        p.join("vega/history-outbox")
+            .join(crate::state::post_host())
+    })
 }
 
 pub fn hash(text: &str) -> String {
@@ -69,15 +63,15 @@ pub fn enrich(event: &mut Value) {
     }
     let Some(cwd) = event["data"]["cwd"]
         .as_str()
-        .filter(|p| p.starts_with('/') || p.starts_with("~/"))
+        .filter(|p| Path::new(p).is_absolute() || p.starts_with("~/"))
     else {
         return;
     };
     let path = if let Some(rest) = cwd.strip_prefix("~/") {
-        let Some(home) = std::env::var_os("HOME") else {
+        let Some(home) = crate::platform::home() else {
             return;
         };
-        PathBuf::from(home).join(rest)
+        home.join(rest)
     } else {
         PathBuf::from(cwd)
     };
@@ -109,19 +103,18 @@ pub fn enqueue(dir: &Path, event: &Value) -> io::Result<()> {
         return Err(io::Error::other("event exceeds 256 KiB outbox limit"));
     }
     fs::create_dir_all(dir)?;
-    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-    let lock = OpenOptions::new()
+    crate::platform::private_dir(dir)?;
+    let lock = crate::platform::private_options(&mut OpenOptions::new())
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .mode(0o600)
         .open(dir.join("lock"))?;
     // A fork elsewhere in this process briefly shares the previous call's lock
     // until its child execs (CLOEXEC); a few short retries ride that out, a
     // real holder still fails within ~100 ms (vega-0ckc).
     let mut tries = 0;
-    while unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    while !crate::platform::try_lock(&lock).unwrap_or(false) {
         tries += 1;
         if tries == 20 {
             return Err(io::Error::other("outbox busy; event not queued"));
@@ -144,16 +137,15 @@ pub fn enqueue(dir: &Path, event: &Value) -> io::Result<()> {
     // A single lock protects this temporary path. Startup retries overwrite a
     // partial temp file; only .json receipts are eligible for publication.
     let tmp = dir.join("pending.tmp");
-    let mut file = OpenOptions::new()
+    let mut file = crate::platform::private_options(&mut OpenOptions::new())
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
         .open(&tmp)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
-    fs::rename(tmp, target)?;
-    File::open(dir)?.sync_all()?;
+    crate::platform::replace(tmp, target)?;
+    crate::platform::sync_dir(dir)?;
     Ok(())
 }
 
@@ -199,8 +191,8 @@ mod tests {
     #[test]
     fn lock_contention_does_not_wait() {
         let tmp = tempfile::tempdir().unwrap();
-        let lock = File::create(tmp.path().join("lock")).unwrap();
-        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
+        let lock = std::fs::File::create(tmp.path().join("lock")).unwrap();
+        crate::platform::lock(&lock).unwrap();
         assert!(enqueue(tmp.path(), &event("h", "test", Value::Null)).is_err());
         assert!(pending(tmp.path()).unwrap().is_empty());
     }
@@ -238,16 +230,15 @@ pub fn publish_status(dir: &Path, sequence: Option<u64>, error: Option<&str>) ->
     state.last_error = error.map(str::to_owned);
     fs::create_dir_all(dir)?;
     let tmp = dir.join("publish.tmp");
-    let mut file = OpenOptions::new()
+    let mut file = crate::platform::private_options(&mut OpenOptions::new())
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
         .open(&tmp)?;
     file.write_all(&serde_json::to_vec(&state)?)?;
     file.sync_all()?;
-    fs::rename(tmp, dir.join("publish.state"))?;
-    File::open(dir)?.sync_all()
+    crate::platform::replace(tmp, dir.join("publish.state"))?;
+    crate::platform::sync_dir(dir)
 }
 
 #[cfg(test)]

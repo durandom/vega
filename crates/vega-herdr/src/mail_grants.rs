@@ -59,10 +59,7 @@ pub fn now() -> u64 {
 }
 
 pub fn dir() -> Result<PathBuf, String> {
-    let root = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/state")))
-        .ok_or("HOME is unset")?;
+    let root = crate::platform::state_home().ok_or("no user state directory")?;
     Ok(root.join("vega/mail-grants"))
 }
 
@@ -82,7 +79,7 @@ pub fn save(g: &Grant) -> Result<(), String> {
         serde_json::to_vec_pretty(g).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, file).map_err(|e| e.to_string())
+    crate::platform::replace(tmp, file).map_err(|e| e.to_string())
 }
 
 pub fn list() -> Result<Vec<Grant>, String> {

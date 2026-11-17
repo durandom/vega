@@ -178,6 +178,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[cfg(unix)]
     fn script(dir: &std::path::Path, body: &str) -> String {
         let path = dir.join("fake-lanista");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -185,6 +186,7 @@ mod tests {
         path.to_string_lossy().into_owned()
     }
 
+    #[cfg(unix)]
     fn make_executable(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(path).unwrap().permissions();
@@ -244,6 +246,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn reads_a_fake_lanista_or_names_why_not() {
         let dir = tempfile::tempdir().unwrap();
         let ok = script(

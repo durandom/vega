@@ -4,7 +4,6 @@
 //! not listed is account-wide.
 
 use std::collections::BTreeMap;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -74,15 +73,7 @@ impl Scopes {
 
 /// `$XDG_CONFIG_HOME/vega/config/capacity/windows.toml` (default `~/.config`).
 pub fn local_path() -> Option<PathBuf> {
-    let config = env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".config"))
-        })?;
+    let config = crate::platform::config_home()?;
     Some(config.join("vega/config").join(SOURCE))
 }
 

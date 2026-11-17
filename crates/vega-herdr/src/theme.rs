@@ -26,7 +26,6 @@
 //! most every READ_EVERY, so a change shows without a restart.
 
 use std::collections::BTreeMap;
-use std::env;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -406,15 +405,7 @@ pub fn is_private_use(c: char) -> bool {
 
 /// `$XDG_CONFIG_HOME/vega/theme.toml`, default `~/.config/vega/theme.toml`.
 pub fn file() -> Option<PathBuf> {
-    let base = env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".config"))
-        })?;
+    let base = crate::platform::config_home()?;
     Some(base.join("vega").join("theme.toml"))
 }
 
