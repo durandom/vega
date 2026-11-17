@@ -80,8 +80,23 @@ jobs:
           git config --global user.name ci
           git config --global user.email ci@example.invalid
       - name: Native client check
-        run: cargo check -p vega-plugin -p vega-herdr --all-targets
+        run: |
+          $packages = @()
+          $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json
+          foreach ($package in $manifest) { $packages += @('-p', $package.package) }
+          cargo check @packages --all-targets
       - name: Native client clippy
-        run: cargo clippy -p vega-plugin -p vega-herdr --all-targets -- -D warnings
+        run: |
+          $packages = @()
+          $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json
+          foreach ($package in $manifest) { $packages += @('-p', $package.package) }
+          cargo clippy @packages --all-targets -- -D warnings
       - name: Native client tests
-        run: cargo test -p vega-plugin -p vega-herdr
+        run: |
+          $packages = @()
+          $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json
+          foreach ($package in $manifest) { $packages += @('-p', $package.package) }
+          cargo test @packages
+      - name: PowerShell 5.1 source installer
+        shell: powershell
+        run: .\scripts\windows-install.ps1 -Checkout $PWD.Path -SkipUpdate

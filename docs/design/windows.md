@@ -2,7 +2,8 @@
 
 Feasibility spike: vega-nic.28.3, epic vega-nic.28. Observed 2026-11-17 on
 proteus, vega base `03292746`; hc source checkout `de97ea5` (installed hc 0.1.21).
-This is a design and read-only investigation, not a Windows deployment.
+Sections 1–4 record that read-only investigation. Section 5 records the later
+native self-build validation on io (vega-nic.28.10).
 
 ## Recommendation
 
@@ -312,7 +313,7 @@ process has an environment variable named HOME. Proposed defaults:
 
 | Purpose | Windows default | Existing override retained |
 | --- | --- | --- |
-| Executables | `%LOCALAPPDATA%\Programs\vega\bin` | installer-selected destination |
+| Executables | `%LOCALAPPDATA%\Programs\vega` | installer-selected destination |
 | Config and nkey | `%APPDATA%\vega\nats.url`, `nats.nk`, `vegad.env` | `XDG_CONFIG_HOME`, `VEGA_NATS_URL`, `VEGA_NATS_NKEY` |
 | Runtime state/records | `%LOCALAPPDATA%\vega` | `XDG_STATE_HOME` (vega subdirectory) |
 | User home | `%USERPROFILE%` | nonempty `HOME` |
@@ -366,41 +367,117 @@ lifecycle or jobs. If the epic forbids any resident Windows process, it must
 choose and fund the delegated-relay alternative; manual `vega post inbox`
 works only after the client port and is not automatic pointer delivery.
 
-## 5. Installation without admin
+## 5. Native source installation without admin (vega-nic.28.10)
 
-Ship a Windows x86_64 release archive containing only the subset's `.exe` files
-and guides. The future installer should verify the release, write to
-`%LOCALAPPDATA%\Programs\vega\bin`, offer a user-only PATH entry, and create
-private config/state directories. Use copies of the vega skill stub for the
-chosen harness, not privileged symlinks. Detect in-use executables and perform
-updates at a controlled stop; do not port Unix exec-over-self behavior verbatim.
-No Windows build toolchain is required for an end user of prebuilt binaries.
+Use **x86_64-pc-windows-msvc**, matching native Windows CI. io already has Visual
+Studio Community 2022 17.14.13 with the x64/x86 C++ tools (MSVC 14.44.35207) and
+Windows SDK 10.0.26100.0 at `C:\ADK` (the registered KitsRoot10). Rust and the
+`cc` crate discover the registered installation; no Developer Command Prompt
+or administrator access is needed. GNU would require maintaining a separate
+MinGW toolchain and would differ from the CI ABI; io's existing GNU-local rally
+toolchain is left alone. See the [Rust MSVC prerequisites](https://rust-lang.github.io/rustup/installation/windows-msvc.html)
+and [ABI choice](https://rust-lang.github.io/rustup/installation/windows.html).
 
-The user can prepare the **future** archive destination and PATH with this
-PowerShell recipe after the release exists (these commands were not run):
+The C dependency inventory, using `cargo tree --target x86_64-pc-windows-msvc
+-e normal,build` on the current checkout:
+
+| Package | C compiler requirement |
+| --- | --- |
+| `vega-plugin`, `vega-herdr` | None in the Windows dependency graph. Rust compilation still requires the MSVC linker/SDK. `rusqlite` and its bundled SQLite C source are Unix-only in `vega-herdr`. |
+| `vega`, `vega-skills` | No C build dependencies, but executable ports are not yet in the approved Windows package list. |
+| Planned `vega-post` client and worker, `vega-mux` | `ring` 0.17.14 via async-nats/rustls/ureq compiles C/assembly using `cc`; MSVC C tools and Windows SDK headers/libs are required. Recheck after dependency extraction lands. |
+
+`%USERPROFILE%\.cargo` already existed, with rustup 1.29.3, a GNU-local default,
+and MSVC 1.88. Rustup/Cargo and Git were absent from the hc core's PATH. Its
+Cargo config forces offline sources in `rally-ng-vendor` and a GNU linker under
+`rally-ng-rust`. The installer therefore finds rustup explicitly and uses
+`%LOCALAPPDATA%\vega-build\cargo` as a separate Cargo home; it never edits that
+existing config or changes the default Rust toolchain. It installs the channel
+from `rust-toolchain.toml` with the explicit MSVC host, and uses `rustup run`.
+Cargo runs from the checkout drive's root with an explicit `--manifest-path`:
+otherwise Cargo also loads the profile's `.cargo/config.toml` as an ancestor
+of the checkout, even with a separate Cargo home. Checkout-local Cargo config
+is likewise not loaded by this isolated build.
+If rustup is absent, it downloads official rustup-init into a temporary file
+and installs in user space with `--no-modify-path --default-toolchain none`.
+Git for Windows must already be installed (the standard Program Files path is
+also detected). No mise, WSL, cross-built vega executable, or privileged setup
+is involved.
+
+From a non-administrator **Windows PowerShell 5.1** on io, download the installer
+outside the checkout (or copy it from a reviewed checkout), then run:
 
 ```powershell
-$vegaBin = Join-Path $env:LOCALAPPDATA 'Programs\vega\bin'
-New-Item -ItemType Directory -Force -Path $vegaBin | Out-Null
-# Copy the verified release's .exe files here; no such release exists yet.
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if (($userPath -split ';') -notcontains $vegaBin) {
-    [Environment]::SetEnvironmentVariable('Path', "$vegaBin;$userPath", 'User')
-}
-$env:Path = "$vegaBin;" + $env:Path
-$env:VEGA_POST_HOST = 'io-win'
-# After private storage and keygen have been ported:
-vega post keygen
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/durandom/vega/main/scripts/windows-install.ps1' -OutFile "$env:TEMP\vega-windows-install.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\vega-windows-install.ps1" -NativeTls
 ```
 
-Only the public key printed by keygen goes to the operator for provisioning.
-The worker startup command, host enrollment and rollback runbook must be
-implemented/tested in the follow-ups before use; `vega post relay start` today
-has Unix-only lifecycle code and is not a working Windows installation recipe.
-Existing herdr-app automatic startup on connected hc hosts must not invoke the
-full daemon on io-win; capability detection must select the minimal worker or
-report it unavailable. Do not use `mise run install`, config apply or deploy
-on Windows as a shortcut.
+io resets rustup's default Rustls HTTPS connections. `-NativeTls` selects
+rustup's native TLS backend **for this process only**; verification remains
+enabled. That backend is deprecated upstream, so omit the flag where the
+default works. The initial install needed a retry after a transient connection
+reset; an already-installed pinned toolchain is reused without a network
+update. Toolchain upgrades follow changes to the repository pin.
+
+The script clones `https://github.com/durandom/vega.git` into
+`%USERPROFILE%\src\vega`, or fetches and fast-forwards an existing clean `main`
+checkout. It refuses dirty trees, a different branch, and non-fast-forward
+updates. `-Repository`, `-Ref`, `-Checkout`, and `-InstallDir` select alternatives;
+`-SkipUpdate` deliberately builds an existing checkout as-is:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows-install.ps1 -Checkout "$env:USERPROFILE\src\vega" -SkipUpdate -NativeTls
+```
+
+The single allowlist is [scripts/windows-packages.json](../../scripts/windows-packages.json):
+each entry has a Cargo `package` and explicit `binaries` (names without `.exe`).
+The installer and native CI check/clippy/tests all read it. Add executables
+only when their Windows ports land on main and pass native CI; an existing
+package manifest alone does not demonstrate Windows readiness. Today the list
+contains **only vega-plugin and vega-herdr, with no executables**. A successful
+run proves a native release library build and reports zero installed executables;
+it does not claim a usable vega CLI yet. The post port is vega-nic.28.6.
+
+Builds run at BelowNormal process priority with two Cargo jobs, `--release
+--locked --target x86_64-pc-windows-msvc`, and checkout-local
+`target\windows-install` output. After a successful build, listed `.exe` files
+are copied into `%LOCALAPPDATA%\Programs\vega` and that directory is added to
+the **user** PATH once (case-insensitive and trailing-slash-aware). With no
+executables the script leaves installation/PATH alone. Exit owned processes
+and rerun if an in-use executable prevents copying. No services are restarted
+or processes terminated. Open a new shell for PATH changes; existing hc cores
+retain their environment, so use explicit paths there. Environment changes
+and process priority are restored on exit.
+
+This source installer supersedes the earlier archive-only proposal. An archive
+release, private identity storage, enrollment, and pointer-worker startup remain
+separate epic work. If another machine lacks MSVC/SDK, stop for the operator to
+install Desktop development with C++ and a Windows SDK through Visual Studio
+Installer; the script never requests elevation or modifies the system PATH.
+
+### Native validation on io, 2026-11-17
+
+Created `C:\Users\hild\src\vega` from main `edf13d9c`, copied the installer and
+allowlist under test, and ran the script through `hc exec --on io-win` using
+Windows PowerShell 5.1. It installed the pinned MSVC toolchain (rustc 1.94.1,
+clippy, rustfmt) and downloaded crates into the isolated Cargo home. The final
+script ran with `-SkipUpdate -NativeTls`: **exit 0**, both libraries built with
+`--release --locked --target x86_64-pc-windows-msvc`. The cold release build took
+57.75 seconds; the repeat build took 0.11 seconds. Cargo and rustc processes
+were observed at BelowNormal priority. No executable or PATH entry was installed
+because the allowlist contains libraries only. No admin/toolchain prerequisites
+remain for io; adding the executable ports after they land is the remaining step.
+
+`nice -n 10 env -u CODEX_THREAD_ID mise run check` on proteus: **exit 0**, 1,523
+Rust tests passed and six skipped, plus the format/lint and script checks.
+The gate was disabled by the task brief. The fresh-rustup bootstrap path and
+executable copy/PATH branch await testing on a machine/allowlist that needs them;
+the actual io runs used existing rustup and an existing checkout.
+
+Host enrollment, worker startup and rollback still need the later epic work.
+Use a separate io-win identity, never WSL io's seed, and send only the public
+key to the operator. Do not invoke the full daemon automatically or use config
+apply, deploy, `mise run install`, or Unix relay lifecycle as a Windows shortcut.
 
 ## Ordered follow-ups and risks
 

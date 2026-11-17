@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 234 · 2026-11-17
+
+- feature: `scripts/windows-install.ps1` builds the approved Windows package list
+  natively with pinned MSVC Rust, without mise or administrator access. It uses
+  a separate Cargo home and installs listed executables to the user PATH as
+  Windows executable ports become available; today it builds the two libraries.
+
 ## 233 · 2026-11-17
 
 - feature: Windows clients resolve common Git configuration, recognize existing
