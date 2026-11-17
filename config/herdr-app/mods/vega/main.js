@@ -96,7 +96,7 @@ else: print(json.dumps({'skipped':True}))`;
 // Idempotent starter on a machine. argv runs without a shell, so sh resolves the remote home;
 // relay start reads that host's vegad.env, so a host pin (io-wsl registered as io) applies.
 // Exit 77 is reserved for the preflight; a present but broken binary still fails normally.
-// A future Windows worker can supply a native starter here.
+// A missing sh selects the native Windows worker without a remote shell.
 const remoteStart = '[ -e "$HOME/.local/bin/vega-post" ] || { echo vega-not-provisioned; exit 77; }; exec "$HOME/.local/bin/vega-post" relay start';
 const START_OK_MS = 300000, START_RETRY_MS = 60000;
 
@@ -424,15 +424,20 @@ export default class Vega extends View {
       await Promise.all(due.map(async name => {
         let ok = false, notProvisioned = false;
         try {
-          const r = await exec("python3", ["-c", startRelay, "hc", "exec", "--json", "--on", name, "--timeout", "20", "--", "sh", "-c", remoteStart]);
-          const outer = r.code === 0 ? JSON.parse(r.stdout) : {code: -1};
-          // hc prints command results as JSON on stdout (exit 0) and launch errors as
-          // JSON on stderr (exit 1).
-          const raw = outer.stdout || (outer.code === 1 ? outer.stderr : "");
-          const result = raw ? JSON.parse(raw) : {};
-          // Match only missing sh, not permission, connection or relay errors.
-          notProvisioned = (outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal) ||
-            ([0, 1].includes(outer.code) && result.error?.kind === "spawn_failed" && result.error?.message === "cannot start sh: program not found");
+          const start = async argv => {
+            const r = await exec("python3", ["-c", startRelay, "hc", "exec", "--json", "--on", name, "--timeout", "20", "--", ...argv]);
+            const outer = r.code === 0 ? JSON.parse(r.stdout) : {code: -1};
+            const raw = outer.stdout || (outer.code === 1 ? outer.stderr : "");
+            return {outer, result: raw ? JSON.parse(raw) : {}};
+          };
+          let {outer, result} = await start(["sh", "-c", remoteStart]);
+          const missing = (program) => [0, 1].includes(outer.code) && result.error?.kind === "spawn_failed" && result.error?.message === `cannot start ${program}: program not found`;
+          if (missing("sh")) {
+            ({outer, result} = await start(["vega-post.exe", "relay", "start"]));
+            notProvisioned = missing("vega-post.exe");
+          } else {
+            notProvisioned = outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal;
+          }
           ok = Boolean(outer.skipped) || (outer.code === 0 && result.code === 0 && !result.timed_out && !result.signal);
         } catch (_) {}
         if (notProvisioned && !this.started.get(name)?.notProvisioned) console.log(`vega: hc ${name} not provisioned (vega starter unavailable)`);

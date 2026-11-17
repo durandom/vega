@@ -640,3 +640,43 @@ of custom XDG directories must provide their own restrictive directory ACLs.
 The `windows` CI job runs native all-targets check/clippy and tests for both
 packages. Cross-checking on macOS validates Rust types and lints but cannot
 execute the MSVC test binaries or prove native file/process behavior.
+
+## 6. Native pointer worker (vega-nic.28.8)
+
+After installing the native subset and provisioning/enrolling **io-win** with its
+own nkey, run `vega-post.exe relay start` as the ordinary Windows user. From a
+connected hc machine, the equivalent direct argv start is:
+
+```text
+hc exec --on io-win -- vega-post.exe relay start
+```
+
+The installed binary directory must be on the core's PATH (or use the installed
+absolute executable path). No `sh`, PowerShell script, admin rights or full
+vegad is required. Pin `VEGA_POST_HOST=io-win` in the Windows user's environment
+or `%APPDATA%\vega\vegad.env` before starting; never reuse the WSL host identity.
+The app mod first tries the Unix starter; an exact hc missing-sh launch error
+selects `vega-post.exe relay start`. An exact missing-executable launch error
+keeps the quiet not-provisioned state and five-minute recheck. Permission,
+connection and worker failures retain the ordinary failure/retry path.
+
+`relay start` creates a detached Windows process and waits for its lock/readiness
+handshake. `relay serve` runs in the foreground for diagnostics and Ctrl-C stop.
+A user-state file lock (Windows native locking) lasts for the worker's lifetime;
+concurrent/repeated starts succeed without creating a second delivery loop.
+State and diagnostics live under `%LOCALAPPDATA%\vega\native-relay` (XDG overrides
+apply). Restart `relay start` after terminating a foreground/debug worker.
+
+The worker polls only local live hc terminals, inspects per-pane unread counts
+and ack floors, and publishes its own host heartbeat and minimal hc agent keys.
+It never pulls or acknowledges mail: `inbox` retains exclusive ack ownership.
+It reuses `delivery.rs` pointer state and draft parsing, preserves pointer state
+across worker restarts, retries broker/core failures, and rescans mail after
+reconnection. Blocked/unknown targets wait; unreadable screens and visible drafts
+also wait. Unlike full vegad it never stashes a draft or forces an unknown input
+box. hc rechecks live/status guards at send time. No remote terminal, Unix daemon
+job, UAC election, config deployment or administrative provisioning is included.
+
+CI uses an owned Rust hc fake and temporary restricted NATS broker. Logout/core
+lifetime and real native harness delivery remain acceptance work in 28.9; no live
+io/io-win run is part of this implementation.

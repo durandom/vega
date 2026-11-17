@@ -13,4 +13,4 @@ description: Sends and reads agent mail through a NATS broker on native Windows.
 - `vega post keygen`: own user nkey. Only its public key leaves this host.
 - `vega post identity enroll --checkout <path>`: fresh v2 owner-local enrollment after operator provisioning; see docs/design/windows.md.
 
-Config defaults to `%APPDATA%\vega`; state to `%LOCALAPPDATA%\vega`. XDG overrides remain supported and require private directory ACLs. Set `VEGA_POST_HOST=io-win`; never use io's WSL seed or an admin seed. Relay/cutover/admin commands are Unix-only; automatic Windows pointers need the separate worker.
+Config defaults to `%APPDATA%\vega`; state to `%LOCALAPPDATA%\vega`. XDG overrides remain supported and require private directory ACLs. Set `VEGA_POST_HOST=io-win`; never use io's WSL seed or an admin seed. `vega post relay start` ensures one native local hc pointer worker; `relay serve` runs in the foreground. Cutover/admin commands stay Unix-only.

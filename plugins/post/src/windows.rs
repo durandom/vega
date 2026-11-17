@@ -1,8 +1,11 @@
-// Native mail client; no daemon lifecycle, sockets, relay or cutover modules.
+// Native mail client and minimal local pointer worker; no full vegad jobs.
 mod client_identity;
 mod client_key;
+#[allow(dead_code)] // Shared policy also includes Unix daemon features.
+mod delivery;
+mod native_relay;
 mod reach;
-#[allow(dead_code)] // Shared terminal address/transport module; no resident worker here.
+#[allow(dead_code)] // Shared module includes Unix terminal operations.
 mod terminals;
 
 use async_nats::jetstream::{self, consumer::pull, stream};
@@ -100,6 +103,11 @@ enum Cmd {
         #[arg(long, requires = "to")]
         host: Option<String>,
     },
+    /// Start or run the minimal local hc pointer worker
+    Relay {
+        #[command(subcommand)]
+        action: native_relay::Action,
+    },
     /// Create this host's own user nkey; prints only the public key
     Keygen,
     /// Enroll a fresh owner-local v2 identity; does not run legacy cutover
@@ -130,6 +138,7 @@ fn main() -> ExitCode {
     }
     let result = match cli.command {
         None | Some(Cmd::Status) => home(),
+        Some(Cmd::Relay { action }) => native_relay::run(action),
         Some(Cmd::Keygen) => client_key::keygen(),
         Some(Cmd::Identity { action }) => client_identity::run(action),
         Some(Cmd::Send {

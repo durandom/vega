@@ -1112,9 +1112,9 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
     const h=load('vega'); let now=1e12, current=result; const logs=[];
     h.api.Date={now:()=>now}; h.api.console={log:s=>logs.push(s)};
     // Real hc shape: launch errors go to stderr with exit 1 and an empty stdout.
-    h.api.exec=async()=>({code:0,stdout:JSON.stringify(current.error
-      ?{code:1,stdout:'',stderr:JSON.stringify(current)}
-      :{code:0,stdout:JSON.stringify(current),stderr:''})});
+    h.api.exec=async(_bin,args)=>{ const reply = args.includes('vega-post.exe') && current.error?.message === 'cannot start sh: program not found' ? {error:{kind:'spawn_failed',message:'cannot start vega-post.exe: program not found'}} : current; return {code:0,stdout:JSON.stringify(reply.error
+      ?{code:1,stdout:'',stderr:JSON.stringify(reply)}
+      :{code:0,stdout:JSON.stringify(reply),stderr:''})}; };
     h.mod.machines=[{name:'io-win',state:'connected'}];
     for(let i=0;i<4;i++) {
       await h.mod.startRemotes(h.cx);
@@ -1133,6 +1133,24 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
     assert.equal(h.mod.startError,null);
     assert.equal(h.mod.started.get('io-win').notProvisioned,false);
   }
+});
+
+test('missing sh starts the Windows worker with direct argv and retries real launch failures',async()=>{
+  const h=load('vega'); const calls=[]; let now=1e12, broken=false;
+  h.api.Date={now:()=>now};
+  h.api.exec=async(_bin,args)=>{
+    calls.push(Array.from(args));
+    const error=args.includes('sh') ? {kind:'spawn_failed',message:'cannot start sh: program not found'} : broken ? {kind:'spawn_failed',message:'cannot start vega-post.exe: permission denied'} : null;
+    return {code:0,stdout:JSON.stringify(error ? {code:1,stdout:'',stderr:JSON.stringify({error})} : {code:0,stdout:JSON.stringify({code:0}),stderr:''})};
+  };
+  h.mod.machines=[{name:'io-win',state:'connected'}];
+  await h.mod.startRemotes(h.cx);
+  assert.deepEqual(calls[1].slice(2),['hc','exec','--json','--on','io-win','--timeout','20','--','vega-post.exe','relay','start']);
+  assert.equal(h.mod.started.get('io-win').notProvisioned,false);
+  assert.equal(h.mod.startError,null);
+  broken=true;
+  for(let i=0;i<3;i++){now+=300001;await h.mod.startRemotes(h.cx);}
+  assert.equal(h.mod.startError,'hc io-win vegad start failed');
 });
 
 function projectFixture(h) {

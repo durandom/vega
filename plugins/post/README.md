@@ -15,6 +15,11 @@ starts vegad on its host and, through `hc exec`, on connected hc machines. `rela
 shows a leftover login job; `vega config infra` flags it. hc machine/SSH retains core ownership.
 See [Lifecycle](../../docs/design/vegad.md#lifecycle-vega-lhc54).
 
+On native Windows, `vega-post.exe relay start` starts the minimal local hc pointer
+worker. The app falls back to this direct executable when the Unix starter's `sh`
+is absent; a missing executable stays not provisioned. `relay serve` provides
+foreground diagnostics. See [Windows worker](../../docs/design/windows.md#6-native-pointer-worker-vega-nic288).
+
 hc machine names must equal vega registry hosts. `vega post send ganymede/t7 "ping"`
 (also `hc:ganymede/t7`) routes to host `ganymede` and terminal `t7` without `--host`.
 The registry must contain that host; unknown hosts or unavailable checks fail before

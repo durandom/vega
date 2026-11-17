@@ -31,14 +31,54 @@ mod native {
     pub fn fake_hc() {
         let line = std::io::stdin().lock().lines().next().unwrap().unwrap();
         let req: Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(req["method"], "terminal.get");
-        let pane = req["params"]["terminal"].as_str().unwrap();
+        let pane =
+            req["params"]["terminal"]
+                .as_str()
+                .unwrap_or(if env::var_os("FAKE_STATE").is_some() {
+                    "t4"
+                } else {
+                    "t1"
+                });
+        let state: Value = env::var("FAKE_STATE")
+            .ok()
+            .and_then(|p| fs::read(p).ok())
+            .and_then(|s| serde_json::from_slice(&s).ok())
+            .unwrap_or(json!({"status":"idle","screen":"❯ "}));
         let cwd = env::var("FAKE_CWD").unwrap();
         let pid = env::var("FAKE_PID").unwrap().parse::<u32>().unwrap();
-        let result = json!({"address":pane,"state":"live","name":pane,"pid":pid,
+        if req["method"] == "terminal.list" && state["status"] == "outage" {
+            println!(
+                "{}",
+                json!({"jsonrpc":"2.0","id":req["id"],"error":{"code":-32000,"message":"owned fake offline","data":{"kind":"unavailable"}}})
+            );
+            return;
+        }
+        let terminal = json!({"address":pane,"state":"live","name":pane,"pid":pid,
             "argv":[],"labels":{},"created_ms":0,"screen":"exact","cols":80,"rows":24,
             "cwd":cwd,"foreground":null,"turn":0,
-            "status":{"app":"codex","state":"idle"},"parent":env::var("FAKE_PARENT").ok()});
+            "status":{"app":"codex","state":state["status"]},"parent":env::var("FAKE_PARENT").ok()});
+        let result = match req["method"].as_str().unwrap() {
+            "terminal.get" => terminal,
+            "terminal.list" => {
+                let mut remote = terminal.clone();
+                remote["address"] = "other/t9".into();
+                json!({"terminals":[terminal,remote],"machines":[],"hidden_finished":0})
+            }
+            "doc.get" => json!({"version":0,"value":null}),
+            "terminal.read" => json!({"text":state["screen"],"complete":true,"how":"screen"}),
+            "terminal.send" => {
+                assert_ne!(state["status"], "blocked");
+                use std::io::Write;
+                let mut f = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(env::var("FAKE_SENDS").unwrap())
+                    .unwrap();
+                writeln!(f, "{}", req["params"]).unwrap();
+                json!({"turn":0,"status":state["status"],"started":true})
+            }
+            other => panic!("unexpected fake method {other}"),
+        };
         println!(
             "{}",
             json!({"jsonrpc":"2.0","id":req["id"],"result":result})
@@ -168,6 +208,179 @@ mod native {
         }} }}"#
         )
     }
+    struct OwnedWorker(String);
+    impl Drop for OwnedWorker {
+        fn drop(&mut self) {
+            #[cfg(windows)]
+            let _ = Command::new("taskkill.exe")
+                .args(["/PID", &self.0, "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            #[cfg(unix)]
+            let _ = Command::new("kill").args(["-TERM", &self.0]).status();
+        }
+    }
+    #[track_caller]
+    fn wait_for(mut check: impl FnMut() -> bool) {
+        let until = Instant::now() + Duration::from_secs(20);
+        while !check() {
+            assert!(Instant::now() < until, "relay condition timed out");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    fn relay_suite(
+        win: &Host,
+        peer: &Host,
+        rt: &tokio::runtime::Runtime,
+        client: &async_nats::Client,
+        broker: &mut Broker,
+        conf: &Path,
+    ) {
+        let state = win.root.join("hc-state.json");
+        let sends = win.root.join("sends.jsonl");
+        let set = |status: &str, screen: &str| {
+            fs::write(
+                &state,
+                json!({"status":status,"screen":format!("────────\n{screen}\n────────\n  status")})
+                    .to_string(),
+            )
+            .unwrap()
+        };
+        let lines = || {
+            fs::read_to_string(&sends)
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        set("blocked", "❯ ");
+        peer.run(
+            &["send", "--host", win.host, "t4", "worker blocked mail"],
+            "t2",
+        );
+        let ready = win.root.join("worker-ready");
+        let mut command = win.cmd(
+            &["relay", "serve", "--ready-file", ready.to_str().unwrap()],
+            "t4",
+        );
+        command
+            .env("FAKE_STATE", &state)
+            .env("FAKE_SENDS", &sends)
+            .stdout(Stdio::null());
+        let mut worker = Broker(command.spawn().unwrap());
+        wait_for(|| ready.exists());
+        let mut duplicate = win.cmd(&["relay", "start"], "t4");
+        duplicate
+            .env("FAKE_STATE", &state)
+            .env("FAKE_SENDS", &sends);
+        assert!(output(duplicate, true).contains("already running"));
+        wait_for(|| {
+            rt.block_on(async {
+                vega_registry::get_one(client, &vega_registry::agent_key(win.host, "t4"))
+                    .await
+                    .unwrap()
+                    .is_some()
+            })
+        });
+        assert_eq!(lines(), 0, "blocked waits");
+        set("unknown", "❯ ");
+        std::thread::sleep(Duration::from_secs(3));
+        assert_eq!(lines(), 0, "unknown waits");
+        set("idle", "❯ unfinished draft");
+        std::thread::sleep(Duration::from_secs(3));
+        assert_eq!(lines(), 0, "draft waits");
+        set("idle", "❯ ");
+        wait_for(|| lines() == 1);
+        let sent = fs::read_to_string(&sends).unwrap();
+        assert!(sent.contains("[vega-post]"));
+        assert!(sent.contains(" inbox"));
+        assert!(!sent.contains("worker blocked mail"));
+        assert!(!sent.contains("other/t9"));
+        // Worker counts mail but never fetches, leases or acknowledges it.
+        assert!(win.run(&["status"], "t4").contains("unread: 1"));
+        rt.block_on(async {
+            let stream = vega_registry::broker_context(client.clone())
+                .get_stream(format!("VEGA_INBOX_{}", win.host))
+                .await
+                .unwrap();
+            assert!(
+                stream
+                    .consumer_info(format!("inbox-{}-t4", win.host))
+                    .await
+                    .is_err(),
+                "worker must not create or fetch an inbox consumer"
+            );
+            assert!(vega_registry::get_one(
+                client,
+                &vega_registry::agent_key(win.host, "other/t9")
+            )
+            .await
+            .unwrap()
+            .is_none());
+        });
+        // Killing the worker releases its lock; persisted pointer state survives restart.
+        worker.0.kill().unwrap();
+        worker.0.wait().unwrap();
+        fs::remove_file(&ready).unwrap();
+        let mut again = win.cmd(
+            &["relay", "serve", "--ready-file", ready.to_str().unwrap()],
+            "t4",
+        );
+        again
+            .env("FAKE_STATE", &state)
+            .env("FAKE_SENDS", &sends)
+            .stdout(Stdio::null());
+        let _again = Broker(again.spawn().unwrap());
+        wait_for(|| ready.exists());
+        std::thread::sleep(Duration::from_secs(3));
+        assert_eq!(lines(), 1, "restart does not duplicate unread pointer");
+        // A broker restart retains inbox state; the same worker reconnects/rescans.
+        rt.block_on(async {
+            broker.0.kill().unwrap();
+            broker.0.wait().unwrap();
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            broker.0 = Command::new("nats-server")
+                .arg("-c")
+                .arg(conf)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            // Drive the test observer's current-thread runtime through reconnect too.
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            client.flush().await.unwrap();
+        });
+        set("outage", "❯ ");
+        std::thread::sleep(Duration::from_secs(3));
+        // A failed local inventory must not delete published agents.
+        assert!(rt
+            .block_on(vega_registry::get_one(
+                client,
+                &vega_registry::agent_key(win.host, "t4")
+            ))
+            .unwrap()
+            .is_some());
+        set("idle", "❯ ");
+        // An actual inbox read advances ack ownership; subsequent mail gets a pointer.
+        win.run(&["inbox"], "t4");
+        peer.run(&["send", "--host", win.host, "t4", "next mail"], "t2");
+        wait_for(|| lines() == 2);
+        drop(_again);
+        let mut start = win.cmd(&["relay", "start"], "t4");
+        start.env("FAKE_STATE", &state).env("FAKE_SENDS", &sends);
+        let started = output(start, true);
+        assert!(started.contains("relay: started"), "{started}");
+        let pid = started
+            .lines()
+            .find_map(|l| l.strip_prefix("pid: "))
+            .unwrap()
+            .to_string();
+        let _owned = OwnedWorker(pid);
+        // Starter exited, but its detached child still owns the lock.
+        assert!(win
+            .run(&["relay", "start"], "t4")
+            .contains("already running"));
+    }
     pub fn suite() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
@@ -189,7 +402,7 @@ mod native {
         let admin = nkeys::KeyPair::new_user();
         let conf = root.join("nats.conf");
         fs::write(&conf,format!("listen: 127.0.0.1:{port}\njetstream {{ store_dir: {} }}\nauthorization {{ users: [{{ nkey: \"{}\" }}, {}, {}] }}\n",json!(root.join("js").to_string_lossy()),admin.public_key(),permissions(win.host,&win.public()),permissions(peer.host,&peer.public()))).unwrap();
-        let _broker = Broker(
+        let mut broker = Broker(
             Command::new("nats-server")
                 .arg("-c")
                 .arg(&conf)
@@ -331,7 +544,8 @@ mod native {
             false
         )
         .contains("hop_limit"));
-        assert!(output(win.cmd(&["relay", "start"], "t1"), false).contains("usage"));
+        relay_suite(&win, &peer, &rt, &client, &mut broker, &conf);
+        assert!(output(win.cmd(&["relay", "start", "--typo"], "t1"), false).contains("usage"));
         assert!(output(win.cmd(&["keygen", "--admin"], "t1"), false).contains("usage"));
         assert!(output(
             win.cmd(&["send", "--host", peer.host, "t2", "--typo", "text"], "t1"),
@@ -412,6 +626,6 @@ mod native {
         })
         .unwrap();
         assert!(output(peer.cmd(&["status"], "t2"), false).contains("no_inbox_stream"));
-        println!("native client suite: passed (restricted nkeys, enrollment, status/send/reply/done, inbox/archive/acks, ancestry, errors)");
+        println!("native client suite: passed (restricted nkeys, enrollment, mail/acks, ancestry, relay guards/lock/detach/restart/reconnect, errors)");
     }
 }

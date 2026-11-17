@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 239 · 2026-11-17
+
+- feature: Native Windows `vega-post.exe relay start` runs one local hc pointer
+  worker with draft/status guards, inbox-owned acknowledgements, registry presence
+  and reconnect retries. The app uses direct executable argv after a missing-sh
+  error; an absent Windows binary stays quietly not provisioned. Provision and
+  enroll io-win first; see `docs/design/windows.md` for the start path.
+
 ## 238 · 2026-11-17
 
 - feature: Unix coordinators can spawn native Codex and Claude agents on Windows

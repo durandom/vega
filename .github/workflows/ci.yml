@@ -105,6 +105,8 @@ jobs:
           $manifest = Get-Content -Raw scripts/windows-packages.json | ConvertFrom-Json
           foreach ($package in $manifest) { $packages += @('-p', $package.package) }
           cargo test @packages
+      - name: Remote starter mod tests (hc launch error envelopes)
+        run: node --test scripts/herdr-app-mods.test.mjs
       - name: PowerShell 5.1 source installer
         shell: powershell
         run: .\scripts\windows-install.ps1 -Checkout $PWD.Path -SkipUpdate

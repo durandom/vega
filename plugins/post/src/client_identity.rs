@@ -59,6 +59,10 @@ fn validate(enrollment: &Enrollment) -> Result<(), Failure> {
     }
     Ok(())
 }
+/// Resident workers may publish v2 presence only for this enrolled owner.
+pub fn verify_local() -> Result<(), Failure> {
+    validate(&load()?)
+}
 pub fn run(action: Action) -> Result<(), Failure> {
     let host = crate::host();
     if vega_herdr::state::is_inbox_only(&host) {
