@@ -382,6 +382,41 @@ pub fn cleanup_detached(r: &Review) {
         .spawn();
 }
 
+/// A fresh reviewer is not judged dead before its pane has had this long to
+/// show up in the terminal's list.
+pub const REAP_GRACE_SECS: i64 = 15;
+
+/// Ends the reviews of `repo` whose reviewer pane is gone (exited) with no
+/// verdict written: their running beads become `abandoned` and the state,
+/// clone and pane are cleaned, so the next `vega gate start` starts a fresh
+/// review instead of waiting for the timeout. The state lock decides against
+/// a verdict in flight. Returns the abandoned panes.
+pub fn reap_dead(dir: &Path, repo: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in state::all() {
+        if r.repo != repo || now() - r.started_at <= REAP_GRACE_SECS || pane_alive(&r) {
+            continue;
+        }
+        let Ok(Some(guard)) = state::lock_current(&r) else {
+            continue;
+        };
+        for b in &r.beads {
+            let _ = record::finish(
+                dir,
+                b,
+                "abandoned",
+                &format!("abandoned: reviewer {} exited without a verdict", r.pane),
+                None,
+            );
+        }
+        state::remove(&r.pane);
+        drop(guard);
+        cleanup(&r, false);
+        out.push(r.pane.clone());
+    }
+    out
+}
+
 /// What a plan needs: a pass for every segment, else a running review.
 pub fn start(dir: &Path, plan: &Plan, cfg: &Config, branch: &str) -> Result<Outcome, String> {
     start_from(dir, plan, cfg, branch, lookup(dir, plan)?)
@@ -904,7 +939,7 @@ pub fn hc_spawn_args(
             .map(|s| s.to_string()),
     );
     args.extend(model.iter().filter(|s| !s.is_empty()).cloned());
-    args.push(task.into());
+    args.extend(vega_herdr::launch::prompt_args(kind, task));
     args
 }
 
@@ -1250,6 +1285,15 @@ mod tests {
         assert_eq!(
             choose(&reviewers, "budget", &author, &none, &resolve, &never).unwrap_err(),
             vec!["codex: codex not on PATH", "pi:xai: pi not on PATH"]
+        );
+    }
+
+    #[test]
+    fn hc_spawn_gives_agy_its_task_through_dash_i() {
+        let args = hc_spawn_args("gate-r", "r", "agy", Path::new("/clone"), "task", &[], None);
+        assert!(
+            args.ends_with(&["-i", "task"].map(String::from)),
+            "{args:?}"
         );
     }
 

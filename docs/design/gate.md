@@ -302,6 +302,7 @@ closed bead with `verdict=pass`. Only a pass lets the push through; `fail` beads
 | Reviewer idle without ever taking its prompt (no prompt in its session log), or at a dialog | `vega gate` and the running line say `stuck` or `blocked` with `vega mux show <pane>` for TUI or `hc read <terminal>` for hc; the timeout still applies |
 | Push again or `vega gate start`, new head, review running | lock the old review, mark its beads `superseded`, revoke its state, close the old pane and start a fresh reviewer bound to the new head/generation. Include unchanged running segments; never re-point a reviewer by mail. A stale verdict cannot apply to the new generation |
 | Reviewer dies (pane gone) or silent past `timeout` | on the next push: bead `abandoned`, cleanup, start a new review with the next candidate. A second abandon for the same key fails open (infrastructure, spike input 7) |
+| Reviewer exited (hc terminal not `live`, herdr pane gone) with no verdict, e.g. the agent rejected its argv at start | `vega gate` (home) and `vega gate start` end the review at once, once it is 15 s old: beads `abandoned` (reason `reviewer <pane> exited without a verdict`), state, clone and pane cleaned, so the next start spawns afresh instead of reporting a running review. The state lock decides against a verdict in flight |
 | Target ref missing locally | uses `<remote>/HEAD`; none either: fail open |
 | Reviewer pushes | refused (section 1) |
 
