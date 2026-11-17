@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-function load(name, {allowFocus=false}={}) {
+function load(name, {allowFocus=false,crlf=false}={}) {
   const state = new Map(), storage = new Map(), calls = [], tasks = [], commands = [];
   const files = new Map(), fsCalls = [];
   const fakeFs = {
@@ -40,11 +40,12 @@ function load(name, {allowFocus=false}={}) {
     checking:()=>false, appHome:()=>'/scratch/app-home', fs: fakeFs,
     localStorage:{getItem:k=>storage.get(k)??null,removeItem:k=>storage.delete(k),setItem:(k,v)=>storage.set(k,v)},Date,Map,Set,JSON};
   let code=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/main.js`,import.meta.url),'utf8');
-  code=code.replace(/^import .*;\n/gm,'').replace('export default class','globalThis.Mod = class');
+  if (crlf) code=code.replace(/\r?\n/g,'\r\n');
+  code=code.replace(/^import .*;\r?\n/gm,'').replace('export default class','globalThis.Mod = class');
   const context=vm.createContext(api);
   if(['vega-window-tabs','vega-services'].includes(name)) for(const file of name==='vega-services'?['model.js']:['navigation.js','tabs.js','diff.js']) {
     const helper=fs.readFileSync(new URL(`../config/herdr-app/mods/${name}/${file}`,import.meta.url),'utf8')
-      .replace(/^import .*;\n/gm,'').replaceAll('export function','function').replaceAll('export const','const');
+      .replace(/^import .*;\r?\n/gm,'').replaceAll('export function','function').replaceAll('export const','const');
     vm.runInContext(helper,context);
   }
   vm.runInContext(code,context);
@@ -1136,7 +1137,7 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
 });
 
 test('missing sh starts the Windows worker with direct argv and retries real launch failures',async()=>{
-  const h=load('vega'); const calls=[]; let now=1e12, broken=false;
+  const h=load('vega',{crlf:true}); const calls=[]; let now=1e12, broken=false;
   h.api.Date={now:()=>now};
   h.api.exec=async(_bin,args)=>{
     calls.push(Array.from(args));
