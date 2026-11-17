@@ -383,8 +383,11 @@ pub fn project_origin_name(project: &str) -> Option<String> {
 
 /// `project_origin_name` with the Git budget given (tests of the bound).
 fn origin_name_within(project: &str, budget: Duration) -> Option<String> {
-    let dir = match project.strip_prefix("~/") {
-        Some(rest) => std::path::PathBuf::from(env::var_os("HOME")?).join(rest),
+    let relative = project.strip_prefix("~/");
+    #[cfg(windows)]
+    let relative = relative.or_else(|| project.strip_prefix("~\\"));
+    let dir = match relative {
+        Some(rest) => vega_herdr::platform::home()?.join(rest),
         None => std::path::PathBuf::from(project),
     };
     let out = vega_herdr::output_within(
@@ -688,18 +691,12 @@ fn url() -> String {
     vega_herdr::service_config::get("VEGA_NATS_URL", "nats.url").unwrap_or_default()
 }
 
-fn config_dir() -> Option<String> {
-    env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|c| !c.is_empty())
-        .or_else(|| env::var("HOME").ok().map(|h| format!("{h}/.config")))
-}
-
 fn seed() -> Option<String> {
     let path = env::var("VEGA_NATS_NKEY")
         .ok()
         .filter(|p| !p.is_empty())
-        .or_else(|| config_dir().map(|c| format!("{c}/vega/nats.nk")))?;
+        .map(std::path::PathBuf::from)
+        .or_else(|| vega_herdr::platform::config_home().map(|c| c.join("vega").join("nats.nk")))?;
     std::fs::read_to_string(path)
         .ok()
         .map(|s| s.trim().to_string())
@@ -1290,7 +1287,7 @@ mod tests {
             let p =
                 vega_herdr::project::resolve(&tmp.path().join(cwd), &state::post_host()).unwrap();
             let key = vega_herdr::home_relative(p.location.common_dir.to_str().unwrap());
-            assert!(key.starts_with("~/"), "{key}");
+            assert!(key.starts_with("~/") || key.starts_with("~\\"), "{key}");
             assert_eq!(project_origin_name(&key).as_deref(), Some(name));
         }
         let plain = tmp.path().join("orrery/main/.git").display().to_string();
