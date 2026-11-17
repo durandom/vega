@@ -361,7 +361,7 @@ pub struct Plan {
 }
 
 impl Plan {
-    fn skip(why: impl Into<String>) -> Plan {
+    pub(crate) fn skip(why: impl Into<String>) -> Plan {
         Plan {
             skip: Some(why.into()),
             ..Plan::default()

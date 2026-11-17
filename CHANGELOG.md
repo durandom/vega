@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 228 · 2026-11-17
+
+- unit: `browser.agent-browser` skips a host that has neither agent-browser nor npm on PATH
+  (it does not use browsers, e.g. io) instead of failing every apply.
+
 ## 227 · 2026-11-17
 
 - unit: `browser.agent-browser` converges agent-browser to the repository pin 0.43.0

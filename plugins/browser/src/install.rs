@@ -52,6 +52,12 @@ pub fn chrome(home: &Path) -> bool {
         .any(|e| suffixes.iter().any(|s| e.path().join(s).is_file()))
 }
 
+/// Whether `npm` is on PATH: a host without agent-browser and without npm
+/// does not use browsers (e.g. io), so the config unit skips it.
+pub fn npm_on_path() -> bool {
+    env::var_os("PATH").is_some_and(|p| env::split_paths(&p).any(|d| d.join("npm").is_file()))
+}
+
 pub fn status() -> Result<Value, Failure> {
     let bin = real::real_binary();
     let found = bin.as_deref().map(version).transpose()?;
@@ -63,7 +69,8 @@ pub fn status() -> Result<Value, Failure> {
     let home = env::var_os("HOME").ok_or_else(|| failure("HOME is missing"))?;
     Ok(
         json!({"state": state, "version": found, "pinned": VERSION.trim(), "binary": bin,
-        "chrome": if chrome(Path::new(&home)) { "current" } else { "missing" }}),
+        "chrome": if chrome(Path::new(&home)) { "current" } else { "missing" },
+        "npm": npm_on_path()}),
     )
 }
 

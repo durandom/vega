@@ -31,6 +31,11 @@ pub fn plan(ctx: &Ctx) -> Result<Plan, String> {
         .as_str()
         .filter(|s| matches!(*s, "current" | "missing"))
         .ok_or("invalid Chrome status")?;
+    if state == "missing" && s["npm"] == Value::Bool(false) {
+        return Ok(Plan::skip(
+            "no agent-browser and no npm on PATH: this host does not use browsers",
+        ));
+    }
     Ok(Plan {
         browser_pending: state != "current" || chrome != "current",
         notes: vec![format!("agent-browser: {state}, pinned {}; Chrome for Testing: {chrome}; apply runs vega browser install", s["pinned"].as_str().unwrap_or("unknown"))],
