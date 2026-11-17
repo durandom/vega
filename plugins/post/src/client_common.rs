@@ -56,7 +56,11 @@ fn seed_path(kind: Seed) -> Result<String, Failure> {
             "set VEGA_NATS_NKEY to the seed file",
         )
     })?;
-    Ok(format!("{config}/vega/{}", kind.file()))
+    Ok(std::path::Path::new(&config)
+        .join("vega")
+        .join(kind.file())
+        .to_string_lossy()
+        .into_owned())
 }
 
 /// The seed to connect with: `VEGA_NATS_NKEY` (must exist), else the

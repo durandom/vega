@@ -26,7 +26,7 @@ pub fn check_path(path: &Path) -> Result<(), Failure> {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(failure(e)),
+            Err(e) => return Err(failure(format!("{}: {e}", ancestor.display()))),
         }
     }
     Ok(())
