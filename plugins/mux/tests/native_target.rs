@@ -40,7 +40,7 @@ fn preparation_resolves_only_native_exes_without_changing_cwd_or_trust() {
         let out = command(root).args(args).output().unwrap();
         assert!(!out.status.success());
         assert!(String::from_utf8_lossy(&out.stdout).contains("executable_not_found"));
-        let exe = root.join(format!("bin/{kind}.exe"));
+        let exe = root.join("bin").join(format!("{kind}.exe"));
         // Preparation locates but never starts the executable.
         fs::write(&exe, "must never execute").unwrap();
         let v = success(command(root).args(args).output().unwrap());
