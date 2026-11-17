@@ -9,7 +9,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 - optional: Windows installer `-CoreAutostart` registers hidden, non-elevated hc desktop startup
   at logon; `-CoreAutostartOnly` registers without building or starting a core.
-- feature: Windows `vega post doctor` and `status` detect a Services/session-0 core or pipe access
+- feature: Windows `vega post doctor` detects a Services/session-0 core or pipe access
   denied and give recovery steps. See `docs/design/windows.md` for logon verification and ownership repair.
 
 ## 240 · 2026-11-17

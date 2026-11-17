@@ -732,8 +732,8 @@ can differ), no startup window, and `hc_core: pid ..., session ... (desktop)`.
 Windows `hc server status`, then `ProcessIdToSessionId` in vega-herdr's platform
 layer. Session 0 returns `hc_core_session_zero`; pipe access denied returns
 `hc_core_access_denied` with an elevated/session-0 warning and recovery hint.
-Neither probe starts a core. `vega post status` runs it before caller/broker
-lookup, so a broken pipe is reported even when caller verification would fail.
+Neither probe starts a core. Run `vega post doctor` directly when `status` cannot
+verify its caller: doctor needs neither caller identity nor broker access.
 Other probe failures are explicit, never a healthy result. This requires Windows
 hc with existing-only `server status` (validated against io's 0.1.21).
 

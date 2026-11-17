@@ -6,7 +6,7 @@ description: Sends and reads agent mail through a NATS broker on native Windows.
 # vega post: native Windows client
 
 - `vega post status`: broker, verified caller, unread count.
-- `vega post doctor`: Windows core PID/session and recovery hint; no broker or caller identity required. Status runs this existing-only check first.
+- `vega post doctor`: Windows core PID/session and recovery hint; no broker or caller identity required. This check never starts a core.
 - `vega post send [--host <host>] <pane> "<text>"`: send mail. Reply by copying the timestamped `--re` command from inbox; never reply to acknowledgements.
 - `vega post inbox`: read and ack; `--keep` leaves unread, `--show <id>` rereads without ack.
 - `vega post log`: archive without ack; `--json` emits full bodies.

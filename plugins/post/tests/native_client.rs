@@ -4,7 +4,10 @@
 fn main() {}
 #[cfg(any(windows, feature = "client-only"))]
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some("connect") {
+    if std::env::args().nth(1).as_deref() == Some("server") {
+        assert_eq!(std::env::args().nth(2).as_deref(), Some("status"));
+        println!("{{\"pid\":{}}}", std::env::var("FAKE_PID").unwrap());
+    } else if std::env::args().nth(1).as_deref() == Some("connect") {
         native::fake_hc();
     } else {
         native::suite();
@@ -535,6 +538,18 @@ mod native {
                 .unwrap();
             }
         });
+        #[cfg(windows)]
+        {
+            // Exercise the real Windows session API using the owned fake's server PID.
+            // GitHub's runner can itself be in Services/session 0.
+            let session = vega_herdr::platform::session_id(std::process::id()).unwrap();
+            let report = output(win.cmd(&["doctor"], "t1"), session != 0);
+            assert!(report.contains(if session == 0 {
+                "hc_core_session_zero"
+            } else {
+                "(desktop)"
+            }));
+        }
         for h in [&win, &peer] {
             assert!(h
                 .run(&["identity", "enroll", "--checkout", "."], "t1")

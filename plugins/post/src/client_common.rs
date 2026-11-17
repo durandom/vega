@@ -76,8 +76,6 @@ fn nkey_path(kind: Seed) -> Option<String> {
 
 /// Live view: broker, my pane, unread count.
 fn home() -> Result<(), Failure> {
-    #[cfg(windows)]
-    core_doctor::doctor()?;
     let bin = env::current_exe()
         .map(|p| collapse_home(&p.display().to_string()))
         .unwrap_or_else(|_| "unknown".into());
