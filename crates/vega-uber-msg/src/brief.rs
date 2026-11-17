@@ -103,9 +103,17 @@ fn request_file(uber_dir: &Path, thread: &str) -> PathBuf {
 }
 
 fn reply_file(uber_dir: &Path, thread: &str, host: &str, pane: &str) -> PathBuf {
-    dir(uber_dir)
-        .join(thread)
-        .join(format!("{host}_{pane}.txt"))
+    #[cfg(unix)]
+    let name = format!("{host}_{pane}.txt");
+    #[cfg(windows)]
+    let name = {
+        use sha2::{Digest, Sha256};
+        // Colons in pane IDs denote NTFS alternate data streams. Hash both
+        // components with an unambiguous separator; also avoid case aliases,
+        // reserved device names and the 255-character filename limit.
+        format!("{:x}.txt", Sha256::digest(format!("{host}\0{pane}")))
+    };
+    dir(uber_dir).join(thread).join(name)
 }
 
 fn write_atomic(f: &Path, data: &[u8]) -> std::io::Result<()> {
