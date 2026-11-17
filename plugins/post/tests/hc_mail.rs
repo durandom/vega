@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! Actual CLI + relay + local broker, with both terminal backends faked.
 //! Sending successfully is insufficient: every direction must type a pointer
 //! and the recipient must read the original body from its own inbox.

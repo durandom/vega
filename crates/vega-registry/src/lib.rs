@@ -42,6 +42,7 @@
 //!
 //! Only this crate talks to the bucket; mux, uac and the relay call it.
 
+#[cfg(unix)]
 pub mod cutover;
 pub mod pins;
 mod removal;
@@ -83,6 +84,11 @@ pub fn pane_token(pane: &str) -> String {
 
 pub fn beat_key(host: &str) -> String {
     format!("{}.beat", token(host))
+}
+
+/// Fresh native host enrollment, managed by the client rather than reconcile.
+pub fn identity_key(host: &str) -> String {
+    format!("{}.identity.v2", token(host))
 }
 
 pub fn agent_key(host: &str, pane: &str) -> String {
@@ -323,9 +329,15 @@ pub fn local_entries(
             );
         }
     }
+    #[cfg(unix)]
     let wait_records = state_wait_records(host);
+    #[cfg(unix)]
+    let waits_available = wait_records.is_ok();
+    #[cfg(windows)]
+    let waits_available = false;
     let open_asks = vega_herdr::gather::open();
-    out.insert(format!("{}.orchestration",token(host)),json!({"at":unix_now(),"waits_available":wait_records.is_ok(),"asks_available":open_asks.is_ok()}));
+    out.insert(format!("{}.orchestration",token(host)),json!({"at":unix_now(),"waits_available":waits_available,"asks_available":open_asks.is_ok()}));
+    #[cfg(unix)]
     if let Ok(waits) = wait_records {
         for w in waits.into_iter().filter(|w| w.resolved.is_none()) {
             if let Ok(value) = serde_json::to_value(&w) {
@@ -351,6 +363,7 @@ pub fn project_folder(common: &str) -> &str {
     dir.rsplit('/').next().unwrap_or(dir)
 }
 
+#[cfg(unix)]
 fn state_wait_records(host: &str) -> Result<Vec<vega_herdr::waits::Wait>, String> {
     let file = vega_herdr::waits::path().ok_or("wait source unavailable")?;
     let waits = vega_herdr::waits::Store::read(&file).map_err(|_| "wait source unavailable")?;
@@ -530,6 +543,7 @@ impl View {
     }
 
     /// Runtime declarations, retaining stale records as evidence with unknown freshness.
+    #[cfg(unix)]
     pub fn explicit_waits(&self) -> Result<Vec<(vega_herdr::waits::Wait, bool)>, String> {
         let mut out = Vec::new();
         for (key, v) in &self.entries {
@@ -988,6 +1002,7 @@ pub async fn reconcile(
     for k in present {
         if k.starts_with(&prefix)
             && *k != beat_key(host)
+            && *k != identity_key(host)
             && *k != format!("{}.notify.sent", token(host))
             && !pins::is_pin(k)
             && *k != format!("{}.lanista.host", token(host))
@@ -1111,6 +1126,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn wait_and_ask_projections_verify_their_publisher_and_keep_stale_records_unknown() {
         use vega_herdr::waits::{Actor, Change, Endpoint, Proof, Request, Store};
         let dir = tempfile::tempdir().unwrap();
@@ -1280,6 +1296,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn origin_config_failures_are_bounded() {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(mode) = env::var("VEGA_ORIGIN_TEST_MODE") {

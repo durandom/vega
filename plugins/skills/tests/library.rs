@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! The skills library against throwaway repos: a private HOME, XDG dirs and
 //! PATH per test, so nothing touches the real ~/.claude, ~/.agents or
 //! ~/.config/vega. Tests marked "real engine" need skills.sh (`skills` on

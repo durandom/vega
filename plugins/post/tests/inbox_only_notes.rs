@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! `vega post notes` on an inbox-only host skips the registry read.
 use std::process::Command;
 

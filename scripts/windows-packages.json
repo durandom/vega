@@ -1,4 +1,44 @@
 [
-  { "package": "vega-plugin", "binaries": [] },
-  { "package": "vega-herdr", "binaries": [] }
+  {
+    "package": "vega-plugin",
+    "binaries": []
+  },
+  {
+    "package": "vega-herdr",
+    "binaries": []
+  },
+  {
+    "package": "vega-build",
+    "binaries": []
+  },
+  {
+    "package": "vega-registry",
+    "binaries": []
+  },
+  {
+    "package": "vega-uber-msg",
+    "binaries": []
+  },
+  {
+    "package": "vega-transcript",
+    "binaries": []
+  },
+  {
+    "package": "vega",
+    "binaries": [
+      "vega"
+    ]
+  },
+  {
+    "package": "vega-post",
+    "binaries": [
+      "vega-post"
+    ]
+  },
+  {
+    "package": "vega-skills",
+    "binaries": [
+      "vega-skills"
+    ]
+  }
 ]

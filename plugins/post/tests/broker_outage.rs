@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! A broker that goes away while vegad runs (docs/design/vegad.md, Broker
 //! outage, vega-lhc.205): a local nats-server, killed mid-run and started
 //! again on the same port. vegad keeps labelling herdr's panes, logs the

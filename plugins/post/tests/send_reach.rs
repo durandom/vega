@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! `vega post send` checks the target in the registry (vega-lhc.129): a pane
 //! its fresh host no longer lists fails with pane_gone and names the
 //! project's UAC; a stale host gets the mail with a warning; `--uac`

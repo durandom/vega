@@ -21,6 +21,7 @@ fn skill_flag_is_removed_with_a_hint() {
     assert!(stdout.contains("`vega skills`"), "{stdout}");
 }
 
+#[cfg(unix)]
 fn plugin(dir: &std::path::Path, name: &str, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join(format!("vega-{name}"));
@@ -28,6 +29,7 @@ fn plugin(dir: &std::path::Path, name: &str, body: &str) {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+#[cfg(unix)]
 fn vega(path: &std::path::Path, args: &[&str]) -> (Option<i32>, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_vega"))
         .args(args)
@@ -38,6 +40,7 @@ fn vega(path: &std::path::Path, args: &[&str]) -> (Option<i32>, String) {
 }
 
 #[test]
+#[cfg(unix)]
 fn skill_alias_is_gone() {
     let dir = tempfile::tempdir().unwrap();
     plugin(dir.path(), "skills", "echo \"${0##*/} ARGS $*\"; exit 3");

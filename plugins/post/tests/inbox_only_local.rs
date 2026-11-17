@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! Simulated inbox-only host: local herdr delivery must need no broker;
 //! an explicit remote pane must still use quarantine, never an inbox publish.
 use serde_json::json;

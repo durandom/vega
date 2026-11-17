@@ -49,7 +49,7 @@ pub struct RepoLocation {
     pub checkout: PathBuf,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
     pub location: RepoLocation,

@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 use std::process::Command;
 
 #[test]

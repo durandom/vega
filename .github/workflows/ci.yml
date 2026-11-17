@@ -79,6 +79,14 @@ jobs:
         run: |
           git config --global user.name ci
           git config --global user.email ci@example.invalid
+      - name: Local test broker
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path mise.toml -Pattern '^nats-server = "([^"]+)"').Matches[0].Groups[1].Value
+          $archive = "nats-server-v$version-windows-amd64"
+          Invoke-WebRequest "https://github.com/nats-io/nats-server/releases/download/v$version/$archive.zip" -OutFile "$env:RUNNER_TEMP/nats.zip"
+          Expand-Archive "$env:RUNNER_TEMP/nats.zip" "$env:RUNNER_TEMP/nats"
+          "$env:RUNNER_TEMP/nats/$archive" >> $env:GITHUB_PATH
       - name: Native client check
         run: |
           $packages = @()

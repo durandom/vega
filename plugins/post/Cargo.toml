@@ -7,15 +7,11 @@ description = "Agent mail over a NATS JetStream broker"
 publish = false
 
 [dependencies]
-vega-lanista = { path = "../lanista" }
-vega-gate = { path = "../gate" }
-vega-notify = { path = "../notify" }
 vega-build = { path = "../../crates/vega-build" }
 async-nats = "0.50"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
-libc = "0.2"
 nkeys = "0.4"
 nuid = "0.5"
 serde_json = { version = "1", features = ["raw_value"] }
@@ -25,20 +21,35 @@ ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 time = { version = "0.3", features = ["formatting", "macros"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
-vega-bd-sync = { path = "../../crates/vega-bd-sync" }
-vega-ci-watch = { path = "../../crates/vega-ci-watch" }
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-registry = { path = "../../crates/vega-registry" }
 vega-uber-msg = { path = "../../crates/vega-uber-msg" }
 vega-transcript = { path = "../../crates/vega-transcript" }
-vega-theme-sync = { path = "../../crates/vega-theme-sync" }
-vega-secrets = { path = "../../crates/vega-secrets" }
 vega-plugin = { path = "../../crates/vega-plugin" }
-vega-onboard = { path = "../onboard" }
 
 [dev-dependencies]
-vega-history = { path = "../history" }
 tempfile = "3"
 
 [build-dependencies]
 vega-build = { path = "../../crates/vega-build" }
+
+[target.'cfg(unix)'.dependencies]
+vega-lanista = { path = "../lanista" }
+vega-gate = { path = "../gate" }
+vega-notify = { path = "../notify" }
+libc = "0.2"
+vega-bd-sync = { path = "../../crates/vega-bd-sync" }
+vega-ci-watch = { path = "../../crates/vega-ci-watch" }
+vega-theme-sync = { path = "../../crates/vega-theme-sync" }
+vega-secrets = { path = "../../crates/vega-secrets" }
+vega-onboard = { path = "../onboard" }
+
+[target.'cfg(unix)'.dev-dependencies]
+vega-history = { path = "../history" }
+
+[features]
+client-only = []
+
+[[test]]
+name = "native_client"
+harness = false

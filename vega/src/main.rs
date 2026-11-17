@@ -4,6 +4,7 @@
 //! Bare `vega` lists the plugins it can find.
 
 use std::env;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -38,7 +39,13 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
+    #[cfg(unix)]
     let err = Command::new(&path).arg0(&bin).args(args).exec();
+    #[cfg(windows)]
+    let err = match Command::new(&path).args(args).status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => err,
+    };
     println!("error{{code,message}}:");
     println!("  exec_failed,{}: {err}", path.display());
     ExitCode::from(1)

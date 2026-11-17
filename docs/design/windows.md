@@ -336,6 +336,98 @@ cross-host replies without explicit pair grants; use the appropriate normal
 host role for this bidirectional sentinel lane, or account for those grants
 explicitly. Merely adding an hc machine creates no vega registry entry.
 
+### Native mail client and package inventory (vega-nic.28.6)
+
+The machine-readable build/install inventory is
+[`scripts/windows-packages.json`](../../scripts/windows-packages.json): the file
+is an array of Cargo `package` names and their shipped `binaries` (without
+`.exe`). Windows CI reads this file; the native installer must read it too.
+It currently ships `vega.exe`, `vega-post.exe`, and `vega-skills.exe`, plus their
+shared library packages. No daemon or shim belongs in that list.
+
+Post's Unix entry point is `plugins/post/src/unix.rs`; the reduced native entry
+point is `windows.rs`. Both include `client_common.rs` and the same retry publisher,
+typed body renderer, routing, headers, reply-token and acknowledgement logic.
+The Unix publisher retains history/outbox recording. Native mail publishes directly;
+the Windows pointer/history worker is separate work (vega-nic.28.8).
+`--features client-only` selects the reduced entry point on Unix for local fake-broker
+regression tests; ordinary Unix builds retain daemon, relay and cutover behavior.
+
+Native commands: bare post or `status`, `send` (including `--re` for replies,
+`--uac`, `--host`, `--now`, `--kind`), `inbox` (`--keep`, `--show`, `--max`),
+`log` (including `--json`), `done`, `keygen`, `identity enroll` and `identity verify`.
+The native client rejects relay, provision, auth-config, admin keygen and legacy
+cutover commands with usage errors. Inbox-only local delivery/quarantine is not
+part of this client: provision a normal host role for io-win. hc identity remains
+ancestry-verified; an `HC_TERMINAL_ID` environment value alone is insufficient.
+
+### Operator runbook: fresh io-win enrollment
+
+These are instructions for the UAC/operator **after landing**, not actions run by
+the sentinel. Keep the io WSL lane and Windows lane independent throughout.
+
+1. On Windows, install the binaries from the inventory and use the dedicated
+   user profile. Set `VEGA_POST_HOST=io-win` in the client environment (and the
+   future Windows worker's environment). The hc machine name must also be io-win.
+   Leave `VEGA_NATS_NKEY` unset unless pointing to this Windows host's own seed.
+   Never copy io's WSL seed/state or place an admin seed on io or io-win.
+2. Before creating secrets, inspect `%APPDATA%\vega` and `%LOCALAPPDATA%\vega`
+   with `icacls`. The policy is inherited private user-profile ACLs: the owner,
+   SYSTEM and administrators may access them; unrelated users/groups must not.
+   Custom XDG/seed directories require the operator to supply equally restrictive
+   ACLs. This client does not pretend chmod/readonly bits establish Windows privacy.
+   Seed and enrollment paths reject symlinks/reparse points in existing ancestors;
+   file creation is exclusive, private Unix mode when applicable, and synced.
+   Enrollment does not emit the seed. Concurrent hostile changes by the owning
+   account are outside this inherited-profile policy.
+3. Run `vega post keygen` on Windows. Retain the seed only in
+   `%APPDATA%\vega\nats.nk`. Send **only** the printed `io-win=U...` public-key
+   entry to the UAC/operator. Repeating keygen prints the same public key.
+4. On the trusted Unix operator host, extend the existing complete `auth-config`
+   inputs with that entry and the temporary `--create io-win` grant. Preserve all
+   existing host entries, roles and grants. Deploy/reload broker authorization by
+   the normal operator procedure, then run `vega post provision io-win` with the
+   operator's admin credential on that trusted host. Remove the temporary create
+   grant afterward. The normal host grants permit publishing only
+   `vega.inbox.*.*.io-win`, fetching/acking only `VEGA_INBOX_io-win`, subscribing
+   to `_INBOX_io-win.>` for request replies and writing only
+   `$KV.VEGA_REGISTRY.io-win.>`; retain normal registry-info/direct-read grants.
+   Do not reuse `VEGA_INBOX_io` or `_INBOX_io`, and do not grant host stream creation.
+5. Write the broker endpoint as the first line of `%APPDATA%\vega\nats.url`
+   (or set `VEGA_NATS_URL`). On Windows, from each local checkout, run:
+
+   ```powershell
+   $env:VEGA_POST_HOST = 'io-win'
+   vega post identity enroll --checkout 'G:\src\project with spaces'
+   vega post identity verify
+   ```
+
+   Repeat `--checkout` in one enrollment for multiple checkouts. Git derives v2
+   `ProjectId` and owner-local `RepoLocation`; no remote filesystem is inspected.
+   The immutable, synced `%LOCALAPPDATA%\vega\identity-native\enrollment.json`
+   records schema 2, host, public key and resolved projects. The broker projection
+   is `io-win.identity.v2`, created with compare-and-set under this host's write
+   scope and read back for verification. It is CLI-managed and retained by
+   registry reconciliation. No live beat/UAC claim is forged by enrollment.
+   A network failure leaves the local record for an identical safe retry.
+   Changed host/key/projects, imported cutover/UAC/lane state, live legacy owned
+   registry keys or a divergent broker projection fail closed for operator review.
+   This fresh-host flow does not create or bypass a Unix cutover completion marker.
+   The future Windows worker must verify this enrollment before publication;
+   existing Unix hosts continue to use the audited late-host cutover procedure.
+6. In an ancestry-verified native hc agent terminal, run `vega post status`, send
+   to a known proteus pane with `--host proteus`, read there with `inbox`, and
+   reply using the printed timestamped `--re` command. Read/ack the reply on
+   Windows and send `done` to the recorded or explicit parent. Verify `log` still
+   contains acked mail. Manual inbox works now; automatic pointer delivery waits
+   for vega-nic.28.8. The UAC performs this live acceptance after landing.
+
+Rollback before a worker is enabled: stop using the native client, retain its
+private seed/local enrollment for diagnosis and let the operator revoke only the
+io-win public key/projection. Never delete or alter io's credentials/stream. A
+changed key or project identity needs explicit operator reconciliation; deleting
+an enrollment file is not a migration/rekey procedure.
+
 ## 4. Pointer delivery: physical capability versus current ownership
 
 **hc can send text to a Windows terminal from another host; today's vegad will

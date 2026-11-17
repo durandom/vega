@@ -16,9 +16,7 @@ pub const REMOTE_FILE: &str = "skills-remote";
 pub const GLOBAL_FILE: &str = "skills-global";
 
 fn home() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
+    vega_herdr::platform::home()
 }
 
 fn xdg(var: &str, fallback: &str) -> Option<PathBuf> {
@@ -30,7 +28,7 @@ fn xdg(var: &str, fallback: &str) -> Option<PathBuf> {
 
 /// `$XDG_CONFIG_HOME/vega` (default `~/.config/vega`).
 pub fn config_dir() -> Option<PathBuf> {
-    xdg("XDG_CONFIG_HOME", ".config").map(|c| c.join("vega"))
+    vega_herdr::platform::config_home().map(|c| c.join("vega"))
 }
 
 /// `$XDG_DATA_HOME/vega/skills` (default `~/.local/share/vega/skills`).

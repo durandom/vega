@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! Retired hosts retain the exact admin/viewer reads captured before retirement.
 use std::process::{Command, Output};
 

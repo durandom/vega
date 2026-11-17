@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Runs the built `vega-skills` against fake plugins on a private PATH.
 
 use std::fs;

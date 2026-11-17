@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 237 · 2026-11-17
+
+- feature: Native Windows `vega post` supports status, send/reply, inbox, log,
+  done, own-host key generation and fresh v2 identity enrollment. `vega.exe`
+  dispatches native plugins; `vega skills` loads their guides. Config defaults
+  to `%APPDATA%\vega`; see `docs/design/windows.md` for operator provisioning.
+  Daemon, relay, admin provisioning and legacy cutover stay Unix-only.
+
 ## 236 · 2026-11-17
 
 - feature: The app's not-provisioned check for remote vegad starts now reads hc's launch error from stderr, where
@@ -24,7 +32,6 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   a separate Cargo home and installs listed executables to the user PATH as
   Windows executable ports become available; today it builds the two libraries.
 
-||||||| parent of 60c5a0b6 (Treat hosts without vega runtime as not provisioned)
 ## 233 · 2026-11-17
 
 - feature: Windows clients resolve common Git configuration, recognize existing

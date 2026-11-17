@@ -393,9 +393,7 @@ fn exists_or_link(p: &Path) -> bool {
 }
 
 fn home() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
+    vega_herdr::platform::home()
 }
 
 /// The git root of the working directory, if inside a repo.

@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! vegad without a broker (docs/design/vegad.md, Local mode): it stays up,
 //! keeps the upstream check running and types the upgrade proposal into the
 //! vega session itself. Temp HOME, a fake herdr, a closed broker port.

@@ -1,3 +1,4 @@
+#![cfg(all(unix, not(feature = "client-only")))]
 //! Actual CLI/startup path against a local broker and isolated owner state.
 use serde_json::{json, Value};
 use std::fs;
