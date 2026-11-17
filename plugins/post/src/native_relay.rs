@@ -59,6 +59,11 @@ fn lock() -> Result<Option<File>, Failure> {
         .map_err(fail)?;
     Ok(platform::try_lock(&f).map_err(fail)?.then_some(f))
 }
+fn publish(path: &std::path::Path, contents: &str) -> Result<(), Failure> {
+    let tmp = path.with_extension(format!("tmp-{}", nuid::next()));
+    fs::write(&tmp, contents).map_err(fail)?;
+    platform::replace(&tmp, path).map_err(fail)
+}
 pub fn run(action: Action) -> Result<(), Failure> {
     match action {
         Action::Start => start(),
@@ -76,26 +81,24 @@ pub fn run(action: Action) -> Result<(), Failure> {
             let held = lock()?;
             let token = nuid::next().to_string();
             if held.is_some() {
-                fs::write(
-                    root()?.join("worker.json"),
-                    json!({
+                publish(
+                    &root()?.join("worker.json"),
+                    &json!({
                         "pid": std::process::id(), "token": token,
                         "exe": std::env::current_exe().map_err(fail)?
                     })
                     .to_string(),
-                )
-                .map_err(fail)?;
+                )?;
             }
             if let Some(p) = ready_file {
-                fs::write(
-                    p,
-                    if held.is_some() {
+                publish(
+                    &p,
+                    &if held.is_some() {
                         format!("started\npid: {}", std::process::id())
                     } else {
                         "already running".into()
                     },
-                )
-                .map_err(fail)?;
+                )?;
             }
             let Some(_held) = held else {
                 println!("relay: already running");
@@ -156,7 +159,13 @@ fn stop() -> Result<(), Failure> {
     fs::write(root()?.join("stop"), token).map_err(fail)?;
     let until = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        if lock()?.is_some() || worker()?["token"].as_str() != Some(token) {
+        // Missing metadata can mean the old worker is still cleaning up while
+        // holding its lock. Wait for release before an installer restarts it.
+        if lock()?.is_some()
+            || worker()?["token"]
+                .as_str()
+                .is_some_and(|current| current != token)
+        {
             println!("relay: stopped");
             return Ok(());
         }
