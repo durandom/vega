@@ -1,6 +1,7 @@
 // Native mail client and minimal local pointer worker; no full vegad jobs.
 mod client_identity;
 mod client_key;
+#[cfg(windows)]
 mod core_doctor;
 #[allow(dead_code)] // Shared policy also includes Unix daemon features.
 mod delivery;
@@ -42,6 +43,7 @@ enum Cmd {
     /// Broker, host, verified caller and unread count
     Status,
     /// Inspect the local hc core session without starting it or needing a broker
+    #[cfg(windows)]
     Doctor,
     /// Send mail, or reply with the timestamped --re token from inbox
     #[command(
@@ -141,6 +143,7 @@ fn main() -> ExitCode {
     }
     let result = match cli.command {
         None | Some(Cmd::Status) => home(),
+        #[cfg(windows)]
         Some(Cmd::Doctor) => core_doctor::doctor(),
         Some(Cmd::Relay { action }) => native_relay::run(action),
         Some(Cmd::Keygen) => client_key::keygen(),
