@@ -7,8 +7,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
 
 ## 244 · 2026-11-17
 
-- feature: Windows `relay start` survives hc exec and terminal shutdown using job
-  breakaway or a temporary per-user interactive task. `relay status [--json]` and
+- feature: Windows `relay start` survives hc exec and terminal shutdown using a
+  temporary per-user interactive task. `relay status [--json]` and
   `relay stop` manage the native worker without killing unrelated processes.
 - feature: The Windows source installer replaces running images by renaming them
   aside, then restarts a worker belonging to that install directory. Old foreground

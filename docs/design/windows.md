@@ -660,17 +660,19 @@ selects `vega-post.exe relay start`. An exact missing-executable launch error
 keeps the quiet not-provisioned state and five-minute recheck. Permission,
 connection and worker failures retain the ordinary failure/retry path.
 
-`relay start` requests `CREATE_BREAKAWAY_FROM_JOB` and waits for its lock/readiness
-handshake. hc's terminal jobs allow breakaway, but its exec jobs do not
-(`repos/herdr-core/crates/herdr-core/src/platform/windows{,_exec}.rs`). On access
-denied, the starter registers and runs a temporary demand-only Task Scheduler
+`relay start` waits for a lock/readiness handshake from a worker launched through
+a temporary demand-only Task Scheduler
 task using the current user's interactive token and limited run level. No
 password, elevation, service, logon trigger or hc job change is involved. The
 temporary definition is deleted after readiness; its running instance survives.
-This fallback needs a logged-in desktop user and permission to register user tasks;
+This needs a logged-in desktop user and permission to register user tasks;
 failure is explicit. A short-lived profile-local launch file transfers the caller's
 environment (including XDG overrides and PATH), is consumed before readiness, and
 is also cleaned up on launch failure. Custom state directories require private ACLs.
+hc's terminal jobs allow `CREATE_BREAKAWAY_FROM_JOB`, but exec jobs do not
+(`repos/herdr-core/crates/herdr-core/src/platform/windows{,_exec}.rs`). Breakaway
+also leaves arbitrary inherited ancestor pipe handles open, so every Windows
+start uses the task boundary to isolate both process lifetime and handles.
 `relay serve` runs in the foreground for diagnostics and Ctrl-C stop.
 A user-state file lock (Windows native locking) lasts for the worker's lifetime;
 concurrent/repeated starts succeed without creating a second delivery loop.

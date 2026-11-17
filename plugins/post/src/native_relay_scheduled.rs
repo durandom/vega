@@ -1,6 +1,9 @@
-//! Escape non-breakaway hc exec jobs through the user's interactive task scheduler.
+//! Escape caller jobs and handle inheritance through the interactive task scheduler.
 use super::*;
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    process::{Command, Stdio},
+};
 
 pub(super) fn start(ready: &std::path::Path) -> Result<(), Failure> {
     let id = nuid::next();
@@ -45,7 +48,6 @@ pub(super) fn start(ready: &std::path::Path) -> Result<(), Failure> {
             .stderr(Stdio::piped());
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        let _handles = DetachedHandles::new().map_err(fail)?;
         let output = command.output().map_err(fail)?;
         if !output.status.success() {
             return Err(fail(format!(

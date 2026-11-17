@@ -5,11 +5,12 @@ use crate::{
 };
 use clap::Subcommand;
 use serde_json::{json, Value};
+#[cfg(not(windows))]
+use std::process::{Command, Stdio};
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
     path::PathBuf,
-    process::{Command, Stdio},
     time::Duration,
 };
 use vega_herdr::{platform, Failure};
@@ -183,6 +184,17 @@ fn start() -> Result<(), Failure> {
     };
     drop(probe);
     let ready = root()?.join(format!("ready-{}", nuid::next()));
+    #[cfg(windows)]
+    {
+        scheduled::start(&ready)
+    }
+    #[cfg(not(windows))]
+    {
+        start_direct(&ready)
+    }
+}
+#[cfg(not(windows))]
+fn start_direct(ready: &std::path::Path) -> Result<(), Failure> {
     let log = OpenOptions::new()
         .create(true)
         .append(true)
@@ -190,40 +202,24 @@ fn start() -> Result<(), Failure> {
         .map_err(fail)?;
     let mut c = Command::new(std::env::current_exe().map_err(fail)?);
     c.args(["relay", "serve", "--ready-file"])
-        .arg(&ready)
+        .arg(ready)
         .env_remove("HC_TERMINAL_ID")
         .env_remove("HERDR_PANE_ID")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // hc terminal jobs allow breakaway; hc exec jobs do not.
-        // Never retry without breakaway: that reports success for a doomed worker.
-        c.creation_flags(0x00000008 | 0x00000200 | 0x01000000);
-    }
-    let mut child = {
-        #[cfg(windows)]
-        let _handles = DetachedHandles::new().map_err(fail)?;
-        match c.spawn() {
-            Ok(child) => child,
-            #[cfg(windows)]
-            Err(e) if e.raw_os_error() == Some(5) => return scheduled::start(&ready),
-            Err(e) => return Err(fail(e)),
-        }
-    };
+    let mut child = c.spawn().map_err(fail)?;
     let until = std::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(status) = fs::read_to_string(&ready) {
-            let _ = fs::remove_file(&ready);
+        if let Ok(status) = fs::read_to_string(ready) {
+            let _ = fs::remove_file(ready);
             println!("relay: {status}");
             return Ok(());
         }
         if child.try_wait().map_err(fail)?.is_some() || std::time::Instant::now() >= until {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = fs::remove_file(&ready);
+            let _ = fs::remove_file(ready);
             return Err(fail(
                 "worker did not acquire its lock; inspect native-relay/worker.log",
             ));
@@ -350,60 +346,6 @@ fn save(d: &Delivery, file: &std::path::Path) -> Result<(), Failure> {
     let tmp = file.with_extension("tmp");
     fs::write(&tmp, d.export().to_string()).map_err(fail)?;
     platform::replace(tmp, file).map_err(fail)
-}
-
-// Even with replacement stdio, Windows may inherit the starter's original pipe
-// handles. Keeping those open prevents hc exec/capture from observing EOF.
-// start runs before any worker threads; restore flags immediately after spawn.
-#[cfg(windows)]
-struct DetachedHandles(Vec<(windows_sys::Win32::Foundation::HANDLE, u32)>);
-#[cfg(windows)]
-impl DetachedHandles {
-    fn new() -> std::io::Result<Self> {
-        use windows_sys::Win32::{
-            Foundation::{
-                GetHandleInformation, SetHandleInformation, HANDLE_FLAG_INHERIT,
-                INVALID_HANDLE_VALUE,
-            },
-            System::Console::{
-                GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-            },
-        };
-        let mut guard = Self(Vec::new());
-        for kind in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-            // SAFETY: GetStdHandle returns borrowed process handles; never close them.
-            let handle = unsafe { GetStdHandle(kind) };
-            let mut flags = 0;
-            if handle.is_null()
-                || handle == INVALID_HANDLE_VALUE
-                || unsafe { GetHandleInformation(handle, &mut flags) } == 0
-            {
-                continue;
-            }
-            if flags & HANDLE_FLAG_INHERIT != 0 {
-                if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                guard.0.push((handle, flags));
-            }
-        }
-        Ok(guard)
-    }
-}
-#[cfg(windows)]
-impl Drop for DetachedHandles {
-    fn drop(&mut self) {
-        for (handle, flags) in &self.0 {
-            // SAFETY: borrowed handles stay alive throughout the synchronous spawn.
-            unsafe {
-                windows_sys::Win32::Foundation::SetHandleInformation(
-                    *handle,
-                    windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT,
-                    *flags,
-                );
-            }
-        }
-    }
 }
 
 #[cfg(windows)]
