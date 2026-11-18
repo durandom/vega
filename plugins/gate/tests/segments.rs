@@ -55,7 +55,7 @@ fn a_merged_branch_keeps_the_sentinels_key() {
         uac.segments[1].label(),
         format!(
             "branch feat ({}^2)",
-            &git(&work, &["rev-parse", "--short=7", "main"])
+            git(&work, &["rev-parse", "--short=7", "main"])
         )
     );
     assert_eq!(uac.empty, 1);

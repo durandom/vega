@@ -45,8 +45,8 @@ fn run(args: &[String]) -> Result<(), Failure> {
         [cmd, sender, target] if cmd == "revoke" => (true, sender, target, None),
         _ => return Err(usage("expected grant <sender> <target> --expires <duration>, revoke <sender> <target>, or grants (--help always allowed)".into())),
     };
-    let sender = store::Peer::parse(sender).map_err(&usage)?;
-    let target = store::Peer::parse(target).map_err(&usage)?;
+    let sender = store::Peer::parse(sender).map_err(usage)?;
+    let target = store::Peer::parse(target).map_err(usage)?;
     let host = state::post_host();
     if target.host != host
         || (!revoke && !state::is_inbox_only(&sender.host))
@@ -59,7 +59,7 @@ fn run(args: &[String]) -> Result<(), Failure> {
     let now = store::now();
     let g = if revoke {
         let Some(mut g) = store::list()
-            .map_err(&io)?
+            .map_err(io)?
             .into_iter()
             .find(|g| g.sender == sender && g.target == target)
         else {

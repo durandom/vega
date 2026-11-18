@@ -464,7 +464,7 @@ fn release() -> Result<(), Failure> {
 fn split(view: &View) -> (Option<UberClaim>, Vec<UberClaim>, Vec<UberClaim>) {
     let winner = view.live_uber();
     let mut claims = view.uber_claims();
-    claims.sort_by(|a, b| b.epoch.cmp(&a.epoch));
+    claims.sort_by_key(|a| std::cmp::Reverse(a.epoch));
     let (live, gone): (Vec<_>, Vec<_>) = claims.into_iter().partition(|c| view.uber_live(c));
     let superseded = live
         .into_iter()
