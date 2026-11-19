@@ -323,7 +323,7 @@ fn rpc_with_timeout(
     input.push(b'\n');
     let mut cmd = Command::new("hc");
     cmd.arg("connect");
-    let line = crate::rpc_line_within(&mut cmd, input, timeout)
+    let output = crate::rpc_line_within(&mut cmd, input, timeout)
         .map_err(io)?
         .ok_or_else(|| {
             Failure::new(
@@ -332,12 +332,18 @@ fn rpc_with_timeout(
                 "inspect vega mux --all before retrying; a launch may have completed",
             )
         })?;
+    let diagnostic = || connect_diagnostic(&output.stderr);
+    let line = output
+        .line
+        .map_err(|e| diagnostic().unwrap_or_else(|| io(e)))?;
     let bad = || {
-        Failure::new(
-            "hc_bad_output",
-            "hc returned no valid RPC reply",
-            "check hc --version and inspect vega mux --all before retrying",
-        )
+        diagnostic().unwrap_or_else(|| {
+            Failure::new(
+                "hc_bad_output",
+                "hc returned no valid RPC reply",
+                "check hc --version and inspect vega mux --all before retrying",
+            )
+        })
     };
     let reply: Value = serde_json::from_slice(&line).map_err(|_| bad())?;
     if reply["jsonrpc"] != "2.0" || reply["id"] != 1 {
@@ -363,6 +369,43 @@ fn rpc_with_timeout(
     fill_empty_machines(method, &mut result);
     validate_result(method, &result)?;
     Ok(result)
+}
+
+/// hc emits a CLI error on stderr before it can establish the RPC stream.
+fn connect_diagnostic(stderr: &[u8]) -> Option<Failure> {
+    let text = String::from_utf8_lossy(stderr);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let fallback = "check hc and the target machine connection";
+    // Piped hc uses JSON; allow preceding diagnostics in the bounded tail.
+    for line in text.lines().rev() {
+        if let Ok(value) = serde_json::from_str::<Value>(line) {
+            if let Some(message) = value["error"]["message"].as_str() {
+                return Some(Failure::new(
+                    "hc_unavailable",
+                    message,
+                    value["error"]["hint"].as_str().unwrap_or(fallback),
+                ));
+            }
+        }
+    }
+    // Human output is `error: MESSAGE` followed by an optional `hint: HINT`.
+    let mut message = Vec::new();
+    let mut hint = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("hint: ") {
+            hint = Some(value);
+        } else {
+            message.push(line.strip_prefix("error: ").unwrap_or(line));
+        }
+    }
+    Some(Failure::new(
+        "hc_unavailable",
+        message.join("\n"),
+        hint.unwrap_or(fallback),
+    ))
 }
 
 /// hc 0.1.18 and 0.1.19 drop an empty `machines` from `terminal.list` (ListResult has

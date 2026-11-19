@@ -52,6 +52,20 @@ fn fake_hc_contract() {
                     assert_eq!(hc_local(args).unwrap_err().code, "usage", "{args:?}");
                 }
             }
+            "stderr_json" | "stderr_plain" | "stderr_noisy" | "stderr_invalid" | "stderr_early"
+            | "stderr_descendant" => {
+                let failure = hc_on(None, &["ls"], Some(Duration::from_secs(2))).unwrap_err();
+                assert_eq!(failure.code, "hc_unavailable");
+                assert_eq!(failure.message, "the Windows core exists but this process cannot access its pipe: Access is denied (os error 5)");
+                assert_eq!(failure.hint, "open Herdr in a normal desktop terminal");
+            }
+            "stderr_success" => assert_eq!(hc_local(&["get", "t7"]).unwrap()["address"], "t7"),
+            "stderr_timeout" => assert_eq!(
+                hc_on(None, &["ls"], Some(Duration::from_millis(50)))
+                    .unwrap_err()
+                    .code,
+                "hc_timeout"
+            ),
             "bad" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_bad_output"),
             "exit" => assert_eq!(hc_local(&["ls"]).unwrap_err().code, "hc_bad_output"),
             "timeout" => assert_eq!(
@@ -83,7 +97,22 @@ fn fake_hc_contract() {
     fs::write(&fake, format!(r#"#!/usr/bin/python3
 import json,os,sys,time
 open(os.environ['VEGA_HC_ARGS'],'w').write('\n'.join(sys.argv[1:])+'\n')
+c=os.environ['VEGA_HC_TEST']
+message='the Windows core exists but this process cannot access its pipe: Access is denied (os error 5)'
+hint='open Herdr in a normal desktop terminal'
+if c=='stderr_early':
+ print(json.dumps({{"error":{{"kind":"unavailable","message":message,"hint":hint}}}}),file=sys.stderr,flush=True);sys.exit(1)
 r=json.loads(sys.stdin.readline())
+if c.startswith('stderr_'):
+ if c in ['stderr_noisy','stderr_success']:
+  sys.stderr.write('x'*200000+'\n');sys.stderr.flush()
+ if c=='stderr_plain': print('error: '+message+'\nhint: '+hint,file=sys.stderr,flush=True)
+ else: print(json.dumps({{"error":{{"kind":"unavailable","message":message,"hint":hint}}}}),file=sys.stderr,flush=True)
+ if c=='stderr_descendant':
+  if os.fork()==0: os.close(1);time.sleep(5);os._exit(0)
+ if c=='stderr_timeout': time.sleep(5)
+ elif c=='stderr_invalid': print('not an RPC reply');sys.stdout.flush();sys.exit(1)
+ elif c!='stderr_success': sys.exit(1)
 open(os.environ['VEGA_HC_REQUEST'],'w').write(json.dumps(r))
 c=os.environ['VEGA_HC_TEST']
 t={{"address":"t7","state":"live","pid":{pid},"labels":{{}},"argv":[],"cwd":"/shell/vega","created_ms":0,"screen":"exact","cols":80,"rows":24}}
@@ -99,7 +128,7 @@ elif c=='timeout': time.sleep(5)
 elif c=='on': t['address']='remote/t7'
 elif c=='send': t={{'turn':1}}
 elif c=='bounded_send': time.sleep(5.2);t={{'turn':1}}
-elif c not in ['hc']:
+elif c not in ['hc','stderr_success']:
  print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"error":{{"code":-32000,"message":"probe","data":{{"kind":c,"hint":"try again"}}}}}}));sys.exit(3)
 print(json.dumps({{"jsonrpc":"2.0","id":r['id'],"result":t}}))
 "#)).unwrap();
@@ -128,6 +157,14 @@ esac
         "bounded_send",
         "usage",
         "bad",
+        "stderr_json",
+        "stderr_plain",
+        "stderr_noisy",
+        "stderr_invalid",
+        "stderr_early",
+        "stderr_descendant",
+        "stderr_success",
+        "stderr_timeout",
         "exit",
         "timeout",
         "not_found",

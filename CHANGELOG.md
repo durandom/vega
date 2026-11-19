@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 246 · 2026-11-19
+
+- feature: Failed hc connections preserve hc's diagnostic and recovery hint,
+  including Windows pipe access errors, instead of reporting only `hc_bad_output`.
+
 ## 245 · 2026-11-19
 
 - feature: CI watches report `cancelled` when current-head jobs or workflows were

@@ -553,7 +553,7 @@ mod tests {
         .unwrap();
         // Console.WriteLine uses CRLF; JSON accepts either line ending.
         assert_eq!(
-            String::from_utf8(reply).unwrap().trim(),
+            String::from_utf8(reply.line.unwrap()).unwrap().trim(),
             String::from_utf8(input).unwrap().trim()
         );
     }

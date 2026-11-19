@@ -353,24 +353,58 @@ fn kill_and_reap(mut child: std::process::Child) {
     });
 }
 
+/// One-shot transport output; a failed write can still carry hc's diagnosis.
+pub(crate) struct RpcLine {
+    pub line: std::io::Result<Vec<u8>>,
+    pub stderr: Vec<u8>,
+}
+
+const RPC_STDERR_LIMIT: usize = 16 * 1024;
+
+/// Drain continuously, retaining only the tail even when hc floods stderr.
+fn drain_rpc_stderr(mut reader: impl Read, tail: &std::sync::Mutex<Vec<u8>>) {
+    let mut chunk = [0; 4096];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                let mut tail = tail.lock().expect("stderr tail lock");
+                let excess = (tail.len() + n).saturating_sub(RPC_STDERR_LIMIT);
+                tail.drain(..excess);
+                tail.extend_from_slice(&chunk[..n]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
 /// Exchange one newline-delimited request/reply while keeping stdin open.
 /// The deadline covers writing and reading; cleanup never waits on the caller.
 pub(crate) fn rpc_line_within(
     cmd: &mut Command,
     input: Vec<u8>,
     timeout: Option<Duration>,
-) -> std::io::Result<Option<Vec<u8>>> {
+) -> std::io::Result<Option<RpcLine>> {
     use std::io::{BufRead, BufReader, Write};
     let start = Instant::now();
     platform::isolate(cmd);
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()?;
     let _tree = platform::ProcessTree::attach(&mut child)?;
     let mut stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let tail = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = tail.clone();
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        drain_rpc_stderr(stderr, &captured);
+        let _ = err_tx.send(());
+    });
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let result = (|| {
@@ -385,19 +419,38 @@ pub(crate) fn rpc_line_within(
     });
     let result = match timeout {
         Some(timeout) => match rx.recv_timeout(timeout.saturating_sub(start.elapsed())) {
-            Ok(result) => result.map(Some),
+            Ok(result) => Ok(Some(result)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(None),
             Err(e) => Err(std::io::Error::other(e)),
         },
-        None => rx
-            .recv()
-            .map_err(std::io::Error::other)
-            .and_then(|r| r.map(Some)),
+        None => rx.recv().map_err(std::io::Error::other).map(Some),
     };
     // A reply completes this connection. Neither exit status nor descendants
     // retaining inherited pipes should delay a one-shot RPC.
     kill_and_reap(child);
-    result
+    result.map(|result| {
+        result.map(|line| {
+            let valid_reply = line
+                .as_ref()
+                .ok()
+                .and_then(|line| serde_json::from_slice::<Value>(line).ok())
+                .is_some_and(|v| {
+                    v["jsonrpc"] == "2.0"
+                        && v["id"] == 1
+                        && (v.get("result").is_some() || v.get("error").is_some())
+                });
+            if !valid_reply {
+                // Cleanup has killed descendants holding stderr open. Never join
+                // the reader: even killed processes can stall in kernel I/O.
+                let grace = Duration::from_millis(100);
+                let budget =
+                    timeout.map_or(grace, |t| grace.min(t.saturating_sub(start.elapsed())));
+                let _ = err_rx.recv_timeout(budget);
+            }
+            let stderr = tail.lock().expect("stderr tail lock").clone();
+            RpcLine { line, stderr }
+        })
+    })
 }
 
 fn hint_for(code: &str) -> &'static str {
@@ -872,6 +925,17 @@ pub fn local_host() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rpc_stderr_retains_only_bounded_tail() {
+        let mut input = vec![b'x'; super::RPC_STDERR_LIMIT * 4];
+        input.extend_from_slice(b"final diagnosis");
+        let tail = std::sync::Mutex::new(Vec::new());
+        super::drain_rpc_stderr(input.as_slice(), &tail);
+        let tail = tail.into_inner().unwrap();
+        assert_eq!(tail.len(), super::RPC_STDERR_LIMIT);
+        assert_eq!(tail, input[input.len() - super::RPC_STDERR_LIMIT..]);
+    }
+
     use super::*;
     use serde_json::json;
 
