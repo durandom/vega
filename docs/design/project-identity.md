@@ -14,6 +14,14 @@ startup-coordinator handoff are in
 journal, audited host plans and rollback are implemented by .14.6 in
 `plugins/post/src/identity.rs`; see the registry cutover operator runbook.
 
+Completed hosts accept fresh schema-2 peers enrolled after the flag day even
+when absent from the frozen bundle. This is a protocol check, not enrollment
+permission: broker authorization still controls publication. Fresh non-v2 beats
+and all legacy project keys fail closed. Without a valid local completion marker,
+startup retains strict inventory checks; preview/audit keep their plan validation.
+Verify follows the local completion phase while still checking every planned
+owner and the requested projections. See [post-cutover peers](project-registry-cutover.md#post-cutover-v2-peers).
+
 ## Inventory (before the cutover)
 
 | Path:line | Path-based identity or dependency to replace |
@@ -256,7 +264,7 @@ which the rekey would split.
 entry and the late-host runbook needs the completed hosts' entries to stay
 identical, so a rekey must not touch them. Nor do they hold a rekey back:
 after completion vegad reads them only for that comparison and for the
-legacy-key and unplanned-host guards, which a v2-to-v2 rekey never trips.
+legacy-key and mixed-version guards, which a v2-to-v2 rekey never trips.
 Each rekey adds generation `rekey/<n>.json` (n = 1, 2, ...), never
 overwritten. While a generation has neither `.done` nor `.rolled-back`, vegad
 stays identity quiesced and `apply` refuses any other plan.

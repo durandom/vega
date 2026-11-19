@@ -200,7 +200,7 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    trackers, notes/watermarks and pin times/tombstones against previews. Then
    release external writers. Unapproved offline hosts cannot migrate/rejoin.
    Completed hosts retain offline local mode; every registry reconcile checks
-   fresh old/unplanned hosts and every live legacy project key before ordinary
+   fresh non-v2 hosts and every live legacy project key before ordinary
    publication, including byte-identical backed-up keys that reappear. Only the
    initial migration permits planned legacy keys while other owners cut over;
    startup publishes this owner's verified v2 heartbeat before completion.
@@ -221,20 +221,38 @@ before using offline local mode. An offline empty-host bootstrap is not supporte
    newer work. A host with rekey generations (vega-lhc.14.7) rolls those back
    first (`vega post identity rekey rollback`); flag-day rollback refuses until then.
 
+## Post-cutover v2 peers
+
+After a valid local `complete.json`, startup rejoin, recurring publication and
+`identity verify` accept fresh schema-2 beats from owners absent from
+`approved.json` (for example native Windows io-win, enrolled after the cutover).
+The frozen bundle describes migration work, not a permanent host allowlist;
+broker permissions still authorize each publisher. Missing or non-2 schemas
+remain mixed-version failures, and every legacy project key still blocks,
+including byte-identical planned backups. No bundle rewrite is needed merely
+to observe a new v2 peer. This does not bypass a host's own startup approval,
+journal, role, rollback or pending-rekey checks.
+
+Without a valid completion marker, startup requires fresh owners in the audited
+inventory and permits only planned legacy payloads during migration. Preview
+and audit retain their existing plan validation; they gain no enrollment bypass.
+Verify uses the local completion phase but still requires fresh v2 beats from
+all planned owners and exact projections for the selected hosts.
+
 ## Late host rejoin
 
 A host that was offline on the flag day (io on 2026-10-22) is not in
-`approved.json`. Completed hosts treat its fresh beat as an unplanned live host
-and hold ordinary publication (heartbeat only), and its own new vegad stays
-quiesced. It rejoins with a re-audited bundle: the completed hosts' plans
-unchanged plus the late host's preview. No completed host re-migrates:
+`approved.json`. Its old non-v2 beat blocks completed hosts' publication,
+and its own new vegad stays quiesced without an approved local plan. It rejoins
+with a re-audited bundle: the completed hosts' plans unchanged plus the late
+host's preview. No completed host re-migrates:
 
 - Startup compares its durable journal with its own bundle entry (JSON
   equality) and, with `complete.json` present, only runs the live checks. The
   completed hosts' entries must therefore be the original plan files, unchanged.
 - Registry reconciliation re-reads `approved.json` every cycle, so a completed
-  host takes the new bundle without a restart. It must have it before the late
-  host's v2 beat appears. Replace the file atomically (rename).
+  host takes the new bundle without a restart. A completed host accepts the late
+  host's v2 beat even with its original bundle. Replace bundles atomically (rename).
 - `audit` checks the late host's claims and pins only against the flag-day
   plans, not against UACs/pins created since. This runbook covers a late host
   without a registry projection (no UAC claims or pins in its preview). A late

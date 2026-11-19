@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 248 · 2026-11-19
+
+- feature: Completed identity cutovers accept newly enrolled schema-2 registry
+  hosts without rewriting the flag-day bundle. Fresh non-v2 heartbeats and
+  legacy project keys still block startup and publication (vega-nic.28.18).
+
 ## 247 · 2026-11-19
 
 - feature: Capacity imports token-burn's stored reset counts, next expiry and last use

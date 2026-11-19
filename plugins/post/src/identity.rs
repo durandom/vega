@@ -463,16 +463,25 @@ fn restore(root: &Path, original: &Snapshot, writes: &Snapshot) -> Result<(), St
     Ok(())
 }
 
-/// Fresh old daemons must be stopped before deployment; an unplanned host or
-/// old offline host returning later is a hard failure, never a protocol bridge.
-fn check_live(entries: &BTreeMap<String, Value>, bundle: &Bundle, now: i64) -> Result<(), String> {
+/// A completed host checks protocol compatibility, not flag-day membership.
+/// Before completion the audited inventory still bounds migration participants.
+fn check_live(
+    entries: &BTreeMap<String, Value>,
+    bundle: &Bundle,
+    now: i64,
+    completed: bool,
+) -> Result<(), String> {
+    if completed {
+        reject_legacy(entries)?;
+    }
     for (key, v) in entries {
         let owner = key.split('.').next().unwrap_or_default();
         if key.ends_with(".beat")
             && v["at"]
                 .as_i64()
                 .is_some_and(|at| now - at <= vega_registry::FRESH.as_secs() as i64)
-            && (v["schema"] != 2 || !bundle.hosts.iter().any(|p| p.host == owner))
+            && (v["schema"] != 2
+                || (!completed && !bundle.hosts.iter().any(|p| p.host == owner)))
         {
             return Err(format!(
                 "mixed version or unplanned live host: {owner}; stop it before cutover/rejoin"
@@ -680,7 +689,7 @@ fn run_inner(action: Action) -> Result<(), String> {
                 let c = vega_registry::connect("identity verify").await?;
                 let kv = vega_registry::bucket(&c).await?;
                 let entries = raw_entries(&kv).await?;
-                verify_deployment(&entries, &bundle, now())?;
+                verify_deployment(&entries, &bundle, now(), completed(&root, &crate::host())?)?;
                 for p in &plans {
                     p.registry.verify(&c, &kv).await?;
                 }
@@ -1154,11 +1163,7 @@ async fn startup_inner() -> Result<(), String> {
         return Err("host role changed since audit".into());
     }
     let p = prepare_startup_files(&root, approved, &host)?;
-    if root.join(MARKER).exists() {
-        let marker: Value = read(&root.join(MARKER))?;
-        if marker != serde_json::json!({"schema":2,"host":host}) {
-            return Err("invalid completion marker".into());
-        }
+    if completed(&root, &host)? {
         // Check an online rejoin before workers start, while retaining local
         // mode for completed hosts whose broker is unreachable. The recurring
         // registry guard also checks a later reconnect before publication.
@@ -1166,8 +1171,7 @@ async fn startup_inner() -> Result<(), String> {
             Ok(c) if !p.inbox_only => {
                 let kv = vega_registry::bucket(&c).await?;
                 let entries = raw_entries(&kv).await?;
-                check_live(&entries, &bundle, now())?;
-                reject_legacy(&entries)?;
+                check_live(&entries, &bundle, now(), true)?;
             }
             Ok(_) => {}
             Err(e) if e.code == "broker_unreachable" => {}
@@ -1210,7 +1214,7 @@ async fn startup_inner() -> Result<(), String> {
     } else {
         let kv = vega_registry::bucket(&c).await?;
         let live = raw_entries(&kv).await?;
-        check_live(&live, &bundle, now())?;
+        check_live(&live, &bundle, now(), false)?;
         // An original key may already be absent after an interruption. Existing
         // owned values must still equal either original or planned payloads.
         for (key, value) in &live {
@@ -1288,11 +1292,22 @@ async fn require_denial(
     result.map_err(|_| format!("timed out verifying permission denial of {subject}"))?
 }
 
-/// Refuse publication when an old or unplanned host comes back online.
+fn completed(root: &Path, host: &str) -> Result<bool, String> {
+    if !root.join(MARKER).exists() {
+        return Ok(false);
+    }
+    let marker: Value = read(&root.join(MARKER))?;
+    if marker != serde_json::json!({"schema":2,"host":host}) {
+        return Err("invalid completion marker".into());
+    }
+    Ok(true)
+}
+
+/// Refuse publication when an old host or legacy project key comes back online.
 pub fn guard(entries: &BTreeMap<String, Value>) -> Result<(), String> {
     let root = crate::service::state_dir().map_err(|e| e.message)?;
     let bundle: Bundle = read(&root.join(BUNDLE))?;
-    check_live(entries, &bundle, now())?;
+    check_live(entries, &bundle, now(), completed(&root, &crate::host())?)?;
     reject_legacy(entries)
 }
 
@@ -1400,6 +1415,7 @@ fn verify_deployment(
     entries: &BTreeMap<String, Value>,
     bundle: &Bundle,
     now: i64,
+    completed: bool,
 ) -> Result<(), String> {
     validate_bundle(
         bundle,
@@ -1409,7 +1425,7 @@ fn verify_deployment(
             .map(|p| p.host.clone())
             .collect::<Vec<_>>(),
     )?;
-    check_live(entries, bundle, now)?;
+    check_live(entries, bundle, now, completed)?;
     reject_legacy(entries)?;
     for p in bundle.hosts.iter().filter(|p| !p.inbox_only) {
         let beat = entries
@@ -1607,21 +1623,56 @@ mod tests {
     fn old_or_unplanned_offline_host_cannot_rejoin_and_completion_needs_every_owner() {
         let b = bundle(fixture("a", "p1"));
         let mut entries = BTreeMap::from([("a.beat".into(), json!({"schema":2,"at":100}))]);
-        verify_deployment(&entries, &b, 100).unwrap();
+        verify_deployment(&entries, &b, 100, false).unwrap();
         let (legacy, value) = b.hosts[0].registry.backup.first_key_value().unwrap();
         entries.insert(legacy.clone(), value.clone());
-        check_live(&entries, &b, 100).unwrap(); // migration may see planned legacy
+        check_live(&entries, &b, 100, false).unwrap(); // migration may see planned legacy
         assert!(reject_legacy(&entries).is_err()); // completed publication may not
         entries.remove(legacy);
         entries.insert("old.beat".into(), json!({"schema":2,"at":100}));
-        assert!(check_live(&entries, &b, 100).is_err());
+        assert!(check_live(&entries, &b, 100, false).is_err());
         entries.remove("old.beat");
         entries.insert("a.beat".into(), json!({"at":100}));
-        assert!(check_live(&entries, &b, 100).is_err());
+        assert!(check_live(&entries, &b, 100, false).is_err());
         entries.insert("a.beat".into(), json!({"schema":2,"at":1}));
-        assert!(verify_deployment(&entries, &b, 1000).is_err());
+        assert!(verify_deployment(&entries, &b, 1000, false).is_err());
         entries.insert("unplanned.uac.old".into(), json!({"project":"/old"}));
-        assert!(check_live(&entries, &b, 1000).is_err());
+        assert!(check_live(&entries, &b, 1000, false).is_err());
+    }
+
+    #[test]
+    fn completed_protocol_check_accepts_new_v2_peers_only() {
+        let b = bundle(fixture("a", "p1"));
+        let mut entries = BTreeMap::from([
+            ("a.beat".into(), json!({"schema":2,"at":100})),
+            ("io-win.beat".into(), json!({"schema":2,"at":100})),
+        ]);
+        assert!(check_live(&entries, &b, 100, false).is_err());
+        verify_deployment(&entries, &b, 100, true).unwrap();
+        for beat in [json!({"at":100}), json!({"schema":1,"at":100}), json!({"schema":3,"at":100})] {
+            entries.insert("io-win.beat".into(), beat);
+            assert!(check_live(&entries, &b, 100, true).is_err());
+        }
+        entries.insert("io-win.beat".into(), json!({"schema":2,"at":100}));
+        for (key, value) in &b.hosts[0].registry.backup {
+            entries.insert(key.clone(), value.clone());
+            assert!(check_live(&entries, &b, 100, true).is_err());
+            entries.remove(key);
+        }
+        entries.remove("a.beat");
+        assert!(verify_deployment(&entries, &b, 100, true).is_err());
+    }
+
+    #[test]
+    fn completed_phase_requires_valid_local_marker() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!completed(root.path(), "a").unwrap());
+        for marker in [json!({"schema":1,"host":"a"}), json!({"schema":2,"host":"other"})] {
+            save(&root.path().join(MARKER), &marker).unwrap();
+            assert!(completed(root.path(), "a").is_err());
+        }
+        save(&root.path().join(MARKER), &json!({"schema":2,"host":"a"})).unwrap();
+        assert!(completed(root.path(), "a").unwrap());
     }
 
     #[test]

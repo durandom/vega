@@ -460,6 +460,74 @@ fn startup_requires_approval_migrates_restarts_and_rollback_blocks_forward_start
         assert_eq!(published, vega_registry::uac_entry("a", &claim).unwrap());
         assert_eq!(published, expected);
     });
+    // Real io-win beat shape: a native v2 publisher enrolled after flag day,
+    // absent from the frozen plans. Both rejoin and ordinary reconcile pass.
+    let fresh = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    rt.block_on(async {
+        kv.put(
+            "io-win.beat",
+            json!({"schema":2,"at":fresh}).to_string().into(),
+        )
+        .await
+        .unwrap();
+        kv.delete("a.orchestration").await.unwrap();
+    });
+    success(post(home, &url, &["relay", "--once"]));
+    success(post(home, &url, &["identity", "verify"]));
+
+    // The recurring guard responds to protocol changes after successful startup.
+    let log = home.join("post-cutover.log");
+    let running = Server(
+        post_command(home, &url, "a", &["relay"])
+            .stdout(fs::File::create(&log).unwrap())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for(|| {
+        fs::read_to_string(&log)
+            .unwrap()
+            .contains("registry: in sync")
+    });
+    rt.block_on(async {
+        kv.put(
+            "io-win.beat",
+            json!({"schema":1,"at":fresh}).to_string().into(),
+        )
+        .await
+        .unwrap();
+    });
+    wait_for(|| fs::read_to_string(&log).unwrap().contains("heartbeat only"));
+    rt.block_on(async {
+        kv.put(
+            "io-win.beat",
+            json!({"schema":2,"at":fresh}).to_string().into(),
+        )
+        .await
+        .unwrap();
+    });
+    wait_for(|| {
+        fs::read_to_string(&log)
+            .unwrap()
+            .matches("registry: in sync")
+            .count()
+            >= 2
+    });
+    drop(running);
+
+    // Without completion, even this v2 peer must be in the migration inventory.
+    fs::remove_file(&marker).unwrap();
+    drop(quiesced(home, &url, "a", "unplanned live host: io-win"));
+    assert!(!marker.exists());
+    assert!(!post(home, &url, &["identity", "verify"]).status.success());
+    fs::write(&marker, json!({"schema":2,"host":"a"}).to_string()).unwrap();
+    rt.block_on(async {
+        kv.delete("io-win.beat").await.unwrap();
+    });
+
     // Even a completed offline host cannot rejoin an online mixed protocol.
     rt.block_on(async {
         kv.put("old.beat",json!({"at":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()}).to_string().into()).await.unwrap();
