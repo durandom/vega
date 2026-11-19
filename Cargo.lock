@@ -2873,7 +2873,10 @@ dependencies = [
 name = "vega-browser"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "rusqlite",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "vega-build",
  "vega-herdr",

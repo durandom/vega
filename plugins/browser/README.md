@@ -7,13 +7,17 @@ blockers (`launch`, `cleanup`), and the session inventory with owners
 owner records and the browser processes. One rule: every agent-browser call
 names its session.
 
-`vpn start|stop|status [--json]` manages a dedicated headed Chromium via autossh
+`vpn start|stop|status|trust [--json]` manages a dedicated headed Chromium via autossh
 SOCKS to puck, separate from the global browser. After explicit start, agents
 attach with `ab --profile vpn --session <project>-vpn-<task>`. Defaults: CDP 9224,
 SOCKS 1080, persistent ~/.local/share/vega-chromium-vpn; optional configuration
 in ~/.config/vega/browser-vpn.json. Full-profile SOCKS uses remote DNS without
 PAC or direct fallback. Status probes the corp host once; stop preserves data.
-Requires autossh and noninteractive SSH access to puck.
+Requires autossh and noninteractive SSH access to puck. Start imports the pinned
+corp root into the stopped VPN profile; `vpn trust` imports without starting.
+`ca_sha256` config overrides the default SHA-256 pin; mismatches fail before
+import. Already trusted is a read-only no-op. Status includes `ca_trusted`.
+The macOS keychain and browser policies are unchanged.
 
 Replaces the global `browser` skill (`~/.agents/skills/browser`); the old
 script paths forward to this plugin for the migration

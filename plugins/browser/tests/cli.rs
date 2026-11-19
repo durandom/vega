@@ -11,7 +11,9 @@ use std::process::{Command, Output};
 use std::thread;
 use std::time::Duration;
 
+use base64::Engine;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use vega_browser::mark;
 
@@ -91,6 +93,15 @@ fn fix() -> Fix {
     for dir in [&f.bin, &f.state, &f.home, &f.tmp.join("tmp")] {
         fs::create_dir_all(dir).unwrap();
     }
+    fs::write(f.path("ca.pem"), include_str!("fixtures/vpn-ca.pem")).unwrap();
+    script(
+        &f.bin.join("security"),
+        r#"printf '%s\n' "$*" >> "$VEGA_FIX/security-argv"; cat "$VEGA_FIX/ca.pem""#,
+    );
+    script(
+        &f.bin.join("ssh"),
+        r#"printf '%s\n' "$*" >> "$VEGA_FIX/ca-ssh-argv"; security find-certificate -a -p -c 'Internal Root CA' /Library/Keychains/System.keychain"#,
+    );
     // agent-browser: records argv and env, answers the subcommands vega uses.
     script(
         &f.bin.join("agent-browser"),
@@ -115,6 +126,7 @@ case " $* " in
 esac
 "#,
     );
+    fs::write(f.path("ps"), "").unwrap();
     // ps: the table under test, from a file.
     script(&f.bin.join("ps"), r#"cat "$VEGA_FIX/ps" 2>/dev/null"#);
     // herdr: pane list from a file (`{"pane_id":"w1:p2"}` lines).
@@ -267,7 +279,7 @@ fn chromium_attaches_to_the_answering_global() {
 fn vpn_config(f: &Fix, extra: Value) -> (u16, u16) {
     let port = free_port();
     let socks = free_port();
-    let mut cfg = serde_json::json!({"cdp_port":port, "socks_port":socks});
+    let mut cfg = serde_json::json!({"cdp_port":port, "socks_port":socks, "ca_sha256":test_ca().0});
     for (k, v) in extra.as_object().unwrap() {
         cfg[k] = v.clone();
     }
@@ -288,6 +300,8 @@ fn vpn_refuses_collisions_bad_config_and_implicit_start() {
         serde_json::json!({"socks_port":f.port}),
         serde_json::json!({"host":"-bad"}),
         serde_json::json!({"typo":true}),
+        serde_json::json!({"ca_sha256":"gg".repeat(32)}),
+        serde_json::json!({"ca_sha256":123}),
         serde_json::json!({"profile":f.home.join(".local/share/vega-chromium")}),
     ] {
         vpn_config(&f, cfg);
@@ -355,7 +369,7 @@ while :; do sleep 1; done
         &f.bin.join("ssh"),
         r#"
 case "$*" in *"-O check"*) test -e "$VEGA_FIX/tunnel";;
-*"-O exit"*) rm -f "$VEGA_FIX/tunnel";; *) exit 1;; esac
+*"-O exit"*) rm -f "$VEGA_FIX/tunnel";; *) security find-certificate -a -p -c 'Internal Root CA' /Library/Keychains/System.keychain;; esac
 "#,
     );
     script(
@@ -425,6 +439,7 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
     let v: Value = serde_json::from_str(&out(&o)).unwrap();
     assert_eq!(v["corp_http"], "302");
     assert_eq!(v["browser"], true);
+    assert_eq!(v["ca_trusted"], true);
     let curl = fs::read_to_string(f.path("curl-argv")).unwrap();
     assert!(curl.contains("--socks5-hostname") && curl.contains("--insecure"));
     // Stop follows the saved launch settings, even after a config edit.
@@ -1027,4 +1042,121 @@ fn close_closes_one_session_on_request() {
     let o = run(&f, &["close", "bad name"], &[]);
     assert_eq!(o.status.code(), Some(1));
     assert!(out(&o).contains("bad session name"), "{}", out(&o));
+}
+
+fn test_ca() -> (String, Vec<u8>) {
+    let pem = include_str!("fixtures/vpn-ca.pem");
+    let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(body)
+        .unwrap();
+    (format!("{:x}", Sha256::digest(&der)), der)
+}
+
+#[test]
+fn vpn_trust_pins_ca_and_preserves_existing_certificates() {
+    let f = fix();
+    vpn_config(&f, serde_json::json!({}));
+    let db_path = f
+        .home
+        .join(".local/share/vega-chromium-vpn/Default/ServerCertificate");
+    let initial = run(&f, &["vpn", "status", "--json"], &[]);
+    assert_eq!(
+        serde_json::from_str::<Value>(&out(&initial)).unwrap()["ca_trusted"],
+        false
+    );
+    assert!(!db_path.exists());
+    let imported = run(&f, &["vpn", "trust", "--json"], &[]);
+    assert!(
+        imported.status.success(),
+        "{}{}",
+        out(&imported),
+        err(&imported)
+    );
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    let (pin, der) = test_ca();
+    let stored: (Vec<u8>, Vec<u8>) = db
+        .query_row(
+            "SELECT der_cert,trust_settings FROM certificates WHERE sha256hash_hex=?",
+            [&pin],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, (der, vec![10, 2, 8, 3]));
+    db.execute(
+        "INSERT INTO certificates VALUES('unrelated',x'12',x'34')",
+        [],
+    )
+    .unwrap();
+    let before = fs::read(&db_path).unwrap();
+    fs::remove_file(f.path("ca.pem")).unwrap();
+    assert!(run(&f, &["vpn", "trust"], &[]).status.success());
+    assert_eq!(before, fs::read(&db_path).unwrap());
+    assert!(!f.home.join(".local/share/vega-chromium").exists());
+    let ssh = fs::read_to_string(f.path("ca-ssh-argv")).unwrap();
+    assert!(ssh.contains("BatchMode=yes") && ssh.contains("ConnectTimeout=10"));
+    assert_eq!(ssh.lines().count(), 1);
+    assert!(ssh.contains("puck security find-certificate -a -p -c 'Internal Root CA' /Library/Keychains/System.keychain"));
+    assert!(fs::read_to_string(f.path("security-argv"))
+        .unwrap()
+        .contains("find-certificate -a -p -c Internal Root CA /Library/Keychains/System.keychain"));
+    db.execute(
+        "UPDATE certificates SET trust_settings=x'0a020802' WHERE sha256hash_hex=?",
+        [&pin],
+    )
+    .unwrap();
+    let before = fs::read(&db_path).unwrap();
+    let o = run(&f, &["vpn", "trust"], &[]);
+    assert!(
+        !o.status.success() && out(&o).contains("no overwrite"),
+        "{}",
+        out(&o)
+    );
+    assert_eq!(before, fs::read(&db_path).unwrap());
+}
+
+#[test]
+fn vpn_trust_refuses_mismatch_running_profile_symlink_and_unknown_schema() {
+    let f = fix();
+    vpn_config(&f, serde_json::json!({"ca_sha256":"00".repeat(32)}));
+    let profile = f.home.join(".local/share/vega-chromium-vpn");
+    let o = run(&f, &["vpn", "start"], &[]);
+    assert!(
+        !o.status.success() && out(&o).contains("fingerprint mismatch"),
+        "{}",
+        out(&o)
+    );
+    assert!(!profile.exists());
+    assert!(!f.path("chromium-argv").exists());
+    vpn_config(&f, serde_json::json!({}));
+    fs::write(
+        f.path("ps"),
+        format!("4242 1:00 Chromium --user-data-dir={}\n", profile.display()),
+    )
+    .unwrap();
+    let o = run(&f, &["vpn", "trust"], &[]);
+    assert!(
+        !o.status.success() && out(&o).contains("stop the VPN"),
+        "{}",
+        out(&o)
+    );
+    fs::write(f.path("ps"), "").unwrap();
+    fs::create_dir_all(&profile).unwrap();
+    std::os::unix::fs::symlink(&f.tmp, profile.join("Default")).unwrap();
+    assert!(out(&run(&f, &["vpn", "trust"], &[])).contains("symlinks"));
+    fs::remove_file(profile.join("Default")).unwrap();
+    assert!(run(&f, &["vpn", "trust"], &[]).status.success());
+    let path = profile.join("Default/ServerCertificate");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute("UPDATE meta SET value='2' WHERE key='version'", [])
+        .unwrap();
+    let before = fs::read(&path).unwrap();
+    assert!(out(&run(&f, &["vpn", "trust"], &[])).contains("unsupported"));
+    assert_eq!(before, fs::read(&path).unwrap());
+    db.execute("UPDATE meta SET value='1'", []).unwrap();
+    db.execute("ALTER TABLE certificates ADD COLUMN future TEXT", [])
+        .unwrap();
+    let before = fs::read(&path).unwrap();
+    assert!(out(&run(&f, &["vpn", "trust"], &[])).contains("unsupported"));
+    assert_eq!(before, fs::read(&path).unwrap());
 }

@@ -5,6 +5,17 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 250 · 2026-11-19
+
+- feature: VPN Chromium automatically trusts the pinned corporate root CA in its
+  dedicated profile before launch. `vega browser vpn trust` imports without
+  starting; status reports `ca_trusted`. The public CA is read from puck over
+  SSH and checked against SHA-256 before import; existing trust is a no-op.
+- optional: Set `ca_sha256` (64 hex digits) in `~/.config/vega/browser-vpn.json`
+  for a verified replacement CA. New imports require a stopped VPN profile;
+  incompatible stores or conflicting trust need manual review. No keychain or
+  browser policy changes are made.
+
 ## 249 · 2026-11-19
 
 - feature: `vega browser vpn start|stop|status` manages a separate headed Chromium

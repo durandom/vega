@@ -270,3 +270,48 @@ invalid config, saved-settings cleanup, startup failure and stale PID refusal.
 
 Killing Playwright leftovers (rally-coach's lanes own them); a shared parallax profile with a PAC
 proxy (parallax-cdg.44); Lightpanda.
+
+## VPN profile root trust (vega-nt71)
+
+Before launch, `vpn start` ensures the configured CA is trusted; `vpn trust`
+performs just this step. The default `ca_sha256` pin is
+`4678DB0942D0B9E732122507BD6CDC08D128AB832DA274AD7D46F8C3576BC925`;
+configuration accepts exactly 64 hexadecimal digits, case insensitive. Fetch is
+read-only SSH BatchMode to the configured host (default puck), running
+`security find-certificate -a -p -c 'Internal Root CA' /Library/Keychains/System.keychain`.
+Select only the PEM certificate whose DER SHA-256 matches the pin; absence or
+mismatch fails before creating a profile/store or launching anything.
+
+Mechanism: Chromium's native `Default/ServerCertificate` SQLite store, only
+while the profile is stopped. Chromium 146's profile service passes
+`Profile::GetPath()` to this database. Schema v1 has `meta` version and
+last_compatible_version both 1, and `certificates(sha256hash_hex TEXT PRIMARY
+KEY, der_cert BLOB NOT NULL, trust_settings BLOB NOT NULL)`. Hashes are lowercase
+DER SHA-256. Trust metadata `0a020803` is protobuf CertificateMetadata.trust
+(field 1), CertificateTrust.trust_type (field 1), TRUSTED (3). The user's
+manually imported entry confirmed this format through a read-only query.
+
+This internal format is guarded, not an upstream compatibility guarantee.
+Check versions and column shape; fail closed for unknown formats without
+migrating or razing. A transaction inserts only the missing pinned certificate,
+preserving all other entries. Existing matching DER and canonical trust are a
+read-only no-op, including when Chromium is running, without SSH. Conflicting
+DER, explicit distrust, constraints or unknown metadata require manual review;
+never overwrite them. A missing CA requires no process using the profile and
+no SingletonLock; symlinks within the certificate path are refused. Vega's
+lifecycle lock serializes its own commands; avoid launching Chromium manually
+against this directory during trust import. Status reads the database read-only:
+`ca_trusted` is true for the canonical pinned entry, false for absence, null
+for unreadable/unsupported/conflicting metadata.
+
+Chosen over macOS/NSS stores (not this per-profile store), policies (broader
+scope), fragile certificate-manager UI automation, and certificate-error bypass
+flags (which do not install a CA). No public CDP CA-import API was identified.
+Full TLS verification remains enabled; no keychain writes, policy changes,
+global profile changes or running-profile writes.
+
+Source references (Chromium 146.0.7680.0):
+- [profile factory](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/chrome/browser/net/server_certificate_database_service_factory.cc)
+- [store and schema](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/components/server_certificate_database/server_certificate_database.cc)
+- [trust protobuf](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/components/server_certificate_database/server_certificate_database.proto)
+- [verifier additional trust](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/net/cert/cert_verify_proc_builtin.cc)

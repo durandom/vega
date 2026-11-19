@@ -28,7 +28,12 @@ Load upstream guides before driving pages: `agent-browser skills get core`,
 
 ## VPN Chromium
 
-`vega browser vpn start|stop|status [--json]` manages a separate headed profile,
+Start imports the pinned corp CA into the stopped profile; `vpn trust` only
+imports. Already trusted is a read-only no-op. Status includes `ca_trusted`
+(null means unreadable/unsupported/conflicting trust). Config `ca_sha256` takes
+64 hex digits; mismatch refuses import. Verify replacement CAs before repinning.
+
+`vega browser vpn start|stop|status|trust [--json]` manages a separate headed profile,
 using autossh and BatchMode SSH to puck. Start explicitly, then attach:
 `vega browser ab --profile vpn --session <project>-vpn-<task> <args>`.
 Use a fresh VPN-specific session and your own tab. Status makes one bounded

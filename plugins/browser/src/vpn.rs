@@ -1,5 +1,6 @@
 //! Dedicated VPN profile; Chromium mechanics remain in the shared launcher.
 use super::*;
+mod trust;
 use std::fs::{File, OpenOptions};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
@@ -10,6 +11,7 @@ pub(super) struct Vpn {
     port: u16,
     profile: PathBuf,
     state: PathBuf,
+    ca_sha256: String,
 }
 
 fn fail(message: impl Into<String>) -> Failure {
@@ -49,7 +51,7 @@ impl Vpn {
             .as_object()
             .ok_or_else(|| fail("VPN config must be an object"))?;
         for key in obj.keys() {
-            if !["host", "socks_port", "cdp_port", "profile"].contains(&key.as_str()) {
+            if !["host", "socks_port", "cdp_port", "profile", "ca_sha256"].contains(&key.as_str()) {
                 return Err(fail(format!("unknown VPN config field: {key}")));
             }
         }
@@ -83,7 +85,11 @@ impl Vpn {
                     .to_string(),
             )?),
             state,
+            ca_sha256: string("ca_sha256", trust::DEFAULT_SHA256.into())?.to_ascii_lowercase(),
         };
+        if v.ca_sha256.len() != 64 || !v.ca_sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(fail("ca_sha256 must contain exactly 64 hexadecimal digits"));
+        }
         if v.host.is_empty()
             || v.host.starts_with('-')
             || !v
@@ -222,7 +228,7 @@ impl Vpn {
     }
 
     fn settings(&self) -> serde_json::Value {
-        serde_json::json!({"host":self.host,"cdp_port":self.port,"socks_port":self.socks,"profile":self.profile})
+        serde_json::json!({"host":self.host,"cdp_port":self.port,"socks_port":self.socks,"profile":self.profile,"ca_sha256":self.ca_sha256})
     }
 
     fn start(&self) -> Result<(), Failure> {
@@ -238,7 +244,8 @@ impl Vpn {
             }
         }
         if self.supervisor().is_some() {
-            return self.require_running();
+            self.require_running()?;
+            return self.trust();
         }
         for port in [self.port, self.socks] {
             TcpListener::bind(("127.0.0.1", port)).map_err(|_| {
@@ -252,6 +259,7 @@ impl Vpn {
                 "VPN profile already has a browser; stop it before starting",
             ));
         }
+        self.trust()?;
         let _ = fs::remove_file(self.socket());
         let mut child = Command::new("nohup")
             .args(["autossh", "-M", "0", "-N", "-T", "-a", "-D"])
@@ -373,6 +381,7 @@ impl Vpn {
             None
         };
         serde_json::json!({"profile":"vpn", "host":self.host, "cdp_port":self.port, "socks_port":self.socks,
+            "ca_sha256":self.ca_sha256, "ca_trusted":self.ca_trusted().ok(),
             "supervisor":supervisor, "tunnel":tunnel, "browser":browser, "corp_http":corp,
             "hint": if corp.is_none() { "Corp host unavailable; check VPN on puck (no automatic probe retries)" } else { "" }})
     }
@@ -454,29 +463,32 @@ pub(super) fn select(args: &[String]) -> Result<(Option<Vpn>, Vec<String>), Fail
 
 pub(super) fn command(args: &[String]) -> Result<ExitCode, Failure> {
     let (op, json) = match args {
-        [op] if ["start", "stop", "status"].contains(&op.as_str()) => (op.as_str(), false),
-        [op, flag] if ["start", "stop", "status"].contains(&op.as_str()) && flag == "--json" => {
+        [op] if ["start", "stop", "status", "trust"].contains(&op.as_str()) => (op.as_str(), false),
+        [op, flag]
+            if ["start", "stop", "status", "trust"].contains(&op.as_str()) && flag == "--json" =>
+        {
             (op.as_str(), true)
         }
         _ => {
             return Err(Failure::new(
                 "usage",
-                "expected vpn start|stop|status [--json]",
+                "expected vpn start|stop|status|trust [--json]",
                 "vega browser vpn --help",
             ))
         }
     };
-    let v = Vpn::load(op != "start")?;
+    let v = Vpn::load(!["start", "trust"].contains(&op))?;
     let _lock = v.lock()?;
     match op {
         "start" => v.start()?,
         "stop" => v.stop()?,
+        "trust" => v.trust()?,
         _ => (),
     }
     let value = if op == "status" {
         v.status()
     } else {
-        serde_json::json!({"profile":"vpn", "state":if op == "start" {"started"} else {"stopped"}})
+        serde_json::json!({"profile":"vpn", "state":match op { "start" => "started", "trust" => "trusted", _ => "stopped" }})
     };
     if json {
         println!("{value}");

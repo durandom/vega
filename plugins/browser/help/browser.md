@@ -3,7 +3,7 @@ vega browser: named agent-browser sessions — the global Chromium, throwaway fa
 Usage: vega browser <command>
 
 Commands:
-  vpn start|stop|status [--json]
+  vpn start|stop|status|trust [--json]
                               Dedicated headed VPN Chromium via SSH SOCKS to puck.
                               Requires autossh and BatchMode SSH access. Status makes
                               one bounded corp HTTPS probe; stop preserves the profile.
@@ -68,6 +68,16 @@ VPN defaults: SSH host puck, SOCKS 127.0.0.1:1080, CDP 127.0.0.1:9224,
 profile ~/.local/share/vega-chromium-vpn. Optional config:
 $XDG_CONFIG_HOME/vega/browser-vpn.json (default ~/.config/vega/browser-vpn.json):
 {"host":"puck","socks_port":1080,"cdp_port":9224}
+Start automatically imports the pinned corp root into this profile before launch;
+`vpn trust` performs only that step. Requires a stopped profile for a new import.
+Already trusted: no writes or SSH fetch. Status includes ca_sha256 and ca_trusted
+(false = absent; null = unreadable/unsupported/conflicting metadata).
+Optional ca_sha256: exactly 64 hex digits (case insensitive); default:
+4678DB0942D0B9E732122507BD6CDC08D128AB832DA274AD7D46F8C3576BC925.
+The public cert is read from the SSH host's System.keychain and checked before
+any import. A mismatch fails; existing distrust/constraints or unknown store
+versions fail without overwrite. Review those in the VPN certificate manager.
+No macOS keychain writes or browser policies.
 Optional profile must be an absolute dedicated vega-chromium-vpn* directory.
 Stop before changing config. Full-profile SOCKS/remote DNS, no direct fallback;
 no PAC or domain list. Only the user logs in. CDP_CHROMIUM selects the binary.
