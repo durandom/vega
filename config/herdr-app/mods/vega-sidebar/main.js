@@ -1713,7 +1713,12 @@ export default class Agents extends View {
         .when(on, el => el.bg(t.selected))
         .cursor_pointer().hover(s => s.bg(t.hover))
         .tooltip([a.title, l["vega.role"]].filter(Boolean).join(" · ") || a.address)
-        .on_click(() => depth || !a.pane ? this.peek(a.address) : run("pane.focus", { pane: a.pane }))
+        // A child with its own pane (kept as a tab) opens there; only paneless ones peek.
+        // Tree children are terminal records without `pane`: look it up on click, not per render.
+        .on_click(() => {
+          const pane = a.pane ?? agents().find(x => x.address === a.address)?.pane;
+          pane ? run("pane.focus", { pane }) : this.peek(a.address);
+        })
         .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx))
         .children(lines.map(x => div().self_start().mt(-4).w(9).h(16).mr(2).flex_none()
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))

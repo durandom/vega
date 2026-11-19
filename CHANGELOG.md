@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 252 · 2026-11-19
+
+- feature: In the vega sidebar, clicking a nested sentinel that has its own pane
+  (kept as a tab) opens that pane instead of the peek preview; paneless children
+  still peek.
+
 ## 251 · 2026-11-19
 
 - unit: lanista seats move tiers to the current models: codex flagship

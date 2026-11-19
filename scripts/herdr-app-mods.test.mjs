@@ -1207,6 +1207,17 @@ function projectFixture(h) {
   return project;
 }
 
+test('a nested sentinel with its own pane opens it; a paneless one peeks',()=>{
+  const h=load('vega-sidebar');projectFixture(h);h.mod.init({},h.cx);
+  const click=()=>{h.calls.length=0;elements(h.render()).find(n=>n.idValue==='sub-t2').handlers.on_click({},h.cx);};
+  click();
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='pane.focus'&&c[2].pane==='t2'),'kept child focuses its pane');
+  assert(!h.calls.some(c=>c[1]==='terminal.peek'));
+  const agents=h.api.agents();h.api.agents=()=>agents.map(a=>a.address==='t2'?{...a,pane:null}:a);
+  click();
+  assert(h.calls.some(c=>c[0]==='run'&&c[1]==='terminal.peek'&&c[2].terminal==='t2'),'paneless child peeks');
+});
+
 test('sidebar shows coloured browser dots on owning agent rows and derives once per payload',()=>{
   const h=load('vega-sidebar'),project=projectFixture(h);h.mod.init({},h.cx);
   h.render();
