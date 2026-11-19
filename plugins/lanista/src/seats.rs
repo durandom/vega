@@ -393,11 +393,11 @@ mod tests {
         // Ids checked against the installed CLIs (claude --model, codex -m).
         let pins = repo();
         let p = |l, t| pick(&pins, l, t).unwrap();
-        assert_eq!(p("claude", "flagship").model, "claude-opus-5-5");
+        assert_eq!(p("claude", "flagship").model, "claude-fable-5-2");
         assert_eq!(p("claude", "balanced").model, "claude-sonnet-5-5");
         assert_eq!(p("claude", "budget").model, "claude-haiku-5-5");
-        assert_eq!(p("codex", "flagship").model, "gpt-6-astra");
-        assert_eq!(p("codex", "balanced").model, "gpt-6.1-sol");
+        assert_eq!(p("codex", "flagship").model, "gpt-6.2-astra");
+        assert_eq!(p("codex", "balanced").model, "gpt-6.2-sol");
         assert_eq!(p("codex", "budget").model, "gpt-6-luna");
         assert_eq!(p("claude", "budget").engine, "claude");
         assert_eq!(p("codex", "budget").engine, "codex");

@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 251 · 2026-11-19
+
+- unit: lanista seats move tiers to the current models: codex flagship
+  `gpt-6.2-astra`, balanced `gpt-6.2-sol` (budget stays `gpt-6-luna`); claude
+  flagship `claude-fable-5-2` (Opus 5.5 stays startable by explicit pin). Run
+  `vega lanista install` to write the seats file.
+
 ## 250 · 2026-11-19
 
 - feature: VPN Chromium automatically trusts the pinned corporate root CA in its

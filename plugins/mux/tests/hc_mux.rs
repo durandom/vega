@@ -1810,10 +1810,10 @@ fn bead_uses_local_cwd_and_derived_tier_resolves_the_pin() {
     );
     let shown = f.run(&["show", "worker"]);
     assert!(shown.contains("tier: balanced"), "{shown}");
-    assert!(shown.contains("model: gpt-6.1-sol"), "{shown}");
+    assert!(shown.contains("model: gpt-6.2-sol"), "{shown}");
     assert!(fs::read_to_string(f.root().join("bd-calls"))
         .unwrap()
-        .contains("model=gpt-6.1-sol"));
+        .contains("model=gpt-6.2-sol"));
 }
 
 #[test]

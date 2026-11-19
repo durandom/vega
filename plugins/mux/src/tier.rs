@@ -389,10 +389,10 @@ mod tests {
         for text in [
             "flagship",
             "design/root-cause",
-            "gpt-6-astra",
+            "gpt-6.2-astra",
             "balanced",
             "normal implementation",
-            "gpt-6.1-sol",
+            "gpt-6.2-sol",
             "budget",
             "mechanical",
             "gpt-6-luna",

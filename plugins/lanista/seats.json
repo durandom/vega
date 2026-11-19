@@ -1,6 +1,6 @@
 {
   "_schema": "Named seat allowlists: provider-facing pin ids a host/rig can start.",
-  "_updated": "2026-10-30",
+  "_updated": "2026-11-19",
   "_note": "Owned by vega (plugins/lanista/seats.json): `vega lanista install` writes it to ~/.config/lanista/seats.json on every host; edit it in the vega repo, not on a host. `tier` (flagship, balanced, budget) is vega's: `vega lanista pin` reads it, lanista ignores it. Pins keep the host spelling (dots ok).",
   "seats": {
     "herdr-agents": {
@@ -21,12 +21,15 @@
         {"provider": "agy", "engine": "agy", "pin": "gemini-3.7-flash-high", "role": "flash"},
         {"provider": "agy", "engine": "agy", "pin": "gemini-3.7-flash", "role": "flash", "tier": "budget"},
 
-        {"provider": "claude", "engine": "claude", "pin": "claude-opus-5-5", "role": "max-quality", "tier": "flagship"},
+        {"provider": "claude", "engine": "claude", "pin": "claude-fable-5-2", "role": "max-quality", "tier": "flagship"},
+        {"provider": "claude", "engine": "claude", "pin": "claude-opus-5-5", "role": "max-quality"},
         {"provider": "claude", "engine": "claude", "pin": "claude-sonnet-5-5", "role": "mid", "tier": "balanced"},
         {"provider": "claude", "engine": "claude", "pin": "claude-haiku-5-5", "role": "thrifty", "tier": "budget"},
 
-        {"provider": "codex", "engine": "codex", "pin": "gpt-6-astra", "role": "frontier", "tier": "flagship"},
-        {"provider": "codex", "engine": "codex", "pin": "gpt-6.1-sol", "role": "workhorse", "tier": "balanced"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6.2-astra", "role": "frontier", "tier": "flagship"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6.2-sol", "role": "workhorse", "tier": "balanced"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6-astra", "role": "frontier"},
+        {"provider": "codex", "engine": "codex", "pin": "gpt-6.1-sol", "role": "workhorse"},
         {"provider": "codex", "engine": "codex", "pin": "gpt-6-luna", "role": "thrifty", "tier": "budget"},
         {"provider": "codex", "engine": "codex", "pin": "gpt-6.1-terra", "role": "thrifty"}
       ]
