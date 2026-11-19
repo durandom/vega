@@ -91,18 +91,25 @@ for this probe. Runs of other heads do not affect this head's verdict.
 Forgejo remains based on commit statuses: its Actions API has not been measured (see Open questions).
 
 Verdict per head: `red` as soon as one check or workflow fails (failed names listed, pending count added), else `pending`
-while any check or workflow is pending, else `green` when at least one passed, else `none` (no checks, or only skipped and
-cancelled). Cancelled runs are not failures (gh-axi): usually a newer push cancelled them.
+while any check or workflow is pending, else `cancelled` when any current-head check or workflow was
+cancelled, else `green` when at least one passed, else `none` (no checks, or only skipped).
+Cancellation is incomplete acceptance, not a code failure. For example, run 44152159268 at ea98cf5 had
+only `secrets` pass while `check` and `windows` were cancelled: the head is `cancelled`, never green,
+even if the workflow cancellation is the only cancellation reported. A superseded run on an older head
+cannot vote on the newer head; its cancellation remains ignored. Cancellation on the same head remains
+visible until those checks/workflows are replaced by completed results (or a newer head is pushed).
+No branch-protection lookup is needed: any reported current-head cancellation prevents green.
 
 ## Events
 
-Each watcher gets one mail per new (head, verdict) with verdict `green` or `red`, plus one when the target
+Each watcher gets one mail per new (head, verdict) with verdict `green`, `red`, or `cancelled`, plus one when the target
 ends. A watcher that registers after CI finished gets the current verdict on the next cycle. `pending` and
 `none` send nothing; `vega ci` shows them.
 
 ```
 ci: PR #42 (o/r) head 1a2b3c4: green (12 pass, 2 skip). vega ci show o/r#42
 ci: PR #42 (o/r) head 1a2b3c4: red, failed: test (ubuntu), lint; 3 pending. vega ci show o/r#42
+ci: PR #42 (o/r) head 1a2b3c4: cancelled (1 pass, 3 cancel). vega ci show o/r#42
 ci: PR #42 (o/r) merged; watch ended
 ```
 

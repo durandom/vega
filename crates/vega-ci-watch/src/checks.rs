@@ -151,12 +151,14 @@ pub fn parse_status_forgejo(body: &str) -> Result<(Vec<Check>, Option<String>), 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
-    /// All checks finished, none failed, at least one passed.
+    /// All checks finished, none failed or cancelled, at least one passed.
     Green,
     /// At least one check failed (even while others still run).
     Red,
     Pending,
-    /// No checks, or only skipped and cancelled ones.
+    /// Acceptance did not complete: at least one current-head check cancelled.
+    Cancelled,
+    /// No checks, or only skipped ones.
     None,
 }
 
@@ -167,12 +169,13 @@ impl Verdict {
             Verdict::Red => "red",
             Verdict::Pending => "pending",
             Verdict::None => "none",
+            Verdict::Cancelled => "cancelled",
         }
     }
 
-    /// Green and red are worth a mail; pending and none are not.
+    /// Completed verdicts are worth a mail; pending and none are not.
     pub fn settled(self) -> bool {
-        matches!(self, Verdict::Green | Verdict::Red)
+        matches!(self, Verdict::Green | Verdict::Red | Verdict::Cancelled)
     }
 }
 
@@ -212,11 +215,13 @@ pub fn summarize(checks: &[Check]) -> Summary {
         .map(|c| c.name.clone())
         .collect();
     failed.dedup();
-    let [pass, fail, pending, ..] = counts;
+    let [pass, fail, pending, _, cancel] = counts;
     let verdict = if fail > 0 {
         Verdict::Red
     } else if pending > 0 {
         Verdict::Pending
+    } else if cancel > 0 {
+        Verdict::Cancelled
     } else if pass > 0 {
         Verdict::Green
     } else {
@@ -340,12 +345,23 @@ mod tests {
         );
         assert_eq!(
             summarize(&[c("a", Pass), c("b", Cancel)]).verdict,
-            Verdict::Green
+            Verdict::Cancelled
         );
         assert_eq!(
             summarize(&[c("a", Skip), c("b", Cancel)]).verdict,
-            Verdict::None
+            Verdict::Cancelled
         );
+        assert_eq!(summarize(&[c("a", Skip)]).verdict, Verdict::None);
+        assert_eq!(
+            summarize(&[c("a", Fail), c("b", Cancel)]).verdict,
+            Verdict::Red
+        );
+        assert_eq!(
+            summarize(&[c("a", Pending), c("b", Cancel)]).verdict,
+            Verdict::Pending
+        );
+        assert!(Verdict::Cancelled.settled());
+        assert_eq!(Verdict::Cancelled.as_str(), "cancelled");
         assert_eq!(summarize(&[]).verdict, Verdict::None);
     }
 }

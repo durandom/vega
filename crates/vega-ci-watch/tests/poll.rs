@@ -1072,3 +1072,84 @@ fn workflow_probe_errors_and_new_heads_cannot_reuse_green() {
     let old: store::State = serde_json::from_value(cache).unwrap();
     assert_eq!(old.summary().verdict, Verdict::Pending);
 }
+
+#[test]
+fn current_head_cancellation_mails_cancelled_but_superseded_runs_do_not_vote() {
+    let _turn = serial();
+    let tmp = tempfile::tempdir().unwrap();
+    std::env::set_var("XDG_STATE_HOME", tmp.path());
+    // Jobs recorded from durandom/vega run 44152159268 at ea98cf5,
+    // trimmed to fields used by the parser. Workflow/head transitions derived.
+    let jobs = fixture("jobs-cancelled-current-head.json");
+    let checks = jobs.replace("\"jobs\"", "\"check_runs\"");
+    for t in [
+        Target::pr("github.com", "durandom/vega", 42),
+        Target::branch("github.com", "durandom/vega", "feature"),
+    ] {
+        let mut s = store::State::new(&t, 0);
+        let mut f = Fake::default();
+        let head_ref = if t.pr.is_some() { "ea98cf5" } else { "feature" };
+        let status_path = format!("repos/durandom/vega/commits/{head_ref}/status");
+        let checks_path = format!("repos/durandom/vega/commits/{head_ref}/check-runs?per_page=100");
+        let workflows = r#"{"total_count":1,"workflow_runs":[{"id":44152159268,"name":"CI","head_sha":"ea98cf5","status":"completed","conclusion":"cancelled"}]}"#;
+        let workflows_path = "repos/durandom/vega/actions/runs?head_sha=ea98cf5&per_page=100";
+        f.set(
+            "repos/durandom/vega/pulls/42",
+            &pull("ea98cf5", "open", false),
+        );
+        f.set(&status_path, &NO_STATUSES.replace('x', "ea98cf5"));
+        f.set(&checks_path, &checks);
+        f.set(workflows_path, workflows);
+        poll::poll(&mut s, 0, &mut |_, _, p, e| f.get(p, e)).unwrap();
+        assert_eq!(s.summary().verdict, Verdict::Cancelled);
+        assert_eq!(s.summary().counts_text(), "1 pass, 3 cancel");
+        let panes = ["w1:p2".into()];
+        let mail = poll::mails(&mut s, &panes);
+        assert_eq!(mail.len(), 1);
+        assert!(mail[0]
+            .1
+            .contains("head ea98cf5: cancelled (1 pass, 3 cancel)"));
+        assert!(!store::owed("w1:p2", Some(&s), 0));
+        assert_eq!(next_poll(Verdict::Cancelled, None, 0), SETTLED_EVERY);
+        // Conditional responses preserve the verdict without duplicate mail.
+        poll::poll(&mut s, 120, &mut |_, _, p, e| f.get(p, e)).unwrap();
+        assert!(poll::mails(&mut s, &panes).is_empty());
+        // Either the jobs OR the workflow alone must prevent green.
+        f.set(workflows_path, &workflows.replace("cancelled", "success"));
+        poll::poll(&mut s, 240, &mut |_, _, p, e| f.get(p, e)).unwrap();
+        assert_eq!(s.summary().verdict, Verdict::Cancelled);
+        f.set(&checks_path, &checks.replace("cancelled", "success"));
+        f.set(workflows_path, workflows);
+        poll::poll(&mut s, 360, &mut |_, _, p, e| f.get(p, e)).unwrap();
+        assert_eq!(s.summary().verdict, Verdict::Cancelled);
+        // A newer head with successful jobs is green even if the workflow
+        // endpoint includes the superseded cancelled run. Branch zombie scans
+        // likewise must not turn the older cancellation into a verdict.
+        f.set(
+            "repos/durandom/vega/pulls/42",
+            &pull("newhead", "open", false),
+        );
+        let new_ref = if t.pr.is_some() { "newhead" } else { "feature" };
+        f.set(
+            &format!("repos/durandom/vega/commits/{new_ref}/status"),
+            &NO_STATUSES.replace('x', "newhead"),
+        );
+        f.set(
+            &format!("repos/durandom/vega/commits/{new_ref}/check-runs?per_page=100"),
+            &checks.replace("cancelled", "success"),
+        );
+        f.set(
+            "repos/durandom/vega/actions/runs?head_sha=newhead&per_page=100",
+            workflows,
+        );
+        f.set(
+            "repos/durandom/vega/actions/runs?branch=feature&per_page=20",
+            workflows,
+        );
+        poll::poll(&mut s, 480, &mut |_, _, p, e| f.get(p, e)).unwrap();
+        assert_eq!(s.summary().verdict, Verdict::Green);
+        let mail = poll::mails(&mut s, &panes);
+        assert_eq!(mail.len(), 1);
+        assert!(mail[0].1.contains("head newhead: green (3 pass)"));
+    }
+}

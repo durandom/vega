@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 245 · 2026-11-19
+
+- feature: CI watches report `cancelled` when current-head jobs or workflows were
+  cancelled, including a run where only `secrets` passed. This prevents incomplete
+  acceptance from being mailed green; superseded runs on older heads remain ignored
+  (vega-nic.28.13).
+
 ## 244 · 2026-11-17
 
 - feature: Windows `relay start` survives hc exec and terminal shutdown using a

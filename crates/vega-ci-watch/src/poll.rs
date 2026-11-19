@@ -669,7 +669,7 @@ fn signal_text(s: &State, t: &Target, title: &str, key: &str) -> String {
 }
 
 /// The mails `s` owes its watchers: one per new (head, verdict) when green or
-/// red, one per signal (rebase needed, zombie run), one when the target
+/// red or cancelled, one per signal (rebase needed, zombie run), one when the target
 /// ended. Marks them sent in `s.notified` and `s.signals`.
 pub fn mails(s: &mut State, panes: &[String]) -> Vec<(String, String)> {
     let Some(t) = s.target.clone() else {
@@ -737,7 +737,8 @@ pub fn mails(s: &mut State, panes: &[String]) -> Vec<(String, String)> {
             )
         }
         _ => format!(
-            "ci: {title} head {short}: green ({}). vega ci show {}",
+            "ci: {title} head {short}: {} ({}). vega ci show {}",
+            sum.verdict.as_str(),
             sum.counts_text(),
             t.label()
         ),
