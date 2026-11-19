@@ -134,7 +134,6 @@ impl Vpn {
             chromium: global().chromium,
             extra_args: vec![
                 format!("--proxy-server=socks5://127.0.0.1:{}", self.socks),
-                "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1".into(),
                 "--proxy-bypass-list=<-loopback>".into(),
                 "--disable-quic".into(),
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp".into(),
@@ -348,6 +347,8 @@ impl Vpn {
                 .args([
                     "--silent",
                     "--show-error",
+                    // Reachability only, no data sent: the corp host uses an internal CA.
+                    "--insecure",
                     "--noproxy",
                     "",
                     "--socks5-hostname",

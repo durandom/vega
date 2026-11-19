@@ -223,8 +223,11 @@ and attach state machine with separate ports, directories and VPN-only flags.
 Use full-profile SOCKS5 with remote DNS, no PAC or DIRECT fallback. The old
 dotfiles script only routed `.cee.redhat.com` and allowed DIRECT fallback;
 a dedicated browser removes the need for that split. Disable QUIC/non-proxied
-WebRTC UDP, remove implicit loopback proxy bypass, and map local DNS to NOTFOUND
-except the loopback proxy. This is browser routing, not an OS VPN.
+WebRTC UDP and remove implicit loopback proxy bypass. No `--host-resolver-rules`:
+Chromium shows an "unsupported flag" warning bar for it, and SOCKS5 already
+resolves page names on puck; a leaked local prefetch cannot resolve corp names.
+The status probe uses `--insecure` (reachability only; the corp host uses an
+internal CA). This is browser routing, not an OS VPN.
 See [Chromium proxy semantics](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md):
 SOCKS5 resolves names remotely; DIRECT fallback requires explicit configuration.
 

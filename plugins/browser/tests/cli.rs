@@ -400,7 +400,7 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
     let argv = fs::read_to_string(f.path("chromium-argv")).unwrap();
     assert!(argv.contains(&format!("--remote-debugging-port={port}")));
     assert!(argv.contains(&format!("--proxy-server=socks5://127.0.0.1:{socks}")));
-    assert!(argv.contains("--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"));
+    assert!(!argv.contains("--host-resolver-rules"));
     assert!(argv.contains("--proxy-bypass-list=<-loopback>"));
     let ssh = fs::read_to_string(f.path("ssh-argv")).unwrap();
     assert!(ssh.contains(&format!("-D 127.0.0.1:{socks}")));
@@ -425,9 +425,8 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
     let v: Value = serde_json::from_str(&out(&o)).unwrap();
     assert_eq!(v["corp_http"], "302");
     assert_eq!(v["browser"], true);
-    assert!(fs::read_to_string(f.path("curl-argv"))
-        .unwrap()
-        .contains("--socks5-hostname"));
+    let curl = fs::read_to_string(f.path("curl-argv")).unwrap();
+    assert!(curl.contains("--socks5-hostname") && curl.contains("--insecure"));
     // Stop follows the saved launch settings, even after a config edit.
     vpn_config(&f, serde_json::json!({"host":"different-host"}));
     let stopped = run(&f, &["vpn", "stop"], &[]);
