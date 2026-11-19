@@ -3,6 +3,12 @@ vega browser: named agent-browser sessions — the global Chromium, throwaway fa
 Usage: vega browser <command>
 
 Commands:
+  vpn start|stop|status [--json]
+                              Dedicated headed VPN Chromium via SSH SOCKS to puck.
+                              Requires autossh and BatchMode SSH access. Status makes
+                              one bounded corp HTTPS probe; stop preserves the profile.
+  ab --profile vpn --session <name> <args>
+                              Attach to the running VPN profile (start it first).
   install                     Converge agent-browser to the repository pin (0.43.0)
                               using npm global; install Chrome for Testing if missing.
   status [--json]             Read-only current/differs/missing and Chrome cache status.
@@ -57,6 +63,17 @@ VEGA_AGENT_BROWSER_BIN (the real agent-browser binary).
 
 Design: docs/design/browser.md
 Agent guide: vega skills browser
+
+VPN defaults: SSH host puck, SOCKS 127.0.0.1:1080, CDP 127.0.0.1:9224,
+profile ~/.local/share/vega-chromium-vpn. Optional config:
+$XDG_CONFIG_HOME/vega/browser-vpn.json (default ~/.config/vega/browser-vpn.json):
+{"host":"puck","socks_port":1080,"cdp_port":9224}
+Optional profile must be an absolute dedicated vega-chromium-vpn* directory.
+Stop before changing config. Full-profile SOCKS/remote DNS, no direct fallback;
+no PAC or domain list. Only the user logs in. CDP_CHROMIUM selects the binary.
+Examples: vega browser vpn start; vega browser vpn status --json;
+vega browser ab --profile vpn --session corp-vpn-task tab new https://gitlab.cee.redhat.com
+vega browser vpn stop
 
 Install uses npm from PATH (run in your normal login shell; fnm/mise supported).
 An older binary must resolve to that npm prefix's agent-browser package; a

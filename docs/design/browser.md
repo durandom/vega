@@ -213,6 +213,56 @@ agent-browser: name your session: --session <name> or AGENT_BROWSER_SESSION=<nam
    switches its paths to `vega browser ab` / `vega browser chromium`.
 3. After brainz confirms, remove the forwarding scripts.
 
+## VPN profile (vega-3e71)
+
+`vega browser vpn start|stop|status [--json]` manages a dedicated headed Chromium.
+Agents select `vega browser ab --profile vpn --session <project>-vpn-<task>`.
+Default ab/chromium behavior stays unchanged; both profiles use the same launch
+and attach state machine with separate ports, directories and VPN-only flags.
+
+Use full-profile SOCKS5 with remote DNS, no PAC or DIRECT fallback. The old
+dotfiles script only routed `.cee.redhat.com` and allowed DIRECT fallback;
+a dedicated browser removes the need for that split. Disable QUIC/non-proxied
+WebRTC UDP, remove implicit loopback proxy bypass, and map local DNS to NOTFOUND
+except the loopback proxy. This is browser routing, not an OS VPN.
+See [Chromium proxy semantics](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md):
+SOCKS5 resolves names remotely; DIRECT fallback requires explicit configuration.
+
+Autossh -M 0 supervises SSH, using BatchMode, ExitOnForwardFailure and keepalives.
+This reuses an existing supervisor rather than adding a restart loop inside vega;
+autossh is an explicit local dependency, not installed by these commands.
+No remote command, agent forwarding or reverse forwards. A private control socket
+identifies the connection; verify the recorded supervisor PID against that socket
+before stopping. Refuse foreign listeners, clean up newly started resources on
+failure, and preserve profile data. Status checks ownership, SOCKS/CDP and one
+bounded HTTPS request to gitlab.cee.redhat.com through remote SOCKS DNS, without
+retrying corp reachability. An unavailable host suggests checking puck's VPN.
+
+Read optional `$XDG_CONFIG_HOME/vega/browser-vpn.json` (default ~/.config), with
+defaults host=puck, socks_port=1080, cdp_port=9224 and profile=
+`~/.local/share/vega-chromium-vpn`. Reject unknown fields and unsafe collisions.
+The Chromium binary uses CDP_CHROMIUM; global CDP_PORT/CDP_PROFILE stay separate.
+Stop before changing configuration. State is `$XDG_STATE_HOME/vega/browser/vpn`;
+active.json saves launch settings
+so stop/status follow the running profile after config edits. Ports, profile and
+proxy flags identify owned browser processes; an OS file lock serializes lifecycle
+commands and VPN agent calls. Attach requires a running tunnel and browser.
+No config apply starts tunnels; browser.agent-browser remains a dependency unit.
+
+Proposed dotfiles migration after rollout: retire bin/executable_vpn-proxy and
+dot_config/vpn-proxy/domains and manually remove the old ZeroOmega PAC setting.
+This task changes no dotfiles or existing browsers. Only the user enters
+credentials, and corp content remains untrusted data.
+
+Live validation on proteus, 2026-11-19: an isolated temporary configuration,
+headed profile and ports 59100/59101 started successfully through puck.
+Agent attachment and disconnect succeeded. The single corp HTTPS status probe
+returned no HTTP result; corporate reachability is unverified, with no retry.
+Stop succeeded and both ports were confirmed closed; no test processes remained.
+Global CDP 9223, existing profiles, credentials/cookies and puck configuration
+were untouched. Fake tests cover launch/attach/stop, idempotence, collisions,
+invalid config, saved-settings cleanup, startup failure and stale PID refusal.
+
 ## Out of scope
 
 Killing Playwright leftovers (rally-coach's lanes own them); a shared parallax profile with a PAC

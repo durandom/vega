@@ -5,6 +5,16 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 249 · 2026-11-19
+
+- feature: `vega browser vpn start|stop|status` manages a separate headed Chromium
+  through puck's VPN over SSH SOCKS, with remote DNS and no direct fallback.
+  Agents attach with `ab --profile vpn --session <project>-vpn-<task>`; the global
+  Chromium remains unchanged. Requires autossh and BatchMode SSH access to puck.
+- optional: Configure host/ports/profile in `~/.config/vega/browser-vpn.json`.
+  The new profile replaces the old dotfiles vpn-proxy PAC workflow; retire that
+  script and its ZeroOmega setting separately after rollout (vega-3e71).
+
 ## 248 · 2026-11-19
 
 - feature: Completed identity cutovers accept newly enrolled schema-2 registry

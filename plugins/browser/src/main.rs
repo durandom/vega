@@ -16,6 +16,8 @@ use std::time::Duration;
 use vega_browser::{cdp, cdp::Probe, mark, owner, pane, procs, procs::Browser, real, session_name};
 use vega_herdr::{capacity::duration, cell, print_failure, print_failure_json, Failure};
 
+mod vpn;
+
 const HELP: &str = include_str!("../help/browser.md");
 const SKILL: &str = include_str!("../SKILL.md");
 
@@ -54,6 +56,7 @@ fn main() -> ExitCode {
         [a] if a == "--json" => ls(true).map(|_| ExitCode::SUCCESS),
         [a, b] if a == "ls" && b == "--json" => ls(true).map(|_| ExitCode::SUCCESS),
         [a, rest @ ..] if a == "ab" => ab(rest),
+        [a, rest @ ..] if a == "vpn" => vpn::command(rest),
         [a, rest @ ..] if a == "chromium" => chromium(rest),
         [a, rest @ ..] if a == "launch" => launch(rest),
         [a, rest @ ..] if a == "cleanup" => cleanup(rest),
@@ -81,15 +84,17 @@ fn main() -> ExitCode {
 /// The global Chromium: CDP port, persistent profile, binary. Environment
 /// overrides (`CDP_PORT`, `CDP_PROFILE`, `CDP_CHROMIUM`) are the old
 /// scripts' and stay for tests and non-default installs.
-struct Global {
+struct Chromium {
     port: u16,
     profile: PathBuf,
     chromium: PathBuf,
+    extra_args: Vec<String>,
 }
 
-fn global() -> Global {
+fn global() -> Chromium {
     let home = || PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    Global {
+    Chromium {
+        extra_args: Vec::new(),
         port: env::var("CDP_PORT")
             .ok()
             .and_then(|p| p.parse().ok())
@@ -116,7 +121,12 @@ fn no_agent_browser() -> Failure {
 /// `vega browser ab --session <name> <agent-browser args>`: agent-browser on
 /// the global Chromium only, the port of the old `scripts/ab`.
 fn ab(args: &[String]) -> Result<ExitCode, Failure> {
-    let g = global();
+    let (profile, args) = vpn::select(args)?;
+    let args = args.as_slice();
+    let g = match &profile {
+        Some(v) => v.browser(),
+        None => global(),
+    };
     let Some(session) = session_name(args) else {
         return Err(vega_browser::name_failure());
     };
@@ -138,16 +148,21 @@ fn ab(args: &[String]) -> Result<ExitCode, Failure> {
             return Err(refuse(a));
         }
     }
-    ensure_global(&g, None).map_err(|f| {
-        Failure::new(
-            &f.code,
-            format!(
-                "the global Chromium is not available; no fallback browser ({})",
-                f.message
-            ),
-            &f.hint,
-        )
-    })?;
+    let _vpn_lock = profile.as_ref().map(|v| v.lock()).transpose()?;
+    if let Some(v) = &profile {
+        v.require_running()?;
+    } else {
+        ensure_chromium(&g, None).map_err(|f| {
+            Failure::new(
+                &f.code,
+                format!(
+                    "the global Chromium is not available; no fallback browser ({})",
+                    f.message
+                ),
+                &f.hint,
+            )
+        })?;
+    }
     let real = real::real_binary().ok_or_else(no_agent_browser)?;
     let record = owner::record_from_env(vega_shim::unix_now());
     owner::upsert(&session, record.clone());
@@ -196,7 +211,7 @@ fn chromium(args: &[String]) -> Result<ExitCode, Failure> {
         _ => return Err(usage()),
     };
     let g = global();
-    let label = ensure_global(&g, url.as_deref())?;
+    let label = ensure_chromium(&g, url.as_deref())?;
     println!(
         "{}: 127.0.0.1:{}, profile {}",
         label,
@@ -207,7 +222,7 @@ fn chromium(args: &[String]) -> Result<ExitCode, Failure> {
 }
 
 /// The old `chromium.sh` state machine.
-fn ensure_global(g: &Global, url: Option<&str>) -> Result<&'static str, Failure> {
+fn ensure_chromium(g: &Chromium, url: Option<&str>) -> Result<&'static str, Failure> {
     let profile = g.profile.display().to_string();
     match cdp::probe(g.port) {
         Probe::Cdp => {
@@ -243,7 +258,7 @@ fn ensure_global(g: &Global, url: Option<&str>) -> Result<&'static str, Failure>
     }
 }
 
-fn own_failure(g: &Global) -> Failure {
+fn own_failure(g: &Chromium) -> Failure {
     Failure::new(
         "foreign_listener",
         format!(
@@ -257,7 +272,7 @@ fn own_failure(g: &Global) -> Failure {
 
 /// Up to 50 probes, 0.2 s apart, as the old `wait_up`.
 fn wait_up(
-    g: &Global,
+    g: &Chromium,
     label: &'static str,
     timeout: impl Fn(u16) -> String,
 ) -> Result<&'static str, Failure> {
@@ -274,7 +289,7 @@ fn wait_up(
     Err(Failure::new("no_cdp", timeout(g.port), ""))
 }
 
-fn start(g: &Global, url: Option<&str>) -> Result<(), Failure> {
+fn start(g: &Chromium, url: Option<&str>) -> Result<(), Failure> {
     if !g.chromium.is_file() {
         return Err(Failure::new(
             "missing_chromium",
@@ -298,6 +313,7 @@ fn start(g: &Global, url: Option<&str>) -> Result<(), Failure> {
         .arg("--remote-debugging-address=127.0.0.1")
         .arg(format!("--user-data-dir={}", g.profile.display()))
         .args(["--no-first-run", "--no-default-browser-check"])
+        .args(&g.extra_args)
         .arg(url.unwrap_or("about:blank"))
         .stdout(Stdio::null())
         .stderr(Stdio::null())

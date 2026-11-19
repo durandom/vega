@@ -35,9 +35,11 @@ impl Fix {
 
 impl Drop for Fix {
     fn drop(&mut self) {
-        if let Ok(pids) = fs::read_to_string(self.path("responders")) {
-            for pid in pids.lines().filter_map(|l| l.trim().parse::<u32>().ok()) {
-                let _ = Command::new("kill").arg(pid.to_string()).status();
+        for file in ["responders", "vpn-supervisors"] {
+            if let Ok(pids) = fs::read_to_string(self.path(file)) {
+                for pid in pids.lines().filter_map(|l| l.trim().parse::<u32>().ok()) {
+                    let _ = Command::new("kill").arg(pid.to_string()).status();
+                }
             }
         }
     }
@@ -260,6 +262,203 @@ fn chromium_attaches_to_the_answering_global() {
         )
     );
     assert!(!f.path("chromium-argv").exists(), "must not start Chromium");
+}
+
+fn vpn_config(f: &Fix, extra: Value) -> (u16, u16) {
+    let port = free_port();
+    let socks = free_port();
+    let mut cfg = serde_json::json!({"cdp_port":port, "socks_port":socks});
+    for (k, v) in extra.as_object().unwrap() {
+        cfg[k] = v.clone();
+    }
+    fs::create_dir_all(f.home.join(".config/vega")).unwrap();
+    fs::write(
+        f.home.join(".config/vega/browser-vpn.json"),
+        cfg.to_string(),
+    )
+    .unwrap();
+    (port, socks)
+}
+
+#[test]
+fn vpn_refuses_collisions_bad_config_and_implicit_start() {
+    let f = fix();
+    for cfg in [
+        serde_json::json!({"cdp_port":9223}),
+        serde_json::json!({"socks_port":f.port}),
+        serde_json::json!({"host":"-bad"}),
+        serde_json::json!({"typo":true}),
+        serde_json::json!({"profile":f.home.join(".local/share/vega-chromium")}),
+    ] {
+        vpn_config(&f, cfg);
+        let o = run(&f, &["vpn", "start"], &[]);
+        assert!(!o.status.success(), "{}", out(&o));
+    }
+    let (port, _) = vpn_config(&f, serde_json::json!({}));
+    let held = TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let o = run(&f, &["vpn", "start"], &[]);
+    assert!(out(&o).contains("occupied"), "{}", out(&o));
+    drop(held);
+    let o = run(
+        &f,
+        &["vpn", "start"],
+        &[(
+            "XDG_STATE_HOME",
+            f.path("state with spaces").display().to_string(),
+        )],
+    );
+    assert!(!o.status.success());
+    assert!(out(&o).contains("whitespace"));
+    let o = run(
+        &f,
+        &[
+            "ab",
+            "--profile",
+            "vpn",
+            "--session",
+            "vpn-test",
+            "get",
+            "title",
+        ],
+        &[],
+    );
+    assert!(!o.status.success());
+    assert!(!f.path("chromium-argv").exists());
+    assert!(!f.path("ab-argv").exists());
+    for args in [
+        vec!["vpn", "start", "--typo"],
+        vec!["ab", "--profile=bad", "--session", "test"],
+    ] {
+        assert_eq!(run(&f, &args, &[]).status.code(), Some(2));
+    }
+}
+
+#[test]
+fn vpn_lifecycle_reuses_launcher_and_isolates_agent_attach_and_stop() {
+    let f = fix();
+    let (port, socks) = vpn_config(&f, serde_json::json!({}));
+    // Real local responder only; no real SSH, autossh, browser or corp request.
+    script(
+        &f.bin.join("autossh"),
+        r#"
+printf '%s\n' "$$" >> "$VEGA_FIX/vpn-supervisors"
+printf '%s\n' "$*" > "$VEGA_FIX/ssh-argv"
+printf '%s 0:01 /fake/autossh %s\n' "$$" "$*" >> "$VEGA_FIX/ps"
+port=$(printf '%s\n' "$*" | tr ' ' '\n' | sed -n 's/^127.0.0.1://p')
+python3 "$VEGA_FIX/responder.py" "$port" "$VEGA_FIX" &
+touch "$VEGA_FIX/tunnel"
+trap 'exit 0' TERM
+while :; do sleep 1; done
+"#,
+    );
+    script(
+        &f.bin.join("ssh"),
+        r#"
+case "$*" in *"-O check"*) test -e "$VEGA_FIX/tunnel";;
+*"-O exit"*) rm -f "$VEGA_FIX/tunnel";; *) exit 1;; esac
+"#,
+    );
+    script(
+        &f.bin.join("curl"),
+        r#"printf '%s\n' "$*" >> "$VEGA_FIX/curl-argv"; printf 302"#,
+    );
+    let chromium = fs::read_to_string(f.bin.join("chromium"))
+        .unwrap()
+        .replace("> \"$VEGA_FIX/ps\"", ">> \"$VEGA_FIX/ps\"");
+    fs::write(f.bin.join("chromium"), chromium).unwrap();
+    // Fake kill only removes exact recorded rows; it never signals fixture PID 4242.
+    script(
+        &f.bin.join("kill"),
+        r#"
+printf '%s\n' "$1" >> "$VEGA_FIX/killed"
+case "$1" in 4242) for p in $(cat "$VEGA_FIX/responders"); do /bin/kill "$p"; done;;
+*) /bin/kill "$1"; rm -f "$VEGA_FIX/tunnel";; esac
+awk -v pid="$1" '$1 != pid' "$VEGA_FIX/ps" > "$VEGA_FIX/ps.next"
+mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
+"#,
+    );
+    fs::write(
+        f.path("ps"),
+        format!("{}\n", ours_line(&f).replace("4242", "9999")),
+    )
+    .unwrap();
+    let started = run(&f, &["vpn", "start"], &[]);
+    assert!(
+        started.status.success(),
+        "{}{}",
+        out(&started),
+        err(&started)
+    );
+    let again = run(&f, &["vpn", "start"], &[]);
+    assert!(
+        again.status.success(),
+        "{} ps={} status={}",
+        out(&again),
+        fs::read_to_string(f.path("ps")).unwrap(),
+        out(&run(&f, &["vpn", "status", "--json"], &[]))
+    );
+    let argv = fs::read_to_string(f.path("chromium-argv")).unwrap();
+    assert!(argv.contains(&format!("--remote-debugging-port={port}")));
+    assert!(argv.contains(&format!("--proxy-server=socks5://127.0.0.1:{socks}")));
+    assert!(argv.contains("--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"));
+    assert!(argv.contains("--proxy-bypass-list=<-loopback>"));
+    let ssh = fs::read_to_string(f.path("ssh-argv")).unwrap();
+    assert!(ssh.contains(&format!("-D 127.0.0.1:{socks}")));
+    assert!(ssh.contains("BatchMode=yes") && ssh.contains("ExitOnForwardFailure=yes"));
+    assert!(!ssh.contains("-R"));
+    let attached = run(
+        &f,
+        &[
+            "ab",
+            "--profile=vpn",
+            "--session",
+            "test-vpn",
+            "get",
+            "title",
+        ],
+        &[],
+    );
+    assert!(attached.status.success(), "{}", out(&attached));
+    let ab = fs::read_to_string(f.path("ab-argv")).unwrap();
+    assert!(ab.contains(&format!("--cdp {port}")) && !ab.contains("--profile"));
+    let o = run(&f, &["vpn", "status", "--json"], &[]);
+    let v: Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(v["corp_http"], "302");
+    assert_eq!(v["browser"], true);
+    assert!(fs::read_to_string(f.path("curl-argv"))
+        .unwrap()
+        .contains("--socks5-hostname"));
+    // Stop follows the saved launch settings, even after a config edit.
+    vpn_config(&f, serde_json::json!({"host":"different-host"}));
+    let stopped = run(&f, &["vpn", "stop"], &[]);
+    assert!(
+        stopped.status.success(),
+        "{}{}",
+        out(&stopped),
+        err(&stopped)
+    );
+    assert!(!fs::read_to_string(f.path("killed"))
+        .unwrap()
+        .contains("9999"));
+    assert!(f.home.join(".local/share/vega-chromium-vpn").is_dir());
+    assert!(run(&f, &["vpn", "stop"], &[]).status.success());
+}
+
+#[test]
+fn vpn_start_failure_and_stale_pid_do_not_kill_foreign_processes() {
+    let f = fix();
+    vpn_config(&f, serde_json::json!({}));
+    script(&f.bin.join("autossh"), "exit 1");
+    script(&f.bin.join("ssh"), "exit 1");
+    script(&f.bin.join("kill"), r#"echo "$*" >> "$VEGA_FIX/killed""#);
+    let o = run(&f, &["vpn", "start"], &[]);
+    assert!(!o.status.success());
+    assert!(!f.path("chromium-argv").exists());
+    assert!(!f.state.join("vega/browser/vpn/active.json").exists());
+    fs::write(f.state.join("vega/browser/vpn/autossh.pid"), "8888").unwrap();
+    fs::write(f.path("ps"), "8888 0:01 /some/other/program\n").unwrap();
+    assert!(run(&f, &["vpn", "stop"], &[]).status.success());
+    assert!(!f.path("killed").exists());
 }
 
 #[test]
