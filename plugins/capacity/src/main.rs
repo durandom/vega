@@ -8,6 +8,7 @@
 //! full view and the ledger commands. Design: docs/design/capacity.md.
 
 mod health;
+mod inventory;
 mod ledger;
 
 use std::env;
@@ -77,7 +78,7 @@ fn json_view(
         let h = if w.binding { w.headroom.covered_by(ledger.as_ref().unwrap_or(&empty), now) } else { w.headroom };
         serde_json::json!({"provider":h.provider,"account_id":h.account_id,"credits":h.credits,"on_credits":w.binding && h.on_credits(),"window":h.window,"scope":h.scope.text(),"left_percent":h.left,"used_percent":100.0-h.left,"binding":w.binding,"resets_in":h.resets_in,"runs_out_in":h.out_in,"sample_age":h.age,"stale":h.stale(),"override":h.cover,"warns":w.binding && h.warns()})
     }).collect();
-    serde_json::json!({"schema":1,"windows":rows,"source_error":sample.as_ref().err(),"ledger_error":ledger.as_ref().err()})
+    serde_json::json!({"schema":1,"windows":rows,"resets":inventory::rows(sample.as_ref().ok(),ledger.as_ref().unwrap_or(&empty),now),"source_error":sample.as_ref().err(),"ledger_error":ledger.as_ref().err()})
 }
 
 fn home() -> Result<(), Failure> {
@@ -120,10 +121,10 @@ fn view(
     let empty = Ledger::default();
     let mut out = Vec::new();
     let mut age = None;
-    match sample {
+    match &sample {
         Err(why) => out.push(format!("capacity: unknown ({why})")),
         Ok(s) => {
-            let rows = capacity::windows(&s, now);
+            let rows = capacity::windows(s, now);
             age = rows.iter().map(|w| w.headroom.age).min();
             if rows.is_empty() {
                 out.push("capacity: unknown (token-burn has no sample)".into());
@@ -133,7 +134,7 @@ fn view(
         }
     }
     match ledger {
-        Ok(l) => out.extend(ledger::table(l, now)),
+        Ok(l) => out.extend(inventory::table(sample.as_ref().ok(), l, now)),
         Err(why) => {
             out.push(format!("resets: unreadable ({why})"));
             out.push("help: fix the JSON or remove the file; vega does not overwrite it".into());
@@ -249,6 +250,48 @@ mod tests {
             let lines = view(Ok(sample), &Ok(Ledger::default()), &ok(), AT);
             assert!(lines.iter().any(|l| l.contains(label)), "{lines:?}");
         }
+    }
+
+    #[test]
+    fn live_resets_show_expiry_but_manual_inventory_wins_without_silencing_warnings() {
+        let mut sample = recorded();
+        let codex = sample
+            .readings
+            .iter_mut()
+            .find(|r| r.provider == "codex")
+            .unwrap();
+        codex.left = 0.0;
+        codex.resets = Some(capacity::ResetCapacity {
+            observed_at: AT,
+            owned: 1,
+            next_expiry: Some(AT + 86400),
+            last_used: Some(AT - 86400),
+        });
+        let empty = Ok(Ledger::default());
+        let json = json_view(&Ok(sample.clone()), &empty, AT);
+        assert_eq!(json["resets"][0]["owned"], 1);
+        assert_eq!(json["resets"][0]["observed_at"], AT);
+        assert_eq!(json["resets"][0]["source"], "token-burn");
+        assert_eq!(json["resets"][0]["next_expiry"], AT + 86400);
+        let row = json["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["provider"] == "codex")
+            .unwrap();
+        assert_eq!(row["warns"], true, "ownership is not permission to redeem");
+        let text = view(Ok(sample.clone()), &empty, &ok(), AT).join("\n");
+        assert!(text.contains("source_resets[1]"));
+        assert!(text.contains("2026-10-11 (expires this week)"));
+        let mut manual = Ledger::default();
+        manual.set_owned("codex", 0);
+        let json = json_view(&Ok(sample.clone()), &Ok(manual.clone()), AT);
+        assert_eq!(json["resets"][0]["owned"], 0);
+        assert_eq!(json["resets"][0]["source"], "manual");
+        assert!(json["resets"][0]["next_expiry"].is_null());
+        assert!(!view(Ok(sample), &Ok(manual), &ok(), AT)
+            .join("\n")
+            .contains("source_resets"));
     }
 
     #[test]

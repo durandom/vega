@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{parse_rfc3339, Credits, Reading, Sample, Scope, Source};
+use super::{parse_rfc3339, Credits, Reading, ResetCapacity, Sample, Scope, Source};
 use crate::output_within;
 
 /// token-burn reads SQLite and answers in about a second.
@@ -119,6 +119,8 @@ pub(super) fn sample(status: &[Value], forecast: &[Value]) -> Sample {
                 provider: provider.into(),
                 account_id: account.into(),
                 credits,
+                resets: reset_capacity(&r["reset_capacity"])
+                    .or_else(|| forecast_row.and_then(|f| reset_capacity(&f["reset_capacity"]))),
                 window: window.into(),
                 scope: Scope::Account,
                 left,
@@ -129,6 +131,19 @@ pub(super) fn sample(status: &[Value], forecast: &[Value]) -> Sample {
         })
         .collect();
     Sample { readings }
+}
+
+/// Read the source's stored inventory, never infer zero from missing data.
+fn reset_capacity(v: &Value) -> Option<ResetCapacity> {
+    let owned = u32::try_from(v["owned_resets"].as_u64()?).ok()?;
+    Some(ResetCapacity {
+        observed_at: v["observed_at"].as_str().and_then(parse_rfc3339)?,
+        owned,
+        next_expiry: (owned > 0)
+            .then(|| v["next_expiry"].as_str().and_then(parse_rfc3339))
+            .flatten(),
+        last_used: v["last_used"].as_str().and_then(parse_rfc3339),
+    })
 }
 
 /// Reject partial flags and missing timestamps: quota age cannot date credit flags.
@@ -183,6 +198,55 @@ mod tests {
         partial = credit;
         partial.as_object_mut().unwrap().remove("observed_at");
         assert!(credits(&partial).is_none());
+    }
+
+    #[test]
+    fn reset_inventory_is_account_matched_and_missing_is_not_zero() {
+        let status = json!([
+            {"Provider":"codex","AccountID":"other","WindowName":"primary"},
+            {"Provider":"codex","AccountID":"main","WindowName":"primary"}
+        ]);
+        let forecast = json!([{"provider":"codex","account_id":"main","window_name":"primary",
+            "reset_capacity":{"observed_at":"2026-10-10T07:39:45Z","owned_resets":1,"next_expiry":"2026-12-12T22:43:16Z","last_used":"2026-11-06T06:33:08Z"}}]);
+        let s = sample(status.as_array().unwrap(), forecast.as_array().unwrap());
+        assert!(s.readings[0].resets.is_none());
+        let r = s.readings[1].resets.as_ref().unwrap();
+        assert_eq!(r.owned, 1);
+        assert_eq!(r.next_expiry, parse_rfc3339("2026-12-12T22:43:16Z"));
+        assert_eq!(r.last_used, parse_rfc3339("2026-11-06T06:33:08Z"));
+        for invalid in [
+            json!(null),
+            json!({}),
+            json!({"owned_resets":null}),
+            json!({"owned_resets":-1}),
+            json!({"owned_resets":4294967296u64}),
+            json!({"owned_resets":1}),
+        ] {
+            assert!(reset_capacity(&invalid).is_none());
+        }
+        let zero = reset_capacity(&json!({"observed_at":"2026-10-10T07:39:45Z","owned_resets":0,"next_expiry":"2026-12-12T22:43:16Z"}))
+            .unwrap();
+        assert_eq!(zero.owned, 0);
+        assert!(zero.next_expiry.is_none());
+        let observed = r.observed_at;
+        let h = |now| super::super::for_provider(&s, "codex", now);
+        // The other account binds; it must never inherit this account's inventory.
+        assert!(h(observed).unwrap().resets.is_none());
+        for (offset, known) in [(0, true), (120, true), (121, false), (-1, false)] {
+            assert_eq!(
+                super::super::Headroom::at(&s.readings[1], observed + offset)
+                    .resets
+                    .is_some(),
+                known
+            );
+        }
+        let mut status = status;
+        status[1]["reset_capacity"] = forecast[0]["reset_capacity"].clone();
+        let status_only = sample(status.as_array().unwrap(), &[]);
+        assert_eq!(status_only.readings[1].resets, s.readings[1].resets);
+
+        // Neither the legacy reset attempt nor forecast computation dates credits.
+        assert!(credits(&json!({"has_credits":true,"unlimited":false,"overage_limit_reached":false,"balance":"17776.1924480000"})).is_none());
     }
 
     #[test]

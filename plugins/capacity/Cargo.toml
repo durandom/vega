@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 vega-build = { path = "../../crates/vega-build" }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 vega-herdr = { path = "../../crates/vega-herdr" }
 
 [dev-dependencies]

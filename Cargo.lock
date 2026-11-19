@@ -2889,6 +2889,7 @@ version = "0.1.0"
 name = "vega-capacity"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "tempfile",
  "vega-build",

@@ -36,6 +36,9 @@ pub const STALE_SECS: i64 = 30 * 60;
 /// Remote credit flags expire independently of quota window samples.
 pub const CREDIT_STALE_SECS: i64 = 120;
 
+/// Reset inventory follows token-burn's independently dated two-minute cohort.
+pub const RESET_STALE_SECS: i64 = 120;
+
 /// Spendable overage credits, in provider credit units (never inferred USD).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Credits {
@@ -55,6 +58,15 @@ impl Credits {
     pub fn spendable(&self) -> bool {
         (self.has_credits || self.unlimited) && !self.overage_limit_reached
     }
+}
+
+/// Stored reset inventory. Ownership never implies permission to consume a reset.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ResetCapacity {
+    pub observed_at: i64,
+    pub owned: u32,
+    pub next_expiry: Option<i64>,
+    pub last_used: Option<i64>,
 }
 
 /// What a window limits.
@@ -95,6 +107,7 @@ pub struct Reading {
     pub provider: String,
     pub account_id: String,
     pub credits: Option<Credits>,
+    pub resets: Option<ResetCapacity>,
     pub window: String,
     pub scope: Scope,
     /// Percent left; 0 when the source says the limit is reached.
@@ -183,6 +196,7 @@ pub struct Headroom {
     pub account_id: String,
     /// Only fresh credit observations survive Headroom::at.
     pub credits: Option<Credits>,
+    pub resets: Option<ResetCapacity>,
     pub window: String,
     pub scope: Scope,
     /// Percent left; 0 when the source says the limit is reached.
@@ -211,6 +225,13 @@ impl Headroom {
             provider: r.provider.clone(),
             account_id: r.account_id.clone(),
             credits: r.credits.as_ref().filter(|c| c.fresh(now)).cloned(),
+            resets: r
+                .resets
+                .as_ref()
+                .filter(|r| {
+                    r.observed_at <= now && now.saturating_sub(r.observed_at) <= RESET_STALE_SECS
+                })
+                .cloned(),
             window: r.window.clone(),
             scope: r.scope.clone(),
             left: if passed { 100.0 } else { r.left },
@@ -388,6 +409,7 @@ fn table(sample: Result<Sample, String>, ledger: Option<&Ledger>, now: i64) -> V
             .providers
             .get(&h.provider)
             .map(|e| e.owned.to_string())
+            .or_else(|| h.resets.as_ref().map(|r| r.owned.to_string()))
             .unwrap_or_default();
         out.push(format!(
             "  {},{},{}%,{},{},{}",

@@ -44,3 +44,10 @@ Windows include account_id, fresh credits (or null) and on_credits. A thin bindi
 window with fresh spendable credits shows on credits and gives no spawn warning;
 missing/stale credits show credits unknown and retain the warning. Balances are
 decimal strings in provider credit units. Credit freshness is at most 120 seconds.
+Stored token-burn reset counts and next expiry appear in source_resets when no
+manual provider entry exists. Manual entries (including zero) override them.
+Owning a reset never silences a spawn warning by itself. JSON adds resets with
+source, account_id, owned, observed_at, next_expiry and last_used (Unix seconds or null).
+Reset inventory needs its own observation date, no more than 120 seconds old.
+Fresh quota health does not prove credits are available: older token-burn readers
+may omit or return undated credits; check token-burn version/status/forecast.

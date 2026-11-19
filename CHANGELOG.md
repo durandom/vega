@@ -5,6 +5,15 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 247 · 2026-11-19
+
+- feature: Capacity imports token-burn's stored reset counts, next expiry and last use
+  for the binding account; manual ledger entries still override source inventory.
+  JSON includes reset provenance, and expiry within a week is marked (vega-of26).
+- required: Live overage credit display requires token-burn's dated credit read interface.
+  Older OpenObserve readers (including v0.1.37) can show healthy quotas while omitting
+  credits/resets; undated balances cannot suppress spawn warnings.
+
 ## 246 · 2026-11-19
 
 - feature: Failed hc connections preserve hc's diagnostic and recovery hint,

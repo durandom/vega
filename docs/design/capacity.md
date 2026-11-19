@@ -166,3 +166,37 @@ headroom model supplies the same behavior to `vega uac status` and mux spawns.
 - Keeping the ledger commands in `vega uac`: the Slayer records resets without being the UAC.
 - Checking the daemon in `vega config infra`: infra checks stay cheap and local (onboarding.md); the
   service call and the sample age belong to `vega capacity`.
+
+## Stored reset inventory (vega-of26)
+
+The adapter imports status `reset_capacity`, falling back to forecast data only
+from the matching provider/account/window. The contract (token-burn-jpg, 8446d43)
+is `owned_resets`, `next_expiry`, `last_used`, and `observed_at`; dates are absolute
+RFC3339 UTC instants and optional expiry/last-use dates may be null. Missing or
+invalid counts or observation dates stay unknown; future observations and those
+older than 120 seconds are rejected independently of quota age, matching the
+upstream remote cohort. Zero is known empty and has no next expiry. This is stored
+inventory, not permission to redeem: it never suppresses spawn warnings by itself.
+The binding account supplies each provider's inventory. An existing manual ledger
+entry overrides that provider's source inventory, including an explicit zero;
+source expiry is not attached to a manual count. Reads never rewrite the ledger.
+
+`vega capacity` adds `source_resets` for providers without manual entries, including
+next expiry and last use. Expiry within seven days is marked; a passed expiry asks
+for refreshed inventory rather than silently decrementing a stored count.
+JSON adds `resets` with provider, account_id (null for manual entries), owned,
+source (`manual` or `token-burn`), observed_at, next_expiry and last_used (Unix
+seconds or null; manual entries have no source observation date).
+
+A healthy quota sample does not establish live credit or reset availability.
+Proteus's token-burn v0.1.37 predates the dated credit interface: its OpenObserve
+read path returns quota windows but omits credits and reset inventory. Older local
+readers can also return undated credit objects; vega deliberately rejects these.
+Neither forecast `computed_at`, reset `attempted_at`, nor configured grant amounts
+can establish a fresh spendable balance. Updating token-burn's reader/installation
+is separate from this adapter and requires the token-burn coordinator.
+
+Token-burn UAC confirmed that cu9 (774f459) was unreleased even in v0.1.38
+(0afd9f5). token-burn-jpg landed at 8446d43 with dated credit/reset state in
+status/forecast/resets for local and OpenObserve readers; release and installation
+remain an upstream rollout task. Missing observation dates must stay unknown.

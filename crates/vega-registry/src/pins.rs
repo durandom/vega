@@ -315,6 +315,7 @@ mod tests {
             provider: "antigravity".into(),
             account_id: String::new(),
             credits: None,
+            resets: None,
             window: "test".into(),
             scope: Scope::Account,
             left,

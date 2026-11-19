@@ -16,3 +16,5 @@ token-burn (the Slayer's quota monitor) stores a usage sample of each provider e
 Advisory only: vega never picks the kind. An uncovered thin binding window (under 10% or out within 2h) means: spawn another kind or provider if the run outlasts it, or ask the Slayer about a reset.
 
 `token_burn: stale` or `missing`: say so in the report and follow its `help:` line with the user; do not install or start token-burn unasked.
+- Stored reset inventory comes from the binding account's status/forecast with its own observation date (at most 120 seconds old). `source_resets` shows owned counts, next expiry and last use; a manual provider entry (even zero) overrides it. Ownership alone never silences warnings. JSON `resets` includes the source and Unix timestamps.
+- Healthy quota samples can coexist with unknown credits/resets on older token-burn readers. Dated live credit state is required; configured grants and forecast computation times are not balance evidence.
