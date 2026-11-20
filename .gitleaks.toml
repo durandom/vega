@@ -3,6 +3,14 @@ title = "vega secret scanning"
 [extend]
 useDefault = true
 
-# No exclusions are needed by the current fixtures. Any future allowlist must
-# match a specific synthetic fixture and rule; never exclude source directories,
-# whole commits, or history. Keep the default rules enabled.
+# Any allowlist must match a specific file and rule; never exclude source
+# directories, whole commits, or history. Keep the default rules enabled.
+
+# The dev tab-group extension's manifest "key" is the extension's PUBLIC key
+# (SPKI, "MIIBIjAN..."): it pins the extension ID. No private key is committed.
+[[allowlists]]
+description = "Chrome extension manifest public key"
+targetRules = ["generic-api-key"]
+paths = ['''^plugins/browser/extension/manifest\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"key": "MIIBIjAN[A-Za-z0-9+/=]+",?\s*$''']
