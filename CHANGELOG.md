@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 259 · 2026-11-20
+
+- feature: The managed dev Chrome for Testing starts with `--use-mock-keychain`, so
+  it no longer shows the macOS "keychain not found" dialog. If that dialog appears,
+  choose Cancel, never "Reset To Defaults" (it resets the login keychain).
+
 ## 258 · 2026-11-20
 
 - feature: Local headed `vega review` sessions use the project's shared

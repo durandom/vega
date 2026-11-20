@@ -8,6 +8,17 @@ use vega_herdr::Failure;
 
 use super::{failure, stale, wire::Cdp, Browser};
 
+/// Fixed flags of the managed dev Chrome for Testing.
+const LAUNCH_ARGS: &[&str] = &[
+    "--remote-debugging-port=0",
+    "--remote-debugging-address=127.0.0.1",
+    "--no-first-run",
+    "--no-default-browser-check",
+    // Never touch the macOS login keychain: without this CfT asks for a
+    // "Chromium Safe Storage" keychain and offers to reset the user's keychain.
+    "--use-mock-keychain",
+];
+
 fn ps(pid: u32, field: &str) -> Result<Option<String>, Failure> {
     let result = Command::new("ps")
         .args(["-ww", "-p", &pid.to_string(), "-o", field])
@@ -107,12 +118,7 @@ pub(super) fn launch(profile: &Path) -> Result<Browser, Failure> {
     let mut child = Command::new("nohup")
         .arg(&exe)
         .arg(&profile_arg)
-        .args([
-            "--remote-debugging-port=0",
-            "--remote-debugging-address=127.0.0.1",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ])
+        .args(LAUNCH_ARGS)
         .arg(format!("--load-extension={}", extension.display()))
         .arg("about:blank")
         .stdin(Stdio::null())
@@ -150,4 +156,12 @@ pub(super) fn launch(profile: &Path) -> Result<Browser, Failure> {
         let _ = child.wait();
     }
     result
+}
+
+#[cfg(test)]
+mod launch_args_tests {
+    #[test]
+    fn dev_cft_never_uses_the_login_keychain() {
+        assert!(super::LAUNCH_ARGS.contains(&"--use-mock-keychain"));
+    }
 }
