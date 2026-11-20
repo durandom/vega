@@ -4,13 +4,13 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { createServer as tcpServer } from 'node:net';
+import { createConnection, createServer as tcpServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
-export async function verifyShare({ scratch, binary, env, browser, foreign, stopBrowser }) {
+export async function verifyShare({ scratch, binary, env, browser, foreign, adapterPort, stopBrowser }) {
   const root = join(scratch, 'ssh');
   mkdirSync(root);
   const cli = (...args) =>
@@ -122,7 +122,25 @@ export async function verifyShare({ scratch, binary, env, browser, foreign, stop
         env: { ...env, VEGA_BROWSER_SHARE: cap },
         timeout: 20000,
       }).then((r) => r.stdout.trim());
+    await assert.rejects(
+      cli('alpha', '--to', 'fixture', '--origin', 'http://127.0.0.1:' + adapterPort),
+      (e) => e.stdout.includes('Invalid or stale share configuration'),
+    );
     let cap = await start('90s');
+    const pending = createConnection(Number(new URL(cap).port), '127.0.0.1');
+    try {
+      await once(pending, 'connect');
+      const expired = once(pending, 'close');
+      assert.equal(await shim(cap, 'get', 'url'), 'about:blank');
+      await Promise.race([
+        expired,
+        delay(4000).then(() => {
+          throw Error('Incomplete handshake did not expire');
+        }),
+      ]);
+    } finally {
+      pending.destroy();
+    }
     assert.equal(JSON.parse((await cli('status')).stdout).shares.length, 1);
     await shim(cap, 'open', origin + '/policy');
     try {
@@ -132,7 +150,7 @@ export async function verifyShare({ scratch, binary, env, browser, foreign, stop
       throw e;
     }
     assert.equal(deniedHits, 0);
-    await shim(cap, 'open', origin);
+    assert.equal(await shim(cap, 'open', origin + '/nested/../'), origin + '/');
     await shim(cap, 'wait', 'button');
     const snap = await shim(cap, 'snapshot', '-i');
     const field = /(@e\d+) textbox/.exec(snap)?.[1], button = /(@e\d+) button/.exec(snap)?.[1];

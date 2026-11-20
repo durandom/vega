@@ -31,6 +31,28 @@ pub fn bound(name: &str) -> Result<Option<u16>, Failure> {
     Ok(read(&directory(name)?)?.map(|s| s.port))
 }
 
+/// Recorded adapter ports can be excluded without contacting a login browser.
+pub(super) fn adapter_ports() -> Result<std::collections::BTreeSet<u16>, Failure> {
+    let root = owner::file()
+        .ok_or_else(|| failure("Missing browser state directory"))?
+        .with_file_name("shared");
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+        Err(e) => return Err(failure(e)),
+    };
+    let mut ports = std::collections::BTreeSet::new();
+    for entry in entries {
+        let entry = entry.map_err(failure)?;
+        if entry.file_type().map_err(failure)?.is_dir() {
+            if let Some(session) = read(&entry.path())? {
+                ports.extend(session.tabs.values().map(|tab| tab.port));
+            }
+        }
+    }
+    Ok(ports)
+}
+
 fn persist(dir: &Path, state: &Owned) -> Result<(), Failure> {
     let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(failure)?;
     serde_json::to_writer(&mut tmp, state).map_err(failure)?;

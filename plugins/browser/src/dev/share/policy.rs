@@ -41,7 +41,11 @@ fn parse(raw: &str) -> Option<Url> {
 }
 
 pub(super) fn permits(origins: &Origins, raw: &str) -> bool {
-    parse(raw).is_some_and(|url| origins.contains(&url.origin().ascii_serialization()))
+    normalized(origins, raw).is_some()
+}
+
+pub(super) fn normalized(origins: &Origins, raw: &str) -> Option<Url> {
+    parse(raw).filter(|url| origins.contains(&url.origin().ascii_serialization()))
 }
 
 fn policy(origins: &Origins) -> String {

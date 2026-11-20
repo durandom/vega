@@ -415,7 +415,9 @@ one-use Unix socket in a private directory. The supervisor verifies the
 actual remote bind using `ss` or `lsof` before publishing the URL. The remote
 account needs public-key SSH access, remote forwarding, and one of those
 listener inspection tools. A 256-bit capability authorizes one command per
-WebSocket connection. Browser-originated handshakes are rejected. Stop, loss
+WebSocket connection. Pending handshakes have a two-second total deadline and
+share a bounded pool. Expiry follows the earlier of wall and monotonic deadlines,
+including time spent asleep. Browser-originated handshakes are rejected. Stop, loss
 of the browser generation, SSH exit, guard loss and TTL revoke the listener
 and connected clients. The supervisor then closes the share's verified tabs.
 The remote SSH master session uses a stdin-backed command so loss of the local
@@ -431,8 +433,8 @@ session IDs, file inputs, storage APIs, dev state operations and download
 settings are outside the protocol. Only the remote shim writes screenshot
 files. The local agent-browser adapter remains private.
 
-Each origin is an exact HTTP(S) origin. The managed debugger and the reserved
-9223/9224 ports are excluded. A persistent Fetch session checks requests and
+Each origin is an exact HTTP(S) origin. Startup excludes the managed debugger,
+reserved ports 9223/9224 and adapter ports in the local binding registries. A persistent Fetch session checks requests and
 redirects, bypasses service workers and disables cache. It rejects attachment
 and non-HTML document responses. Before delivering HTML, the broker fulfills
 the response with an additional sandboxed CSP restricting connections to
@@ -445,6 +447,8 @@ The allowlist design trusts the selected applications and their backends.
 Chrome's request interception applies to the share's page targets. It does
 not mediate server-side requests by an approved app, WebRTC traffic, or the
 independent background activity of workers already registered by local tabs.
+Speculation-rules prerender targets have not been verified against the page
+interceptor. The supervisor does not auto-attach to such targets.
 Applications that need iframes, new workers, or document downloads cannot use
 those features in shared tabs. Share actions support CSS selectors and
 snapshot refs; keyboard shortcuts that invoke browser UI are excluded.

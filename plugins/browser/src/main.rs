@@ -31,7 +31,8 @@ fn main() -> ExitCode {
         return match vega_browser::dev::share::worker() {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                println!("{}", error.message);
+                use std::io::Write;
+                let _ = writeln!(std::io::stdout().lock(), "{}", error.message);
                 ExitCode::FAILURE
             }
         };

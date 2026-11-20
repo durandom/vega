@@ -173,6 +173,7 @@ try {
   if (process.argv.includes('--share')) {
     const { verifyShare } = await import('./dev-share.mjs');
     await verifyShare({ scratch, binary, env, browser, foreign: data.sessions.third.tabs[1].target,
+      adapterPort: data.sessions.first.tabs[1].port,
       stopBrowser: () => call('Browser.close') });
   } else {
     ok('alpha', ['--session', 'first', 'close']);

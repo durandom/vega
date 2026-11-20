@@ -23,8 +23,9 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
+use subtle::ConstantTimeEq;
 use tungstenite::{
     accept_hdr_with_config, client,
     handshake::server::{Request, Response},
@@ -34,6 +35,7 @@ use tungstenite::{
 use vega_herdr::Failure;
 
 pub const WORKER: &str = "--internal-dev-share";
+const MAX_RELAYS: usize = 16;
 #[derive(Serialize, Deserialize)]
 struct Config {
     generation: String,
@@ -196,6 +198,41 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
     passed()
 }
 
+#[derive(Clone, Copy)]
+struct Expiry {
+    monotonic: Instant,
+    wall: SystemTime,
+}
+
+impl Expiry {
+    fn after(ttl: Duration) -> Self {
+        Self {
+            monotonic: Instant::now() + ttl,
+            wall: SystemTime::now() + ttl,
+        }
+    }
+
+    fn remaining(self) -> Duration {
+        self.wall
+            .duration_since(SystemTime::now())
+            .unwrap_or_default()
+            .min(self.monotonic.saturating_duration_since(Instant::now()))
+    }
+}
+
+struct Relay {
+    socket: UnixStream,
+    authenticated: Arc<AtomicBool>,
+    deadline: Instant,
+    task: thread::JoinHandle<()>,
+}
+
+impl Drop for Relay {
+    fn drop(&mut self) {
+        let _ = self.socket.shutdown(Shutdown::Both);
+    }
+}
+
 pub fn worker() -> Result<(), Failure> {
     let cfg: Config = serde_json::from_reader(io::stdin().lock()).map_err(failure)?;
     let profile = profile()?.canonicalize().map_err(failure)?;
@@ -204,6 +241,14 @@ pub fn worker() -> Result<(), Failure> {
     let browser = registry
         .browser
         .ok_or_else(|| failure("Missing managed browser"))?;
+    let mut adapter_ports = super::shared::adapter_ports()?;
+    adapter_ports.extend(
+        registry
+            .sessions
+            .values()
+            .filter(|session| session.generation == browser.path)
+            .flat_map(|session| session.tabs.values().map(|tab| tab.port)),
+    );
     let (id, project) = registry
         .projects
         .into_iter()
@@ -213,10 +258,13 @@ pub fn worker() -> Result<(), Failure> {
         || !valid_host(&cfg.host)
         || !(1..=86400).contains(&cfg.ttl)
         || cfg.origins.is_empty()
-        || cfg
-            .origins
-            .iter()
-            .any(|o| policy::origin(o, browser.port).as_ref().ok() != Some(o))
+        || cfg.origins.iter().any(|o| {
+            policy::origin(o, browser.port).as_ref().ok() != Some(o)
+                || url::Url::parse(o)
+                    .ok()
+                    .and_then(|url| url.port_or_known_default())
+                    .is_some_and(|port| adapter_ports.contains(&port))
+        })
     {
         return Err(failure("Invalid or stale share configuration"));
     }
@@ -276,14 +324,19 @@ pub fn worker() -> Result<(), Failure> {
     drop(registry_lock);
     let result = (|| {
         let (mut ssh, port) = tunnel::Tunnel::open(&cfg.host, private.path(), &endpoint)?;
-        println!("VEGA_BROWSER_SHARE=ws://127.0.0.1:{port}{capability} agent-browser snapshot -i");
+        writeln!(
+            io::stdout().lock(),
+            "VEGA_BROWSER_SHARE=ws://127.0.0.1:{port}{capability} agent-browser snapshot -i"
+        )
+        .map_err(failure)?;
         io::stdout().flush().map_err(failure)?;
-        let deadline = Instant::now() + Duration::from_secs(cfg.ttl);
+        let expiry = Expiry::after(Duration::from_secs(cfg.ttl));
         let mut checked = Instant::now();
-        let mut active: Option<(UnixStream, thread::JoinHandle<()>)> = None;
+        let mut active: Vec<Relay> = Vec::new();
         let mut stop = None;
         loop {
-            if Instant::now() >= deadline
+            if expiry.remaining().is_zero()
+                || pages.is_poisoned()
                 || !live.load(Ordering::Acquire)
                 || !ssh.alive().map_err(failure)?
             {
@@ -310,25 +363,43 @@ pub fn worker() -> Result<(), Failure> {
                     let _ = writeln!(
                         stream,
                         "{}",
-                        json!({"project":cfg.id,"host":cfg.host,"remaining_seconds":deadline.saturating_duration_since(Instant::now()).as_secs()})
+                        json!({"project":cfg.id,"host":cfg.host,"remaining_seconds":expiry.remaining().as_secs()})
                     );
                 }
             }
-            if active.as_ref().is_some_and(|(_, t)| t.is_finished()) {
-                active.take();
-            }
+            active.retain(|relay| {
+                !relay.task.is_finished()
+                    && (relay.authenticated.load(Ordering::Acquire)
+                        || Instant::now() < relay.deadline)
+            });
             if let Ok((stream, _)) = listener.accept() {
-                if active.is_none() {
+                // Keep the handshake pool bounded. A full pool of incomplete
+                // handshakes still admits a fresh client by retiring the oldest.
+                if active.len() == MAX_RELAYS {
+                    if let Some(index) = active
+                        .iter()
+                        .position(|r| !r.authenticated.load(Ordering::Acquire))
+                    {
+                        active.remove(index);
+                    }
+                }
+                if active.len() < MAX_RELAYS {
                     let socket = stream.try_clone().map_err(failure)?;
+                    let authenticated = Arc::new(AtomicBool::new(false));
+                    let deadline = Instant::now() + Duration::from_secs(2);
                     let cap = capability.clone();
                     let label = project.label.clone();
                     let pages = Arc::clone(&pages);
-                    active = Some((
+                    let accepted = Arc::clone(&authenticated);
+                    let task = thread::spawn(move || {
+                        let _ = relay(stream, &cap, &label, pages, accepted, deadline, expiry);
+                    });
+                    active.push(Relay {
                         socket,
-                        thread::spawn(move || {
-                            let _ = relay(stream, &cap, &label, pages);
-                        }),
-                    ));
+                        authenticated,
+                        deadline,
+                        task,
+                    });
                 }
             }
             thread::sleep(Duration::from_millis(15));
@@ -336,15 +407,13 @@ pub fn worker() -> Result<(), Failure> {
         live.store(false, Ordering::Release);
         drop(ssh);
         drop(listener);
-        if let Some((stream, task)) = active {
-            let _ = stream.shutdown(Shutdown::Both);
-            let _ = task.join();
-        }
+        drop(active);
         Ok(stop)
     })();
+    live.store(false, Ordering::Release);
     pages
         .lock()
-        .map_err(|_| failure("Share actor stopped"))?
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .close();
     // A local session may have closed its last tab while the share was active.
     // Reconcile only this generation and context while allocation is serialized.
@@ -382,6 +451,9 @@ fn relay(
     cap: &str,
     label: &str,
     pages: Arc<Mutex<page::Pages>>,
+    authenticated: Arc<AtomicBool>,
+    deadline: Instant,
+    expiry: Expiry,
 ) -> Result<(), Failure> {
     stream.set_nonblocking(false).map_err(failure)?;
     stream
@@ -396,7 +468,12 @@ fn relay(
     let mut ws = accept_hdr_with_config(
         stream,
         |req: &Request, res: Response| {
-            if req.uri().path_and_query().map(|s| s.as_str()) == Some(cap)
+            if Instant::now() < deadline
+                && !expiry.remaining().is_zero()
+                && req
+                    .uri()
+                    .path_and_query()
+                    .is_some_and(|s| bool::from(s.as_str().as_bytes().ct_eq(cap.as_bytes())))
                 && !req.headers().contains_key("origin")
             {
                 Ok(res)
@@ -410,9 +487,16 @@ fn relay(
         Some(config),
     )
     .map_err(failure)?;
+    authenticated.store(true, Ordering::Release);
     let msg = ws.read().map_err(failure)?;
     let req: Value = serde_json::from_str(msg.to_text().map_err(failure)?).map_err(failure)?;
-    let reply = dispatch(&req, label, |args| pages.lock().ok()?.command(&args).ok());
+    let reply = dispatch(&req, label, |args| {
+        let mut actor = pages.lock().ok()?;
+        if expiry.remaining().is_zero() {
+            return None;
+        }
+        actor.command(&args).ok()
+    });
     ws.send(Message::text(reply.to_string())).map_err(failure)
 }
 
@@ -514,6 +598,17 @@ pub fn remote(endpoint: &str, args: &[String]) -> Result<ExitCode, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn either_elapsed_clock_expires_the_share() {
+        let ttl = Duration::from_secs(60);
+        let mut expiry = Expiry::after(ttl);
+        expiry.wall = SystemTime::UNIX_EPOCH;
+        assert!(expiry.remaining().is_zero());
+        expiry.wall = SystemTime::now() + ttl;
+        expiry.monotonic = Instant::now();
+        assert!(expiry.remaining().is_zero());
+    }
+
     #[test]
     fn remote_browser_methods_cannot_reach_the_command_actor() {
         for method in [

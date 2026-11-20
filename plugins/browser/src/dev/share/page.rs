@@ -167,7 +167,9 @@ impl Pages {
             cdp.call_in(Some(&session), method, params)
         };
         match args.as_slice() {
-            ["open", url] if policy::permits(&self.origins, url) => {
+            ["open", raw] => {
+                let normalized = policy::normalized(&self.origins, raw).ok_or_else(denied)?;
+                let url = normalized.as_str();
                 tab.refs.clear();
                 let reply = page("Page.navigate", json!({"url":url}))?;
                 if reply.get("errorText").is_some() {
