@@ -366,6 +366,10 @@ Load the packaged extension only in managed dev CfT. Give it a stable extension 
 
 Title each session group with project and session, and map mark.rs project colours deterministically to Chrome's group palette. Preserve the opt-out and existing frame/title marks on paths that use them. Reconcile groups from live bindings when an extension worker restarts. A tab or group ID is meaningful only within its browser generation. [Chrome tab groups](https://developer.chrome.com/docs/extensions/reference/api/tabGroups)
 
+On first use, open `chrome://extensions` in the regular managed Chrome for Testing window, enable Developer mode, then open **Vega Dev Tab Groups** details and enable **Allow in Incognito**. Retry `vega browser dev --session <name> open <url>`. An already-running managed browser from before the extension was packaged needs to be restarted. Use `VEGA_BROWSER_MARK=0` when opening tabs to skip grouping and page marks. Existing groups remain until their tabs are closed or manually ungrouped.
+
+The extension needs only the `tabGroups` manifest permission and has no host permissions. Chrome owns the groups across worker restarts. Each allocation reconciles its session's verified tabs and leaves groups containing other tabs alone. Run the headed fixture with `nice -n 10 node plugins/browser/tests/dev-groups.mjs target/debug/vega-browser` after building the browser plugin. It grants access only in its throwaway profile and stops that browser on exit.
+
 ### Explicit dev state (vega-tyye.4)
 
 Provide `vega browser dev state save` and `vega browser dev state restore` for the resolved project. Restrict both to a positively identified managed CfT generation and its registered non-default dev context. Reject profile, URL and endpoint overrides before connecting. Never export or import from Chromium 9223/9224, configured VPN endpoints, headless sessions or the default CfT context. Start, close, GC and review never trigger a snapshot.

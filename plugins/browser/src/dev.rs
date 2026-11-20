@@ -1,4 +1,5 @@
 //! Shared headed CfT, with serialized allocation and explicit CDP ownership.
+mod groups;
 mod process;
 mod proxy;
 mod wire;
@@ -42,6 +43,8 @@ struct Project {
 struct Tab {
     target: String,
     port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chrome_tab_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -317,10 +320,22 @@ impl<'a> Invocation<'a> {
     }
 }
 
-fn create_tab(cdp: &mut Cdp, browser: &Browser, project: &mut Project) -> Result<Tab, Failure> {
-    let target = cdp.string("Target.createTarget", json!({
-        "url": "about:blank", "browserContextId": project.context, "newWindow": project.window == 0
-    }), "targetId")?;
+fn create_tab(
+    cdp: &mut Cdp,
+    browser: &Browser,
+    project: &mut Project,
+    name: &str,
+    owned: &[i64],
+) -> Result<Tab, Failure> {
+    let (target, chrome_tab_id) = if env::var("VEGA_BROWSER_MARK").as_deref() == Ok("0") {
+        let target = cdp.string("Target.createTarget", json!({
+            "url": "about:blank", "browserContextId": project.context, "newWindow": project.window == 0
+        }), "targetId")?;
+        (target, None)
+    } else {
+        let (target, id) = groups::allocate(cdp, project, name, owned)?;
+        (target, Some(id))
+    };
     let result = (|| {
         if project.window == 0 {
             project.window = cdp.window(&target)?;
@@ -334,6 +349,7 @@ fn create_tab(cdp: &mut Cdp, browser: &Browser, project: &mut Project) -> Result
         Ok(Tab {
             target: target.clone(),
             port,
+            chrome_tab_id,
         })
     })();
     if result.is_err() {
@@ -343,14 +359,24 @@ fn create_tab(cdp: &mut Cdp, browser: &Browser, project: &mut Project) -> Result
 }
 
 fn release(cdp: &mut Cdp, project: &Project, target: &str) -> Result<(), Failure> {
-    let targets = cdp.call("Target.getTargets", json!({}))?;
-    if targets["targetInfos"]
-        .as_array()
-        .is_some_and(|items| items.iter().any(|t| t["targetId"] == target))
-    {
+    let exists = |cdp: &mut Cdp| -> Result<bool, Failure> {
+        let targets = cdp.call("Target.getTargets", json!({"filter": [{"type": "page"}]}))?;
+        let items = targets["targetInfos"]
+            .as_array()
+            .ok_or_else(|| failure("Chrome returned no target list"))?;
+        Ok(items.iter().any(|t| t["targetId"] == target))
+    };
+    if exists(cdp)? {
         cdp.info(project, target)?;
         if cdp.call("Target.closeTarget", json!({"targetId": target}))?["success"] != true {
             return Err(failure("Chrome did not close the owned dev tab"));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while exists(cdp)? {
+            if std::time::Instant::now() >= deadline {
+                return Err(failure("Chrome has not finished closing the owned dev tab"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
         }
     }
     Ok(())
@@ -489,7 +515,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
             );
         }
         let project = data.projects.get_mut(&repo.id).expect("project allocated");
-        let tab = match create_tab(&mut cdp, &browser, project) {
+        let tab = match create_tab(&mut cdp, &browser, project, &call.name, &[]) {
             Ok(tab) => tab,
             Err(e) => {
                 if new_project {
@@ -547,7 +573,14 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
             if !new_session {
                 let active = &session.tabs[&session.active];
                 cdp.info(project, &active.target)?;
-                let tab = create_tab(&mut cdp, &browser, project)?;
+                let mut owned = Vec::new();
+                for tab in session.tabs.values() {
+                    if let Some(id) = tab.chrome_tab_id {
+                        cdp.info(project, &tab.target)?;
+                        owned.push(id);
+                    }
+                }
+                let tab = create_tab(&mut cdp, &browser, project, &call.name, &owned)?;
                 session.active = session.next;
                 session.next += 1;
                 session.tabs.insert(session.active, tab);

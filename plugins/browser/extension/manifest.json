@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Vega Dev Tab Groups",
+  "version": "1.0.0",
+  "incognito": "split",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtgnDaPlbSMX4oKuj0AIep2g1kR4etKL81QVNcLAto6WgxdvRSMHOWrVlAIq9TNdFEvI1UfAoKpTcvTSUq1T4szQwYu+rjqDeqPjWI+39GwxigK9cA3u9+gNOkOsXsufFQeBcoIkkLCEy7f8U3tmnH9h4Q5zuLuj6Jb9p5V9+aVJSdOjM+nkEH4EySvNsaO8pw78nguV2e1raZt/Z24aNoYgG8dH+lZibJ5B9gu/DOfBo1s08idVf+zVGWvS/EFLtmFa2eD+Y5PxfD13iKNPhM6iHcpQ0KUfGaHDOyA/R6m9Xj81QvPar+JVMLW5ww1SuRCFMqRN8CbwlvtDRaliqxwIDAQAB",
+  "permissions": [
+    "tabGroups"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  }
+}

@@ -103,6 +103,7 @@ pub(super) fn launch(profile: &Path) -> Result<Browser, Failure> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(failure(e)),
     }
+    let extension = super::groups::package(profile)?;
     let mut child = Command::new("nohup")
         .arg(&exe)
         .arg(&profile_arg)
@@ -111,8 +112,9 @@ pub(super) fn launch(profile: &Path) -> Result<Browser, Failure> {
             "--remote-debugging-address=127.0.0.1",
             "--no-first-run",
             "--no-default-browser-check",
-            "about:blank",
         ])
+        .arg(format!("--load-extension={}", extension.display()))
+        .arg("about:blank")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

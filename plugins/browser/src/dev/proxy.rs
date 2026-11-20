@@ -183,7 +183,11 @@ fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
                 (None, "Target.setDiscoverTargets" | "Target.setAutoAttach") => Some(json!({})),
                 (None, "Browser.getVersion") => Some(version.clone()),
                 (None, "Browser.getWindowForTarget") if target_matches => Some(window.clone()),
-                (Some(id), _) if id == attached && page_method(method) => {
+                (Some(id), _)
+                    if id == attached
+                        && page_method(method)
+                        && !internal_navigation(method, params) =>
+                {
                     send(&mut upstream, &request)?;
                     None
                 }
@@ -216,6 +220,26 @@ fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
             }
         }
     }
+}
+
+fn internal_navigation(method: &str, params: &Value) -> bool {
+    if method != "Page.navigate" {
+        return false;
+    }
+    // Keep the extension's privileged APIs and Chrome's management UI out
+    // of the scoped page WebSocket. The dedicated browser UI retains access.
+    let url = params["url"].as_str().unwrap_or_default();
+    let scheme = url
+        .trim_start_matches(|c: char| c <= ' ')
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .replace(['\t', '\r', '\n'], "")
+        .to_ascii_lowercase();
+    matches!(
+        scheme.as_str(),
+        "chrome-extension" | "chrome" | "chrome-untrusted" | "devtools"
+    )
 }
 
 fn page_method(method: &str) -> bool {

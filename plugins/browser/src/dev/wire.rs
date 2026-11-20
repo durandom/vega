@@ -25,14 +25,22 @@ impl Cdp {
     }
 
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value, Failure> {
+        self.call_in(None, method, params)
+    }
+
+    pub fn call_in(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, Failure> {
         self.id += 1;
+        let mut request = json!({"id": self.id, "method": method, "params": params});
+        if let Some(session) = session {
+            request["sessionId"] = json!(session);
+        }
         self.socket
-            .send(Message::text(
-                json!({
-                    "id": self.id, "method": method, "params": params
-                })
-                .to_string(),
-            ))
+            .send(Message::text(request.to_string()))
             .map_err(failure)?;
         loop {
             let Message::Text(raw) = self.socket.read().map_err(failure)? else {

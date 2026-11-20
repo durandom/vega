@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 256 · 2026-11-20
+
+- feature: Shared Chrome for Testing groups dev tabs by project and session.
+  Enable **Allow in Incognito** for **Vega Dev Tab Groups** on
+  `chrome://extensions` in the regular managed Chrome for Testing window.
+  Set `VEGA_BROWSER_MARK=0` when opening tabs to skip grouping and page marks.
+
 ## 255 · 2026-11-20
 
 - feature: `vega browser dev --session <name> open <url>` and ordinary
