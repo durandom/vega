@@ -161,12 +161,13 @@ fn embedded_fixture_skips_shim_dirs_and_preserves_output_and_status() {
 }
 
 #[test]
-fn copied_shim_override_cannot_recurse() {
+fn wrapper_override_cannot_recurse() {
     let f = Fixture::new();
-    fs::copy(env!("CARGO_BIN_EXE_bd"), &f.real).unwrap();
+    script(&f.real, "exec \"$BD_TEST_SHIM\" \"$@\"");
     let out = f
         .command()
         .env("BD_REAL", &f.real)
+        .env("BD_TEST_SHIM", &f.shim)
         .arg("where")
         .bounded_output()
         .unwrap();

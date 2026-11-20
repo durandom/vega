@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 261 · 2026-11-20
+
+- feature: Git, gh, bd, herdr, tea and agent-browser shims skip duplicate
+  vega shim builds on PATH. Recursive wrappers now fail with a stderr
+  diagnostic.
+
 ## 260 · 2026-11-20
 
 - feature: Global and VPN Chromium sessions now list and control only tabs

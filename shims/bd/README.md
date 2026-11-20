@@ -6,11 +6,11 @@ bd's claim is a compare-and-swap on `assignee`, and bd's default actor (`git con
 worktree on every machine, so two agents could both win a claim. A per-worktree actor makes the second claim fail.
 
 - A caller-set `BEADS_ACTOR` wins; an explicit `--actor` beats both (bd's own precedence).
-- `BD_REAL` names the real binary. Discovery skips the shim's directory and symlinks or hard links to itself.
-- The shim removes its directory (including PATH aliases) before running helpers or the real bd.
-  `VEGA_BD_SHIM_ACTIVE` stops re-entry through copied shims or wrappers with exit 126; set `BD_REAL` to the
-  original binary on the next call. If the shim cannot identify its own executable, it also exits 126 before
-  consulting `BD_REAL` or PATH; invoke the original bd directly by absolute path instead.
+- `BD_REAL` names the real binary. Discovery skips vega shim builds and links or aliases to the running shim.
+- The shim excludes shim directories from PATH before running helpers or the real bd.
+  A recursive wrapper exits 126 with a hint to set `BD_REAL` to the original binary.
+  If the shim cannot identify its executable, it also exits 126 before consulting `BD_REAL` or PATH.
+  Invoke the original bd directly by absolute path.
 - Internal hostname/git metadata probes have a two-second deadline; timed-out process groups are killed
   and direct children reaped. A missing git toplevel leaves just the host actor; a failed hostname probe uses
   `unknown` as the host. Unavailable git metadata suppresses hints and can bypass project sync detection.
@@ -40,7 +40,7 @@ journals/applies the migration before workers start; stopped clones remain
 stopped and historical bd backups stay intact. Recovery and rollback:
 [operator runbook](../../docs/design/project-registry-cutover.md#operator-runbook-146).
 
-Regression tests use an embedded-mode metadata fixture, PATH aliases, a copied shim, and a hard link.
+Regression tests use an embedded-mode metadata fixture, PATH aliases, a recursive wrapper, and a hard link.
 For a real embedded Dolt smoke test, run
 `BD_EMBEDDED_TEST_BIN=/absolute/path/to/original/bd RUST_TEST_THREADS=1 nice cargo test -p bd-shim`.
 The real-bd test is skipped unless this variable is set; bd is not a build prerequisite.

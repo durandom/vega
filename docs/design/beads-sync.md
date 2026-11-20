@@ -259,12 +259,9 @@ show vegad's git sync of the same projects ([git-sync.md](git-sync.md)).
 `BEADS_ACTOR=<host>/<worktree dir>` from the directory bd runs in, then execs the real bd, so
 `--claim` (a compare-and-swap on the assignee) distinguishes worktrees and machines. Same escape
 hatches: a caller-set `BEADS_ACTOR` wins, `--actor` beats both, `BD_REAL` names the binary.
-An absent/nonexecutable override, a link to this shim, or a candidate in the shim directory is
-skipped in favor of PATH discovery. Discovery checks inode identity as well as the directory,
-and child PATH excludes the shim's directory, aliases and links back to this executable before
-any helpers or passthrough run. An executable override that is a copied shim or recursive wrapper
-can still be selected; `VEGA_BD_SHIM_ACTIVE` then stops re-entry with exit 126 and a stderr hint to
-set `BD_REAL` to the original binary on the next call. If the shim cannot identify its executable,
+Discovery skips invalid overrides, aliases, links to the current shim, and other vega shim builds.
+Child PATH excludes shim directories before helpers and passthrough run. If a wrapper re-enters the shim,
+the recursion guard exits 126 and suggests setting `BD_REAL` to the original binary. If the shim cannot identify its executable,
 it exits 126 before consulting `BD_REAL` or PATH; invoke the original bd directly by absolute path.
 These are documented P2 deviations. Known gap: `bd -C <dir>` derives from the current dir.
 

@@ -38,21 +38,17 @@ use std::time::{Duration, Instant};
 
 use vega_bd_sync::{store, Project, State};
 
-const REENTRY: &str = "VEGA_BD_SHIM_ACTIVE";
 const PROBE_LIMIT: Duration = Duration::from_secs(2);
 
 fn main() -> ExitCode {
-    // Before actor derivation or hints: even a copied shim/wrapper must stop.
-    if env::var_os(REENTRY).is_some() {
-        eprintln!("bd shim: recursive invocation blocked; set BD_REAL to the original bd binary");
-        return ExitCode::from(126);
+    if let Err(code) = vega_shim::enter("bd", Some("BD_REAL")) {
+        return code;
     }
     let Ok(me) = env::current_exe().and_then(|p| p.canonicalize()) else {
         eprintln!("bd shim: cannot identify this executable; invoke the original bd directly by absolute path");
         return ExitCode::from(126);
     };
-    env::set_var(REENTRY, "1");
-    env::set_var("PATH", vega_shim::path_without_self("bd", &me));
+    env::set_var("PATH", vega_shim::path_without_shims("bd", &me));
     if env::var_os("BEADS_ACTOR").is_none_or(|v| v.is_empty()) {
         let host = output("hostname", &["-s"]).unwrap_or_else(|| "unknown".into());
         let top = output("git", &["rev-parse", "--show-toplevel"]);

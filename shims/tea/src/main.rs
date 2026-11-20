@@ -19,6 +19,9 @@ const POLLS_BEFORE_HINT: usize = 3;
 const POLLS: [&str; 2] = ["pulls", "api"];
 
 fn main() -> ExitCode {
+    if let Err(code) = vega_shim::enter(TOOL, None) {
+        return code;
+    }
     let args: Vec<String> = env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())

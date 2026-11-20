@@ -8,12 +8,51 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const HOP_LIMIT: u8 = 8;
+
+/// An exec keeps the process ID, so a repeated marker identifies a loop
+/// without rejecting ordinary subprocesses (e.g. git in a git hook). The hop
+/// count also bounds chains that spawn new processes or discard the marker.
+pub fn enter(tool: &str, override_var: Option<&str>) -> Result<(), ExitCode> {
+    let marker = format!(
+        "VEGA_{}_SHIM_ACTIVE",
+        tool.to_ascii_uppercase().replace('-', "_")
+    );
+    const HOPS: &str = "VEGA_SHIM_HOPS";
+    let hops = env::var_os(HOPS).map_or(0, |value| {
+        value
+            .to_str()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(HOP_LIMIT)
+    });
+    let pid = std::process::id().to_string();
+    let active = env::var_os(&marker);
+    let reason = if hops >= HOP_LIMIT {
+        "hop limit reached"
+    } else if active
+        .as_deref()
+        .is_some_and(|value| value == pid.as_str() || value == "1")
+    {
+        "re-entered the same shim"
+    } else {
+        env::set_var(marker, pid);
+        env::set_var(HOPS, (hops + 1).to_string());
+        return Ok(());
+    };
+    let fix = override_var.map_or_else(
+        || format!("invoke the original {tool} by absolute path or fix PATH"),
+        |var| format!("set {var} to the original {tool} binary"),
+    );
+    eprintln!("{tool} shim: recursive invocation blocked ({reason}); {fix}");
+    Err(ExitCode::from(126))
+}
 
 /// Replaces this process with the real `tool`, same argv (including `argv[0]`)
 /// and stdio, so stdout, TTY, signals and exit code are the original's. Only
@@ -38,7 +77,7 @@ pub fn exec_real_with(
             .map(|v| format!("{v} or PATH"))
             .unwrap_or("PATH".into());
         eprintln!(
-            "{{\"error\":\"shim_target_not_found\",\"tool\":\"{tool}\",\"message\":\"no real {tool} binary found via {via} (excluding this shim)\"}}"
+            "{{\"error\":\"shim_target_not_found\",\"tool\":\"{tool}\",\"message\":\"no real {tool} binary found via {via} (excluding vega shims)\"}}"
         );
         return ExitCode::from(127);
     };
@@ -52,8 +91,7 @@ pub fn exec_real_with(
 }
 
 /// The real binary: `env_var` first (if set), then the first `tool` on `PATH`.
-/// Candidates in this shim's directory, symlinks and hard links to this shim
-/// are skipped, which prevents exec recursion.
+/// Skip the shim directory, links to the shim, and other builds of vega shims.
 pub fn resolve_real(
     tool: &str,
     env_var: Option<&str>,
@@ -67,7 +105,7 @@ pub fn resolve_real(
     from_env
         .into_iter()
         .chain(from_path)
-        .find(|c| is_executable(c) && !is_self(c, self_path) && !in_self_dir(c, self_path))
+        .find(|c| is_executable(c) && !is_shim(c, self_path))
         .and_then(|c| c.canonicalize().ok())
 }
 
@@ -95,15 +133,61 @@ fn in_self_dir(candidate: &Path, self_path: Option<&Path>) -> bool {
     dir.is_some() && dir == own
 }
 
-/// PATH for a shim's children: remove its own directory (including aliases)
-/// and directories with a symlink/hard link to this executable under `tool`.
-/// Keeping this PATH for the real tool also prevents its helpers re-entering us.
-pub fn path_without_self(tool: &str, self_path: &Path) -> OsString {
+// This diagnostic is embedded in both release and debug builds, including
+// installed shims predating the recursion guard. Checking executable contents
+// also recognizes copies outside vega's installation directory.
+const SHIM_SIGNATURE: &[u8] = br#"{"error":"shim_target_not_found","tool":"#;
+
+fn is_shim(candidate: &Path, self_path: Option<&Path>) -> bool {
+    if in_self_dir(candidate, self_path) || is_self(candidate, self_path) {
+        return true;
+    }
+    if !is_executable(candidate) {
+        return false;
+    }
+    let Ok(mut file) = fs::File::open(candidate) else {
+        return false;
+    };
+    let mut magic = [0; 4];
+    if file.read_exact(&mut magic).is_err()
+        || !matches!(
+            u32::from_be_bytes(magic),
+            0x7f454c46
+                | 0xfeedface
+                | 0xcefaedfe
+                | 0xfeedfacf
+                | 0xcffaedfe
+                | 0xcafebabe
+                | 0xbebafeca
+                | 0xcafebabf
+                | 0xbfbafeca
+        )
+    {
+        return false;
+    }
+
+    let finder = memchr::memmem::Finder::new(SHIM_SIGNATURE);
+    let overlap = SHIM_SIGNATURE.len() - 1;
+    let mut buf = [0; 64 * 1024];
+    let mut carry = 0;
+    while let Ok(n) = file.read(&mut buf[carry..]) {
+        if n == 0 {
+            break;
+        }
+        let end = carry + n;
+        if finder.find(&buf[..end]).is_some() {
+            return true;
+        }
+        carry = end.min(overlap);
+        buf.copy_within(end - carry..end, 0);
+    }
+    false
+}
+
+/// Keep descendants from finding another copy of this shim on PATH.
+pub fn path_without_shims(tool: &str, self_path: &Path) -> OsString {
     let paths = env::var_os("PATH").unwrap_or_default();
-    let dirs = env::split_paths(&paths).filter(|dir| {
-        let candidate = dir.join(tool);
-        !in_self_dir(&candidate, Some(self_path)) && !is_self(&candidate, Some(self_path))
-    });
+    let dirs = env::split_paths(&paths).filter(|dir| !is_shim(&dir.join(tool), Some(self_path)));
     // split_paths yields entries join_paths can represent.
     env::join_paths(dirs).expect("PATH entries must be joinable")
 }

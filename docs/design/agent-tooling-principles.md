@@ -94,10 +94,11 @@ Extensions are **additive plus annotation**:
 
 - stdout of original commands stays byte-identical, so pipes like `gh … | jq` keep working.
 - The shim returns the original's exit code exactly.
-- The shim removes its own directory from `PATH` before it resolves the original, to prevent recursion.
-- The bd shim also removes PATH aliases and links to itself before metadata probes or passthrough.
-  `VEGA_BD_SHIM_ACTIVE` rejects re-entry through copied shims/wrappers with exit 126 and a stderr hint
-  to set `BD_REAL` to the original binary on the next call. If identifying its own executable fails, it
+- Resolution skips the shim's directory, links to the shim and other vega shim builds.
+  A per-tool process marker catches exec recursion, and an eight-hop limit bounds recursive wrappers.
+  Both report exit 126 on stderr.
+- The bd shim also excludes those shim directories from the PATH it passes to metadata probes and real bd.
+  For a recursive wrapper, set `BD_REAL` to the original binary. If identifying its own executable fails, it
   also exits 126 before consulting `BD_REAL` or PATH; invoke the original bd directly by absolute path.
   Its internal hostname/git probes have a two-second deadline,
   kill their process group on timeout, and omit unavailable metadata; the user's bd invocation has no

@@ -27,3 +27,11 @@ CARGO_BUILD_JOBS=6 nice cargo test -p vega-review strict_csp -- --ignored
 
 It serves a strict CSP page and sends overlay notes through the real inbox after initial load, reload,
 navigation and a cross-site round trip. It does not send mail or use the global browser profile.
+
+The opt-in live regression uses a throwaway Chromium profile, a local fixture
+page, and the pinned agent-browser version. Build `vega-browser` and
+`vega-review`, then run from the repository root:
+
+```sh
+nice -n 10 python3 plugins/review/tests/tdeu_live.py --agent-browser /absolute/path/to/agent-browser
+```

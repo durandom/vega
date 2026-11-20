@@ -9,5 +9,8 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    if let Err(code) = vega_shim::enter("herdr", Some("HERDR_BIN_PATH")) {
+        return code;
+    }
     vega_shim::exec_real("herdr", Some("HERDR_BIN_PATH"))
 }

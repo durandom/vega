@@ -6,5 +6,8 @@ license = "Apache-2.0"
 description = "Shared shim mechanics: resolve and exec the real tool, session id, once-per-session hints, call counts"
 publish = false
 
+[dependencies]
+memchr = "2"
+
 [dev-dependencies]
 tempfile = "3"

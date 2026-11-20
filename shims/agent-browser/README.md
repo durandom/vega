@@ -11,8 +11,8 @@ Named calls record the owner in `$XDG_STATE_HOME/vega/browser/sessions.json`.
   Default sessions are the leftovers nobody can attribute, and `close` without a name would close one
   of them. Documented deviation from P2 (agent-tooling-principles).
 - **Exempt without a name:** `--help`/`--version`, `skills …`, `session list`.
-- **No recursion:** the shim `exec`s the real binary by absolute path (`VEGA_AGENT_BROWSER_BIN`, then
-  PATH skipping itself); `vega-browser` resolves it the same way.
+- The shim `exec`s the real binary by absolute path (`VEGA_AGENT_BROWSER_BIN`, then PATH),
+  skipping vega shim builds.
 
 Design: [browser.md](../../docs/design/browser.md) (Shim).
 

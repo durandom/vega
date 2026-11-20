@@ -18,6 +18,9 @@ use vega_gate::push::{self, Decision};
 const TOOL: &str = "git";
 
 fn main() -> ExitCode {
+    if let Err(code) = vega_shim::enter(TOOL, None) {
+        return code;
+    }
     let args: Vec<String> = env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())

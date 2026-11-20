@@ -19,3 +19,7 @@ denials are documented exceptions. Principles: [agent-tooling-principles.md](../
 | [`tea`](tea/) | Hints at `vega ci watch`, counts calls, install hint |
 
 `activate.test.sh` tests the activation rules (`mise run check`).
+
+Real-tool lookup skips other vega shim builds as well as links to the running
+shim. A wrapper that calls back into a shim fails with exit 126 and a stderr
+diagnostic. The same limit applies to a chain that reaches eight shim hops.

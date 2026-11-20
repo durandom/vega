@@ -10,8 +10,7 @@
 //! `skills …`, `session list`.
 //!
 //! The shim `exec`s the real binary by absolute path (`VEGA_AGENT_BROWSER_BIN`,
-//! then PATH skipping itself), so it never recurses; `vega browser` resolves
-//! the real binary the same way.
+//! then PATH), skipping vega shim builds.
 
 use std::env;
 use std::ffi::OsString;
@@ -22,6 +21,9 @@ use vega_browser::{dev, mark, owner, real, session_name};
 const TOOL: &str = "agent-browser";
 
 fn main() -> ExitCode {
+    if let Err(code) = vega_shim::enter(TOOL, Some(real::ENV)) {
+        return code;
+    }
     let args: Vec<String> = env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
