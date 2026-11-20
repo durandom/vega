@@ -336,3 +336,46 @@ only the review tab. It then calls `vega-browser close` to disconnect the sessio
 and remove its owner record. The shared Chromium and VPN tunnel stay running.
 Use review stop for tab and inbox cleanup. Browser GC handles the agent-browser
 session if the owner is gone.
+
+## Shared headed development browser (decision, 2026-11-20)
+
+Proposed implementation for vega-tyye. The earlier sections describe the deployed browser and review commands. The reported inventory of 26 sessions, including 19 without an owner, motivated consolidating visible windows. A session count measures agent-browser daemons, so it can exceed the number of browsers even after migration.
+
+| Request | Browser and lifetime |
+| --- | --- |
+| Real-internet work, including brainz and explicit global review | Headed Chromium.app on 127.0.0.1:9223 with the existing ~/.local/share/vega-chromium login profile. Preserve the existing ab contract. |
+| Explicit VPN work or review | Existing headed VPN Chromium on 9224 by default. Its configured endpoint, SOCKS tunnel, CA pin and stopped-profile import remain the responsibility of vpn.rs and vpn/trust.rs. |
+| Headed development, including default local review | One host-local CfT process. Each project gets an ephemeral CDP browser context and one window. Each named session owns its tabs. |
+| Headless tests and lanes | Keep the caller's isolated process, launch settings and teardown. |
+
+### Launch, ownership and attachment (vega-tyye.2)
+
+Use the installed CfT executable and a dedicated profile under XDG data at vega/browser/dev-cft. Launch headed with loopback debugging on port 0 and read DevToolsActivePort from that profile. This avoids fixed-port collisions, including configured VPN ports. Serialize launch and allocation. Record the process identity, canonical profile and browser WebSocket generation, and revalidate them before reuse. A stale record or occupied profile is grounds to rediscover the owned instance or fail closed. Never discover dev by scanning ports.
+
+Resolve the worktree through Vega's canonical project resolver. Key contexts by project ID and display the project's label. The basename that owner.rs currently records can collide across repositories. On first use call Target.createBrowserContext, then Target.createTarget with that context and newWindow=true. Allocate further tabs in that window and verify context and window before returning a binding. Record generation, project, context, window, session, pane and target. Concurrent opens for one project must converge. Closing one session releases only its targets. Dispose a project context when its last session releases it and no user tabs remain. A browser restart invalidates every old binding.
+
+Use a named dev entry point, `vega browser dev --session <name> …`, and route ordinary headed dev launches through it. Preserve the upstream command output. Agent-browser 0.43.0 exposes browser-level --cdp and a sticky --pin-tab. Review's current first pinned open allocates a tab, and an explicit tab new can rebind it. Neither operation selects a caller-specified context. On proteus a fresh real daemon given the project's page WebSocket returned about:blank from get url instead of the unique about:blank#project-probe, despite exit 0. A raw page WebSocket is therefore unsuitable as the binding contract.
+
+Implement explicit context and initial target selection in the agent-browser attachment path (an upstream change or a pinned adapter). Verify TargetInfo.browserContextId before the first navigation or init script. Bind subsequent page operations to that ID, scope discovery and tab creation to the session's project, and scope selection and close to its owned tabs. Refuse endpoint overrides, automatic reconnection to another target, and operations that escape the binding. A missing target has a structured stale-session error. This is an implementation prerequisite for switching review.
+
+### Project and session colours (vega-tyye.3)
+
+On proteus, headed CfT 152.0.7977.64 loaded a scratch MV3 extension with --load-extension. Its worker appeared in CDP. In a fresh profile the extension reported incognito access disabled and saw only the ordinary blank tab. With Developer mode and Allow in Incognito enabled in the disposable CfT profile, the default spanning extension could enumerate the project tab but grouping failed with “No tab with id” or “No window with id”. With manifest incognito set to split, a packaged extension page opened via Target.createTarget inside the project context saw the incognito project tab and chrome.tabs.group returned a group ID for its window. The fixture used a temporary profile, OS-assigned port and blank pages. It stopped its own browser after each probe. [Chrome incognito modes](https://developer.chrome.com/docs/extensions/reference/manifest/incognito)
+
+Load the packaged extension only in managed dev CfT. Give it a stable extension ID. Check incognito access and provide the dedicated-profile setup steps when missing. Use a packaged control page in the verified project context. At allocation time the wrapper supplies the project label, session and theme colour to that page by typed CDP function arguments. Have the control page create the session's blank tab with chrome.tabs.create in its own window, record the returned extension tab ID, and group it before navigation. Correlate it with the CDP page target using a fresh one-use blank-page fragment and verify its context. Treat missing or ambiguous matches as allocation failure. This keeps project assignment out of page content, URL heuristics and foreground-tab selection. The probe verified grouping; the allocation handshake and two-project reconciliation are implementation tests.
+
+Title each session group with project and session, and map mark.rs project colours deterministically to Chrome's group palette. Preserve the opt-out and existing frame/title marks on paths that use them. Reconcile groups from live bindings when an extension worker restarts. A tab or group ID is meaningful only within its browser generation. [Chrome tab groups](https://developer.chrome.com/docs/extensions/reference/api/tabGroups)
+
+### Explicit dev state (vega-tyye.4)
+
+Provide `vega browser dev state save` and `vega browser dev state restore` for the resolved project. Restrict both to a positively identified managed CfT generation and its registered non-default dev context. Reject profile, URL and endpoint overrides before connecting. Never export or import from Chromium 9223/9224, configured VPN endpoints, headless sessions or the default CfT context. Start, close, GC and review never trigger a snapshot.
+
+Keep the filesystem and snapshot authority in the CLI. The context-local extension identifies managed dev tabs. Use context-qualified CDP cookie operations and first-party localStorage for explicitly registered dev origins. Track origins across navigations so closing a tab does not silently drop its data. Record the supported scope in the versioned file and report unsupported cookie attributes or inaccessible origins before replacing a good snapshot. IndexedDB, sessionStorage, caches and extension storage are outside v1. Keep snapshot values out of output, logs and extension storage.
+
+Store one file per encoded canonical project ID under ${XDG_STATE_HOME:-~/.local/state}/vega/browser/dev-state, directory 0700. Create a 0600 temporary file in that directory, validate ownership and refuse symlinks, then rename atomically. Validate version, project and origin scope before replay. Restore into a fresh unpublished project context before opening the app. Refuse replacement while a project is live. On failure dispose the staged context so retries start clean. Acceptance uses synthetic loopback fixtures and a CfT restart.
+
+### Review, guidance and legacy cleanup (vega-tyye.5)
+
+Route default local headed review through the dev allocator after target binding works. Preserve its unique blank target, pre-navigation CSP setup, origin-scoped overlay, pane inbox, native viewport, printed session and tab-only stop. Explicit global/VPN review keeps its existing path. Keep explicit headless review isolated. Update browser and review runtime guides, shim hints and help together, including how a subsequent plain named command reuses its binding. Treat existing explicitly configured external endpoints as external sessions; never silently adopt them into dev.
+
+Keep ls compatible with existing owner records. Distinguish a confirmed dead local owner from a missing record, remote owner or unknown liveness. Offer a dry-run inventory and explicit per-session disconnect for reviewed legacy ownerless entries. Age alone cannot prove that a process is abandoned. Recheck identity and liveness immediately before acting. Ordinary GC handles proven dead local owners only. Demonstrate cleanup with fixtures before any operator-directed cleanup on a live machine.
