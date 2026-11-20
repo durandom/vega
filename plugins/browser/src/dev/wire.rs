@@ -1,0 +1,81 @@
+use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+use tungstenite::{client, Message, WebSocket};
+use vega_herdr::Failure;
+
+use super::{failure, stale, Browser, Project};
+
+pub(super) struct Cdp {
+    pub socket: WebSocket<TcpStream>,
+    id: u64,
+}
+
+impl Cdp {
+    pub fn connect(browser: &Browser) -> Result<Self, Failure> {
+        let addr = SocketAddr::from(([127, 0, 0, 1], browser.port));
+        let timeout = Duration::from_secs(3);
+        let stream = TcpStream::connect_timeout(&addr, timeout).map_err(failure)?;
+        stream.set_read_timeout(Some(timeout)).map_err(failure)?;
+        stream.set_write_timeout(Some(timeout)).map_err(failure)?;
+        let (socket, _) =
+            client(format!("ws://{addr}{}", browser.path), stream).map_err(failure)?;
+        Ok(Self { socket, id: 0 })
+    }
+
+    pub fn call(&mut self, method: &str, params: Value) -> Result<Value, Failure> {
+        self.id += 1;
+        self.socket
+            .send(Message::text(
+                json!({
+                    "id": self.id, "method": method, "params": params
+                })
+                .to_string(),
+            ))
+            .map_err(failure)?;
+        loop {
+            let Message::Text(raw) = self.socket.read().map_err(failure)? else {
+                continue;
+            };
+            let reply: Value = serde_json::from_str(&raw).map_err(failure)?;
+            if reply["id"] != self.id {
+                continue;
+            }
+            if !reply["error"].is_null() {
+                return Err(failure(format!("{method}: {}", reply["error"]["message"])));
+            }
+            return Ok(reply["result"].clone());
+        }
+    }
+
+    pub fn info(&mut self, project: &Project, target: &str) -> Result<Value, Failure> {
+        let targets = self.call("Target.getTargets", json!({"filter": [{"type": "page"}]}))?;
+        let info = targets["targetInfos"]
+            .as_array()
+            .ok_or_else(|| failure("Chrome returned no target list"))?
+            .iter()
+            .find(|info| info["targetId"] == target)
+            .ok_or_else(|| stale("The owned dev tab is gone"))?;
+        if info["type"] != "page" || info["browserContextId"] != project.context {
+            return Err(stale("The dev tab is outside its recorded context"));
+        }
+        if self.window(target)? != project.window {
+            return Err(stale("The dev tab is outside its recorded window"));
+        }
+        Ok(info.clone())
+    }
+
+    pub fn window(&mut self, target: &str) -> Result<i64, Failure> {
+        self.call("Browser.getWindowForTarget", json!({"targetId": target}))?["windowId"]
+            .as_i64()
+            .ok_or_else(|| failure("Chrome returned no window ID"))
+    }
+
+    pub fn string(&mut self, method: &str, params: Value, field: &str) -> Result<String, Failure> {
+        self.call(method, params)?[field]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| failure(format!("Chrome returned no {field}")))
+    }
+}

@@ -390,6 +390,7 @@ fn alive(pid: Option<u64>) -> bool {
 
 fn agent_browser(session: &str, args: &[&str]) -> Result<String, Failure> {
     let out = Command::new("agent-browser")
+        .env("VEGA_BROWSER_LEGACY_HEADED", "1")
         .arg("--session")
         .arg(session)
         .args(args)

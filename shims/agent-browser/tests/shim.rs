@@ -58,10 +58,14 @@ fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
         )
         .env("VEGA_FIX", &f.tmp)
         .env("XDG_STATE_HOME", f.tmp.join("state"))
+        .env("XDG_DATA_HOME", f.tmp.join("data"))
         .env("HOME", f.tmp.join("home"))
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("VEGA_AGENT_BROWSER_BIN")
         .env_remove("AGENT_BROWSER_SESSION")
+        .env_remove("AGENT_BROWSER_HEADED")
+        .env_remove("AGENT_BROWSER_CDP")
+        .env_remove("VEGA_BROWSER_LEGACY_HEADED")
         .env_remove("HERDR_PANE_ID")
         .env_remove("HC_TERMINAL_ID")
         .env_remove("CLAUDE_CODE_SESSION_ID")
@@ -95,7 +99,7 @@ fn err(o: &Output) -> String {
 }
 
 #[test]
-fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() {
+fn isolated_headless_and_explicit_headed_calls_keep_their_original_route() {
     let f = fix();
     let o = run(
         &f,
@@ -111,13 +115,15 @@ fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() 
     assert_eq!(rec["project"], "proj");
     assert!(rec["first_seen"].as_i64().unwrap() > 0);
 
-    // An explicit --headed flag marks: the mark flag rides along first.
+    // Explicit CDP attachment keeps the original headed marking path.
     let o = run(
         &f,
         &[
             "--session",
             "vega-shim-test",
             "--headed",
+            "--cdp",
+            "12345",
             "open",
             "https://x",
         ],
@@ -129,7 +135,7 @@ fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() 
     assert_eq!(
         argv(&f).last().unwrap(),
         &format!(
-            "--init-script {} --session vega-shim-test --headed open https://x",
+            "--init-script {} --session vega-shim-test --headed --cdp 12345 open https://x",
             mark.display()
         )
     );
@@ -139,7 +145,10 @@ fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() 
     let o = run(
         &f,
         &["--session", "vega-shim-test", "open", "https://y"],
-        &[("AGENT_BROWSER_HEADED", "1".into())],
+        &[
+            ("AGENT_BROWSER_HEADED", "1".into()),
+            ("AGENT_BROWSER_CDP", "12345".into()),
+        ],
     );
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
     assert!(argv(&f).last().unwrap().starts_with("--init-script "));
@@ -152,6 +161,8 @@ fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() 
             "--session",
             "vega-shim-test",
             "--headed",
+            "--cdp",
+            "12345",
             "open",
             "https://z",
         ],
@@ -160,8 +171,30 @@ fn named_headless_calls_pass_through_unchanged_and_headed_ones_carry_the_mark() 
     assert!(o.status.success(), "{}{}", out(&o), err(&o));
     assert_eq!(
         argv(&f).last().unwrap(),
-        "--session vega-shim-test --headed open https://z"
+        "--session vega-shim-test --headed --cdp 12345 open https://z"
     );
+}
+
+#[test]
+fn ordinary_headed_calls_enter_dev_without_falling_back_to_the_real_binary() {
+    let f = fix();
+    let o = run(
+        &f,
+        &["--headed", "--session", "dev", "open", "https://x"],
+        &[],
+    );
+    assert!(!o.status.success());
+    assert!(argv(&f).is_empty());
+    assert!(out(&o).contains("project"), "{}", out(&o));
+}
+
+#[test]
+fn explicit_headless_overrides_the_headed_environment() {
+    let f = fix();
+    let args = ["--session", "dev", "--headed", "false", "open", "https://x"];
+    let o = run(&f, &args, &[("AGENT_BROWSER_HEADED", "true".into())]);
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    assert_eq!(argv(&f), [args.join(" ")]);
 }
 
 #[test]

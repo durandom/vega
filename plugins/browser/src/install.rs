@@ -39,6 +39,10 @@ fn version(path: &Path) -> Result<String, Failure> {
 
 /// Matches upstream v0.43.0 cli/src/install.rs, without starting a browser.
 pub fn chrome(home: &Path) -> bool {
+    chrome_binary(home).is_some()
+}
+
+pub(crate) fn chrome_binary(home: &Path) -> Option<PathBuf> {
     let suffixes: &[&str] = if cfg!(target_os = "macos") {
         &["Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing", "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing", "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"]
     } else {
@@ -49,7 +53,20 @@ pub fn chrome(home: &Path) -> bool {
         .flatten()
         .flatten()
         .filter(|e| e.file_name().to_string_lossy().starts_with("chrome-"))
-        .any(|e| suffixes.iter().any(|s| e.path().join(s).is_file()))
+        .flat_map(|e| suffixes.iter().map(move |s| e.path().join(s)))
+        .filter(|p| p.is_file())
+        .max_by_key(|p| {
+            p.strip_prefix(home.join(".agent-browser/browsers"))
+                .ok()
+                .and_then(|p| p.components().next())
+                .and_then(|s| s.as_os_str().to_str())
+                .and_then(|s| s.strip_prefix("chrome-"))
+                .map(|s| {
+                    s.split('.')
+                        .filter_map(|n| n.parse::<u32>().ok())
+                        .collect::<Vec<_>>()
+                })
+        })
 }
 
 /// Whether `npm` is on PATH: a host without agent-browser and without npm

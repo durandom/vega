@@ -19,13 +19,15 @@ vega-build = { path = "../../crates/vega-build" }
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-shim = { path = "../../crates/vega-shim" }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tungstenite = "0.28"
+tempfile = "3"
 base64 = "0.22"
 sha2 = "0.10"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [dev-dependencies]
 vega-plugin = { path = "../../crates/vega-plugin" }
-tempfile = "3"
 
 [build-dependencies]
 vega-build = { path = "../../crates/vega-build" }

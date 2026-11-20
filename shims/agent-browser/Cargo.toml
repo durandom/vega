@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 vega-browser = { path = "../../plugins/browser" }
+vega-herdr = { path = "../../crates/vega-herdr" }
 vega-shim = { path = "../../crates/vega-shim" }
 
 [dev-dependencies]

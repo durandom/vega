@@ -1,13 +1,9 @@
 //! Agent-session shim for `agent-browser` (docs/design/browser.md, Shim).
 //!
-//! One rule: a named call (`--session <name>` anywhere, or a non-empty
-//! `AGENT_BROWSER_SESSION`) passes through with every flag and subcommand
-//! allowed, upserts the owner record
-//! (`$XDG_STATE_HOME/vega/browser/sessions.json`) and, when the call is
-//! explicitly headed (`--headed` or `AGENT_BROWSER_HEADED`; never with
-//! `VEGA_BROWSER_MARK=0`), carries the session's window mark
-//! (`--init-script`, phase 2: a coloured frame and a `[session]` title
-//! prefix on the pages the call navigates). An unnamed call is refused with
+//! Ordinary headed calls and existing dev sessions use the project-scoped
+//! CfT adapter. Other named calls retain upstream arguments and record their
+//! owner. Explicit headed attachments also carry the session's window mark.
+//! An unnamed call is refused with
 //! a hint — a documented deviation from P2: default sessions are the
 //! unnamed leftovers nobody can attribute, and `close` without a name would
 //! close one of them. Exempt without a name: `--help`, `--version`,
@@ -21,7 +17,7 @@ use std::env;
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-use vega_browser::{mark, owner, real, session_name};
+use vega_browser::{dev, mark, owner, real, session_name};
 
 const TOOL: &str = "agent-browser";
 
@@ -30,7 +26,31 @@ fn main() -> ExitCode {
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
+    if args == [dev::PROXY] {
+        return if dev::serve().is_ok() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
+    if exempt(&args) {
+        return vega_shim::exec_real(TOOL, Some(real::ENV));
+    }
     if let Some(session) = session_name(&args) {
+        match dev::routes(&session, &args)
+            .and_then(|dev| dev.then(|| vega_browser::dev::command(&args)).transpose())
+        {
+            Ok(Some(code)) => return code,
+            Ok(None) => {}
+            Err(f) => {
+                if args.iter().any(|a| a == "--json") {
+                    vega_herdr::print_failure_json(&f);
+                } else {
+                    vega_herdr::print_failure(&f);
+                }
+                return ExitCode::from(if f.code == "usage" { 2 } else { 1 });
+            }
+        }
         // Best effort: a call whose record cannot be written still passes.
         let record = owner::record_from_env(vega_shim::unix_now());
         owner::upsert(&session, record.clone());
@@ -40,9 +60,6 @@ fn main() -> ExitCode {
             .collect();
         let (arg0, rest) = argv.split_first().expect("argv is nonempty");
         return vega_shim::exec_real_with(TOOL, Some(real::ENV), arg0.clone(), rest.to_vec());
-    }
-    if exempt(&args) {
-        return vega_shim::exec_real(TOOL, Some(real::ENV));
     }
     eprintln!("agent-browser: name your session: --session <name> or AGENT_BROWSER_SESSION=<name>");
     eprintln!("  (e.g. --session <project>-<task>); see `vega skills browser`");

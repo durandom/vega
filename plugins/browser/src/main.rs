@@ -26,6 +26,13 @@ const DAY: i64 = 86400;
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args == [vega_browser::dev::PROXY] {
+        return if vega_browser::dev::serve().is_ok() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         print!("{HELP}");
         return ExitCode::SUCCESS;
@@ -56,6 +63,7 @@ fn main() -> ExitCode {
         [a] if a == "--json" => ls(true).map(|_| ExitCode::SUCCESS),
         [a, b] if a == "ls" && b == "--json" => ls(true).map(|_| ExitCode::SUCCESS),
         [a, rest @ ..] if a == "ab" => ab(rest),
+        [a, rest @ ..] if a == "dev" => vega_browser::dev::command(rest),
         [a, rest @ ..] if a == "vpn" => vpn::command(rest),
         [a, rest @ ..] if a == "chromium" => chromium(rest),
         [a, rest @ ..] if a == "launch" => launch(rest),
@@ -858,7 +866,9 @@ mod tests {
 
     #[test]
     fn help_lists_every_command() {
-        for cmd in ["ab", "chromium", "launch", "cleanup", "ls", "gc", "close"] {
+        for cmd in [
+            "ab", "dev", "chromium", "launch", "cleanup", "ls", "gc", "close",
+        ] {
             assert!(HELP.contains(cmd), "help misses {cmd}");
         }
     }

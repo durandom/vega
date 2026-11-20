@@ -18,6 +18,9 @@ Commands:
                               --executable-path; requires a session name.
   chromium [url]              Attach to or start the global Chromium (idempotent);
                               the url opens only when it starts.
+  dev --session <name> <args>  Use shared headed Chrome for Testing for this
+                              Git project. Use open <url> to start and close
+                              to release the session.
   launch <url> [--session s] [--port p]
                               Throwaway ungoogled Chromium (temp profile, CDP on
                               127.0.0.1) for bot blockers. Defaults: session
@@ -44,6 +47,28 @@ age, port, user_data_dir, global}], error}. `pane` is null outside a pane;
 `headed`/`pid` come from the browser whose `--user-data-dir` ends in
 `<session>-profile` (agent-browser's own headed launches), else null. `colour`
 is the session's colour (below).
+
+Shared headed development:
+
+  vega browser dev --session ui open http://localhost:3000
+  agent-browser --session ui snapshot -i
+  agent-browser --session ui tab new http://localhost:3000/settings
+  agent-browser --session ui tab list
+  agent-browser --session ui tab t1
+  agent-browser --session ui tab close t2
+  agent-browser --session ui close
+
+The shim routes ordinary `--headed` launches to dev and remembers their
+names. Git worktrees of one project share cookies and a window. Each
+session can select and close only its own tabs. Use a fresh name for an
+isolated headless browser. The managed profile is
+`${XDG_DATA_HOME:-~/.local/share}/vega/browser/dev-cft`.
+
+Dev sessions use the pinned agent-browser runtime for page commands such
+as `open`, `snapshot`, `click`, `eval`, `get` and `screenshot`. Browser
+and endpoint overrides are rejected. After closing a tab in Chrome or
+restarting CfT, a stale binding reports an error. Release it with the
+session's `close` command before reusing the name.
 
 Every named agent-browser call (shim, ab, launch) upserts the owner record
 `$XDG_STATE_HOME/vega/browser/sessions.json`:

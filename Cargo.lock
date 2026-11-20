@@ -101,6 +101,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vega-browser",
+ "vega-herdr",
  "vega-shim",
 ]
 
@@ -2875,9 +2876,11 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "tungstenite",
  "vega-build",
  "vega-herdr",
  "vega-plugin",

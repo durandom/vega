@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 255 · 2026-11-20
+
+- feature: `vega browser dev --session <name> open <url>` and ordinary
+  headed agent-browser launches share one Chrome for Testing process.
+  Each Git project has its own browser context and window, and each named
+  session controls its own tabs.
+
 ## 254 · 2026-11-20
 
 - feature: vegad retries an initially empty unread count after live mail arrives and logs why a pending pointer waits.
