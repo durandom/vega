@@ -34,6 +34,21 @@ impl Cdp {
         method: &str,
         params: Value,
     ) -> Result<Value, Failure> {
+        let id = self.send(session, method, params)?;
+        loop {
+            let reply = self.receive()?;
+            if reply["id"] == id {
+                return Self::result(method, reply);
+            }
+        }
+    }
+
+    pub fn send(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) -> Result<u64, Failure> {
         self.id += 1;
         let mut request = json!({"id": self.id, "method": method, "params": params});
         if let Some(session) = session {
@@ -42,19 +57,22 @@ impl Cdp {
         self.socket
             .send(Message::text(request.to_string()))
             .map_err(failure)?;
+        Ok(self.id)
+    }
+
+    pub fn receive(&mut self) -> Result<Value, Failure> {
         loop {
-            let Message::Text(raw) = self.socket.read().map_err(failure)? else {
-                continue;
-            };
-            let reply: Value = serde_json::from_str(&raw).map_err(failure)?;
-            if reply["id"] != self.id {
-                continue;
+            if let Message::Text(raw) = self.socket.read().map_err(failure)? {
+                return serde_json::from_str(&raw).map_err(failure);
             }
-            if !reply["error"].is_null() {
-                return Err(failure(format!("{method}: {}", reply["error"]["message"])));
-            }
-            return Ok(reply["result"].clone());
         }
+    }
+
+    pub fn result(method: &str, reply: Value) -> Result<Value, Failure> {
+        if !reply["error"].is_null() {
+            return Err(failure(format!("{method}: {}", reply["error"]["message"])));
+        }
+        Ok(reply["result"].clone())
     }
 
     pub fn info(&mut self, project: &Project, target: &str) -> Result<Value, Failure> {

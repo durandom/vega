@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 257 · 2026-11-20
+
+- feature: Register dev origins with `vega browser dev state register <origin>`.
+  Use `dev state save` before closing the project and `dev state restore`
+  before reopening it to carry host-only cookies and localStorage across
+  Chrome for Testing restarts.
+
 ## 256 · 2026-11-20
 
 - feature: Shared Chrome for Testing groups dev tabs by project and session.

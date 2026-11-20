@@ -2,6 +2,7 @@
 mod groups;
 mod process;
 mod proxy;
+mod snapshot;
 mod wire;
 
 use std::collections::BTreeMap;
@@ -37,6 +38,8 @@ struct Project {
     label: String,
     context: String,
     window: i64,
+    #[serde(default)]
+    origins: std::collections::BTreeSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -62,6 +65,8 @@ struct Registry {
     browser: Option<Browser>,
     projects: BTreeMap<project::ProjectId, Project>,
     sessions: BTreeMap<String, Session>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_restore: Option<String>,
 }
 
 fn failure(error: impl std::fmt::Display) -> Failure {
@@ -417,7 +422,11 @@ fn passed() -> Result<ExitCode, Failure> {
 }
 
 pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
-    let call = Invocation::parse(args)?;
+    let (call, action) = match args.split_first() {
+        Some((word, rest)) if word == "state" => (None, Some(snapshot::Action::parse(rest)?)),
+        _ => (Some(Invocation::parse(args)?), None),
+    };
+    let overridden = |var| env::var_os(var).is_some_and(|value| !value.is_empty());
     if [
         "AGENT_BROWSER_CDP",
         "AGENT_BROWSER_CDP_HEADERS",
@@ -425,13 +434,22 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         "AGENT_BROWSER_EXECUTABLE_PATH",
         "AGENT_BROWSER_PROFILE",
     ]
-    .iter()
-    .any(|var| env::var_os(var).is_some_and(|v| !v.is_empty()))
+    .into_iter()
+    .any(overridden)
         || std::env::var("AGENT_BROWSER_AUTO_CONNECT")
             .is_ok_and(|v| matches!(v.as_str(), "1" | "true"))
+        || action.is_some()
+            && [
+                "CDP_PORT",
+                "CDP_PROFILE",
+                "CDP_CHROMIUM",
+                "AGENT_BROWSER_CONFIG",
+            ]
+            .into_iter()
+            .any(overridden)
     {
         return Err(usage(
-            "Unset agent-browser endpoint or profile overrides for dev sessions",
+            "Unset browser endpoint or profile overrides for managed dev commands",
         ));
     }
     let cwd = env::current_dir().map_err(failure)?;
@@ -447,8 +465,12 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         .map_err(failure)?;
     let profile = profile.canonicalize().map_err(failure)?;
     let guard = lock(&profile)?;
-    let config = runtime_config(&profile)?;
     let mut data = load(&profile)?;
+    if let Some(action) = action {
+        return snapshot::command(action, &profile, &repo, &mut data);
+    }
+    let call = call.expect("named dev invocation");
+    let config = runtime_config(&profile)?;
     let previous = data.sessions.get(&call.name);
     if previous.is_some_and(|s| s.project != repo.id) {
         return Err(stale("This dev session name belongs to another project"));
@@ -480,6 +502,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
     if !running {
         data.browser = Some(process::launch(&profile)?);
         data.projects.clear();
+        data.pending_restore = None;
         save(&profile, &data)?;
     }
     let browser = data.browser.clone().expect("running CfT recorded");
@@ -511,6 +534,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
                     label,
                     context,
                     window: 0,
+                    origins: Default::default(),
                 },
             );
         }

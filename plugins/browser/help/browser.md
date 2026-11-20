@@ -21,6 +21,8 @@ Commands:
   dev --session <name> <args>  Use shared headed Chrome for Testing for this
                               Git project. Use open <url> to start and close
                               to release the session.
+  dev state register <origin> Register a live dev project's HTTP(S) origin.
+  dev state save|restore      Save or restore this Git project's dev state.
   launch <url> [--session s] [--port p]
                               Throwaway ungoogled Chromium (temp profile, CDP on
                               127.0.0.1) for bot blockers. Defaults: session
@@ -69,6 +71,20 @@ as `open`, `snapshot`, `click`, `eval`, `get` and `screenshot`. Browser
 and endpoint overrides are rejected. After closing a tab in Chrome or
 restarting CfT, a stale binding reports an error. Release it with the
 session's `close` command before reusing the name.
+
+Save and restore state from the project's Git checkout:
+
+  vega browser dev state register http://localhost:3000
+  vega browser dev state save
+  vega browser dev state restore
+
+Register each origin in the live project before saving. Registrations survive
+navigation and tab closure while the context lives. Save before closing the last
+session. Restore with the project closed, then open a named dev session. Snapshots
+contain host-only cookies for registered hosts and first-party localStorage for
+registered origins. Domain and partitioned cookies on those hosts make save fail.
+Other browser storage is outside v1. Snapshots are owner-only files under
+`${XDG_STATE_HOME:-~/.local/state}/vega/browser/dev-state`.
 
 Every named agent-browser call (shim, ab, launch) upserts the owner record
 `$XDG_STATE_HOME/vega/browser/sessions.json`:

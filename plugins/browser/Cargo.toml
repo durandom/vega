@@ -23,6 +23,8 @@ serde = { version = "1", features = ["derive"] }
 tungstenite = "0.28"
 tempfile = "3"
 base64 = "0.22"
+libc = "0.2"
+url = "2"
 sha2 = "0.10"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
