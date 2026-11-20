@@ -21,7 +21,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::error::ErrorKind;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use vega_herdr::state::{mode_of, redirects_questions, state_file};
 use vega_herdr::{agent_name, cell, machine, own_terminal, print_failure, Failure};
@@ -58,17 +58,35 @@ struct Cli {
     cmd: Option<Cmd>,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum Profile {
+    Global,
+    Vpn,
+}
+
+impl Profile {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Vpn => "vpn",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Open the app with the review overlay in a headed browser and start the inbox
     #[command(
-        after_help = "URL: a local dev host (localhost, 127.x, private IPs, *.localhost, *.test, *.local,\n*.internal). The overlay runs only on that origin. One review per pane.\n--headless runs the browser headless and skips the headed-pane check: for scripted\ntests, where nobody looks at the page.\n\nExamples:\n  vega review start http://127.0.0.1:5287/\n  vega review start http://app.localhost:3000/settings --session spire-review"
+        after_help = "Without --profile, the URL must be on a local dev host. Shared profiles accept HTTP(S) URLs.\nThe overlay runs only on that origin. One review per pane.\n--headless runs the browser headless and skips the headed-pane check: for scripted\ntests, where nobody looks at the page.\n\nExamples:\n  vega review start http://127.0.0.1:5287/\n  vega review start http://app.localhost:3000/settings --session spire-review"
     )]
     Start {
         url: String,
-        /// agent-browser session name [default: review-<pane>]
+        /// agent-browser session name (prefix for shared profiles) [default: review-<pane>]
         #[arg(long)]
         session: Option<String>,
+        /// Shared Chromium profile [default: isolated browser]
+        #[arg(long, conflicts_with = "headless")]
+        profile: Option<Profile>,
         /// Headless browser, no headed-pane check (tests)
         #[arg(long)]
         headless: bool,
@@ -121,7 +139,7 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Close the browser session and the inbox
+    /// Close the review tab or isolated browser, and stop the inbox
     Stop,
     /// The inbox process (started by `start`)
     #[command(hide = true)]
@@ -169,7 +187,8 @@ fn main() -> ExitCode {
             url,
             session,
             headless,
-        }) => start(&url, session, headless),
+            profile,
+        }) => start(&url, session, headless, profile),
         Some(Cmd::Highlight { selector, label }) => highlight(&selector, label.as_deref()),
         Some(Cmd::Clear) => clear(),
         Some(Cmd::Reply { id, text, status }) => reply(id, &text, &status),
@@ -198,7 +217,7 @@ fn main() -> ExitCode {
 }
 
 /// `scheme://host[:port]` of an http(s) URL on a local dev host.
-fn local_origin(url: &str) -> Result<String, Failure> {
+fn review_origin(url: &str, shared: bool) -> Result<String, Failure> {
     let bad = |why: &str| {
         Failure::new(
             "usage",
@@ -206,6 +225,22 @@ fn local_origin(url: &str) -> Result<String, Failure> {
             "pass an http(s) URL of a local dev server, e.g. http://127.0.0.1:5287/",
         )
     };
+    if shared {
+        let parsed = url::Url::parse(url).map_err(|_| bad("not a URL"))?;
+        if !matches!(parsed.scheme(), "http" | "https")
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || url.split_once("://").is_some_and(|(_, rest)| {
+                rest.split(['/', '?', '#'])
+                    .next()
+                    .unwrap_or("")
+                    .contains('@')
+            })
+        {
+            return Err(bad("expected an HTTP(S) URL without credentials"));
+        }
+        return Ok(parsed.origin().ascii_serialization());
+    }
     let (scheme, rest) = url.split_once("://").ok_or_else(|| bad("not a URL"))?;
     if scheme != "http" && scheme != "https" {
         return Err(bad("not http(s)"));
@@ -219,7 +254,7 @@ fn local_origin(url: &str) -> Result<String, Failure> {
     } else {
         authority.split(':').next().unwrap_or("").to_string()
     };
-    if !is_dev_host(&host.to_ascii_lowercase()) {
+    if !shared && !is_dev_host(&host.to_ascii_lowercase()) {
         return Err(bad("not a local dev host"));
     }
     Ok(format!("{scheme}://{}", authority.to_ascii_lowercase()))
@@ -248,6 +283,37 @@ fn session_dir(pane: &str) -> Result<PathBuf, Failure> {
             "set HOME",
         )
     })
+}
+
+/// Serialize start and stop, including the interval before the inbox writes its PID.
+fn lock_review(dir: &Path) -> Result<fs::File, Failure> {
+    let fail = |e: std::io::Error| Failure::new("write_failed", e.to_string(), "");
+    let path = dir.with_file_name(format!(
+        "{}.lock",
+        dir.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    if let Some(parent) = path.parent() {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
+            .map_err(fail)?;
+    }
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(fail)?;
+    lock.try_lock().map_err(|_| {
+        Failure::new(
+            "review_busy",
+            "another review start or stop is running",
+            "retry when it finishes",
+        )
+    })?;
+    Ok(lock)
 }
 
 fn my_pane() -> Result<String, Failure> {
@@ -347,8 +413,13 @@ fn agent_browser(session: &str, args: &[&str]) -> Result<String, Failure> {
     Ok(text)
 }
 
-fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failure> {
-    let origin = local_origin(url)?;
+fn start(
+    url: &str,
+    session: Option<String>,
+    headless: bool,
+    profile: Option<Profile>,
+) -> Result<(), Failure> {
+    let origin = review_origin(url, profile.is_some())?;
     let pane = my_pane()?;
     if !headless && !owner_works_here(&pane) {
         return Err(Failure::new(
@@ -358,6 +429,7 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
         ));
     }
     let dir = session_dir(&pane)?;
+    let _lock = lock_review(&dir)?;
     if let Some(cfg) = read_config(&dir) {
         if alive(cfg["pid"].as_u64()) {
             return Err(Failure::new(
@@ -369,18 +441,27 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
                 "vega review stop first",
             ));
         }
+        if cfg["profile"].is_string() {
+            close_shared(&dir, &cfg)?;
+        }
     }
+    let session = session.unwrap_or_else(|| format!("review-{}", pane.replace(':', "-")));
+    let session = if profile.is_some() {
+        format!("{session}-{}", random_hex(8)?)
+    } else {
+        session
+    };
     let _ = fs::remove_dir_all(&dir);
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(&dir)
         .map_err(|e| Failure::new("write_failed", format!("{}: {e}", dir.display()), ""))?;
-    let session = session.unwrap_or_else(|| format!("review-{}", pane.replace(':', "-")));
     let secret = random_hex(32)?;
     let cfg = json!({
         "url": url, "origin": origin, "pane": pane, "session": session, "secret": secret,
         "headed": !headless,
+        "profile": profile.map(Profile::name),
         "blank": format!("about:blank#vega-review-{}", random_hex(8)?),
     });
     write_private(&dir.join("config.json"), &cfg.to_string())?;
@@ -426,7 +507,17 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
     write_private(&script_path, &script)?;
     let script_arg = script_path.display().to_string();
     if let Err(f) = open_review(&session, &script_arg, url, headless, &dir, &cfg) {
-        let _ = agent_browser(&session, &["close"]);
+        if profile.is_some() {
+            if let Err(cleanup) = close_shared(&dir, &cfg) {
+                return Err(Failure::new(
+                    &f.code,
+                    format!("{}; cleanup failed: {}", f.message, cleanup.message),
+                    "run vega review stop to retry cleanup",
+                ));
+            }
+        } else {
+            let _ = agent_browser(&session, &["close"]);
+        }
         stop_inbox(&dir, &cfg);
         return Err(f);
     }
@@ -440,7 +531,9 @@ fn start(url: &str, session: Option<String>, headless: bool) -> Result<(), Failu
     println!("review: {url}");
     println!(
         "browser: agent-browser session {session} ({})",
-        if headless { "headless" } else { "headed" }
+        profile
+            .map(Profile::name)
+            .unwrap_or(if headless { "headless" } else { "headed" })
     );
     print_reset(reset);
     println!("inbox: 127.0.0.1:{port} (notes need the session secret and Origin {origin})");
@@ -458,20 +551,69 @@ fn open_review(
     dir: &Path,
     cfg: &Value,
 ) -> Result<(), Failure> {
-    agent_browser(
-        session,
-        &[
+    let blank = cfg["blank"].as_str().unwrap_or("about:blank");
+    if let Some(profile) = cfg["profile"].as_str() {
+        let mut args = vec!["ab"];
+        if profile == "vpn" {
+            browser_plugin(&["vpn", "start"])?;
+            args.extend(["--profile", "vpn"]);
+        }
+        // A fresh pinned CDP session creates its own tab for the first open.
+        // If that tab disappears, subsequent commands fail instead of rebinding.
+        args.extend([
+            "--session",
+            session,
+            "--headed",
+            "--pin-tab",
             "--init-script",
             script,
-            "--headed",
-            if headless { "false" } else { "true" },
             "open",
-            cfg["blank"].as_str().unwrap_or("about:blank"),
-        ],
-    )?;
+            blank,
+        ]);
+        browser_plugin(&args)?;
+    } else {
+        agent_browser(
+            session,
+            &[
+                "--init-script",
+                script,
+                "--headed",
+                if headless { "false" } else { "true" },
+                "open",
+                blank,
+            ],
+        )?;
+    }
     csp::prepare(dir, session)?;
     agent_browser(session, &["open", url])?;
     Ok(())
+}
+
+fn browser_plugin(args: &[&str]) -> Result<(), Failure> {
+    let fail = |message: String| {
+        Failure::new(
+            "browser_profile_failed",
+            message,
+            "check vega browser --help",
+        )
+    };
+    let out = Command::new("vega-browser")
+        .args(args)
+        .output()
+        .map_err(|e| fail(format!("vega browser: {e}")))?;
+    if !out.status.success() {
+        return Err(fail(format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+    Ok(())
+}
+
+fn close_shared(dir: &Path, cfg: &Value) -> Result<(), Failure> {
+    csp::close_tab(dir, cfg["blank"].as_str().unwrap_or(""))?;
+    browser_plugin(&["close", cfg["session"].as_str().unwrap_or("")])
 }
 
 fn stop_inbox(dir: &Path, cfg: &Value) {
@@ -483,6 +625,7 @@ fn stop_inbox(dir: &Path, cfg: &Value) {
 
 fn stop() -> Result<(), Failure> {
     let dir = session_dir(&my_pane()?)?;
+    let _lock = lock_review(&dir)?;
     let cfg = read_config(&dir).ok_or_else(|| {
         Failure::new(
             "no_review",
@@ -492,7 +635,12 @@ fn stop() -> Result<(), Failure> {
     })?;
     let notes = cli_get(&cfg, "/notes").ok();
     let session = cfg["session"].as_str().unwrap_or("").to_string();
-    let closed = agent_browser(&session, &["close"]).is_ok();
+    let closed = if cfg["profile"].is_string() {
+        close_shared(&dir, &cfg)?;
+        true
+    } else {
+        agent_browser(&session, &["close"]).is_ok()
+    };
     stop_inbox(&dir, &cfg);
     println!("stopped: {}", cfg["url"].as_str().unwrap_or("?"));
     println!(
@@ -924,10 +1072,12 @@ fn status() -> Result<(), Failure> {
     };
     let up = alive(cfg["pid"].as_u64());
     println!("review: {}", cfg["url"].as_str().unwrap_or("?"));
-    println!(
-        "browser: agent-browser session {}",
-        cfg["session"].as_str().unwrap_or("?")
-    );
+    let session = cfg["session"].as_str().unwrap_or("?");
+    if let Some(profile) = cfg["profile"].as_str() {
+        println!("browser: agent-browser session {session} ({profile})");
+    } else {
+        println!("browser: agent-browser session {session}");
+    }
     println!(
         "inbox: {}",
         if up {
@@ -1060,19 +1210,19 @@ mod tests {
     #[test]
     fn origins_of_local_dev_hosts_only() {
         assert_eq!(
-            local_origin("http://127.0.0.1:5287/a?b").unwrap(),
+            review_origin("http://127.0.0.1:5287/a?b", false).unwrap(),
             "http://127.0.0.1:5287"
         );
         assert_eq!(
-            local_origin("https://App.localhost").unwrap(),
+            review_origin("https://App.localhost", false).unwrap(),
             "https://app.localhost"
         );
         assert_eq!(
-            local_origin("http://[::1]:8080/").unwrap(),
+            review_origin("http://[::1]:8080/", false).unwrap(),
             "http://[::1]:8080"
         );
         assert_eq!(
-            local_origin("http://192.168.1.4:3000").unwrap(),
+            review_origin("http://192.168.1.4:3000", false).unwrap(),
             "http://192.168.1.4:3000"
         );
         for bad in [
@@ -1083,7 +1233,7 @@ mod tests {
             "http://172.32.0.1/",
             "127.0.0.1:5287",
         ] {
-            assert!(local_origin(bad).is_err(), "{bad}");
+            assert!(review_origin(bad, false).is_err(), "{bad}");
         }
     }
 

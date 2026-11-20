@@ -3165,6 +3165,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tungstenite",
+ "url",
  "vega-build",
  "vega-herdr",
  "vega-plugin",

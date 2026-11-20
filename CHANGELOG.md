@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 253 · 2026-11-20
+
+- feature: `vega review start <url> --profile global|vpn` opens a pinned review
+  tab in the selected Chromium profile. Stopping the review closes its tab
+  while the shared browser stays running.
+
 ## 252 · 2026-11-19
 
 - feature: In the vega sidebar, clicking a nested sentinel that has its own pane

@@ -315,3 +315,24 @@ Source references (Chromium 146.0.7680.0):
 - [store and schema](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/components/server_certificate_database/server_certificate_database.cc)
 - [trust protobuf](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/components/server_certificate_database/server_certificate_database.proto)
 - [verifier additional trust](https://chromium.googlesource.com/chromium/src/+/146.0.7680.0/net/cert/cert_verify_proc_builtin.cc)
+
+## Review in a browser profile (vega-tdeu)
+
+`vega review start <url> --profile global|vpn` uses the normal browser plugin
+attach path. Review invokes `vega-browser ab` so the profile checks, global
+launch, owner record, and headed marking stay in one implementation. For VPN
+it first invokes the idempotent `vega-browser vpn start`. The default review
+still launches an isolated agent-browser for local dev URLs.
+
+A shared review uses a fresh named, pinned agent-browser CDP session. Its first
+`open` creates a new tab for a unique blank URL. The inbox locates that tab and
+saves its CDP target ID before attaching the tab-scoped CSP bypass. Review then
+navigates to the app. The overlay is scoped to the requested origin. The owner
+signs in themselves. The named session is visible to browser inventory and GC
+with the standard ownership rules.
+
+Review stop uses the recorded browser-instance websocket and target ID to close
+only the review tab. It then calls `vega-browser close` to disconnect the session
+and remove its owner record. The shared Chromium and VPN tunnel stay running.
+Use review stop for tab and inbox cleanup. Browser GC handles the agent-browser
+session if the owner is gone.
