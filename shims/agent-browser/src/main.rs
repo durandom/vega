@@ -28,6 +28,19 @@ fn main() -> ExitCode {
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
+    if let Some(endpoint) = env::var_os("VEGA_BROWSER_SHARE") {
+        return match dev::share::remote(&endpoint.to_string_lossy(), &args) {
+            Ok(code) => code,
+            Err(error) => {
+                if args.iter().any(|a| a == "--json") {
+                    vega_herdr::print_failure_json(&error);
+                } else {
+                    vega_herdr::print_failure(&error);
+                }
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args == [dev::PROXY] {
         return if dev::serve().is_ok() {
             ExitCode::SUCCESS

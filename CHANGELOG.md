@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 262 · 2026-11-20
+
+- feature: Share a project's headed dev tabs with a remote vega agent-browser
+  shim using `vega browser dev share <project> --to <host> --origin <origin>`.
+  Use `dev share status` to list shares and `dev share --stop <project>` to revoke one.
+
 ## 261 · 2026-11-20
 
 - feature: Git, gh, bd, herdr, tea and agent-browser shims skip duplicate

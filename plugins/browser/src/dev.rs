@@ -2,6 +2,7 @@
 mod groups;
 mod process;
 mod proxy;
+pub mod share;
 pub mod shared;
 mod snapshot;
 mod wire;
@@ -534,6 +535,11 @@ fn close_session(
 }
 
 pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
+    if let Some((word, rest)) = args.split_first() {
+        if word == "share" {
+            return share::command(rest);
+        }
+    }
     let (call, action) = match args.split_first() {
         Some((word, rest)) if word == "state" => (None, Some(snapshot::Action::parse(rest)?)),
         _ => (Some(Invocation::parse(args)?), None),

@@ -170,10 +170,16 @@ try {
   assert.deepEqual(after.groups, before.groups);
   console.log('Two contexts, three titled groups, target mapping, and worker restart passed');
 
-  ok('alpha', ['--session', 'first', 'close']);
-  ok('alpha', ['--session', 'second', 'close']);
-  ok('beta', ['--session', 'third', 'close']);
-  assert.deepEqual(registry().projects, {});
+  if (process.argv.includes('--share')) {
+    const { verifyShare } = await import('./dev-share.mjs');
+    await verifyShare({ scratch, binary, env, browser, foreign: data.sessions.third.tabs[1].target,
+      stopBrowser: () => call('Browser.close') });
+  } else {
+    ok('alpha', ['--session', 'first', 'close']);
+    ok('alpha', ['--session', 'second', 'close']);
+    ok('beta', ['--session', 'third', 'close']);
+    assert.deepEqual(registry().projects, {});
+  }
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {
     try { await call('Browser.close'); } catch {}

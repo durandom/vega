@@ -399,3 +399,65 @@ entry to `vega browser disconnect <session> --identity <identity>`. It sends
 close over the verified Unix socket. The upstream daemon disconnects from an
 attached browser or shuts down a browser it launched. The dry run leaves stale
 daemon files and owner records intact.
+
+### Remote dev shares
+
+`vega browser dev share <project> --to <host> --origin <origin>` requires a
+live managed dev project and the tab-group extension's incognito grant. The
+supervisor allocates fresh grouped tabs in its recorded window and context.
+Existing local tabs stay private. Each command checks the target, context and
+window against Chrome. Remote tab IDs and accessibility refs belong to the
+share. The worker revalidates the browser generation and never scans ports.
+
+The display machine starts a dedicated OpenSSH master and requests a dynamic
+reverse TCP listener on remote IPv4 loopback. Its local destination is a
+one-use Unix socket in a private directory. The supervisor verifies the
+actual remote bind using `ss` or `lsof` before publishing the URL. The remote
+account needs public-key SSH access, remote forwarding, and one of those
+listener inspection tools. A 256-bit capability authorizes one command per
+WebSocket connection. Browser-originated handshakes are rejected. Stop, loss
+of the browser generation, SSH exit, guard loss and TTL revoke the listener
+and connected clients. The supervisor then closes the share's verified tabs.
+The remote SSH master session uses a stdin-backed command so loss of the local
+supervisor also ends the tunnel.
+
+The remote vega shim consumes `VEGA_BROWSER_SHARE` before upstream endpoint
+discovery. It submits a `Vega.command` request. The broker implements a finite
+set of operations, including navigation, accessibility snapshots, mouse/form
+actions, key input, scrolling and screenshots. It uses private target
+attachments and fixed isolated-world functions for element actions. All user
+strings enter Chrome as typed arguments. Caller-supplied CDP methods, scripts,
+session IDs, file inputs, storage APIs, dev state operations and download
+settings are outside the protocol. Only the remote shim writes screenshot
+files. The local agent-browser adapter remains private.
+
+Each origin is an exact HTTP(S) origin. The managed debugger and the reserved
+9223/9224 ports are excluded. A persistent Fetch session checks requests and
+redirects, bypasses service workers and disables cache. It rejects attachment
+and non-HTML document responses. Before delivering HTML, the broker fulfills
+the response with an additional sandboxed CSP restricting connections to
+approved hosts and ports, including their WebSocket counterparts. The policy
+also excludes frames, new workers, popups and downloads. Chrome's unmodified
+debugger independently rejects page-originated WebSockets. The implementation
+bounds intercepted HTML bodies and ends the share on guard failure.
+
+The allowlist design trusts the selected applications and their backends.
+Chrome's request interception applies to the share's page targets. It does
+not mediate server-side requests by an approved app, WebRTC traffic, or the
+independent background activity of workers already registered by local tabs.
+Applications that need iframes, new workers, or document downloads cannot use
+those features in shared tabs. Share actions support CSS selectors and
+snapshot refs; keyboard shortcuts that invoke browser UI are excluded.
+
+Run the two disposable fixtures with Node 22+:
+
+```sh
+nice -n 10 node plugins/browser/tests/share-origins.mjs "<CfT executable>"
+nice -n 10 node plugins/browser/tests/dev-groups.mjs target/debug/vega-browser --share
+```
+
+Build the browser plugin and the agent-browser shim first for the second
+fixture. It starts its own loopback sshd with temporary keys, two projects,
+an approved app and a denied listener. It exercises the real reverse forward
+and verifies group/context isolation, denied requests, WebSocket restrictions,
+stop, TTL and loss of the disposable browser.

@@ -24,6 +24,13 @@ Commands:
                               to release the session.
   dev state register <origin> Register a live dev project's HTTP(S) origin.
   dev state save|restore      Save or restore this Git project's dev state.
+  dev share <project> --to <ssh-host> --origin <http(s)-origin> [--ttl 8h]
+                              Share new grouped tabs in a live project context.
+                              Repeat --origin for trusted app origins. TTL accepts
+                              seconds, minutes or hours, up to 24h. Run the
+                              printed command with the remote vega shim.
+  dev share status            List destinations and remaining share lifetimes.
+  dev share --stop <project>  Revoke the share and close its tabs.
   launch <url> [--session s] [--port p]
                               Throwaway ungoogled Chromium (temp profile, CDP on
                               127.0.0.1) for bot blockers. Defaults: session

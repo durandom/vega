@@ -27,6 +27,15 @@ const DAY: i64 = 86400;
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args == [vega_browser::dev::share::WORKER] {
+        return match vega_browser::dev::share::worker() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                println!("{}", error.message);
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args == [vega_browser::dev::PROXY] {
         return if vega_browser::dev::serve().is_ok() {
             ExitCode::SUCCESS

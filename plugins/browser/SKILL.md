@@ -27,6 +27,19 @@ Enable **Allow in Incognito** for **Vega Dev Tab Groups** in the managed CfT
 Use a fresh name and `--headed false` for isolated tests. Explicit endpoints and
 existing legacy bindings stay on the upstream route.
 
+## Share a live dev project
+
+```sh
+vega browser dev share myproject --to testhost --origin http://127.0.0.1:8790 --ttl 30m
+vega browser dev share status
+vega browser dev share --stop myproject
+```
+
+Repeat `--origin` for trusted app origins. On the destination, export the
+printed `VEGA_BROWSER_SHARE` capability and use the vega shim, e.g.
+`agent-browser snapshot -i` and `agent-browser click @e1`. Keep the capability
+private. Default TTL is eight hours.
+
 ## Login profiles
 
 Each session uses only tabs it created. Closing the last tab opens a blank
