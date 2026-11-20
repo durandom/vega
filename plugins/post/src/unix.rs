@@ -2278,8 +2278,17 @@ async fn serve(
                             continue; // stays pending
                         }
                     };
-                if d.decide(&pane, count, floor) != Decision::Type {
-                    continue;
+                match d.decide(&pane, count, floor) {
+                    Decision::Type => {}
+                    Decision::Read => continue,
+                    Decision::Wait(reason) => {
+                        if d.first_wait(&pane) {
+                            log(&format!(
+                                "pointer held: {pane}: {reason} (unread {count}, floor {floor})"
+                            ));
+                        }
+                        continue;
+                    }
                 }
                 // No status from the backend for STALE (vega-lhc.257): only into an
                 // input box read as empty; no box or any text keeps it pending.
@@ -2290,6 +2299,11 @@ async fn serve(
                         screen(&pane).as_deref().map(delivery::draft),
                         Some(Draft::None)
                     ) {
+                        if d.first_wait(&pane) {
+                            log(&format!(
+                                "pointer held: {pane}: unknown agent status and no empty input box"
+                            ));
+                        }
                         continue;
                     }
                     unknown_ok = true;
@@ -2393,6 +2407,9 @@ async fn serve(
                             agent: hv(h::FROM_AGENT).unwrap_or_default(),
                         };
                         d.mail_from(&pane, sender, Some(origin));
+                        if let Some(reason) = d.pending_hold(&pane, once, Instant::now()) {
+                            log(&format!("pointer held: {pane}: {reason} (agent {})", d.status_of(&pane)));
+                        }
                     }
                 }
                 Some(req) = async {

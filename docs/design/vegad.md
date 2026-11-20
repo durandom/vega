@@ -118,6 +118,11 @@ Jobs, all in one process:
    agent is `idle` or `done` and no hold stands, at most once per 5 minutes; the log marks it
    `again`. It also catches aborts vegad does not detect (a child that reported earlier).
 
+   A live subscription can announce mail before its durable unread count reflects it.
+   For 10 seconds after arrival, a zero count keeps the pane pending. A positive
+   count resumes normal delivery immediately. The relay logs the first wait for a
+   count or an outstanding pointer per arrival, including the count and ack floor.
+
    **Draft guard (vega-lhc.194).** Before each pointer (also urgent and parent mail) vegad reads the
    pane's screen (`delivery::draft`): a pointer never joins text the user is typing. It knows three
    input boxes: Claude Code (`❯` between two rules), Codex (`›` above its status line) and pi (the

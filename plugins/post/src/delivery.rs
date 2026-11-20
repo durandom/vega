@@ -68,6 +68,9 @@ pub struct Delivery {
     status: HashMap<String, String>,
     pending: HashSet<String>,
     urgent: HashSet<String>,
+    /// Live arrivals awaiting their first broker-visible count (Unix ms).
+    unconfirmed: HashMap<String, u64>,
+    wait_logged: HashSet<String>,
     /// Pending panes whose mail can be queued while working (parent or peer).
     queued: HashSet<String>,
     /// Pane -> pointer state.
@@ -144,8 +147,8 @@ pub enum Decision {
     Type,
     /// Nothing unread: drop the pending state.
     Read,
-    /// Keep waiting (pointed, not yet read).
-    Wait,
+    /// Keep pending; the relay logs the reason once per arrival.
+    Wait(&'static str),
 }
 
 /// What a provider abort does to the pane's pointer.
@@ -207,6 +210,10 @@ impl Delivery {
 
     /// `mail` with its sender, for a bounce if the pane closes unread.
     pub fn mail_from(&mut self, pane: &str, from: Sender, origin: Option<Origin>) {
+        self.wait_logged.remove(pane);
+        if origin.is_some() {
+            self.unconfirmed.insert(pane.into(), now_ms());
+        }
         self.arrivals
             .entry(pane.to_string())
             .or_default()
@@ -310,6 +317,8 @@ impl Delivery {
 
     /// Returns whether the pane had mail state to drop.
     pub fn gone(&mut self, pane: &str) -> bool {
+        self.unconfirmed.remove(pane);
+        self.wait_logged.remove(pane);
         self.status.remove(pane);
         self.unknown_since.remove(pane);
         self.urgent.remove(pane);
@@ -383,6 +392,30 @@ impl Delivery {
         self.candidates_at(ignore_status, Instant::now())
     }
 
+    /// Why new mail is ineligible for a count before checking the broker.
+    pub fn pending_hold(
+        &self,
+        pane: &str,
+        ignore_status: bool,
+        instant: Instant,
+    ) -> Option<&'static str> {
+        if self.is_urgent(pane) {
+            return None;
+        }
+        if self.held.get(pane).is_some_and(|t| now_ms() < *t) {
+            return Some("provider abort holds delivery");
+        }
+        let status = self.status_of(pane);
+        if ignore_status
+            || is_free(status)
+            || status == "working"
+            || self.unknown_long_at(pane, instant)
+        {
+            return None;
+        }
+        Some("agent status holds delivery")
+    }
+
     fn candidates_at(&self, ignore_status: bool, instant: Instant) -> Vec<String> {
         let now = now_ms();
         let panes: HashSet<&String> = self.pending.iter().chain(self.arrivals.keys()).collect();
@@ -393,15 +426,11 @@ impl Delivery {
                     return true;
                 }
                 let status = self.status_of(p);
-                let held = self.held.get(*p).is_some_and(|t| now < *t);
                 if !self.pending.contains(*p) {
+                    let held = self.held.get(*p).is_some_and(|t| now < *t);
                     return !ignore_status && is_free(status) && !held && self.stale(p, now);
                 }
-                let free = ignore_status
-                    || is_free(status)
-                    || status == "working"
-                    || self.unknown_long_at(p, instant);
-                free && !held
+                self.pending_hold(p, ignore_status, instant).is_none()
                     && self
                         .pointed
                         .get(*p)
@@ -416,7 +445,17 @@ impl Delivery {
 
     /// Given the pane's unread count and ack floor, what to do.
     pub fn decide(&mut self, pane: &str, unread: u64, floor: u64) -> Decision {
+        if unread == 0
+            && self
+                .unconfirmed
+                .get(pane)
+                .is_some_and(|seen| now_ms().saturating_sub(*seen) < RECHECK.as_millis() as u64)
+        {
+            return Decision::Wait("live mail not yet visible in unread count");
+        }
+        self.unconfirmed.remove(pane);
         if unread == 0 {
+            self.wait_logged.remove(pane);
             self.pending.remove(pane);
             self.urgent.remove(pane);
             self.queued.remove(pane);
@@ -449,10 +488,15 @@ impl Delivery {
             Some(_) if stale => Decision::Type, // the safety net
             Some(p) => {
                 p.checked = Some(Instant::now());
-                Decision::Wait
+                Decision::Wait("previous pointer still unread")
             }
             None => Decision::Type,
         }
+    }
+
+    /// Suppress repeated poll diagnostics until the next mail.
+    pub fn first_wait(&mut self, pane: &str) -> bool {
+        self.wait_logged.insert(pane.into())
     }
 
     /// The pointer was typed (or failed: `typed` false keeps it pending).
@@ -541,6 +585,8 @@ impl Delivery {
             .collect();
         json!({
             "pending": sorted(&self.pending),
+            "unconfirmed": self.unconfirmed,
+            "wait_logged": sorted(&self.wait_logged),
             "urgent": sorted(&self.urgent),
             "queued": sorted(&self.queued),
             "pointed": pointed,
@@ -575,6 +621,8 @@ impl Delivery {
                 .filter_map(|(p, t)| Some((p.clone(), t.as_u64()?)))
                 .collect()
         };
+        self.unconfirmed.extend(times("unconfirmed"));
+        self.wait_logged.extend(set("wait_logged"));
         self.pending.extend(set("pending"));
         self.urgent.extend(set("urgent"));
         self.queued.extend(set("queued"));
@@ -903,7 +951,7 @@ mod tests {
         assert_eq!(b.unread_since("w1:p1"), since, "mail age survives");
         assert_eq!(
             b.decide("w1:p1", 1, 4),
-            Decision::Wait,
+            Decision::Wait("previous pointer still unread"),
             "pointer stands: no second line"
         );
         assert_eq!(
@@ -1132,7 +1180,10 @@ mod tests {
         // More mail, agent still idle, inbox not read: wait.
         d.mail("w1:p1", Sender::Other);
         assert_eq!(d.candidates(false), vec!["w1:p1"]);
-        assert_eq!(d.decide("w1:p1", 2, 0), Decision::Wait);
+        assert_eq!(
+            d.decide("w1:p1", 2, 0),
+            Decision::Wait("previous pointer still unread")
+        );
         // Checked just now: not a candidate until RECHECK or an event.
         assert!(d.candidates(false).is_empty());
         d.status("w1:p1", "working");
@@ -1193,6 +1244,36 @@ mod tests {
     }
 
     #[test]
+    fn new_mail_survives_an_initial_zero_count_after_upgrade() {
+        let pane = "t72";
+        let mut d = Delivery::default();
+        d.import(&json!({"pointed": {"t72": {"floor": 17512}}, "typed_at": {"t72": 1}}));
+        d.status(pane, "done");
+        d.mail_from(
+            pane,
+            Sender::Other,
+            Some(Origin {
+                host: "proteus".into(),
+                pane: "t6p".into(),
+                agent: "codex".into(),
+            }),
+        );
+        assert_eq!(
+            d.decide(pane, 0, 17513),
+            Decision::Wait("live mail not yet visible in unread count")
+        );
+        assert!(d.first_wait(pane));
+        let mut restored = Delivery::default();
+        restored.import(&d.export());
+        restored.status(pane, "done");
+        let mut d = restored;
+        assert!(matches!(d.decide(pane, 0, 17513), Decision::Wait(_)));
+        assert!(!d.first_wait(pane));
+        assert_eq!(d.candidates(false), vec![pane]);
+        assert_eq!(d.decide(pane, 1, 17513), Decision::Type);
+    }
+
+    #[test]
     fn queued_pointer_stands_for_the_rest_of_the_turn() {
         let mut d = d("working");
         d.mail("w1:p1", Sender::Parent);
@@ -1201,14 +1282,20 @@ mod tests {
         // even when herdr repeats `working` (a snapshot).
         d.mail("w1:p1", Sender::Parent);
         d.snapshot(HashMap::from([("w1:p1".into(), "working".into())]));
-        assert_eq!(d.decide("w1:p1", 2, 0), Decision::Wait);
+        assert_eq!(
+            d.decide("w1:p1", 2, 0),
+            Decision::Wait("previous pointer still unread")
+        );
         // Read it: the next mail gets a line at once.
         assert_eq!(d.decide("w1:p1", 1, 2), Decision::Type);
         d.typed("w1:p1", 2, true);
         // Turn ends unread, then a new turn starts: a new line may follow.
         d.status("w1:p1", "done");
         d.mail("w1:p1", Sender::Other);
-        assert_eq!(d.decide("w1:p1", 1, 2), Decision::Wait);
+        assert_eq!(
+            d.decide("w1:p1", 1, 2),
+            Decision::Wait("previous pointer still unread")
+        );
         d.status("w1:p1", "working");
         d.status("w1:p1", "idle");
         assert_eq!(d.decide("w1:p1", 1, 2), Decision::Type);
@@ -1385,7 +1472,10 @@ mod tests {
         assert!(d.candidates(false).is_empty());
         age(&mut d, "w1:p1", STALE_MS - 1_000);
         assert!(d.candidates(false).is_empty(), "within the bound");
-        assert_eq!(d.decide("w1:p1", 1, 0), Decision::Wait);
+        assert_eq!(
+            d.decide("w1:p1", 1, 0),
+            Decision::Wait("previous pointer still unread")
+        );
         age(&mut d, "w1:p1", 1_000);
         assert_eq!(d.candidates(false), vec!["w1:p1"], "done or idle: re-point");
         assert!(d.repeat("w1:p1"));
@@ -1393,7 +1483,10 @@ mod tests {
         d.typed("w1:p1", 0, true);
         assert!(d.candidates(false).is_empty(), "once per bound");
         d.mail("w1:p1", Sender::Other);
-        assert_eq!(d.decide("w1:p1", 2, 0), Decision::Wait);
+        assert_eq!(
+            d.decide("w1:p1", 2, 0),
+            Decision::Wait("previous pointer still unread")
+        );
         // A turn taken without reading (the pointer no longer stands):
         // still re-pointed after the bound.
         d.status("w1:p1", "working");
@@ -1589,6 +1682,7 @@ mod tests {
         assert_eq!(b[0].senders(9), vec![origin("proteus", "w3V:p2").unwrap()]);
         // All read: nothing to bounce.
         d.mail_from("w2:p1", Sender::Other, origin("ganymede", "w5S:p1"));
+        d.unconfirmed.insert("w2:p1".into(), 0); // confirmation window elapsed
         assert_eq!(d.decide("w2:p1", 0, 1), Decision::Read);
         d.gone("w2:p1");
         assert!(d.take_bounces().is_empty());
