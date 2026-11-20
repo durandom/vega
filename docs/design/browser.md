@@ -321,8 +321,8 @@ Source references (Chromium 146.0.7680.0):
 `vega review start <url> --profile global|vpn` uses the normal browser plugin
 attach path. Review invokes `vega-browser ab` so the profile checks, global
 launch, owner record, and headed marking stay in one implementation. For VPN
-it first invokes the idempotent `vega-browser vpn start`. The default review
-still launches an isolated agent-browser for local dev URLs.
+it first invokes the idempotent `vega-browser vpn start`. Headed local reviews use the managed dev allocator by default. Explicit
+headless reviews launch an isolated agent-browser.
 
 A shared review uses a fresh named, pinned agent-browser CDP session. Its first
 `open` creates a new tab for a unique blank URL. The inbox locates that tab and
@@ -385,3 +385,10 @@ Store one file per encoded canonical project ID under ${XDG_STATE_HOME:-~/.local
 Route default local headed review through the dev allocator after target binding works. Preserve its unique blank target, pre-navigation CSP setup, origin-scoped overlay, pane inbox, native viewport, printed session and tab-only stop. Explicit global/VPN review keeps its existing path. Keep explicit headless review isolated. Update browser and review runtime guides, shim hints and help together, including how a subsequent plain named command reuses its binding. Treat existing explicitly configured external endpoints as external sessions; never silently adopt them into dev.
 
 Keep ls compatible with existing owner records. Distinguish a confirmed dead local owner from a missing record, remote owner or unknown liveness. Offer a dry-run inventory and explicit per-session disconnect for reviewed legacy ownerless entries. Age alone cannot prove that a process is abandoned. Recheck identity and liveness immediately before acting. Ordinary GC handles proven dead local owners only. Demonstrate cleanup with fixtures before any operator-directed cleanup on a live machine.
+
+`vega browser gc --dry-run` reads the legacy daemon socket directory and shows
+owner classifications. Copy the current identity of one reviewed ownerless
+entry to `vega browser disconnect <session> --identity <identity>`. It sends
+close over the verified Unix socket. The upstream daemon disconnects from an
+attached browser or shuts down a browser it launched. The dry run leaves stale
+daemon files and owner records intact.

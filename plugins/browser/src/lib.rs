@@ -7,6 +7,7 @@
 pub mod cdp;
 pub mod dev;
 pub mod install;
+pub mod legacy;
 pub mod mark;
 pub mod owner;
 pub mod pane;

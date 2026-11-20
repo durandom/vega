@@ -1,4 +1,4 @@
-vega browser: named agent-browser sessions — the global Chromium, throwaway fallbacks, owner records
+vega browser: named sessions for shared headed development, Chromium profiles and isolated tests
 
 Usage: vega browser <command>
 
@@ -37,11 +37,15 @@ Commands:
                               unowned (no record; Playwright leftovers), closed.
                               Browsers: pid, kind, headed, age; the global one
                               marked `global`.
-  gc                          Close the sessions of dead owner panes, prune records
-                              of sessions that no longer exist. Never closes a
-                              live owner's session or an unrecorded one; prints
-                              everything it closes.
-  close <session>             Close one session on explicit request.
+  gc                          Close sessions with a confirmed dead local owner.
+  gc --dry-run                Read-only legacy socket inventory with owner status
+                              and identity for ownerless entries. Idle age alone
+                              gives no evidence of owner liveness.
+  disconnect <session> --identity <identity>
+                              Close one reviewed ownerless legacy daemon using
+                              its current identity from gc --dry-run. Attached
+                              browsers stay running.
+  close <session>             Close a named session on explicit request.
 
 `ls --json` (schema 1): {schema, sessions: [{session, state, colour, pane,
 host, project, cwd, age, idle, headed, pid}], browsers: [{pid, kind, headed,
@@ -61,7 +65,8 @@ Shared headed development:
   agent-browser --session ui close
 
 The shim routes ordinary `--headed` launches to dev and remembers their
-names. Git worktrees of one project share cookies and a window. Each
+names. Explicit CDP/launch settings and existing legacy bindings stay on
+the upstream route. Default headed local reviews use dev as well. Git worktrees of one project share cookies and a window. Each
 session can select and close only its own tabs. Use a fresh name for an
 isolated headless browser. The managed profile is
 `${XDG_DATA_HOME:-~/.local/share}/vega/browser/dev-cft`.

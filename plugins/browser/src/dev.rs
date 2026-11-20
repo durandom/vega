@@ -48,6 +48,8 @@ struct Tab {
     port: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     chrome_tab_id: Option<i64>,
+    #[serde(default)]
+    init_script: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -149,15 +151,33 @@ pub fn routes(session: &str, args: &[String]) -> Result<bool, Failure> {
     if load(&profile()?)?.sessions.contains_key(session) {
         return Ok(true);
     }
-    // Review retains its current launcher until it opts into the dev adapter.
+    // Review invokes the adapter explicitly and preserves its legacy routes.
     if env::var("VEGA_BROWSER_LEGACY_HEADED").as_deref() == Ok("1") {
         return Ok(false);
     }
-    // Explicit attach/config/restore invocations retain the existing shim path.
+    Ok(mark::headed(args) && !custom_launch(args) && !crate::legacy::has_binding(session))
+}
+
+pub const LAUNCH_OVERRIDES: &[&str] = &[
+    "AGENT_BROWSER_CDP",
+    "AGENT_BROWSER_CDP_HEADERS",
+    "AGENT_BROWSER_PROVIDER",
+    "AGENT_BROWSER_AUTO_CONNECT",
+    "AGENT_BROWSER_CONFIG",
+    "AGENT_BROWSER_EXECUTABLE_PATH",
+    "AGENT_BROWSER_PROFILE",
+    "AGENT_BROWSER_ENGINE",
+    "AGENT_BROWSER_RESTORE",
+    "AGENT_BROWSER_NAMESPACE",
+];
+
+/// Recognize explicit upstream launch settings, including auto-loaded configs.
+pub fn custom_launch(args: &[String]) -> bool {
     let custom = args.iter().any(|a| {
         matches!(
             a.split('=').next().unwrap_or_default(),
             "--cdp"
+                | "--cdp-headers"
                 | "--auto-connect"
                 | "--provider"
                 | "-p"
@@ -166,19 +186,33 @@ pub fn routes(session: &str, args: &[String]) -> Result<bool, Failure> {
                 | "--executable-path"
                 | "--profile"
                 | "--engine"
+                | "--namespace"
                 | "connect"
         )
-    }) || [
-        "AGENT_BROWSER_CDP",
-        "AGENT_BROWSER_PROVIDER",
-        "AGENT_BROWSER_AUTO_CONNECT",
-        "AGENT_BROWSER_CONFIG",
-        "AGENT_BROWSER_EXECUTABLE_PATH",
-        "AGENT_BROWSER_PROFILE",
-    ]
-    .iter()
-    .any(|var| env::var_os(var).is_some_and(|v| !v.is_empty()));
-    Ok(mark::headed(args) && !custom)
+    }) || LAUNCH_OVERRIDES
+        .iter()
+        .any(|var| env::var_os(var).is_some_and(|v| !v.is_empty()));
+    custom
+        || crate::legacy::configs().any(|config| {
+            [
+                "cdp",
+                "cdpHeaders",
+                "provider",
+                "executablePath",
+                "profile",
+                "engine",
+                "restore",
+                "namespace",
+            ]
+            .iter()
+            .any(|key| !config[key].is_null())
+                || config["autoConnect"] == true
+        })
+}
+
+/// Named bindings in the configured dev registry, including stale generations.
+pub fn session_names() -> Result<Vec<String>, Failure> {
+    Ok(load(&profile()?)?.sessions.into_keys().collect())
 }
 
 struct Invocation<'a> {
@@ -355,6 +389,7 @@ fn create_tab(
             target: target.clone(),
             port,
             chrome_tab_id,
+            init_script: None,
         })
     })();
     if result.is_err() {
@@ -419,6 +454,76 @@ fn tab_id(raw: &str) -> Result<u64, Failure> {
 
 fn passed() -> Result<ExitCode, Failure> {
     Ok(ExitCode::SUCCESS)
+}
+
+/// Close an abandoned managed session under the same registry and owner
+/// locks used for allocation. A changed owner or unreadable pane holds it.
+pub fn gc_close(name: &str) -> Result<bool, Failure> {
+    let profile = profile()?.canonicalize().map_err(failure)?;
+    let _guard = lock(&profile)?;
+    let mut data = load(&profile)?;
+    let Some(session) = data.sessions.get(name) else {
+        return Ok(false);
+    };
+    let owners = owner::Locked::acquire().map_err(failure)?;
+    let Some(record) = owners.get(name).map_err(failure)? else {
+        return Ok(false);
+    };
+    let Some(pane) = record.pane.as_deref() else {
+        return Ok(false);
+    };
+    let local = vega_herdr::local_host();
+    if local.is_empty()
+        || local == "unknown"
+        || record.host != local
+        || session.pane.as_deref() != Some(pane)
+        || crate::pane::alive(pane) != Some(false)
+    {
+        return Ok(false);
+    }
+    if let Some(browser) = data.browser.clone() {
+        if browser.path == session.generation && process::running(&browser, &profile)? {
+            let mut cdp = Cdp::connect(&browser)?;
+            close_session(&mut data, name, &browser, &mut cdp)?;
+        } else {
+            data.sessions.remove(name);
+        }
+    } else {
+        data.sessions.remove(name);
+    }
+    save(&profile, &data)?;
+    owners.remove(name).map_err(failure)?;
+    Ok(true)
+}
+
+fn close_session(
+    data: &mut Registry,
+    name: &str,
+    browser: &Browser,
+    cdp: &mut Cdp,
+) -> Result<(), Failure> {
+    let session = data
+        .sessions
+        .get(name)
+        .ok_or_else(|| stale("Missing dev session"))?;
+    let project = data
+        .projects
+        .get(&session.project)
+        .ok_or_else(|| stale("Missing project context"))?;
+    for tab in session.tabs.values() {
+        release(cdp, project, &tab.target)?;
+    }
+    let id = session.project.clone();
+    data.sessions.remove(name);
+    if !data
+        .sessions
+        .values()
+        .any(|s| s.project == id && s.generation == browser.path)
+        && dispose_unused(cdp, project)?
+    {
+        data.projects.remove(&id);
+    }
+    Ok(())
 }
 
 pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
@@ -496,6 +601,11 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
     let opening_tab = matches!(call.words.as_slice(), ["tab", "new", ..]);
     let opening =
         opening_tab || matches!(call.words.first(), Some(&("open" | "goto" | "navigate")));
+    if previous.is_none() && crate::legacy::has_binding(&call.name) {
+        return Err(usage(
+            "Use a fresh name for a dev session; this name already has a legacy binding",
+        ));
+    }
     if previous.is_none() && !opening {
         return Err(stale("Start the named dev session with open or tab new"));
     }
@@ -576,18 +686,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
 
     match call.words.as_slice() {
         ["close"] => {
-            for tab in session.tabs.values() {
-                release(&mut cdp, project, &tab.target)?;
-            }
-            data.sessions.remove(&call.name);
-            if !data
-                .sessions
-                .values()
-                .any(|s| s.project == repo.id && s.generation == browser.path)
-                && dispose_unused(&mut cdp, project)?
-            {
-                data.projects.remove(&repo.id);
-            }
+            close_session(&mut data, &call.name, &browser, &mut cdp)?;
             save(&profile, &data)?;
             owner::remove(&call.name);
             call.output(json!({"closed": true}), "✓ Browser closed");
@@ -681,7 +780,12 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         _ => {}
     }
 
-    let tab = &session.tabs[&session.active];
+    let tab = session.tabs.get_mut(&session.active).expect("active tab");
+    if let Some(path) = call.init_script {
+        tab.init_script = Some(std::path::absolute(path).map_err(failure)?);
+    }
+    session.pane = record.pane.clone();
+    let init_script = tab.init_script.clone();
     cdp.info(project, &tab.target)?;
     let binding = proxy::Binding {
         browser,
@@ -692,11 +796,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
     // A dead adapter can only be replaced with the exact same verified target.
     if !proxy::alive(port, &binding) {
         port = proxy::start(&binding)?;
-        session
-            .tabs
-            .get_mut(&session.active)
-            .expect("active tab")
-            .port = port;
+        tab.port = port;
     }
     let active = session.active;
     let total = session.tabs.len();
@@ -739,7 +839,15 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         );
         return passed();
     }
-    let status = run_agent(&profile, &config, &binding, &call, port, (&repo.id, &label))?;
+    let status = run_agent(
+        &profile,
+        &config,
+        &binding,
+        &call,
+        port,
+        (&repo.id, &label),
+        init_script.as_deref(),
+    )?;
     if opening_tab && status.success() {
         call.output(
             json!({"tabId": format!("t{active}"), "total": total}),
@@ -758,6 +866,7 @@ fn run_agent(
     call: &Invocation<'_>,
     port: u16,
     project: (&str, &str),
+    init_script: Option<&Path>,
 ) -> Result<std::process::ExitStatus, Failure> {
     let binary = real::real_binary()
         .ok_or_else(|| failure("Install pinned agent-browser with vega browser install"))?;
@@ -797,8 +906,12 @@ fn run_agent(
             "--cdp",
             &endpoint,
         ]);
-    if call.init_script.is_none() && env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0") {
-        if let Some(path) = mark::dev_mark(&call.name, project.0, project.1) {
+    if call.init_script.is_none() {
+        if let Some(path) = init_script.map(Path::to_owned).or_else(|| {
+            (env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0"))
+                .then(|| mark::dev_mark(&call.name, project.0, project.1))
+                .flatten()
+        }) {
             cmd.arg("--init-script").arg(path);
         }
     }

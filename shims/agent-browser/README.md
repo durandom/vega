@@ -1,9 +1,11 @@
 # agent-browser shim
 
-Passes every agent-browser call with a session name (`--session <name>` anywhere in the args, or a
-non-empty `AGENT_BROWSER_SESSION`) through to the real binary unchanged, and upserts the owner record
-(`$XDG_STATE_HOME/vega/browser/sessions.json`: pane, host, project, cwd, first_seen, last_seen) so
-`vega browser ls`/`gc` can attribute sessions.
+Every call names a session with `--session <name>` or `AGENT_BROWSER_SESSION`.
+Ordinary headed calls use shared Chrome for Testing in the Git project's context.
+Start with `vega browser dev --session <name> open <url>` and use
+`agent-browser --session <name>` for subsequent commands. The shim keeps explicit
+attachments, existing legacy bindings and headless launches on the upstream path.
+Named calls record the owner in `$XDG_STATE_HOME/vega/browser/sessions.json`.
 
 - **Denied:** calls without a session name (exit 1, a stderr hint pointing at `vega skills browser`).
   Default sessions are the leftovers nobody can attribute, and `close` without a name would close one

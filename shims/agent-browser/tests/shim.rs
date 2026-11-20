@@ -99,6 +99,32 @@ fn err(o: &Output) -> String {
 }
 
 #[test]
+fn headed_external_config_and_existing_legacy_binding_stay_upstream() {
+    let f = fix();
+    let config = f.tmp.join("proj/agent-browser.json");
+    fs::write(
+        &config,
+        r#"{"cdp":"ws://example.test/devtools/browser/external"}"#,
+    )
+    .unwrap();
+    let args = ["--session", "legacy", "--headed", "get", "url"];
+    let o = run(&f, &args, &[]);
+    assert!(o.status.success(), "{o:?}");
+    fs::remove_file(config).unwrap();
+
+    let sockets = f.tmp.join("sock");
+    fs::create_dir(&sockets).unwrap();
+    let _socket = std::os::unix::net::UnixListener::bind(sockets.join("legacy.sock")).unwrap();
+    let o = run(
+        &f,
+        &args,
+        &[("AGENT_BROWSER_SOCKET_DIR", sockets.display().to_string())],
+    );
+    assert!(o.status.success(), "{o:?}");
+    assert_eq!(argv(&f).len(), 2);
+}
+
+#[test]
 fn isolated_headless_and_explicit_headed_calls_keep_their_original_route() {
     let f = fix();
     let o = run(

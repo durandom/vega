@@ -5,6 +5,14 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 258 · 2026-11-20
+
+- feature: Local headed `vega review` sessions use the project's shared
+  Chrome for Testing context. Use the printed session name for later commands.
+- optional: Inspect legacy browser owners with `vega browser gc --dry-run`
+  and disconnect a reviewed entry with `vega browser disconnect <session>
+  --identity <identity>`.
+
 ## 257 · 2026-11-20
 
 - feature: Register dev origins with `vega browser dev state register <origin>`.

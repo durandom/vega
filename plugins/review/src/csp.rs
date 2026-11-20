@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
-use crate::{agent_browser, fs, thread, write_private, Failure};
+use crate::{fs, thread, write_private, Failure};
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -36,9 +36,8 @@ fn wait_file(path: &Path) -> Result<String, Failure> {
 }
 
 /// Called by start after launching the blank tab; wait before loading the app.
-pub fn prepare(dir: &Path, session: &str) -> Result<(), Failure> {
-    let endpoint = agent_browser(session, &["get", "cdp-url"])?;
-    write_private(&dir.join("cdp-url.tmp"), &endpoint)?;
+pub fn prepare(dir: &Path, endpoint: &str) -> Result<(), Failure> {
+    write_private(&dir.join("cdp-url.tmp"), endpoint)?;
     fs::rename(dir.join("cdp-url.tmp"), dir.join("cdp-url")).map_err(failure)?;
     let result = wait_file(&dir.join("csp-ready"))?;
     if result != "ok" {

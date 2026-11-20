@@ -77,14 +77,14 @@ impl Profile {
 enum Cmd {
     /// Open the app with the review overlay in a headed browser and start the inbox
     #[command(
-        after_help = "Without --profile, the URL must be on a local dev host. Shared profiles accept HTTP(S) URLs.\nThe overlay runs only on that origin. One review per pane.\n--headless runs the browser headless and skips the headed-pane check: for scripted\ntests, where nobody looks at the page.\n\nExamples:\n  vega review start http://127.0.0.1:5287/\n  vega review start http://app.localhost:3000/settings --session spire-review"
+        after_help = "Local headed reviews use shared Chrome for Testing by default. Without --profile, the URL must be on a local dev host. Explicit Chromium profiles accept HTTP(S) URLs.\nThe overlay runs only on that origin. One review per pane.\n--headless runs the browser headless and skips the headed-pane check: for scripted\ntests, where nobody looks at the page.\n\nExamples:\n  vega review start http://127.0.0.1:5287/\n  vega review start http://app.localhost:3000/settings --session spire-review"
     )]
     Start {
         url: String,
-        /// agent-browser session name (prefix for shared profiles) [default: review-<pane>]
+        /// Prefix for the printed session name [default: review-<pane>]
         #[arg(long)]
         session: Option<String>,
-        /// Shared Chromium profile [default: isolated browser]
+        /// Explicit Chromium profile [default for headed review: shared dev CfT]
         #[arg(long, conflicts_with = "headless")]
         profile: Option<Profile>,
         /// Headless browser, no headed-pane check (tests)
@@ -389,16 +389,46 @@ fn alive(pid: Option<u64>) -> bool {
 }
 
 fn agent_browser(session: &str, args: &[&str]) -> Result<String, Failure> {
-    let out = Command::new("agent-browser")
+    run_browser("agent-browser", &["--session", session], args, false)
+}
+
+fn review_browser(cfg: &Value, args: &[&str]) -> Result<String, Failure> {
+    let session = cfg["session"].as_str().unwrap_or("");
+    if cfg["dev"] == true {
+        run_browser("vega-browser", &["dev", "--session", session], args, true)
+    } else if let Some(config) = cfg["headless_config"].as_str() {
+        run_browser(
+            "agent-browser",
+            &["--session", session, "--config", config],
+            args,
+            true,
+        )
+    } else {
+        agent_browser(session, args)
+    }
+}
+
+fn run_browser(
+    bin: &str,
+    prefix: &[&str],
+    args: &[&str],
+    isolated: bool,
+) -> Result<String, Failure> {
+    let mut command = Command::new(bin);
+    if isolated {
+        for var in vega_browser::dev::LAUNCH_OVERRIDES {
+            command.env_remove(var);
+        }
+    }
+    let out = command
         .env("VEGA_BROWSER_LEGACY_HEADED", "1")
-        .arg("--session")
-        .arg(session)
+        .args(prefix)
         .args(args)
         .output()
         .map_err(|e| {
             Failure::new(
                 "no_agent_browser",
-                format!("agent-browser: {e}"),
+                format!("{bin}: {e}"),
                 "install agent-browser (npm i -g agent-browser)",
             )
         })?;
@@ -407,7 +437,7 @@ fn agent_browser(session: &str, args: &[&str]) -> Result<String, Failure> {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(Failure::new(
             "agent_browser_failed",
-            format!("agent-browser {}: {} {}", args.join(" "), text, err.trim()),
+            format!("{bin} {}: {} {}", args.join(" "), text, err.trim()),
             "check the session with agent-browser session list",
         ));
     }
@@ -421,6 +451,8 @@ fn start(
     profile: Option<Profile>,
 ) -> Result<(), Failure> {
     let origin = review_origin(url, profile.is_some())?;
+    let external = profile.is_none() && !headless && vega_browser::dev::custom_launch(&[]);
+    let dev = profile.is_none() && !headless && !external;
     let pane = my_pane()?;
     if !headless && !owner_works_here(&pane) {
         return Err(Failure::new(
@@ -442,16 +474,12 @@ fn start(
                 "vega review stop first",
             ));
         }
-        if cfg["profile"].is_string() {
+        if shared(&cfg) {
             close_shared(&dir, &cfg)?;
         }
     }
-    let session = session.unwrap_or_else(|| format!("review-{}", pane.replace(':', "-")));
-    let session = if profile.is_some() {
-        format!("{session}-{}", random_hex(8)?)
-    } else {
-        session
-    };
+    let prefix = session.unwrap_or_else(|| format!("review-{}", pane.replace(':', "-")));
+    let session = format!("{prefix}-{}", random_hex(8)?);
     let _ = fs::remove_dir_all(&dir);
     fs::DirBuilder::new()
         .recursive(true)
@@ -459,10 +487,18 @@ fn start(
         .create(&dir)
         .map_err(|e| Failure::new("write_failed", format!("{}: {e}", dir.display()), ""))?;
     let secret = random_hex(32)?;
+    let headless_config = if headless {
+        let path = dir.join("agent-browser.json");
+        write_private(&path, "{}")?;
+        Some(path)
+    } else {
+        None
+    };
     let cfg = json!({
         "url": url, "origin": origin, "pane": pane, "session": session, "secret": secret,
         "headed": !headless,
         "profile": profile.map(Profile::name),
+        "dev": dev, "external": external, "headless_config": headless_config,
         "blank": format!("about:blank#vega-review-{}", random_hex(8)?),
     });
     write_private(&dir.join("config.json"), &cfg.to_string())?;
@@ -507,8 +543,8 @@ fn start(
     let script_path = dir.join("overlay.js");
     write_private(&script_path, &script)?;
     let script_arg = script_path.display().to_string();
-    if let Err(f) = open_review(&session, &script_arg, url, headless, &dir, &cfg) {
-        if profile.is_some() {
+    if let Err(f) = open_review(&script_arg, url, headless, &dir, &cfg) {
+        if shared(&cfg) {
             if let Err(cleanup) = close_shared(&dir, &cfg) {
                 return Err(Failure::new(
                     &f.code,
@@ -517,24 +553,22 @@ fn start(
                 ));
             }
         } else {
-            let _ = agent_browser(&session, &["close"]);
+            let _ = review_browser(&cfg, &["close"]);
         }
         stop_inbox(&dir, &cfg);
         return Err(f);
     }
     // A reused session can carry an earlier `set viewport`; the owner's page
     // must follow their window from the start.
-    let reset = if headless {
+    let reset = if headless || dev {
         None
     } else {
-        follow_window(&session)
+        follow_window(&cfg)
     };
     println!("review: {url}");
     println!(
         "browser: agent-browser session {session} ({})",
-        profile
-            .map(Profile::name)
-            .unwrap_or(if headless { "headless" } else { "headed" })
+        browser_label(&cfg)
     );
     print_reset(reset);
     println!("inbox: 127.0.0.1:{port} (notes need the session secret and Origin {origin})");
@@ -545,7 +579,6 @@ fn start(
 /// Launch on a unique blank tab so the inbox can attach CSP bypass before the
 /// app's CSP is initialized. The init script still runs on every navigation.
 fn open_review(
-    session: &str,
     script: &str,
     url: &str,
     headless: bool,
@@ -553,7 +586,10 @@ fn open_review(
     cfg: &Value,
 ) -> Result<(), Failure> {
     let blank = cfg["blank"].as_str().unwrap_or("about:blank");
-    if let Some(profile) = cfg["profile"].as_str() {
+    let session = cfg["session"].as_str().unwrap_or("");
+    if cfg["dev"] == true {
+        review_browser(cfg, &["--init-script", script, "open", blank])?;
+    } else if let Some(profile) = cfg["profile"].as_str() {
         let mut args = vec!["ab"];
         if profile == "vpn" {
             browser_plugin(&["vpn", "start"])?;
@@ -572,9 +608,21 @@ fn open_review(
             blank,
         ]);
         browser_plugin(&args)?;
-    } else {
+    } else if cfg["external"] == true {
         agent_browser(
             session,
+            &[
+                "--headed",
+                "--pin-tab",
+                "--init-script",
+                script,
+                "open",
+                blank,
+            ],
+        )?;
+    } else {
+        review_browser(
+            cfg,
             &[
                 "--init-script",
                 script,
@@ -585,8 +633,13 @@ fn open_review(
             ],
         )?;
     }
-    csp::prepare(dir, session)?;
-    agent_browser(session, &["open", url])?;
+    csp::prepare(dir, &review_browser(cfg, &["get", "cdp-url"])?)?;
+    review_browser(cfg, &["open", url])?;
+    if cfg["dev"] == true {
+        // Grouped tabs can start in the background. Present this review's
+        // verified initial tab after navigation.
+        review_browser(cfg, &["tab", "t1"])?;
+    }
     Ok(())
 }
 
@@ -612,9 +665,34 @@ fn browser_plugin(args: &[&str]) -> Result<(), Failure> {
     Ok(())
 }
 
+fn shared(cfg: &Value) -> bool {
+    cfg["dev"] == true || cfg["external"] == true || cfg["profile"].is_string()
+}
+
+fn browser_label(cfg: &Value) -> &str {
+    cfg["profile"].as_str().unwrap_or_else(|| {
+        if cfg["dev"] == true {
+            "dev CfT"
+        } else if cfg["external"] == true {
+            "external"
+        } else if cfg["headed"] == false {
+            "headless"
+        } else {
+            "headed"
+        }
+    })
+}
+
 fn close_shared(dir: &Path, cfg: &Value) -> Result<(), Failure> {
+    if cfg["dev"] == true {
+        return review_browser(cfg, &["close"]).map(drop);
+    }
     csp::close_tab(dir, cfg["blank"].as_str().unwrap_or(""))?;
-    browser_plugin(&["close", cfg["session"].as_str().unwrap_or("")])
+    if cfg["external"] == true {
+        review_browser(cfg, &["close"]).map(drop)
+    } else {
+        browser_plugin(&["close", cfg["session"].as_str().unwrap_or("")])
+    }
 }
 
 fn stop_inbox(dir: &Path, cfg: &Value) {
@@ -636,11 +714,11 @@ fn stop() -> Result<(), Failure> {
     })?;
     let notes = cli_get(&cfg, "/notes").ok();
     let session = cfg["session"].as_str().unwrap_or("").to_string();
-    let closed = if cfg["profile"].is_string() {
+    let closed = if shared(&cfg) {
         close_shared(&dir, &cfg)?;
         true
     } else {
-        agent_browser(&session, &["close"]).is_ok()
+        review_browser(&cfg, &["close"]).is_ok()
     };
     stop_inbox(&dir, &cfg);
     println!("stopped: {}", cfg["url"].as_str().unwrap_or("?"));
@@ -706,9 +784,8 @@ fn cli_get(cfg: &Value, path: &str) -> Result<Value, Failure> {
 /// `eval` prints the result as JSON; a page without the overlay gives the
 /// string `no_overlay`.
 fn overlay_call(cfg: &Value, call: &str) -> Result<Value, Failure> {
-    let session = cfg["session"].as_str().unwrap_or("");
     let js = format!("window.__vegaReview ? (window.__vegaReview.{call} ?? null) : 'no_overlay'");
-    let out = agent_browser(session, &["eval", &js])?;
+    let out = review_browser(cfg, &["eval", &js])?;
     Ok(serde_json::from_str(&out).unwrap_or(Value::String(out)))
 }
 
@@ -730,9 +807,9 @@ fn pinned(sizes: &str) -> Option<(u64, u64)> {
 /// Clears a device metrics override so the page follows the window again:
 /// `set viewport 0 0 0` (CDP: 0 disables the override). Returns the size the
 /// page was pinned at, if any. Best effort: a failure only keeps the override.
-fn follow_window(session: &str) -> Option<(u64, u64)> {
-    let size = pinned(&agent_browser(session, &["eval", SIZES_JS]).ok()?)?;
-    agent_browser(session, &["set", "viewport", "0", "0", "0"]).ok()?;
+fn follow_window(cfg: &Value) -> Option<(u64, u64)> {
+    let size = pinned(&review_browser(cfg, &["eval", SIZES_JS]).ok()?)?;
+    review_browser(cfg, &["set", "viewport", "0", "0", "0"]).ok()?;
     Some(size)
 }
 
@@ -772,8 +849,8 @@ fn highlight_result(out: &Value, selector: &str, label: Option<&str>) -> Result<
 
 fn highlight(selector: &str, label: Option<&str>) -> Result<(), Failure> {
     let (_, cfg) = current()?;
-    let reset = if cfg["headed"].as_bool().unwrap_or(true) {
-        follow_window(cfg["session"].as_str().unwrap_or(""))
+    let reset = if cfg["headed"].as_bool().unwrap_or(true) && cfg["dev"] != true {
+        follow_window(&cfg)
     } else {
         None
     };
@@ -904,7 +981,7 @@ fn page_patches(cfg: &Value, name: Option<&str>) -> Value {
 }
 
 fn reload(cfg: &Value) -> Result<(), Failure> {
-    agent_browser(cfg["session"].as_str().unwrap_or(""), &["reload"]).map(drop)
+    review_browser(cfg, &["reload"]).map(drop)
 }
 
 fn patch(file: &Path) -> Result<(), Failure> {
@@ -1036,7 +1113,7 @@ fn shot(selector: Option<&str>, out: Option<&Path>) -> Result<(), Failure> {
     args.extend(out.as_deref());
     // Highlights and the panel would cover the design under review.
     let hidden = overlay_call(&cfg, "hide(true)").is_ok_and(|v| v != "no_overlay");
-    let res = agent_browser(session, &args);
+    let res = review_browser(&cfg, &args);
     if hidden {
         let _ = overlay_call(&cfg, "hide(false)");
     }
@@ -1074,8 +1151,11 @@ fn status() -> Result<(), Failure> {
     let up = alive(cfg["pid"].as_u64());
     println!("review: {}", cfg["url"].as_str().unwrap_or("?"));
     let session = cfg["session"].as_str().unwrap_or("?");
-    if let Some(profile) = cfg["profile"].as_str() {
-        println!("browser: agent-browser session {session} ({profile})");
+    if shared(&cfg) {
+        println!(
+            "browser: agent-browser session {session} ({})",
+            browser_label(&cfg)
+        );
     } else {
         println!("browser: agent-browser session {session}");
     }

@@ -88,24 +88,16 @@ fn strict_csp_notes_survive_reload_and_navigation() {
             write_response(stream, &response);
         }
     });
-    let cfg = json!({"blank": format!("about:blank#vega-csp-test-{}", random_hex(8).unwrap()), "port": inbox.port, "secret": secret});
+    let browser = Browser(format!("vega-csp-test-{}", random_hex(8).unwrap()));
+    let cfg = json!({"session": browser.0, "blank": format!("about:blank#vega-csp-test-{}", random_hex(8).unwrap()), "port": inbox.port, "secret": secret});
     let script = dir.path().join("overlay.js");
     write_private(&script, &OVERLAY.replace(CFG_PLACEHOLDER, &json!({
         "origin": origin, "secret": secret, "endpoint": format!("http://127.0.0.1:{}", inbox.port),
     }).to_string())).unwrap();
-    let browser = Browser(format!("vega-csp-test-{}", random_hex(8).unwrap()));
     let path = dir.path().to_path_buf();
     let blank = cfg["blank"].as_str().unwrap().to_string();
     let attachment = thread::spawn(move || csp::listen(&path, &blank).unwrap());
-    open_review(
-        &browser.0,
-        script.to_str().unwrap(),
-        &origin,
-        true,
-        dir.path(),
-        &cfg,
-    )
-    .unwrap();
+    open_review(script.to_str().unwrap(), &origin, true, dir.path(), &cfg).unwrap();
     // Like serve, keep the attachment alive for the full review lifetime.
     let _csp = attachment.join().unwrap();
     for (index, action) in ["initial", "reload", "navigate", "return"]

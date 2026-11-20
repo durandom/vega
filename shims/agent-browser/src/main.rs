@@ -62,7 +62,8 @@ fn main() -> ExitCode {
         return vega_shim::exec_real_with(TOOL, Some(real::ENV), arg0.clone(), rest.to_vec());
     }
     eprintln!("agent-browser: name your session: --session <name> or AGENT_BROWSER_SESSION=<name>");
-    eprintln!("  (e.g. --session <project>-<task>); see `vega skills browser`");
+    eprintln!("  For headed dev: vega browser dev --session <project>-<task> open <url>");
+    eprintln!("  Reuse that name for later commands and see `vega skills browser`.");
     ExitCode::from(1)
 }
 

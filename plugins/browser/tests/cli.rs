@@ -3,9 +3,9 @@
 //! in-test DevTools responder, and temp homes. Nothing real is started.
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::{fs::PermissionsExt, net::UnixListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
@@ -224,6 +224,9 @@ fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
         .env("PATH", format!("{}:/usr/bin:/bin", f.bin.display()))
         .env("XDG_STATE_HOME", &f.state)
         .env("HOME", &f.home)
+        .env("XDG_DATA_HOME", f.path("data"))
+        .env("AGENT_BROWSER_SOCKET_DIR", f.path("sock"))
+        .env_remove("AGENT_BROWSER_NAMESPACE")
         .env_remove("XDG_CONFIG_HOME")
         .env("TMPDIR", f.tmp.join("tmp"))
         .env("VEGA_FIX", &f.tmp)
@@ -944,8 +947,46 @@ fn ls_survives_a_missing_agent_browser() {
     assert_eq!(s[0]["state"], "live", "no session list: nothing is closed");
 }
 
+fn daemon_socket(f: &Fix, session: &str) -> UnixListener {
+    fs::create_dir_all(f.path("sock")).unwrap();
+    UnixListener::bind(f.path(&format!("sock/{session}.sock"))).unwrap()
+}
+
+fn expect_disconnect(socket: UnixListener) {
+    socket.set_nonblocking(true).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut stream = loop {
+        match socket.accept() {
+            Ok((stream, _)) => break stream,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    && std::time::Instant::now() < deadline =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("expected disconnect: {e}"),
+        }
+    };
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut command = String::new();
+    BufReader::new(&stream).read_line(&mut command).unwrap();
+    let request: Value = serde_json::from_str(&command).unwrap();
+    assert_eq!(request["action"], "close");
+    writeln!(
+        stream,
+        "{}",
+        serde_json::json!({
+            "id": request["id"], "success": true, "data": {"closed": true}
+        })
+    )
+    .unwrap();
+}
+
 #[test]
-fn gc_closes_dead_owners_and_prunes_dead_records_only() {
+fn gc_closes_only_daemons_of_dead_local_owners() {
     let f = fix();
     let host = hostname();
     let now = std::time::SystemTime::now()
@@ -954,7 +995,7 @@ fn gc_closes_dead_owners_and_prunes_dead_records_only() {
         .as_secs() as i64;
     fs::write(
         f.path("sessions"),
-        "s-dead\ns-live\ns-hc-dead\ns-far\ns-none\n",
+        "s-dead\ns-live\ns-hc-dead\ns-far\ns-none\ns-unrecorded\n",
     )
     .unwrap();
     herdr_panes(&f, r#"{"pane_id":"w1:p2"}"#);
@@ -965,7 +1006,29 @@ fn gc_closes_dead_owners_and_prunes_dead_records_only() {
     record(&f, "s-none", None, &host, now - 60, now - 60);
     record(&f, "s-ghost", Some("w1:p2"), &host, now - 60, now - 60);
 
+    let workers: Vec<_> = ["s-dead", "s-hc-dead"]
+        .into_iter()
+        .map(|name| {
+            let socket = daemon_socket(&f, name);
+            thread::spawn(move || expect_disconnect(socket))
+        })
+        .collect();
+    // Ownerless sessions remain untouched even when their sockets exist.
+    let untouched: Vec<_> = ["s-unrecorded", "s-live", "s-far", "s-none"]
+        .into_iter()
+        .map(|name| daemon_socket(&f, name))
+        .collect();
     let o = run(&f, &["gc"], &[]);
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    for socket in untouched {
+        socket.set_nonblocking(true).unwrap();
+        assert_eq!(
+            socket.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
     assert!(o.status.success(), "{}", out(&o));
     let text = out(&o);
     assert!(
@@ -976,28 +1039,13 @@ fn gc_closes_dead_owners_and_prunes_dead_records_only() {
         text.contains("closed s-hc-dead (owner pane t9 is gone)"),
         "{text}"
     );
-    assert!(
-        text.contains("pruned s-ghost (no agent-browser session)"),
-        "{text}"
-    );
-    assert!(
-        text.contains("gc: 2 closed, kept 3 (1 live owner pane, 1 on another host, 1 unattributed, 0 liveness unknown)"),
-        "{text}"
-    );
-    let closed = lines_of(&f, "ab-argv");
-    assert!(
-        closed.contains(&"--session s-dead close".to_string()),
-        "{closed:?}"
-    );
-    assert!(
-        closed.contains(&"--session s-hc-dead close".to_string()),
-        "{closed:?}"
-    );
+    assert!(text.contains("gc: 2 closed, 4 kept"), "{text}");
+    assert!(lines_of(&f, "ab-argv").is_empty());
     let left = records(&f);
-    for kept in ["s-live", "s-far", "s-none"] {
+    for kept in ["s-live", "s-far", "s-none", "s-ghost"] {
         assert!(left.get(kept).is_some(), "{left}");
     }
-    for gone in ["s-dead", "s-hc-dead", "s-ghost"] {
+    for gone in ["s-dead", "s-hc-dead"] {
         assert!(left.get(gone).is_none(), "{left}");
     }
 }
@@ -1010,19 +1058,117 @@ fn gc_keeps_sessions_when_liveness_is_unknown() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    fs::write(f.path("sessions"), "s-herdr-down\n").unwrap();
+    let _unknown = daemon_socket(&f, "s-herdr-down");
     fs::remove_file(f.bin.join("herdr")).unwrap(); // no herdr: liveness unknown
     record(&f, "s-herdr-down", Some("w1:p2"), &host, now - 60, now - 60);
     let o = run(&f, &["gc"], &[]);
     assert!(o.status.success(), "{}", out(&o));
     assert!(
-        out(&o).contains("kept s-herdr-down: cannot tell whether pane w1:p2 is alive"),
+        out(&o).contains("kept s-herdr-down: unknown"),
         "{}",
         out(&o)
     );
-    // Only the session listing ran; nothing was closed.
-    assert_eq!(lines_of(&f, "ab-argv"), ["session list"]);
+    assert!(lines_of(&f, "ab-argv").is_empty());
     assert!(records(&f).get("s-herdr-down").is_some());
+}
+
+#[test]
+fn gc_only_releases_dev_bindings_with_a_matching_dead_local_owner() {
+    let f = fix();
+    let dir = f.path("data/vega/browser/dev-cft");
+    fs::create_dir_all(&dir).unwrap();
+    let registry = dir.join("vega-dev.json");
+    let session = serde_json::json!({
+        "project": "fixture",
+        "generation": "/devtools/browser/expired",
+        "pane": "w1:p9",
+        "active": 1,
+        "next": 2,
+        "tabs": {"1": {"target": "fixture", "port": 0}}
+    });
+    fs::write(
+        &registry,
+        serde_json::json!({
+            "browser": null, "projects": {},
+            "sessions": {"dev-dead": session, "dev-transferred": session}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    herdr_panes(&f, r#"{"pane_id":"w1:p2"}"#);
+    let host = hostname();
+    record(&f, "dev-dead", Some("w1:p9"), &host, 1, 2);
+    record(&f, "dev-transferred", Some("w1:p2"), &host, 1, 2);
+    let output = run(&f, &["gc"], &[]);
+    assert!(output.status.success(), "{output:?}");
+    let current: Value = serde_json::from_slice(&fs::read(registry).unwrap()).unwrap();
+    assert!(current["sessions"]["dev-dead"].is_null());
+    assert!(current["sessions"]["dev-transferred"].is_object());
+}
+
+#[test]
+fn legacy_disconnect_requires_current_ownerless_socket_identity() {
+    let f = fix();
+    fs::write(f.path("sessions"), "ownerless\nprotected\n").unwrap();
+    let old = daemon_socket(&f, "ownerless");
+    let protected = daemon_socket(&f, "protected");
+    record(&f, "protected", Some("w1:p2"), "remote", 1, 2);
+    let args = ["gc", "--dry-run"];
+    let dry = run(&f, &args, &[]);
+    assert!(dry.status.success(), "{dry:?}");
+    let original = out(&dry);
+    let identity = |report: &str| {
+        report
+            .lines()
+            .find_map(|line| line.strip_prefix("  ownerless,ownerless,"))
+            .filter(|id| id.len() == 64)
+            .unwrap()
+            .to_owned()
+    };
+    let reviewed = identity(&original);
+    assert!(original.contains("protected,remote,"));
+    assert!(lines_of(&f, "ab-argv").is_empty());
+
+    fs::remove_file(f.path("sock/ownerless.sock")).unwrap();
+    let replacement = daemon_socket(&f, "ownerless");
+    let rejected = run(
+        &f,
+        &["disconnect", "ownerless", "--identity", &reviewed],
+        &[],
+    );
+    assert!(!rejected.status.success(), "{rejected:?}");
+    assert!(out(&rejected).contains("no longer active with that identity"));
+    let current = identity(&out(&run(&f, &args, &[])));
+    assert_ne!(current, reviewed);
+
+    record(&f, "ownerless", Some("w1:p2"), &hostname(), 1, 2);
+    let rejected = run(
+        &f,
+        &["disconnect", "ownerless", "--identity", &current],
+        &[],
+    );
+    assert!(!rejected.status.success(), "{rejected:?}");
+    assert!(out(&rejected).contains("no longer a legacy ownerless entry"));
+    // The old socket and newly owned socket were never connected to.
+    for socket in [&old, &replacement, &protected] {
+        socket.set_nonblocking(true).unwrap();
+        assert_eq!(
+            socket.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    record(&f, "ownerless", None, &hostname(), 1, 2);
+    let worker = thread::spawn(move || expect_disconnect(replacement));
+    let closed = run(
+        &f,
+        &["disconnect", "ownerless", "--identity", &current],
+        &[],
+    );
+    worker.join().unwrap();
+    assert!(closed.status.success(), "{closed:?}");
+    assert!(records(&f).get("ownerless").is_none());
+    assert!(records(&f).get("protected").is_some());
 }
 
 #[test]

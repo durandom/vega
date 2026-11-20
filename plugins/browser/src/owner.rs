@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 use std::env;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -64,53 +66,103 @@ pub fn file() -> Option<PathBuf> {
     )
 }
 
-/// All records; an unreadable file reads as none (never fatal).
+/// Inventory accepts legacy rows and skips malformed entries.
 pub fn load() -> BTreeMap<String, Record> {
-    let text = fs::read_to_string(file().unwrap_or_default()).unwrap_or_default();
-    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&text) else {
-        return BTreeMap::new();
-    };
-    map.into_iter()
+    read_map()
+        .unwrap_or_default()
+        .into_iter()
         .filter_map(|(session, v)| Record::from_json(&v).map(|r| (session, r)))
         .collect()
 }
 
-/// Upserts the owner of `session`; `first_seen` of an existing record stays.
-pub fn upsert(session: &str, record: Record) {
-    let Some(file) = file() else { return };
-    let mut all = load();
-    let first = all.get(session).map_or(record.first_seen, |r| r.first_seen);
-    let mut record = record;
-    record.first_seen = first;
-    all.insert(session.to_owned(), record);
-    let json = Value::Object(
-        all.iter()
-            .map(|(s, r)| (s.clone(), r.to_json()))
-            .collect::<Map<String, Value>>(),
-    );
-    let _ = fs::create_dir_all(file.parent().unwrap_or(Path::new("/")));
-    let tmp = file.with_extension(format!("json.tmp.{}", std::process::id()));
-    if fs::write(&tmp, format!("{json}\n"))
-        .and_then(|_| fs::rename(&tmp, &file))
-        .is_err()
-    {
-        let _ = fs::remove_file(&tmp);
+fn read_map() -> io::Result<Map<String, Value>> {
+    let file = file().ok_or_else(|| io::Error::other("owner file path unavailable"))?;
+    match fs::read(file) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
+        Err(e) => Err(e),
     }
+}
+
+pub fn get(session: &str) -> io::Result<Option<Record>> {
+    read_map()?
+        .get(session)
+        .map(|v| {
+            if v.get("pane")
+                .is_some_and(|p| !p.is_null() && !p.is_string())
+            {
+                return Err(io::Error::other("invalid owner pane"));
+            }
+            Record::from_json(v).ok_or_else(|| io::Error::other("invalid owner record"))
+        })
+        .transpose()
+}
+
+/// Serialize read/check/write across shim calls and cleanup commands.
+pub struct Locked {
+    _guard: File,
+    file: PathBuf,
+}
+
+impl Locked {
+    pub fn acquire() -> io::Result<Self> {
+        let file = file().ok_or_else(|| io::Error::other("owner file path unavailable"))?;
+        let parent = file
+            .parent()
+            .ok_or_else(|| io::Error::other("owner directory unavailable"))?;
+        fs::create_dir_all(parent)?;
+        let guard = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(file.with_extension("lock"))?;
+        vega_herdr::platform::lock(&guard)?;
+        Ok(Self {
+            _guard: guard,
+            file,
+        })
+    }
+
+    fn save(&self, all: &Map<String, Value>) -> io::Result<()> {
+        let mut tmp =
+            tempfile::NamedTempFile::new_in(self.file.parent().expect("owner directory"))?;
+        serde_json::to_writer(tmp.as_file_mut(), all)?;
+        tmp.persist(&self.file)?;
+        Ok(())
+    }
+
+    pub fn get(&self, session: &str) -> io::Result<Option<Record>> {
+        get(session)
+    }
+
+    pub fn remove(&self, session: &str) -> io::Result<()> {
+        let mut all = read_map()?;
+        if all.remove(session).is_some() {
+            self.save(&all)?;
+        }
+        Ok(())
+    }
+}
+
+/// Upserts the owner of `session`; `first_seen` of an existing record stays.
+pub fn upsert(session: &str, mut record: Record) {
+    let Ok(lock) = Locked::acquire() else { return };
+    let Ok(mut all) = read_map() else { return };
+    record.first_seen = all
+        .get(session)
+        .and_then(Record::from_json)
+        .map_or(record.first_seen, |r| r.first_seen);
+    all.insert(session.to_owned(), record.to_json());
+    let _ = lock.save(&all);
 }
 
 /// Drops the record of `session`.
 pub fn remove(session: &str) {
-    let Some(file) = file() else { return };
-    let mut all = load();
-    if all.remove(session).is_none() {
-        return;
+    if let Ok(lock) = Locked::acquire() {
+        let _ = lock.remove(session);
     }
-    let json = Value::Object(
-        all.iter()
-            .map(|(s, r)| (s.clone(), r.to_json()))
-            .collect::<Map<String, Value>>(),
-    );
-    let _ = fs::write(&file, format!("{json}\n"));
 }
 
 /// The owner of a call made from this process: its pane (a real pane id only,
