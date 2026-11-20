@@ -80,7 +80,7 @@ case "$1" in
     case "$last" in
       about:blank*) printf '%s' "$last" > "$HOME/blank" ;;
       cdp-url) echo "$TEST_CDP" ;;
-      http:*) : > "$HOME/navigated" ;;
+      http:*|https:*) : > "$HOME/navigated" ;;
     esac
     ;;
   close|vpn) ;;
@@ -120,11 +120,7 @@ esac
                 ][..],
                 &["Target.getTargets", "Target.closeTarget"][..],
             ];
-            let count = if matches!(route, "dev" | "headless") {
-                1
-            } else {
-                2
-            };
+            let count = if route == "external" { 2 } else { 1 };
             for expected in calls.iter().take(count).copied() {
                 let (stream, _) = listener.accept().unwrap();
                 stream
@@ -238,6 +234,15 @@ esac
                 assert!(browser_calls.is_empty());
             }
             _ => unreachable!(),
+        }
+        if matches!(route, "global" | "vpn") {
+            assert!(agent_calls.is_empty());
+            assert!(
+                browser_calls
+                    .lines()
+                    .any(|line| line
+                        == format!("ab --profile {route} --session {session} open {url}"))
+            );
         }
         assert!(browser_calls
             .lines()

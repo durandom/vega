@@ -142,9 +142,9 @@ fn ab(args: &[String]) -> Result<ExitCode, Failure> {
         Some(v) => v.browser(),
         None => global(),
     };
-    let Some(session) = session_name(args) else {
+    if session_name(args).is_none() {
         return Err(vega_browser::name_failure());
-    };
+    }
     let attach = format!("ab always attaches to 127.0.0.1:{}", g.port);
     let refuse =
         |what: &str| Failure::new("not_allowed", format!("{what} is not allowed"), &attach);
@@ -178,36 +178,7 @@ fn ab(args: &[String]) -> Result<ExitCode, Failure> {
             )
         })?;
     }
-    let real = real::real_binary().ok_or_else(no_agent_browser)?;
-    let record = owner::record_from_env(vega_shim::unix_now());
-    owner::upsert(&session, record.clone());
-    let mut cmd = Command::new(&real);
-    cmd.arg("--cdp")
-        .arg(g.port.to_string())
-        .args(mark::with_mark(args, &session, record.project.as_deref()));
-    for var in [
-        "AGENT_BROWSER_AUTO_CONNECT",
-        "AGENT_BROWSER_PROVIDER",
-        "AGENT_BROWSER_EXECUTABLE_PATH",
-    ] {
-        cmd.env_remove(var);
-    }
-    let status = cmd.status().map_err(|e| {
-        Failure::new(
-            "agent_browser_failed",
-            format!("{}: {e}", real.display()),
-            "run vega browser install",
-        )
-    })?;
-    if !status.success() && cdp::probe(g.port) != Probe::Cdp {
-        eprintln!(
-            "ab: lost the global Chromium on 127.0.0.1:{}; no fallback browser",
-            g.port
-        );
-    }
-    Ok(ExitCode::from(
-        status.code().unwrap_or(1).clamp(0, 255) as u8
-    ))
+    vega_browser::dev::shared::command(args, g.port)
 }
 
 /// `vega browser chromium [url]`: attach to or start the global Chromium
@@ -591,9 +562,17 @@ fn session_names(real: Option<&PathBuf>) -> Result<Vec<String>, String> {
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_owned());
     }
-    Ok(vega_browser::parse_session_list(&String::from_utf8_lossy(
-        &out.stdout,
-    )))
+    let mut names = vega_browser::parse_session_list(&String::from_utf8_lossy(&out.stdout));
+    for name in owner::load().keys() {
+        if vega_browser::dev::shared::bound(name)
+            .map_err(|e| e.message)?
+            .is_some()
+            && !names.contains(name)
+        {
+            names.push(name.clone());
+        }
+    }
+    Ok(names)
 }
 
 /// `vega browser ls [--json]`: sessions with owner and state, plus the
@@ -777,6 +756,13 @@ fn json_view(
 /// `vega browser close <session>`: close one session on explicit request.
 fn close(session: &str) -> Result<(), Failure> {
     valid_session(session)?;
+    if let Some(port) = vega_browser::dev::shared::bound(session)? {
+        vega_browser::dev::shared::command(
+            &["--session".into(), session.into(), "close".into()],
+            port,
+        )?;
+        return Ok(());
+    }
     if vega_browser::dev::session_names()?
         .iter()
         .any(|name| name == session)

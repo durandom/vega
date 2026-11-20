@@ -33,13 +33,21 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         };
     }
+    if raw_shared_endpoint(&args) {
+        eprintln!("agent-browser: use vega browser ab --profile global|vpn --session <name> for shared Chromium");
+        return ExitCode::from(2);
+    }
     if exempt(&args) {
         return vega_shim::exec_real(TOOL, Some(real::ENV));
     }
     if let Some(session) = session_name(&args) {
-        match dev::routes(&session, &args)
-            .and_then(|dev| dev.then(|| vega_browser::dev::command(&args)).transpose())
-        {
+        match dev::shared::bound(&session).and_then(|port| {
+            if let Some(port) = port {
+                return dev::shared::resume(&args, port).map(Some);
+            }
+            dev::routes(&session, &args)
+                .and_then(|dev| dev.then(|| vega_browser::dev::command(&args)).transpose())
+        }) {
             Ok(Some(code)) => return code,
             Ok(None) => {}
             Err(f) => {
@@ -65,6 +73,24 @@ fn main() -> ExitCode {
     eprintln!("  For headed dev: vega browser dev --session <project>-<task> open <url>");
     eprintln!("  Reuse that name for later commands and see `vega skills browser`.");
     ExitCode::from(1)
+}
+
+fn raw_shared_endpoint(args: &[String]) -> bool {
+    fn shared(value: &str) -> bool {
+        let port = value.parse::<u16>().ok().or_else(|| {
+            let url = tungstenite::http::Uri::try_from(value).ok()?;
+            matches!(url.host()?, "127.0.0.1" | "localhost" | "[::1]")
+                .then(|| url.port_u16())
+                .flatten()
+        });
+        matches!(port, Some(9223 | 9224))
+    }
+    env::var("AGENT_BROWSER_CDP").is_ok_and(|v| shared(&v))
+        || args.iter().enumerate().any(|(i, arg)| {
+            arg.strip_prefix("--cdp=").is_some_and(shared)
+                || (matches!(arg.as_str(), "--cdp" | "connect")
+                    && args.get(i + 1).is_some_and(|v| shared(v)))
+        })
 }
 
 /// Calls without a session name that still pass through: help and version,

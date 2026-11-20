@@ -315,7 +315,7 @@ fn named_calls_keep_every_flag_and_subcommand() {
             "open",
             "https://y",
         ],
-        vec!["--session", "sk", "--cdp", "9224", "get", "url"],
+        vec!["--session", "sk", "--cdp", "9324", "get", "url"],
     ] {
         let refs: Vec<&str> = args.to_vec();
         let o = run(&f, &refs, &[]);
@@ -363,4 +363,22 @@ fn a_session_key_owner_is_not_a_pane() {
     let rec = &records(&f)["hand-started"];
     assert_eq!(rec["pane"], Value::Null);
     assert!(!rec["host"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn raw_shared_attach_points_to_scoped_profile() {
+    let f = fix();
+    for args in [
+        vec!["--session", "x", "--cdp", "9223", "get", "url"],
+        vec![
+            "--session",
+            "x",
+            "connect",
+            "ws://localhost:9224/devtools/browser/abc",
+        ],
+    ] {
+        let result = run(&f, &args, &[]);
+        assert_eq!(result.status.code(), Some(2));
+    }
+    assert!(argv(&f).is_empty());
 }

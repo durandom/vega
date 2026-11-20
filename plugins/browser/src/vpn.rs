@@ -430,7 +430,7 @@ fn listening(port: u16) -> bool {
 
 pub(super) fn select(args: &[String]) -> Result<(Option<Vpn>, Vec<String>), Failure> {
     let mut result = Vec::new();
-    let mut selected = false;
+    let mut selected = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let value = if arg == "--profile" {
@@ -439,20 +439,20 @@ pub(super) fn select(args: &[String]) -> Result<(Option<Vpn>, Vec<String>), Fail
             arg.strip_prefix("--profile=")
         };
         if let Some(value) = value {
-            if selected || value != "vpn" {
+            if selected.is_some() || !matches!(value, "global" | "vpn") {
                 return Err(Failure::new(
                     "usage",
-                    "ab profile must be vpn (specified once)",
+                    "ab profile must be global or vpn (specified once)",
                     "omit --profile for the global Chromium",
                 ));
             }
-            selected = true;
+            selected = Some(value);
         } else {
             result.push(arg.clone());
         }
     }
     Ok((
-        if selected {
+        if selected == Some("vpn") {
             Some(Vpn::load(false)?)
         } else {
             None

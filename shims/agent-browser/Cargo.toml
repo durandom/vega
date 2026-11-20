@@ -11,6 +11,7 @@ name = "agent-browser"
 path = "src/main.rs"
 
 [dependencies]
+tungstenite = "0.28"
 vega-browser = { path = "../../plugins/browser" }
 vega-herdr = { path = "../../crates/vega-herdr" }
 vega-shim = { path = "../../crates/vega-shim" }

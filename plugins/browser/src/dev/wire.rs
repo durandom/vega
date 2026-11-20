@@ -14,13 +14,16 @@ pub(super) struct Cdp {
 
 impl Cdp {
     pub fn connect(browser: &Browser) -> Result<Self, Failure> {
-        let addr = SocketAddr::from(([127, 0, 0, 1], browser.port));
+        Self::endpoint(browser.port, &browser.path)
+    }
+
+    pub fn endpoint(port: u16, path: &str) -> Result<Self, Failure> {
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let timeout = Duration::from_secs(3);
         let stream = TcpStream::connect_timeout(&addr, timeout).map_err(failure)?;
         stream.set_read_timeout(Some(timeout)).map_err(failure)?;
         stream.set_write_timeout(Some(timeout)).map_err(failure)?;
-        let (socket, _) =
-            client(format!("ws://{addr}{}", browser.path), stream).map_err(failure)?;
+        let (socket, _) = client(format!("ws://{addr}{path}"), stream).map_err(failure)?;
         Ok(Self { socket, id: 0 })
     }
 

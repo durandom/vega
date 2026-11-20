@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 260 · 2026-11-20
+
+- feature: Global and VPN Chromium sessions now list and control only tabs
+  they create. Closing the last owned tab gives the session a fresh blank
+  tab. Shared-profile reviews use the same protection.
+
 ## 259 · 2026-11-20
 
 - feature: The managed dev Chrome for Testing starts with `--use-mock-keychain`, so

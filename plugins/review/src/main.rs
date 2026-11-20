@@ -396,6 +396,13 @@ fn review_browser(cfg: &Value, args: &[&str]) -> Result<String, Failure> {
     let session = cfg["session"].as_str().unwrap_or("");
     if cfg["dev"] == true {
         run_browser("vega-browser", &["dev", "--session", session], args, true)
+    } else if let Some(profile) = cfg["profile"].as_str() {
+        run_browser(
+            "vega-browser",
+            &["ab", "--profile", profile, "--session", session],
+            args,
+            false,
+        )
     } else if let Some(config) = cfg["headless_config"].as_str() {
         run_browser(
             "agent-browser",
@@ -498,6 +505,7 @@ fn start(
         "url": url, "origin": origin, "pane": pane, "session": session, "secret": secret,
         "headed": !headless,
         "profile": profile.map(Profile::name),
+        "owned_tabs": profile.is_some(),
         "dev": dev, "external": external, "headless_config": headless_config,
         "blank": format!("about:blank#vega-review-{}", random_hex(8)?),
     });
@@ -595,8 +603,7 @@ fn open_review(
             browser_plugin(&["vpn", "start"])?;
             args.extend(["--profile", "vpn"]);
         }
-        // A fresh pinned CDP session creates its own tab for the first open.
-        // If that tab disappears, subsequent commands fail instead of rebinding.
+        // The shared adapter creates the review tab before the first open.
         args.extend([
             "--session",
             session,
@@ -687,7 +694,9 @@ fn close_shared(dir: &Path, cfg: &Value) -> Result<(), Failure> {
     if cfg["dev"] == true {
         return review_browser(cfg, &["close"]).map(drop);
     }
-    csp::close_tab(dir, cfg["blank"].as_str().unwrap_or(""))?;
+    if cfg["owned_tabs"] != true {
+        csp::close_tab(dir, cfg["blank"].as_str().unwrap_or(""))?;
+    }
     if cfg["external"] == true {
         review_browser(cfg, &["close"]).map(drop)
     } else {

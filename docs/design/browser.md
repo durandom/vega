@@ -324,18 +324,25 @@ launch, owner record, and headed marking stay in one implementation. For VPN
 it first invokes the idempotent `vega-browser vpn start`. Headed local reviews use the managed dev allocator by default. Explicit
 headless reviews launch an isolated agent-browser.
 
-A shared review uses a fresh named, pinned agent-browser CDP session. Its first
-`open` creates a new tab for a unique blank URL. The inbox locates that tab and
-saves its CDP target ID before attaching the tab-scoped CSP bypass. Review then
-navigates to the app. The overlay is scoped to the requested origin. The owner
-signs in themselves. The named session is visible to browser inventory and GC
-with the standard ownership rules.
+Global and VPN Chromium share their default login context. Agent-browser 0.43
+discovers all page targets on a browser-level CDP connection and can select
+the active or first page when attaching or after a close. A daemon name alone
+does not filter that discovery.
 
-Review stop uses the recorded browser-instance websocket and target ID to close
-only the review tab. It then calls `vega-browser close` to disconnect the session
-and remove its owner record. The shared Chromium and VPN tunnel stay running.
-Use review stop for tab and inbox cleanup. Browser GC handles the agent-browser
-session if the owner is gone.
+For `ab --profile global|vpn`, Vega records only the target IDs returned by
+`Target.createTarget` for the named session, together with the browser websocket
+generation. Tab IDs are local to the session. Vega serializes commands for a
+name, filters tab listing and selection through that registry, and allocates a
+blank page if all owned tabs are gone. Closing the active tab selects an owned
+successor first, allocating a blank page when closing the final tab. The runtime and review's CSP client
+receive a loopback websocket bound to one owned target. Each connection filters
+discovery, attachment, activation and page commands at the CDP boundary.
+Closing the session releases its remaining tabs. Plain named shim calls reuse
+the recorded binding.
+
+A shared review starts on an owned blank page with a unique fragment, attaches
+its CSP bypass there, then opens the app through the same named session. Stop
+releases the session's targets and leaves Chromium and the VPN tunnel running.
 
 ## Shared headed development browser (decision, 2026-11-20)
 

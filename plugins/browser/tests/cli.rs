@@ -106,6 +106,7 @@ fn fix() -> Fix {
     script(
         &f.bin.join("agent-browser"),
         r#"
+[ "$1" = "--version" ] && { echo "agent-browser 0.43.0"; exit 0; }
 printf '%s\n' "$*" >> "$VEGA_FIX/ab-argv"
 env | grep '^AGENT_BROWSER_' | sort >> "$VEGA_FIX/ab-env"
 [ -e "$VEGA_FIX/ab-hang" ] && : > "$VEGA_FIX/hang"
@@ -437,7 +438,11 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
     );
     assert!(attached.status.success(), "{}", out(&attached));
     let ab = fs::read_to_string(f.path("ab-argv")).unwrap();
-    assert!(ab.contains(&format!("--cdp {port}")) && !ab.contains("--profile"));
+    assert!(
+        ab.contains("--cdp ws://127.0.0.1:")
+            && !ab.contains(&format!(":{port}/"))
+            && !ab.contains("--profile")
+    );
     let o = run(&f, &["vpn", "status", "--json"], &[]);
     let v: Value = serde_json::from_str(&out(&o)).unwrap();
     assert_eq!(v["corp_http"], "302");
@@ -542,68 +547,59 @@ fn chromium_fails_loudly_when_it_does_not_come_up() {
 }
 
 #[test]
-fn ab_attaches_passes_through_and_records_the_owner() {
+fn shared_session_cannot_fall_back_to_the_foreign_first_page() {
+    use serde_json::json;
+    use tungstenite::Message;
     let f = fix();
-    serve(&f, f.port);
-    fs::write(f.path("ps"), ours_line(&f)).unwrap();
-    herdr_panes(&f, r#"{"pane_id":"w1:p2"}"#);
-    let o = run(
-        &f,
-        &["ab", "--session", "me", "get", "url"],
-        &[
-            ("HERDR_PANE_ID", "w1:p2".into()),
-            ("AGENT_BROWSER_AUTO_CONNECT", "1".into()),
-        ],
-    );
-    assert!(o.status.success(), "{}{}", out(&o), err(&o));
-    // The fake answers `get url` with a URL.
-    assert_eq!(out(&o).trim(), "https://example.com/x");
-    // A call without --headed (attaching to the global Chromium) is unchanged.
+    let named = |args: &[&str]| {
+        let mut argv = vec!["ab", "--profile", "global", "--session", "me"];
+        argv.extend_from_slice(args);
+        run(&f, &argv, &[])
+    };
+    let ok = |args: &[&str]| {
+        let o = named(args);
+        assert!(o.status.success(), "{}", out(&o));
+        out(&o)
+    };
+    assert!(!ok(&["tab", "list"]).contains("foreign"));
+    ok(&["tab", "new"]);
+    assert!(ok(&["tab", "list"]).contains("[t2]"));
+    for args in [vec!["tab", "foreign"], vec!["tab", "close", "t3"]] {
+        assert!(!named(&args).status.success());
+    }
+    ok(&["tab", "close"]);
+    ok(&["tab", "close"]);
+    let endpoint = ok(&["get", "cdp-url"]);
+    let (mut ws, _) = tungstenite::connect(endpoint.trim()).unwrap();
+    let mut rpc = |method: &str, params: Value, session: Option<&str>| {
+        let mut req = json!({"id":10,"method":method,"params":params});
+        if let Some(session) = session {
+            req["sessionId"] = json!(session);
+        }
+        ws.send(Message::text(req.to_string())).unwrap();
+        serde_json::from_str::<Value>(ws.read().unwrap().to_text().unwrap()).unwrap()
+    };
+    let infos = rpc("Target.getTargets", json!({}), None);
+    assert_eq!(infos["result"]["targetInfos"].as_array().unwrap().len(), 1);
+    assert_eq!(infos["result"]["targetInfos"][0]["targetId"], "owned3");
+    for method in [
+        "Target.activateTarget",
+        "Target.closeTarget",
+        "Target.attachToTarget",
+    ] {
+        assert!(
+            rpc(method, json!({"targetId":"foreign","flatten":true}), None)["error"].is_object()
+        );
+    }
+    assert!(rpc("Runtime.evaluate", json!({}), Some("foreign"))["error"].is_object());
     assert_eq!(
-        lines_of(&f, "ab-argv"),
-        [format!("--cdp {} --session me get url", f.port)]
+        rpc("Runtime.evaluate", json!({}), Some("owned3"))["result"]["target"],
+        "owned3"
     );
-    // Browser-picking env never reaches agent-browser.
-    assert!(!fs::read_to_string(f.path("ab-env"))
-        .unwrap()
-        .contains("AUTO_CONNECT"));
-    let me = &records(&f)["me"];
-    assert_eq!(me["pane"], "w1:p2");
-    assert_eq!(me["host"], hostname());
-    assert_eq!(me["project"], "proj");
-    assert!(me["first_seen"].as_i64().unwrap() > 0);
-    assert_eq!(me["first_seen"], me["last_seen"]);
-
-    // An explicitly headed ab call carries the window mark; the opt-out wins.
-    let o = run(
-        &f,
-        &["ab", "--session", "me", "--headed", "open", "https://x"],
-        &[],
-    );
-    assert!(o.status.success(), "{}{}", out(&o), err(&o));
-    let mark = f.state.join("vega/browser/marks/me.js");
-    assert!(mark.is_file(), "the mark script is written");
-    assert!(fs::read_to_string(&mark)
-        .unwrap()
-        .contains("DOMContentLoaded"));
-    assert_eq!(
-        lines_of(&f, "ab-argv").last().unwrap(),
-        &format!(
-            "--cdp {} --init-script {} --session me --headed open https://x",
-            f.port,
-            mark.display()
-        )
-    );
-    let o = run(
-        &f,
-        &["ab", "--session", "me", "--headed", "open", "https://y"],
-        &[("VEGA_BROWSER_MARK", "0".into())],
-    );
-    assert!(o.status.success(), "{}{}", out(&o), err(&o));
-    assert_eq!(
-        lines_of(&f, "ab-argv").last().unwrap(),
-        &format!("--cdp {} --session me --headed open https://y", f.port)
-    );
+    drop(ws);
+    assert!(ok(&["get", "url"]).contains("https://example.com/x"));
+    assert_eq!(records(&f)["me"]["project"], "proj");
+    ok(&["close"]);
 }
 
 #[test]
@@ -643,7 +639,7 @@ fn ab_refuses_unnamed_calls_and_browser_pickers() {
 }
 
 #[test]
-fn ab_never_runs_without_the_global_and_reports_a_lost_one() {
+fn ab_never_runs_without_a_verified_browser_endpoint() {
     // Down: refuses before agent-browser runs.
     let f = fix();
     fs::write(f.path("ps"), "").unwrap();
@@ -656,15 +652,13 @@ fn ab_never_runs_without_the_global_and_reports_a_lost_one() {
     assert!(out(&o).contains("no fallback browser"), "{}", out(&o));
     assert!(lines_of(&f, "ab-argv").is_empty());
 
-    // Lost mid-call: agent-browser fails and CDP goes dark.
+    // An HTTP 200 without a browser generation cannot authorize a daemon.
     let f2 = fix();
     serve(&f2, f2.port);
     fs::write(f2.path("ps"), ours_line(&f2)).unwrap();
-    fs::write(f2.path("ab-fail"), "boom").unwrap();
-    fs::write(f2.path("ab-hang"), "").unwrap();
     let o = run(&f2, &["ab", "--session", "me", "get", "url"], &[]);
     assert_eq!(o.status.code(), Some(1));
-    assert!(err(&o).contains("lost the global Chromium"), "{}", err(&o));
+    assert!(lines_of(&f2, "ab-argv").is_empty());
 }
 
 #[test]

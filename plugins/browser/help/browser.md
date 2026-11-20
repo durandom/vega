@@ -8,12 +8,13 @@ Commands:
                               Requires autossh and BatchMode SSH access. Status makes
                               one bounded corp HTTPS probe; stop preserves the profile.
   ab --profile vpn --session <name> <args>
-                              Attach to the running VPN profile (start it first).
+                              Use session-owned tabs in the running VPN profile (start it first).
   install                     Converge agent-browser to the repository pin (0.43.0)
                               using npm global; install Chrome for Testing if missing.
   status [--json]             Read-only current/differs/missing and Chrome cache status.
   doctor [--json]             Same dependency status as status.
   ab --session <name> <args>  agent-browser on the global Chromium (127.0.0.1:9223).
+                              Lists and operates on tabs created by this session.
                               Refuses connect/--cdp/--auto-connect/--provider/
                               --executable-path; requires a session name.
   chromium [url]              Attach to or start the global Chromium (idempotent);

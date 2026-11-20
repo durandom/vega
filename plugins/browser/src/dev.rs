@@ -2,6 +2,7 @@
 mod groups;
 mod process;
 mod proxy;
+pub mod shared;
 mod snapshot;
 mod wire;
 
@@ -272,13 +273,18 @@ impl<'a> Invocation<'a> {
                     this.forwarded.extend(["--init-script", value]);
                 }
                 "--full" | "--interactive" | "--compact" | "--stdin" | "--base64" | "-i" | "-c"
-                | "-d" | "-s" | "--selector" | "--depth" | "--quality" | "--timeout"
+                | "-d" | "-s" | "--selector" | "--depth" | "--quality" | "--timeout" | "--type"
                 | "--annotate" => {
                     this.forwarded.push(arg);
                     if arg == flag
                         && matches!(
                             flag,
-                            "-d" | "-s" | "--selector" | "--depth" | "--quality" | "--timeout"
+                            "-d" | "-s"
+                                | "--selector"
+                                | "--depth"
+                                | "--quality"
+                                | "--timeout"
+                                | "--type"
                         )
                     {
                         this.forwarded.push(
@@ -307,6 +313,8 @@ impl<'a> Invocation<'a> {
                 | ["tab", "close", _]
                 | ["tab", _]
                 | ["close"]
+                | ["set", "viewport", ..]
+                | ["network", "requests", ..]
                 | [
                     "open"
                         | "goto"
@@ -381,8 +389,7 @@ fn create_tab(
         }
         cdp.info(project, &target)?;
         let port = proxy::start(&proxy::Binding {
-            browser: browser.clone(),
-            project: project.clone(),
+            scope: proxy::Scope::Dev(browser.clone(), project.clone()),
             target: target.clone(),
         })?;
         Ok(Tab {
@@ -788,8 +795,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
     let init_script = tab.init_script.clone();
     cdp.info(project, &tab.target)?;
     let binding = proxy::Binding {
-        browser,
-        project: project.clone(),
+        scope: proxy::Scope::Dev(browser, project.clone()),
         target: tab.target.clone(),
     };
     let mut port = tab.port;
@@ -839,15 +845,16 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         );
         return passed();
     }
-    let status = run_agent(
-        &profile,
-        &config,
-        &binding,
-        &call,
-        port,
-        (&repo.id, &label),
-        init_script.as_deref(),
-    )?;
+    let script = if call.init_script.is_some() {
+        None
+    } else {
+        init_script.or_else(|| {
+            (env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0"))
+                .then(|| mark::dev_mark(&call.name, &repo.id, &label))
+                .flatten()
+        })
+    };
+    let status = run_agent(&profile, &config, &binding, &call, port, script)?;
     if opening_tab && status.success() {
         call.output(
             json!({"tabId": format!("t{active}"), "total": total}),
@@ -865,8 +872,7 @@ fn run_agent(
     binding: &proxy::Binding,
     call: &Invocation<'_>,
     port: u16,
-    project: (&str, &str),
-    init_script: Option<&Path>,
+    script: Option<PathBuf>,
 ) -> Result<std::process::ExitStatus, Failure> {
     let binary = real::real_binary()
         .ok_or_else(|| failure("Install pinned agent-browser with vega browser install"))?;
@@ -906,14 +912,8 @@ fn run_agent(
             "--cdp",
             &endpoint,
         ]);
-    if call.init_script.is_none() {
-        if let Some(path) = init_script.map(Path::to_owned).or_else(|| {
-            (env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0"))
-                .then(|| mark::dev_mark(&call.name, project.0, project.1))
-                .flatten()
-        }) {
-            cmd.arg("--init-script").arg(path);
-        }
+    if let Some(path) = script {
+        cmd.arg("--init-script").arg(path);
     }
     if let ["tab", "new", url] = call.words.as_slice() {
         cmd.args(["open", url]).stdout(Stdio::null());

@@ -29,6 +29,9 @@ existing legacy bindings stay on the upstream route.
 
 ## Login profiles
 
+Each session uses only tabs it created. Closing the last tab opens a blank
+replacement. Closing the session releases all its tabs.
+
 - Global Chromium on 9223 retains logins. Use
   `vega browser ab --session <name> tab new <url>`.
 - VPN Chromium uses puck's SOCKS tunnel and a pinned corp CA. Run

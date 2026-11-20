@@ -22,19 +22,47 @@ use super::{failure, process, stale, wire::Cdp, Browser, Project};
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Binding {
-    pub browser: Browser,
-    pub project: Project,
+    pub scope: Scope,
     pub target: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub(super) enum Scope {
+    Dev(Browser, Project),
+    Shared { port: u16, path: String },
+}
+
 impl Binding {
-    fn open(&self) -> Result<(Cdp, Value), Failure> {
-        if !process::running(&self.browser, &self.browser.profile)? {
-            return Err(stale("The dev browser has restarted"));
+    fn generation(&self) -> &str {
+        match &self.scope {
+            Scope::Dev(browser, _) => &browser.path,
+            Scope::Shared { path, .. } => path,
         }
-        let mut cdp = Cdp::connect(&self.browser)?;
-        let info = cdp.info(&self.project, &self.target)?;
-        Ok((cdp, info))
+    }
+
+    fn open(&self) -> Result<(Cdp, Value), Failure> {
+        match &self.scope {
+            Scope::Dev(browser, project) => {
+                if !process::running(browser, &browser.profile)? {
+                    return Err(stale("The dev browser has restarted"));
+                }
+                let mut cdp = Cdp::connect(browser)?;
+                let info = cdp.info(project, &self.target)?;
+                Ok((cdp, info))
+            }
+            Scope::Shared { port, path } => {
+                let mut cdp =
+                    Cdp::endpoint(*port, path).map_err(|_| stale("Shared browser disconnected"))?;
+                let result = cdp
+                    .call("Target.getTargetInfo", json!({"targetId": self.target}))
+                    .map_err(|_| stale("Shared tab disappeared"))?;
+                let info = &result["targetInfo"];
+                if info["targetId"] != self.target || info["type"] != "page" {
+                    return Err(stale("Invalid shared tab"));
+                }
+                Ok((cdp, info.clone()))
+            }
+        }
     }
 }
 
@@ -107,7 +135,7 @@ pub(super) fn alive(port: u16, binding: &Binding) -> bool {
         response
             .headers()
             .get("x-vega-dev-generation")
-            .is_some_and(|value| value == binding.browser.path.as_str())
+            .is_some_and(|value| value == binding.generation())
     })
 }
 
@@ -132,7 +160,7 @@ fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
                 .expect("static HTTP response"));
         }
         if health {
-            if let Ok(generation) = binding.browser.path.parse() {
+            if let Ok(generation) = binding.generation().parse() {
                 res.headers_mut()
                     .insert("x-vega-dev-generation", generation);
             }

@@ -25,6 +25,16 @@ enum Owner {
     Unknown,
 }
 
+fn shared_names() -> Result<Vec<String>, Failure> {
+    let mut names = Vec::new();
+    for name in owner::load().into_keys() {
+        if dev::shared::bound(&name)?.is_some() {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
 fn classify(record: Option<&owner::Record>, local: &str) -> Owner {
     let Some(record) = record else {
         return Owner::Ownerless;
@@ -60,10 +70,11 @@ impl Owner {
 pub fn inventory() -> Result<(), Failure> {
     let names = legacy::socket_names().map_err(failure)?;
     let dev = dev::session_names()?;
+    let shared = shared_names()?;
     let local = vega_herdr::local_host();
     let rows = names
         .iter()
-        .filter(|session| !dev.contains(session))
+        .filter(|session| !dev.contains(session) && !shared.contains(session))
         .map(|name| {
             let ownership =
                 owner::get(name).map_or(Owner::Unknown, |rec| classify(rec.as_ref(), &local));
@@ -91,6 +102,7 @@ pub fn disconnect(session: &str, identity: &str) -> Result<(), Failure> {
     valid_session(session)?;
     let lock = owner::Locked::acquire().map_err(failure)?;
     if dev::session_names()?.iter().any(|name| name == session)
+        || dev::shared::bound(session)?.is_some()
         || classify(
             lock.get(session).map_err(failure)?.as_ref(),
             &vega_herdr::local_host(),
@@ -113,10 +125,14 @@ pub fn disconnect(session: &str, identity: &str) -> Result<(), Failure> {
 pub fn gc() -> Result<(), Failure> {
     let names = legacy::socket_names().map_err(failure)?;
     let dev = dev::session_names()?;
+    let shared = shared_names()?;
     let local = vega_herdr::local_host();
     let mut closed = 0;
     let mut kept = 0;
-    for name in names.iter().filter(|name| !dev.contains(name)) {
+    for name in names
+        .iter()
+        .filter(|name| !dev.contains(name) && !shared.contains(name))
+    {
         let original = Daemon::find(name);
         let lock = owner::Locked::acquire().map_err(failure)?;
         let record = lock.get(name).map_err(failure)?;
@@ -128,7 +144,7 @@ pub fn gc() -> Result<(), Failure> {
         }
         // Acquire the socket identity before probing liveness, then verify
         // it again on the connected socket before sending any command.
-        if dev::session_names()?.contains(name) {
+        if dev::session_names()?.contains(name) || dev::shared::bound(name)?.is_some() {
             kept += 1;
             continue;
         }
@@ -145,6 +161,14 @@ pub fn gc() -> Result<(), Failure> {
                 println!("kept {name}: could not verify or close daemon ({e})");
                 kept += 1;
             }
+        }
+    }
+    for name in shared {
+        if dev::shared::gc_close(&name)? {
+            println!("closed {name} (shared Chromium owner pane is gone)");
+            closed += 1;
+        } else {
+            kept += 1;
         }
     }
     for name in dev {
