@@ -10,6 +10,53 @@ use std::path::{Path, PathBuf};
 
 pub const PREFIX: &str = "vega-";
 
+/// The `BEADS_DOLT_*` variables a project's mise config sets for `dir`
+/// (`mise env --json` there), nothing else: mise envs can hold secrets, and
+/// only these decide which dolt server bd talks to. They normally arrive via
+/// `mise activate` in an interactive shell, which processes vega starts do
+/// not have. Empty when mise is missing, `dir` is untrusted or sets none.
+pub fn beads_env(dir: &Path) -> Vec<(String, String)> {
+    let Ok(out) = std::process::Command::new("mise")
+        .args(["env", "--json"])
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    parse_beads_env(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_beads_env(json: &str) -> Vec<(String, String)> {
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str(json) else {
+        return Vec::new();
+    };
+    let mut vars: Vec<(String, String)> = map
+        .into_iter()
+        .filter(|(k, _)| k.starts_with("BEADS_DOLT_"))
+        .filter_map(|(k, v)| Some((k, v.as_str()?.to_string())))
+        .collect();
+    vars.sort();
+    vars
+}
+
+/// Gives this process (and so every `bd` and plugin it starts) the project's
+/// `BEADS_DOLT_*` from `mise env` in the current directory. Variables already
+/// set win: an explicit environment beats the project's. Call before any
+/// thread starts.
+pub fn inherit_beads_env() {
+    let Ok(cwd) = env::current_dir() else { return };
+    for (k, v) in beads_env(&cwd) {
+        if env::var_os(&k).is_none() {
+            env::set_var(k, v);
+        }
+    }
+}
+
 /// `bd --json` output with the `{"data": ..., "schema_version": n}` envelope
 /// (`BD_JSON_ENVELOPE=1`, default in bd 1.2) removed; bare JSON passes unchanged.
 pub fn unwrap_bd_envelope(out: &str) -> String {
@@ -343,6 +390,19 @@ fn is_executable(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn beads_env_keeps_only_beads_dolt_strings() {
+        let json = r#"{"PATH":"/x","AWS_SECRET":"s","BEADS_DOLT_SERVER_PORT":"3307","BEADS_DOLT_AUTO_START":"0","BEADS_DOLT_N":1}"#;
+        assert_eq!(
+            super::parse_beads_env(json),
+            [
+                ("BEADS_DOLT_AUTO_START".to_string(), "0".to_string()),
+                ("BEADS_DOLT_SERVER_PORT".to_string(), "3307".to_string())
+            ]
+        );
+        assert!(super::parse_beads_env("not json").is_empty());
+    }
+
     use super::*;
 
     #[test]
