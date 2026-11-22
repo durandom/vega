@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 266 · 2026-11-22
+
+- feature: Managed dev Chrome for Testing enables Developer mode and incognito
+  access for Vega Dev Tab Groups in its dedicated profile. Marked sessions
+  can group tabs in existing project contexts and report a named timeout if
+  allocation stalls.
+
 ## 265 · 2026-11-22
 
 - feature: The PagerDuty poller skips pane directories outside Git repositories

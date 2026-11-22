@@ -639,6 +639,9 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
     let mut record = owner::record_from_env(vega_shim::unix_now());
     let new_session = !data.sessions.contains_key(&call.name);
     if new_session {
+        if env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0") {
+            groups::require_access(&mut cdp)?;
+        }
         let new_project = !data.projects.contains_key(&repo.id);
         if new_project {
             let label = repo
@@ -715,6 +718,9 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
                         cdp.info(project, &tab.target)?;
                         owned.push(id);
                     }
+                }
+                if env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0") {
+                    groups::require_access(&mut cdp)?;
                 }
                 let tab = create_tab(&mut cdp, &browser, project, &call.name, &owned)?;
                 session.active = session.next;

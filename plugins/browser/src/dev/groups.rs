@@ -13,6 +13,7 @@ use vega_herdr::Failure;
 use super::{failure, wire::Cdp, Project};
 
 const ID: &str = "ddhpkjdjaccmkefgalpmnbnpibiimapm";
+const ALLOCATION_TIMEOUT: Duration = Duration::from_secs(3);
 const EXTENSION: &[(&str, &str)] = &[
     (
         "manifest.json",
@@ -20,7 +21,6 @@ const EXTENSION: &[(&str, &str)] = &[
     ),
     ("control.html", include_str!("../../extension/control.html")),
     ("control.js", include_str!("../../extension/control.js")),
-    ("worker.js", include_str!("../../extension/worker.js")),
 ];
 
 pub(super) fn package(profile: &Path) -> Result<PathBuf, Failure> {
@@ -100,14 +100,23 @@ fn wait_for_control(cdp: &mut Cdp, session: &str) -> Result<Option<Value>, Failu
 
 fn close(cdp: &mut Cdp, target: &str) -> Result<(), Failure> {
     if cdp.call("Target.closeTarget", json!({"targetId": target}))?["success"] != true {
-        return Err(failure(
-            "Chrome did not close the Vega extension control tab",
-        ));
+        return Err(failure("Chrome did not close a Vega setup tab"));
     }
-    Ok(())
+    // CDP acknowledges a close request before Chrome removes the tab.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if !page_targets(cdp, deadline)?
+            .iter()
+            .any(|info| info["targetId"] == target)
+        {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Err(failure("Chrome did not remove a closed Vega setup tab"))
 }
 
-fn require_access(cdp: &mut Cdp) -> Result<(), Failure> {
+fn has_access(cdp: &mut Cdp) -> Result<bool, Failure> {
     let target = control_page(cdp, None)?;
     let access = (|| {
         let session = attach(cdp, &target)?;
@@ -127,21 +136,69 @@ fn require_access(cdp: &mut Cdp) -> Result<(), Failure> {
                 "returnByValue": true
             }),
         )?;
-        if response["result"]["value"] == true {
-            return Ok(());
+        Ok(response["result"]["value"] == true)
+    })();
+    let cleanup = close(cdp, &target);
+    let allowed = access?;
+    cleanup?;
+    Ok(allowed)
+}
+
+fn enable_access(cdp: &mut Cdp) -> Result<(), Failure> {
+    let target = cdp.string(
+        "Target.createTarget",
+        json!({"url": format!("chrome://extensions/?id={ID}"), "hidden": true, "background": true}),
+        "targetId",
+    )?;
+    let result = (|| {
+        let session = attach(cdp, &target)?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let script = include_str!("enable-incognito.js");
+        let expression = format!("({script})({})", json!(ID));
+        while Instant::now() < deadline {
+            let response = cdp.call_in_until(
+                Some(&session),
+                "Runtime.evaluate",
+                json!({"expression": expression, "returnByValue": true, "awaitPromise": true}),
+                deadline,
+            )?;
+            if response["result"]["value"] == true {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(25));
         }
-        Err(Failure::new(
-            "dev_extension_incognito_required",
-            "Vega Dev Tab Groups needs incognito access in the managed Chrome for Testing profile",
-            &format!(
-                "In the regular managed Chrome for Testing window, open chrome://extensions/?id={ID}, \
-                 enable Developer mode on chrome://extensions if needed, then enable Allow in Incognito \
-                 in the extension details and retry. Set VEGA_BROWSER_MARK=0 to open unmarked tabs."
-            ),
+        Err(failure(
+            "Chrome did not show the Vega extension incognito toggle",
         ))
     })();
     let cleanup = close(cdp, &target);
-    access.and(cleanup)
+    result.and(cleanup)
+}
+
+pub(super) fn require_access(cdp: &mut Cdp) -> Result<(), Failure> {
+    if has_access(cdp)? {
+        return Ok(());
+    }
+    if enable_access(cdp).is_ok() && has_access(cdp).unwrap_or(false) {
+        return Ok(());
+    }
+    Err(Failure::new(
+        "dev_extension_incognito_required",
+        "Vega Dev Tab Groups needs incognito access in the managed Chrome for Testing profile",
+        &format!(
+            "In the regular managed Chrome for Testing window, enable Developer mode on chrome://extensions, \
+             then open chrome://extensions/?id={ID}, enable Allow in Incognito and retry. \
+             Set VEGA_BROWSER_MARK=0 to open unmarked tabs."
+        ),
+    ))
+}
+
+fn allocation_timeout(step: &str) -> Failure {
+    Failure::new(
+        "dev_tab_allocation_timeout",
+        format!("Timed out allocating a Vega dev tab: {step}"),
+        "Retry the dev command, or set VEGA_BROWSER_MARK=0 to open unmarked tabs",
+    )
 }
 
 pub(super) fn allocate(
@@ -150,7 +207,6 @@ pub(super) fn allocate(
     name: &str,
     owned: &[i64],
 ) -> Result<(String, i64), Failure> {
-    require_access(cdp)?;
     let control = control_page(cdp, Some(project))?;
     let mut nonce_url = None;
     let mut verified_target = None;
@@ -175,7 +231,8 @@ pub(super) fn allocate(
         let title = format!("{} · {name}", project.label);
         let colour = crate::mark::session_colour(name, Some(&project.label));
         let object = control_object(cdp, &session)?;
-        let response = cdp.call_in(
+        let deadline = Instant::now() + ALLOCATION_TIMEOUT;
+        let response = cdp.call_in_until(
             Some(&session),
             "Runtime.callFunctionOn",
             json!({
@@ -185,7 +242,14 @@ pub(super) fn allocate(
                 "awaitPromise": true,
                 "returnByValue": true
             }),
-        )?;
+            deadline,
+        ).map_err(|error| {
+            if error.code == "dev_cdp_read_timeout" {
+                allocation_timeout("creating and grouping the tab")
+            } else {
+                error
+            }
+        })?;
         let tab_id = response["result"]["value"].as_i64().ok_or_else(|| {
             failure(format!(
                 "The Vega extension could not group the new tab: {}",
@@ -195,9 +259,17 @@ pub(super) fn allocate(
                     .unwrap_or("missing tab ID")
             ))
         })?;
-        let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            match matching_targets(cdp, project, url)?.as_slice() {
+            if Instant::now() >= deadline {
+                return Err(allocation_timeout("locating the new Chrome target"));
+            }
+            match matching_targets(cdp, project, url, deadline)
+                .map_err(|error| match error.code.as_str() {
+                    "dev_cdp_read_timeout" => allocation_timeout("locating the new Chrome target"),
+                    _ => error,
+                })?
+                .as_slice()
+            {
                 [target] => {
                     cdp.info(&verified, target)?;
                     verified_target = Some(target.clone());
@@ -213,8 +285,7 @@ pub(super) fn allocate(
                     cdp.call("Target.detachFromTarget", json!({"sessionId": session}))?;
                     return Ok((target.clone(), tab_id));
                 }
-                [] if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-                [] => return Err(failure("No CDP target matched the Vega extension tab")),
+                [] => thread::sleep(Duration::from_millis(25)),
                 _ => {
                     return Err(failure(
                         "Multiple CDP targets matched the Vega extension tab",
@@ -233,7 +304,8 @@ pub(super) fn allocate(
             if let Some(target) = verified_target {
                 let _ = close(cdp, &target);
             } else if let Some(url) = nonce_url {
-                if let Ok(matches) = matching_targets(cdp, project, &url) {
+                let deadline = Instant::now() + ALLOCATION_TIMEOUT;
+                if let Ok(matches) = matching_targets(cdp, project, &url, deadline) {
                     if let [target] = matches.as_slice() {
                         if cdp.window(target).ok() == Some(window) {
                             let _ = close(cdp, target);
@@ -260,12 +332,26 @@ fn control_object(cdp: &mut Cdp, session: &str) -> Result<String, Failure> {
         .ok_or_else(|| failure("Chrome returned no Vega extension execution object"))
 }
 
-fn matching_targets(cdp: &mut Cdp, project: &Project, url: &str) -> Result<Vec<String>, Failure> {
-    let response = cdp.call("Target.getTargets", json!({"filter": [{"type": "page"}]}))?;
-    let items = response["targetInfos"]
-        .as_array()
-        .ok_or_else(|| failure("Chrome returned no target list"))?;
-    items
+fn page_targets(cdp: &mut Cdp, deadline: Instant) -> Result<Vec<Value>, Failure> {
+    let mut response = cdp.call_in_until(
+        None,
+        "Target.getTargets",
+        json!({"filter": [{"type": "page"}]}),
+        deadline,
+    )?;
+    match response["targetInfos"].take() {
+        Value::Array(items) => Ok(items),
+        _ => Err(failure("Chrome returned no target list")),
+    }
+}
+
+fn matching_targets(
+    cdp: &mut Cdp,
+    project: &Project,
+    url: &str,
+    deadline: Instant,
+) -> Result<Vec<String>, Failure> {
+    page_targets(cdp, deadline)?
         .iter()
         .filter(|info| info["url"] == url && info["browserContextId"] == project.context)
         .map(|info| {

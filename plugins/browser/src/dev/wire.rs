@@ -1,11 +1,22 @@
+use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tungstenite::{client, Message, WebSocket};
 use vega_herdr::Failure;
 
 use super::{failure, stale, Browser, Project};
+
+const TIMEOUT: Duration = Duration::from_secs(3);
+
+fn read_timeout(operation: &str) -> Failure {
+    Failure::new(
+        "dev_cdp_read_timeout",
+        format!("Timed out waiting for Chrome CDP: {operation}"),
+        "Check that the managed Chrome for Testing window is responsive, then retry",
+    )
+}
 
 pub(super) struct Cdp {
     pub socket: WebSocket<TcpStream>,
@@ -19,10 +30,9 @@ impl Cdp {
 
     pub fn endpoint(port: u16, path: &str) -> Result<Self, Failure> {
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let timeout = Duration::from_secs(3);
-        let stream = TcpStream::connect_timeout(&addr, timeout).map_err(failure)?;
-        stream.set_read_timeout(Some(timeout)).map_err(failure)?;
-        stream.set_write_timeout(Some(timeout)).map_err(failure)?;
+        let stream = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(failure)?;
+        stream.set_read_timeout(Some(TIMEOUT)).map_err(failure)?;
+        stream.set_write_timeout(Some(TIMEOUT)).map_err(failure)?;
         let (socket, _) = client(format!("ws://{addr}{path}"), stream).map_err(failure)?;
         Ok(Self { socket, id: 0 })
     }
@@ -37,13 +47,26 @@ impl Cdp {
         method: &str,
         params: Value,
     ) -> Result<Value, Failure> {
+        self.call_in_until(session, method, params, Instant::now() + TIMEOUT)
+    }
+
+    pub fn call_in_until(
+        &mut self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        deadline: Instant,
+    ) -> Result<Value, Failure> {
         let id = self.send(session, method, params)?;
-        loop {
-            let reply = self.receive()?;
-            if reply["id"] == id {
-                return Self::result(method, reply);
+        let result = loop {
+            match self.receive_until(deadline, method) {
+                Ok(reply) if reply["id"] == id => break Self::result(method, reply),
+                Ok(_) => {}
+                Err(error) => break Err(error),
             }
-        }
+        };
+        let reset = self.socket.get_ref().set_read_timeout(Some(TIMEOUT));
+        result.and_then(|reply| reset.map(|()| reply).map_err(failure))
     }
 
     pub fn send(
@@ -64,9 +87,28 @@ impl Cdp {
     }
 
     pub fn receive(&mut self) -> Result<Value, Failure> {
+        self.receive_until(Instant::now() + TIMEOUT, "reading a message")
+    }
+
+    fn receive_until(&mut self, deadline: Instant, operation: &str) -> Result<Value, Failure> {
         loop {
-            if let Message::Text(raw) = self.socket.read().map_err(failure)? {
-                return serde_json::from_str(&raw).map_err(failure);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(read_timeout(operation));
+            }
+            self.socket
+                .get_ref()
+                .set_read_timeout(Some(remaining))
+                .map_err(failure)?;
+            match self.socket.read() {
+                Ok(Message::Text(raw)) => return serde_json::from_str(&raw).map_err(failure),
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(error))
+                    if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
+                {
+                    return Err(read_timeout(operation));
+                }
+                Err(error) => return Err(failure(error)),
             }
         }
     }

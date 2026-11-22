@@ -1,7 +1,7 @@
 // Run against a built vega-browser with Node 22+ on a desktop with CfT installed.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -36,7 +36,6 @@ function ok(project, args, overrides) {
 let socket;
 let nextId = 0;
 const requests = new Map();
-const events = [];
 function call(method, params = {}, sessionId) {
   const id = ++nextId;
   return new Promise((resolve, reject) => {
@@ -83,6 +82,31 @@ const evaluate = (params, expression) => page(params, sessionId => until(async (
   return result.value;
 }, params.url));
 
+async function connect(browser) {
+  assert.equal(browser.profile, profile);
+  socket = new WebSocket(`ws://127.0.0.1:${browser.port}${browser.path}`);
+  socket.addEventListener('message', ({ data }) => {
+    const message = JSON.parse(data);
+    requests.get(message.id)?.(message);
+    requests.delete(message.id);
+  });
+  await until(() => socket.readyState === WebSocket.OPEN, 'fixture CDP connection');
+}
+
+async function stop(browser) {
+  assert.equal(browser.profile, profile);
+  const running = () => spawnSync('ps', ['-ww', '-p', String(browser.pid), '-o', 'command='], {
+    encoding: 'utf8',
+  }).stdout.includes(`--user-data-dir=${profile} `);
+  if (socket?.readyState === WebSocket.OPEN) {
+    try { await call('Browser.close'); } catch {}
+    socket.close();
+  } else if (running()) {
+    process.kill(browser.pid, 'SIGTERM');
+  }
+  await until(() => !running(), 'throwaway Chrome shutdown', 600);
+}
+
 try {
   for (const project of ['alpha', 'beta']) {
     const cwd = join(scratch, project);
@@ -91,36 +115,21 @@ try {
     execFileSync('git', ['remote', 'add', 'origin', `https://example.invalid/${project}.git`], { cwd });
   }
 
-  const missing = cli('alpha', ['--session', 'first', 'tab', 'new']);
-  assert.notEqual(missing.status, 0);
-  assert.match(missing.stdout + missing.stderr, /Allow in Incognito/);
-  assert.deepEqual(registry().projects, {});
   ok('alpha', ['--session', 'unmarked', 'tab', 'new'], { VEGA_BROWSER_MARK: '0' });
   assert.equal(registry().sessions.unmarked.tabs[1].chrome_tab_id, undefined);
-  ok('alpha', ['--session', 'unmarked', 'close']);
-  console.log('Missing incognito grant and opt-out passed');
+  const oldContext = Object.values(registry().projects)[0].context;
 
   const { browser } = registry();
-  assert.equal(browser.profile, profile);
-  socket = new WebSocket(`ws://127.0.0.1:${browser.port}${browser.path}`);
-  socket.addEventListener('message', ({ data }) => {
-    const message = JSON.parse(data);
-    if (message.id) {
-      requests.get(message.id)?.(message);
-      requests.delete(message.id);
-    } else events.push(message);
-  });
-  await until(() => socket.readyState === WebSocket.OPEN, 'fixture CDP connection');
+  await connect(browser);
   console.log((await call('Browser.getVersion')).product);
 
-  // Modify the generated profile only. The production extension never grants itself access.
-  await evaluate({ url: 'chrome://extensions/' }, `chrome.developerPrivate && (async () => {
-    await chrome.developerPrivate.updateProfileConfiguration({inDeveloperMode:true});
-    await chrome.developerPrivate.updateExtensionConfiguration({extensionId:'${extension}', incognitoAccess:true});
-    return true;
-  })()`);
-
+  const access = () => evaluate({ url: control, hidden: true, background: true },
+    'chrome.extension && chrome.extension.isAllowedIncognitoAccess().then(allowed => ({allowed}))');
+  assert.deepEqual(await access(), { allowed: false });
   ok('alpha', ['--session', 'first', 'tab', 'new']);
+  assert.deepEqual(await access(), { allowed: true });
+  assert.equal(Object.values(registry().projects)[0].context, oldContext);
+  ok('alpha', ['--session', 'unmarked', 'close']);
   ok('alpha', ['--session', 'second', 'tab', 'new']);
   ok('beta', ['--session', 'third', 'tab', 'new']);
   const data = registry();
@@ -135,6 +144,9 @@ try {
   assert.equal(project('first').window, project('second').window);
   const { targetInfos } = await call('Target.getTargets');
   assert.equal(targetInfos.filter(info => info.url === control).length, 0);
+  assert.equal(targetInfos.some(info => info.url.startsWith('chrome://extensions')), false);
+  assert.equal(targetInfos.some(info => info.type === 'service_worker' &&
+    info.url.startsWith(`chrome-extension://${extension}/`)), false);
   for (const [name, label, colour] of [
     ['first', 'alpha', 'pink'], ['second', 'alpha', 'pink'], ['third', 'beta', 'purple'],
   ]) {
@@ -152,23 +164,34 @@ try {
   }
 
   const before = await inspect('first');
-  await page(params('first'), async sessionId => {
-    await call('ServiceWorker.enable', {}, sessionId);
-    const versions = () => events.filter(event => event.sessionId === sessionId &&
-      event.method === 'ServiceWorker.workerVersionUpdated').flatMap(event => event.params.versions);
-    const worker = await until(() => versions().find(version =>
-      version.scriptURL === `chrome-extension://${extension}/worker.js` && version.runningStatus === 'running'),
-    'running project worker');
-    await call('ServiceWorker.stopWorker', { versionId: worker.versionId }, sessionId);
-    await until(() => versions().some(version => version.versionId === worker.versionId &&
-      version.runningStatus === 'stopped'), 'worker stop');
-  });
+  const script = join(profile, 'vega-extension/control.js');
+  const original = readFileSync(script, 'utf8');
+  try {
+    const stalled = original.replace('await groupTabs(', 'await new Promise(() => {}); await groupTabs(');
+    assert.notEqual(stalled, original);
+    writeFileSync(script, stalled);
+    const started = performance.now();
+    const failure = cli('alpha', ['--session', 'first', 'tab', 'new', '--json']);
+    assert.equal(failure.error, undefined);
+    assert.notEqual(failure.status, 0);
+    assert.match(failure.stdout + failure.stderr, /dev_tab_allocation_timeout/);
+    assert.ok(performance.now() - started < 7000, 'allocation and cleanup exceeded 7 seconds');
+    const { targetInfos: remaining } = await call('Target.getTargets');
+    assert.deepEqual(remaining.filter(info => info.url.startsWith('about:blank#vega-') ||
+      info.url === control), []);
+  } finally {
+    writeFileSync(script, original);
+  }
   ok('alpha', ['--session', 'first', 'tab', 'new']);
   const after = await inspect('first');
   const groupId = before.groups.find(group => group.title === 'alpha · first').id;
   assert.equal(after.tabs.filter(tab => tab.groupId === groupId).length, 2);
   assert.deepEqual(after.groups, before.groups);
-  console.log('Two contexts, three titled groups, target mapping, and worker restart passed');
+  ok('alpha', ['--session', 'first', 'open', 'data:text/html,<title>Fixture</title>']);
+  const denied = cli('alpha', ['--session', 'first', 'open', 'chrome://extensions/']);
+  assert.notEqual(denied.status, 0);
+  assert.match(ok('alpha', ['--session', 'first', 'get', 'title']), /Fixture/);
+  console.log('Automatic grant in a pre-existing context, grouping without a worker, timeout cleanup, and scoped Chrome settings denial passed');
 
   if (process.argv.includes('--share')) {
     const { verifyShare } = await import('./dev-share.mjs');
@@ -180,20 +203,23 @@ try {
     ok('alpha', ['--session', 'second', 'close']);
     ok('beta', ['--session', 'third', 'close']);
     assert.deepEqual(registry().projects, {});
+    await stop(browser);
+    ok('alpha', ['--session', 'restarted', 'tab', 'new'], { VEGA_BROWSER_MARK: '0' });
+    const restarted = registry().browser;
+    assert.notEqual(restarted.path, browser.path);
+    await connect(restarted);
+    assert.deepEqual(await access(), { allowed: true });
+    ok('alpha', ['--session', 'first', 'tab', 'new']);
+    ok('alpha', ['--session', 'first', 'close']);
+    ok('alpha', ['--session', 'restarted', 'close']);
+    console.log('Grant persisted across browser restart');
   }
+} catch (error) {
+  console.error(error);
+  throw error;
 } finally {
-  if (socket?.readyState === WebSocket.OPEN) {
-    try { await call('Browser.close'); } catch {}
-    socket.close();
-  }
   let browser;
   try { ({ browser } = registry()); } catch {}
-  if (browser?.profile === profile) {
-    const running = () => spawnSync('ps', ['-ww', '-p', String(browser.pid), '-o', 'command='], {
-      encoding: 'utf8',
-    }).stdout.includes(`--user-data-dir=${profile} `);
-    if (running()) process.kill(browser.pid, 'SIGTERM');
-    await until(() => !running(), 'throwaway Chrome shutdown', 240);
-  }
+  if (browser?.profile === profile) await stop(browser);
   rmSync(scratch, { recursive: true, force: true });
 }
