@@ -142,6 +142,9 @@ pub(super) fn alive(port: u16, binding: &Binding) -> bool {
 // tungstenite's handshake callback fixes the HTTP error response type.
 #[allow(clippy::result_large_err)]
 fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
+    // Darwin inherits O_NONBLOCK from the listener. The relay uses socket
+    // timeouts, including when a large reply temporarily fills the send buffer.
+    stream.set_nonblocking(false).map_err(failure)?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(failure)?;
@@ -320,4 +323,101 @@ fn send(socket: &mut WebSocket<TcpStream>, value: &Value) -> Result<(), Failure>
     socket
         .send(Message::text(value.to_string()))
         .map_err(failure)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screenshot_reply_survives_downstream_backpressure() {
+        let chrome = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        chrome.set_nonblocking(true).unwrap();
+        let adapter = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = adapter.local_addr().unwrap();
+        let binding = Binding {
+            scope: Scope::Shared {
+                port: chrome.local_addr().unwrap().port(),
+                path: "/devtools/browser/fake".into(),
+            },
+            target: "owned".into(),
+        };
+        let size = 12 * 1024 * 1024;
+        let (capturing, screenshot_requested) = std::sync::mpsc::channel();
+        thread::scope(|threads| {
+            threads.spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let stream = loop {
+                    match chrome.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                        {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("Expected upstream connection: {error}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut socket = tungstenite::accept(stream).unwrap();
+                for (method, result) in [
+                    ("Target.getTargetInfo", json!({"targetInfo": {"targetId": "owned", "type": "page"}})),
+                    ("Target.attachToTarget", json!({"sessionId": "attached"})),
+                    ("Browser.getVersion", json!({})),
+                    ("Browser.getWindowForTarget", json!({})),
+                ] {
+                    let request = read(&mut socket).unwrap().unwrap();
+                    assert_eq!(request["method"], method);
+                    send(&mut socket, &json!({"id": request["id"], "result": result})).unwrap();
+                }
+                let request = read(&mut socket).unwrap().unwrap();
+                assert_eq!(request["method"], "Page.captureScreenshot");
+                assert_eq!(request["sessionId"], "attached");
+                capturing.send(()).unwrap();
+                send(&mut socket, &json!({
+                    "id": request["id"], "sessionId": "attached", "result": {"data": "a".repeat(size)}
+                })).unwrap();
+                // Keep the upstream available for the next command on this relay.
+                let _ = socket.read();
+            });
+            threads.spawn(move || {
+                let (stream, _) = adapter.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                // Let the handshake arrive before reproducing Darwin's socket
+                // mode so the test exercises backpressure on the reply.
+                assert_eq!(stream.peek(&mut [0]).unwrap(), 1);
+                // Reproduce Darwin's accepted socket mode on every platform.
+                stream.set_nonblocking(true).unwrap();
+                let _ = relay(stream, &binding);
+            });
+
+            let stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let (mut socket, _) =
+                client(format!("ws://{address}/devtools/browser/owned"), stream).unwrap();
+            send(
+                &mut socket,
+                &json!({"id": 51, "sessionId": "attached", "method": "Page.captureScreenshot"}),
+            )
+            .unwrap();
+            screenshot_requested
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            thread::sleep(Duration::from_millis(400));
+            let reply = read(&mut socket).unwrap().unwrap();
+            assert_eq!(reply["id"], 51);
+            assert_eq!(reply["result"]["data"].as_str().unwrap().len(), size);
+            send(
+                &mut socket,
+                &json!({"id": 52, "method": "Browser.getVersion"}),
+            )
+            .unwrap();
+            assert_eq!(read(&mut socket).unwrap().unwrap()["id"], 52);
+        });
+    }
 }
