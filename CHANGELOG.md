@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 265 · 2026-11-22
+
+- feature: The PagerDuty poller skips pane directories outside Git repositories
+  and still reports Git errors and timeouts when inspecting repositories.
+
 ## 264 · 2026-11-22
 
 - feature: Dev screenshot requests report a capture timeout if Chrome stops

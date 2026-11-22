@@ -472,8 +472,15 @@ fn read_ownership<T: Into<OwnershipLocation>>(
             }
             continue;
         }
-        let resolved = match vega_herdr::project::resolve(&local, &vega_herdr::state::post_host()) {
-            Ok(p) => p,
+        let host = vega_herdr::state::post_host();
+        let resolution = if source.project.is_some() {
+            vega_herdr::project::resolve(&local, &host).map(Some)
+        } else {
+            vega_herdr::project::resolve_optional(&local, &host)
+        };
+        let resolved = match resolution {
+            Ok(Some(p)) => p,
+            Ok(None) => continue,
             Err(e) => {
                 let key = source
                     .project

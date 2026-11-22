@@ -730,6 +730,87 @@ fn mapped_project(dir: &Path) -> String {
 }
 
 #[test]
+fn non_repository_pane_cwd_does_not_report_an_ownership_problem() {
+    let dir = tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let agents = json!({"result":{"agents":[{"cwd":cwd}]}});
+    let locations = agent_projects(&agents, &json!({}));
+    assert_eq!(locations, [cwd]);
+    let mut ownership = read_ownership(locations, |p| fs::canonicalize(p));
+    assert!(ownership.projects.is_empty());
+    ownership.report_problems(|key, error| panic!("unexpected problem for {key}: {error}"));
+
+    let registered = OwnershipLocation {
+        path: dir.path().to_path_buf(),
+        project: Some(PROJECT.into()),
+    };
+    let ownership = read_ownership([registered], |p| fs::canonicalize(p));
+    assert!(ownership.lookup_errors[PROJECT].starts_with("project_git_failed:"));
+}
+
+#[test]
+fn repository_git_failure_still_reports_an_ownership_problem() {
+    let dir = tempdir().unwrap();
+    git(dir.path(), &["init"]);
+    fs::write(dir.path().join(".git/config"), "[broken\n").unwrap();
+    let cwd = dir.path().display().to_string();
+    let mut ownership = read_ownership([cwd.clone()], |p| fs::canonicalize(p));
+    let mut problems = Vec::new();
+    ownership.report_problems(|key, error| {
+        problems.push((key.to_owned(), error.to_owned()));
+        Ok(())
+    });
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].0, format!("location:{cwd}"));
+    assert!(problems[0].1.starts_with("project_git_failed:"));
+}
+
+#[test]
+fn repository_git_timeout_still_reports_an_ownership_problem() {
+    // Set the fake Git environment only in the child test process.
+    const CWD_ENV: &str = "VEGA_PAGERDUTY_TIMEOUT_TEST_CWD";
+    if let Ok(cwd) = std::env::var(CWD_ENV) {
+        let ownership = read_ownership([cwd.clone()], |p| fs::canonicalize(p));
+        assert!(ownership.lookup_errors[&format!("location:{cwd}")]
+            .starts_with("project_git_timeout:"));
+        return;
+    }
+
+    let repo = tempdir().unwrap();
+    git(repo.path(), &["init"]);
+    let bin = tempdir().unwrap();
+    let fake_git = bin.path().join("git");
+    fs::write(
+        &fake_git,
+        "#!/bin/sh\n[ \"$1\" = --warmup ] && exit 0\nexec /bin/sleep 60\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(Command::new(&fake_git)
+        .arg("--warmup")
+        .status()
+        .unwrap()
+        .success());
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "pagerduty::tests::repository_git_timeout_still_reports_an_ownership_problem",
+        ])
+        .env(CWD_ENV, repo.path())
+        .env("PATH", bin.path())
+        .env("VEGA_PROJECT_GIT_TIMEOUT_MS", "200")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn a_stale_registration_without_a_checkout_does_not_block_mapped_uac_mail() {
     let dir = tempdir().unwrap();
     let project_path = mapped_project(dir.path());
