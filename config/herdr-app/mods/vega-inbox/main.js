@@ -23,9 +23,9 @@ export default class VegaInbox extends View {
     setShared("vega.inbox-project", props()?.project ?? null);
     setShared("vega.inbox-open", true);
     this.prepare(cx);
-    cx.timer.every(15000, cx => { this.prepare(cx); cx.notify(); });
+    cx.timer.every(15000, cx => this.refresh(cx));
     cx.spawn(async cx => {
-      for (;;) { await nextCommand(); this.prepare(cx); cx.notify(); }
+      for (;;) { await nextCommand(); this.refresh(cx); }
     });
   }
 
@@ -43,16 +43,25 @@ export default class VegaInbox extends View {
       .filter(w => live.has(w.pane.replace(/^hc:/,"")));
   }
 
+  refresh(cx) {
+    if (this.prepare(cx)) cx.notify();
+  }
+
   prepare(cx) {
-    const rows = this.rows();
-    if (!rows.some(r => r.decision_texts?.length) && !this.waiting(rows).length && !this.busy.size) {
+    const rows = this.rows(), waiting = this.waiting(rows);
+    const decisions = rows.flatMap(row => row.decision_texts.map(d => [decisionKey(row, d.id), row.checkout, d.title, d.question]));
+    const sig = JSON.stringify([decisions, waiting]);
+    const changed = sig !== this.preparedSig;
+    this.preparedSig = sig;
+    if (!decisions.length && !waiting.length && !this.busy.size) {
       setShared("vega.inbox-open", false);
       if (props()?.overlay) closeOverlay(props().overlay);
       return;
     }
     for (const row of rows) {
-      for (const d of row.decision_texts ?? []) this.input(decisionKey(row, d.id), cx);
+      for (const d of row.decision_texts) this.input(decisionKey(row, d.id), cx);
     }
+    return changed;
   }
 
   input(key, cx) {

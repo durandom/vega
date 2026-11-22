@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 267 · 2026-11-22
+
+- feature: Herdr's Vega sidebar, status bar and inbox skip redraws on unchanged
+  polls. Changes to badge freshness, age labels and error messages still appear.
+
 ## 266 · 2026-11-22
 
 - feature: Managed dev Chrome for Testing enables Developer mode and incognito

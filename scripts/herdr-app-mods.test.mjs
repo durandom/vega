@@ -55,6 +55,103 @@ function load(name, {allowFocus=false,crlf=false}={}) {
 const row=()=>({schema:2,project:'project-a',checkout:'/repo with spaces',at:Date.now()/1000,decisions:1,
   decision_texts:[{id:'b-1',title:'Choose',question:'What next?',project:'project-a'}],waiting_panes:[]});
 
+test('sidebar preference timer redraws only for changes, errors, and recovery', async () => {
+  const h = load('vega-sidebar'), timers = new Map();
+  h.cx.timer.every = (ms, tick) => timers.set(ms, tick);
+  let redraws = 0;
+  h.cx.notify = () => redraws++;
+  let response = {code: 0, stdout: '{"projects":{},"views":{}}'};
+  h.api.exec = async () => response;
+  h.mod.init({}, h.cx);
+  await h.flush();
+  redraws = 0;
+  const poll = () => timers.get(5000)(h.cx);
+  for (let i = 0; i < 3; i++) await poll();
+  assert.equal(redraws, 0);
+  response = {code: 0, stdout: '{"projects":{"alpha":{"pinned":true}},"views":{}}'};
+  await poll();
+  const lastGood = h.mod.preferences;
+  assert.equal(redraws, 1);
+  response = {code: 1, stderr: 'offline'};
+  await poll();
+  await poll();
+  assert.equal(redraws, 2);
+  assert.equal(h.mod.preferences, lastGood);
+  response = {code: 0, stdout: JSON.stringify(lastGood)};
+  await poll();
+  await poll();
+  assert.equal(redraws, 3);
+  assert.equal(h.mod.configError, null);
+});
+
+test('sidebar age timer redraws once when a label changes or a badge expires', () => {
+  const h = load('vega-sidebar'), timers = new Map();
+  h.cx.timer.every = (ms, tick) => timers.set(ms, tick);
+  let redraws = 0, now = 1_800_000_000_000;
+  h.cx.notify = () => redraws++;
+  h.api.Date = class extends Date { static now() { return now; } };
+  h.api.agents = () => [{address: 't7', status: 'idle'}];
+  h.mod.init({}, h.cx);
+  h.state.set('vega.badges', [{...row(), at: now / 1000 - 45}]);
+  h.render();
+  assert(texts(h.render()).includes('<1m'));
+  const tick = () => timers.get(30000)(h.cx);
+  tick();
+  assert.equal(redraws, 0);
+  now += 30_000;
+  tick();
+  tick();
+  assert.equal(redraws, 1, 'an expired badge invalidates once');
+  now += 30_000;
+  tick();
+  tick();
+  assert.equal(redraws, 2, 'the age boundary invalidates once');
+  assert(texts(h.render()).includes('1m'));
+});
+
+test('status polls skip identical render state and keychain heartbeat timestamps', async () => {
+  const h = load('vega');
+  let redraws = 0;
+  h.cx.notify = () => redraws++;
+  h.api.exec = async () => ({code: 0, stdout: '{"running":true,"rows":[]}'});
+  // Direct calls exercise the same poll body without launching the daemon or watcher task.
+  h.mod.watching = true;
+  for (let i = 0; i < 3; i++) await h.mod.refresh(h.cx);
+  assert.equal(redraws, 0);
+  const now = Date.now() / 1000;
+  const keychain = {host: 'puck', state: 'unlocked', since: now - 10, at: now,
+    agent: {state: 'ready', keys: 2, at: now}};
+  h.mod.applyKeychains([keychain], now, h.cx);
+  const published = h.state.get('vega.keychains');
+  h.mod.applyKeychains([{...keychain, at: now + 1, agent: {...keychain.agent, at: now + 1}}], now + 1, h.cx);
+  assert.equal(redraws, 1);
+  assert.equal(h.state.get('vega.keychains'), published);
+  h.mod.applyKeychains([keychain], now - 181, h.cx);
+  assert.equal(redraws, 2);
+  assert.equal(h.mod.keychains[0].state, 'unknown');
+});
+
+test('decision inbox timer redraws when content changes and closes on expiration', () => {
+  const h = load('vega-inbox');
+  let redraws = 0, tick;
+  h.cx.notify = () => redraws++;
+  h.cx.timer.every = (_ms, callback) => { tick = () => callback(h.cx); };
+  const badge = row();
+  h.state.set('vega.badges', [badge]);
+  h.setProps({overlay: 'inbox'});
+  h.mod.init({}, h.cx);
+  badge.at += 1;
+  tick();
+  assert.equal(redraws, 0);
+  badge.decision_texts[0].title = 'New title';
+  tick();
+  tick();
+  assert.equal(redraws, 1);
+  badge.at -= 120;
+  tick();
+  assert(h.calls.some(([call, id]) => call === 'close' && id === 'inbox'));
+});
+
 test('unspaced remote core agents join project rows without a native agent entry',()=>{
   const h=load('vega-sidebar'),coord='github.com/durandom/rally-ng-app',member='github.com/durandom/rally-ng-maps';
   const uac={address:'ganymede/t1j',state:'live',status:'idle',labels:{'vega.role':'uac','vega.project-id':coord,'herdr.space':'s1','vega.group-members':JSON.stringify([member])}};

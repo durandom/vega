@@ -144,8 +144,7 @@ export default class Vega extends View {
       this.applyKeychains(data.rows ?? [], data.at, cx);
       this.probeOpenPopups(cx);
     } catch (_) {
-      this.keychains = this.keychains.map(r => ({...r, state: "unknown", agent: {state: "unknown"}}));
-      cx.notify();
+      this.publishKeychains(this.keychains.map(r => ({...r, state: "unknown", agent: {state: "unknown", keys: null}})), cx);
     } finally { this.readingKeychains = false; }
   }
 
@@ -181,14 +180,14 @@ export default class Vega extends View {
     const now = Date.now()/1000;
     // A direct unlock seen by probeOpenPopups wins over older registry samples.
     const unlockedAt = shared("vega.keychain-unlocked-at") ?? {};
-    this.keychains = rows.filter(r => /^[a-zA-Z0-9_-]+$/.test(r.host)).map(r => {
+    const keychains = rows.filter(r => /^[a-zA-Z0-9_-]+$/.test(r.host)).map(r => {
       const state = now-at <= 180 && now-r.at <= 180 && ["locked", "unlocked"].includes(r.state) ? r.state : "unknown";
       const seen = unlockedAt[r.host];
-      const agent = now-at <= 180 && now-r.at <= 180 ? r.agent ?? {state: "unknown"} : {state: "unknown"};
-      r = {...r, agent};
-      return seen && seen > r.at * 1000 && state !== "unlocked" ? {...r, state: "unlocked", since: Math.floor(seen / 1000)} : {...r, state};
+      const agent = now-at <= 180 && now-r.at <= 180 ? r.agent : null;
+      const row = {host: r.host, state, since: r.since ?? null, agent: {state: agent?.state ?? "unknown", keys: agent?.keys ?? null}};
+      return seen && seen > r.at * 1000 && state !== "unlocked" ? {...row, state: "unlocked", since: Math.floor(seen / 1000)} : row;
     });
-    setShared("vega.keychains", this.keychains);
+    this.publishKeychains(keychains, cx);
     for (const row of this.keychains) {
       const key = `${row.host}/${row.since}`;
       // An unlock keeps the window: its title turns green, the Slayer closes it (closeKeychain).
@@ -199,6 +198,14 @@ export default class Vega extends View {
         this.openKeychain(row, cx);
       }
     }
+  }
+
+  publishKeychains(rows, cx) {
+    // Probe timestamps drive freshness above, but never appear in either view.
+    const sig = JSON.stringify(rows);
+    if (sig !== JSON.stringify(shared("vega.keychains") ?? [])) setShared("vega.keychains", rows);
+    if (sig === JSON.stringify(this.keychains)) return;
+    this.keychains = rows;
     cx.notify();
   }
 
@@ -352,7 +359,7 @@ export default class Vega extends View {
     // A host with no starter has no supported badge runtime yet either (native
     // Windows may lack python3). Keep its diagnostic in the provisioning state.
     const errors = (data.errors ?? []).filter(e => !this.started?.get(e.source)?.notProvisioned);
-    this.readErrors(errors);
+    this.readErrors(errors, cx);
     const failed = new Set(errors.map(e => e.source));
     // Keep only failed sources; successful empty reads and removed machines clear old rows.
     data.rows.push(...(shared("vega.badges") ?? []).filter(r => failed.has(r.machine || "local")));
@@ -386,10 +393,13 @@ export default class Vega extends View {
     }
   }
 
-  readErrors(errors) {
+  readErrors(errors, cx) {
     const previous = this.failures ?? new Map();
     this.failures = new Map(errors.map(e => [e.source, (previous.get(e.source) ?? 0) + 1]));
-    this.error = errors.filter(e => this.failures.get(e.source) >= 3).map(e => e.message).join("; ") || null;
+    const error = errors.filter(e => this.failures.get(e.source) >= 3).map(e => e.message).join("; ") || null;
+    const changed = error !== (this.error ?? null);
+    this.error = error;
+    if (changed) cx.notify();
   }
 
   async refresh(cx) {
@@ -404,10 +414,9 @@ export default class Vega extends View {
       }
     } catch (_) {}
     try { await this.badges(cx); }
-    catch (_) { this.readErrors([{source: "reader", message: "badge reader unavailable"}]); }
+    catch (_) { this.readErrors([{source: "reader", message: "badge reader unavailable"}], cx); }
     finally { this.refreshing = false; }
     this.state = state;
-    cx.notify();
     this.startRemotes(cx);
   }
 
@@ -445,8 +454,10 @@ export default class Vega extends View {
         this.started.set(name, {next: Date.now() + (ok || notProvisioned ? START_OK_MS : START_RETRY_MS), fails, notProvisioned});
       }));
       const bad = [...this.started].filter(([, v]) => v.fails >= 3).map(([name]) => `hc ${name} vegad start failed`);
-      this.startError = bad.join("; ") || null;
-      cx.notify();
+      const error = bad.join("; ") || null;
+      const changed = error !== (this.startError ?? null);
+      this.startError = error;
+      if (changed) cx.notify();
     } finally { this.starting = false; }
   }
 

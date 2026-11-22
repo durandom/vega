@@ -352,7 +352,10 @@ export default class Agents extends View {
       cx.spawn(cx => this.readNotes(cx));
       // Ages are minute-granular; only redraw when a label or badge freshness changes.
       cx.timer.every(1000, cx => {
-        if (this.attentionClock() !== this.attentionClockSig) cx.notify();
+        const clock = this.attentionClock();
+        if (clock === this.attentionClockSig) return;
+        this.attentionClockSig = clock;
+        cx.notify();
       });
       cx.timer.every(15000, cx => this.readNotes(cx));
       return;
@@ -413,7 +416,7 @@ export default class Agents extends View {
     this.pendingPins = JSON.parse(localStorage.getItem("pins") ?? "[]");
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
-    cx.timer.every(30000, (cx) => cx.notify());
+    cx.timer.every(30000, cx => this.refreshAges(cx));
     try { this.order = JSON.parse(localStorage.getItem("project-order") ?? "[]"); } catch (_) { this.order = []; }
     cx.spawn(async (cx) => {
       try {
@@ -494,18 +497,47 @@ export default class Agents extends View {
     return this.changed[a.address]?.at ?? 0;
   }
 
+  rowAge(now, at) {
+    const label = duration(now - at);
+    this.renderedAges.set(at, label);
+    return label;
+  }
+
+  refreshAges(cx) {
+    if (!this.renderedAges) return;
+    const now = Date.now();
+    const fresh = this.freshBadges(now);
+    let changed = fresh !== this.renderedFreshBadges;
+    for (const [at, label] of this.renderedAges) {
+      const age = duration(now - at);
+      if (age === label) continue;
+      this.renderedAges.set(at, age);
+      changed = true;
+    }
+    this.renderedFreshBadges = fresh;
+    if (changed) cx.notify();
+  }
+
+  freshBadges(now, badges = shared("vega.badges") ?? []) {
+    return badges.map(r => Number(now / 1000 - r.at <= 60)).join("");
+  }
+
   async refreshPreferences(cx) {
     if (this.readingPreferences) return;
     this.readingPreferences = true;
+    let data, error = null;
     try {
       const r = await exec("vega", ["project", "config", "--json"]);
       if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Project config unavailable");
-      const data = JSON.parse(r.stdout);
-      if (!data.projects || !data.views) throw new Error("Invalid project config response");
-      this.preferences = data;
-      this.configError = null;
-    } catch (e) { this.configError = String(e); }
-    finally { this.readingPreferences = false; cx.notify(); }
+      data = JSON.parse(r.stdout);
+      if (!data?.projects || !data.views) throw new Error("Invalid project config response");
+    } catch (e) { error = String(e); }
+    finally { this.readingPreferences = false; }
+    const changed = !error && JSON.stringify(data) !== JSON.stringify(this.preferences);
+    const errorChanged = error !== (this.configError ?? null);
+    if (changed) this.preferences = data;
+    this.configError = error;
+    if (changed || errorChanged) cx.notify();
   }
 
   async toggleProjectPin(project, cx) {
@@ -680,6 +712,7 @@ export default class Agents extends View {
   }
 
   async loadModels(cx) {
+    let error = null;
     try {
       const r = await exec("vega", ["lanista", "hosts", "--json"], { cwd: home(), timeout: 10000 });
       if (r.code !== 0) throw new Error((r.stdout || r.stderr || `hosts failed (${r.code})`).trim());
@@ -697,9 +730,11 @@ export default class Agents extends View {
         } catch (e) { return {...row, model: "Unknown", source: "unknown", error: String(e.message ?? e)}; }
       }));
       setShared(this.modelsKey(), { rows: data.rows, defaults });
-      this.modelsError = null;
-    } catch (e) { this.modelsError = String(e.message ?? e); }
-    finally { cx.notify(); }
+    } catch (e) { error = String(e.message ?? e); }
+    if (error !== (this.modelsError ?? null)) {
+      this.modelsError = error;
+      cx.notify();
+    }
   }
 
   modelArgs(row, defaults) {
@@ -949,7 +984,10 @@ export default class Agents extends View {
   async readOverview(cx) {
     const uac = visibleTerminals().find(x => x.address === props()?.uac);
     if (!uac || this.readingOverview) return;
-    if (uac.address.includes("/")) { this.beads = "remote"; cx.notify(); return; }
+    if (uac.address.includes("/")) {
+      if (this.beads !== "remote") { this.beads = "remote"; cx.notify(); }
+      return;
+    }
     this.readingOverview = true;
     // The registry checkout first: the terminal's cwd is its login shell's folder and drifts.
     const cwd = this.badgeRow().checkout;
@@ -1100,7 +1138,6 @@ export default class Agents extends View {
   async readBoard(cx) {
     if (this.readingBoard) return;
     const { machine, checkout } = this.badgeRow();
-    if (!checkout) { this.board = "No checkout known for this project."; cx.notify(); return; }
     this.readingBoard = true;
     const bd = async args => {
       const r = await inCheckout(machine, checkout, "bd", [...args, "--json"]);
@@ -1109,6 +1146,7 @@ export default class Agents extends View {
     };
     let board;
     try {
+      if (!checkout) throw new Error("No checkout known for this project.");
       const [progress, ready, blocked] = await Promise.all([bd(["list", "--status", "in_progress"]), bd(["ready", "--limit", "50"]), bd(["blocked"])]);
       board = { progress, ready, blocked };
     } catch (e) { board = String(e.message ?? e); }
@@ -1734,7 +1772,7 @@ export default class Agents extends View {
         .when(Boolean(this.browserBadge(a.address, t)), el => el.child(this.browserBadge(a.address, t)))
         .child(div().flex_1())
         .when(!depth && subs.length > 0 && this.folded.has(a.address), el => el.child(div().text_size(11).text_color(t.dim).child(`+${subs.length}`)))
-        .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
+        .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(this.rowAge(now, when))))
         .child(host(a.address));
     };
     const withTree = (a) => {
@@ -1894,7 +1932,7 @@ export default class Agents extends View {
       .child(div().flex_none().font_semibold().text_color(C.uac).child("Über"))
       .when(l["vega.engaged"] === "yes", el => el.child(div().flex_none().text_size(11).text_color(t.accent).child("engaged")))
       .child(div().flex_1())
-      .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
+      .when(Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(this.rowAge(now, when))))
       .child(host(term.address));
   }
 
@@ -1987,7 +2025,7 @@ export default class Agents extends View {
   // freshness, waiting episodes, the browser session view (vega-nic.19), the
   // resolved view and activity filter (including their localStorage
   // fallbacks), project preferences and the manual order.
-  inputSignature(badges) {
+  inputSignature(badges, freshness) {
     const focus = focused();
     const terms = terminals(), ags = agents(), paneRows = panes(), spaceRows = spaces();
     const view = activeView(), hide = hideInactive();
@@ -2004,7 +2042,7 @@ export default class Agents extends View {
       spaceRows.map(s => [s.id, s.name ?? null, s.named ?? null, s.machine ?? null, Boolean(s.active),
         (s.tabs ?? []).map(tab => [tab.id, tab.name ?? null, tab.named ?? null])]),
       focus ? [focus.terminal ?? null, focus.agent ?? null, focus.space ?? null, focus.tab ?? null, focus.pane ?? null] : null,
-      badges, badges.map(r => Date.now() / 1000 - r.at <= 60 ? 1 : 0),
+      badges, freshness,
       shared("vega.waiting-state") ?? null,
       shared("vega.browsers") ?? null,
       view, hide,
@@ -2014,13 +2052,14 @@ export default class Agents extends View {
     return sig;
   }
 
-  viewModel() {
+  viewModel(now) {
     const badges = shared("vega.badges") ?? [];
+    this.renderedFreshBadges = this.freshBadges(now, badges);
     diagPhase("signature");
-    const sig = this.inputSignature(badges);
+    const sig = this.inputSignature(badges, this.renderedFreshBadges);
     if (this.modelCache?.sig === sig) return this.modelCache;
     diagPhase("derive");
-    this.modelCache = this.buildModel(sig, badges);
+    this.modelCache = this.buildModel(sig, badges, now);
     return this.modelCache;
   }
 
@@ -2028,7 +2067,7 @@ export default class Agents extends View {
   // change. A render that only builds rows (focus, theme, layout, folds, drags)
   // reuses the previous model instead of redoing group parsing, tree scans and
   // sorts per frame ("This view could not be re-rendered ... interrupted").
-  buildModel(sig, badges) {
+  buildModel(sig, badges, now) {
     const model = { sig };
     const windowAddresses = new Set(terminals().filter(t => Object.hasOwn(t.labels ?? {}, "vega.window")).map(t => t.address));
     let list = agents().filter(a => !windowAddresses.has(a.address));
@@ -2109,11 +2148,11 @@ export default class Agents extends View {
     // Judge the status the row shows, including unread done sub-agents.
     const rowStatus = a => kids.has(a.address) ? kidStatus(a, model.listed) : this.topStatus(a);
     const waitingState = shared("vega.waiting-state");
-    const waitingAddresses = model.waitingAddresses = new Set(badges.flatMap(r => Date.now() / 1000 - r.at <= 60
+    const waitingAddresses = model.waitingAddresses = new Set(badges.flatMap(r => now / 1000 - r.at <= 60
       ? (r.waiting_panes ?? []).filter(w => !waitingState?.[waitingKey(r, w)]?.cleared).map(w => w.pane.replace(/^hc:/, "")) : []));
     model.waitingByAddress = new Map();
     for (const row of badges) {
-      if (Date.now() / 1000 - row.at > 60) continue;
+      if (now / 1000 - row.at > 60) continue;
       for (const w of (row.waiting_panes ?? []).filter(w => !waitingState?.[waitingKey(row, w)]?.cleared)) {
         const pane = w.pane.replace(/^hc:/, "");
         const open = model.waitingByAddress.get(pane);
@@ -2276,7 +2315,8 @@ export default class Agents extends View {
     const collapsed = narrow();
     // The derivation lives in a cache rebuilt only when its inputs change
     // (vega-0h4c.103); this render reads it and builds rows.
-    const m = this.viewModel();
+    const now = Date.now();
+    const m = this.viewModel(now);
     this.vegaTerminals = m.vegaTerminals;
     this.projectUacs = m.projectUacs;
     this.listed = m.listed;
@@ -2291,7 +2331,8 @@ export default class Agents extends View {
     const list = m.list;
     setAgentOrder(m.agentOrder);
     // Restart fallbacks sync on every render, as before the cache.
-    if (shared(INACTIVE_KEY) != null) localStorage.setItem("hide-inactive", String(filtering));
+    if (shared(INACTIVE_KEY) != null && localStorage.getItem("hide-inactive") !== String(filtering))
+      localStorage.setItem("hide-inactive", String(filtering));
     if (shared(VIEW_KEY) && localStorage.getItem("active-view") !== m.activeView) localStorage.setItem("active-view", m.activeView);
 
     const railRow = (a, i) => h_flex().id(`ag-${a.address}`).h(26).px(8).flex_none().items_center().gap(4)
@@ -2305,7 +2346,8 @@ export default class Agents extends View {
     const rail = filtering || this.viewFilter().respect_pins ? list.flatMap(a => [a, ...m.treeFull(a.address).map(s => s.t)])
       .filter(a => m.visibleSessions.has(a.address)) : list;
     diagPhase("elements");
-    const rows = collapsed ? rail.map(railRow) : this.projectTree(t, m, Date.now());
+    this.renderedAges = new Map();
+    const rows = collapsed ? rail.map(railRow) : this.projectTree(t, m, now);
 
     return v_flex()
       .size_full()
