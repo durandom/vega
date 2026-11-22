@@ -223,6 +223,9 @@ const values = input => [...new Set(input.split(",").map(s => s.trim()).filter(B
 // (for Esc), so the press must stop here or the input loses the focus it just took.
 const inputBox = (t, state, h = 32) => div().on_mouse_down("left", (_e, cx) => cx.stop_propagation())
   .child(Input.new(state).h(h).px(8).rounded(6).border_1().border_color(t.input).bg(t.background));
+const pinnedAgentIcon = t => div().flex_none().tooltip("Pinned agent")
+  .child(svg("mods/vega-sidebar/pin.svg").size(10).text_color(t.accent));
+
 // A small pill: a label on a project, a view's filter, a toggle in an editor.
 const pill = (t, id, text, { on = false, action = null, tooltip = null } = {}) => div().id(id).flex_none().px(6).rounded(8)
   .text_size(10.5).bg(on ? t.accent : t.raised).text_color(on ? t.background : t.dim)
@@ -1762,7 +1765,7 @@ export default class Agents extends View {
           .when(Boolean(x), el => el.border_l(1.5).border_color(t.input))
           .when(x === "└" || x === "├", el => el.border_b(1.5).rounded_bl(6))))
         .child(this.status(t, st, true))
-        .when(this.isPinned(a.address), el => el.child(svg("mods/vega-sidebar/pin.svg").size(10).flex_none().tooltip("Pinned agent").text_color(t.accent)))
+        .when(this.isPinned(a.address), el => el.child(pinnedAgentIcon(t)))
         .when(uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(l["vega.uac"] || "u▲c")))
         .child(div().flex_none().text_color(color).child(glyph))
         .when(!depth && this.foreignChild(this.vegaTerminals.get(a.address) ?? {}), el => el.child(div().flex_none().text_size(11).text_color(t.dim)
@@ -1927,7 +1930,7 @@ export default class Agents extends View {
       .tooltip(["Uber-UAC", agent?.title].filter(Boolean).join(" · "))
       .on_click(() => pane ? run("pane.focus", { pane }) : this.peek(term.address))
       .on_mouse_down("right", (_e, cx) => this.openAgentMenu(term.address, cx))
-      .when(this.isPinned(term.address), el => el.child(svg("mods/vega-sidebar/pin.svg").size(10).flex_none().tooltip("Pinned agent").text_color(t.accent)))
+      .when(this.isPinned(term.address), el => el.child(pinnedAgentIcon(t)))
       .child(this.status(t, a, true))
       .child(div().flex_none().font_semibold().text_color(C.uac).child("Über"))
       .when(l["vega.engaged"] === "yes", el => el.child(div().flex_none().text_size(11).text_color(t.accent).child("engaged")))
@@ -2338,7 +2341,7 @@ export default class Agents extends View {
     const railRow = (a, i) => h_flex().id(`ag-${a.address}`).h(26).px(8).flex_none().items_center().gap(4)
       .hover(el => el.bg(t.hover)).on_click(() => a.pane ? run("pane.focus", { pane: a.pane }) : this.peek(a.address))
       .on_mouse_down("right", (_e, cx) => this.openAgentMenu(a.address, cx))
-      .when(this.isPinned(a.address), el => el.child(svg("mods/vega-sidebar/pin.svg").size(10).flex_none().tooltip("Pinned agent").text_color(t.accent)))
+      .when(this.isPinned(a.address), el => el.child(pinnedAgentIcon(t)))
       .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
       .child(h_flex().w(14).flex_none().items_center().justify_center()
         .child(this.status(t, { ...a, status: this.topStatus(a) }, true)));

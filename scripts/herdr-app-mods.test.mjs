@@ -25,7 +25,7 @@ function load(name, {allowFocus=false,crlf=false}={}) {
     }});return proxy;
   }
   const cx={notify(){},open_url:url=>calls.push(['open-url',url]),write_to_clipboard:text=>calls.push(['clipboard',text]),stop_propagation(){calls.push(['stop']);},timer:{every(){}},sleep(){background=true;return new Promise(()=>{});},spawn(f){background=false;const p=f(cx);if(!background)tasks.push(p);return p;}};
-  const api={View:class {},div:el,h_flex:el,v_flex:el,svg:el,image:el,
+  const api={View:class {},div:el,h_flex:el,v_flex:el,svg:source=>Object.assign(el(),{svgSource:source}),image:el,
     InputState:{new(options={}){assert.equal(rendering,false,'input state created in render');let value=options.value??'';return {handlers:{},on(event,f){this.handlers[event]=f;},value:()=>value,set_value:v=>{value=v;},focus(){assert(allowFocus,'focus stolen');calls.push(['focus']);}};}},
     Input:{new:el},ScrollHandle:{new:()=>({scroll_to_item:i=>calls.push(['scroll',i])})},
     Scrollbar:{vertical:el},v_virtual_list:(id,count,height,key,render)=>el().id(id).children(render({start:0,end:count})),
@@ -1361,7 +1361,11 @@ test('sidebar derivation is cached between renders and rebuilt exactly when an i
   all[1].labels['herdr.pinned']='true';
   h.render();assert.notEqual(h.mod.modelCache,first);
   let model=h.mod.modelCache;h.render();assert.equal(h.mod.modelCache,model);
-  assert(elements(h.render()).some(n=>n.tooltipValue==='Pinned agent'),'rebuilt model carries the pin marker');
+  const tree = elements(h.render());
+  const pins = tree.filter(n=>n.svgSource==='mods/vega-sidebar/pin.svg');
+  assert.ok(pins.length,'rebuilt model carries the pin marker');
+  assert.ok(pins.every(pin=>!Object.hasOwn(pin,'tooltipValue')),'pin SVGs have no tooltip');
+  assert.ok(tree.some(n=>n.tooltipValue==='Pinned agent' && n.items.some(child=>pins.includes(child))));
   // Agent data: a status change rebuilds.
   const agents=h.api.agents();h.api.agents=()=>agents;agents[2].status='blocked';
   h.render();assert.notEqual(h.mod.modelCache,model);
