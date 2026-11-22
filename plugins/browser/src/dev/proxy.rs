@@ -1,6 +1,7 @@
 //! A transport adapter for agent-browser 0.43.0. Each daemon discovers one
 //! verified page. Browser-wide operations and fallback target creation are
 //! rejected even if the runtime requests them during automatic recovery.
+use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -19,6 +20,9 @@ use tungstenite::{
 use vega_herdr::Failure;
 
 use super::{failure, process, stale, wire::Cdp, Browser, Project};
+
+// Leave room for the error to reach agent-browser before its 30 s IPC deadline.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Binding {
@@ -108,7 +112,7 @@ pub fn serve() -> Result<(), Failure> {
             Ok((stream, _)) => {
                 let binding = Arc::clone(&binding);
                 thread::spawn(move || {
-                    let _ = relay(stream, &binding);
+                    let _ = relay(stream, &binding, CAPTURE_TIMEOUT);
                 });
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -141,7 +145,7 @@ pub(super) fn alive(port: u16, binding: &Binding) -> bool {
 
 // tungstenite's handshake callback fixes the HTTP error response type.
 #[allow(clippy::result_large_err)]
-fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
+fn relay(stream: TcpStream, binding: &Binding, capture_timeout: Duration) -> Result<(), Failure> {
     // Darwin inherits O_NONBLOCK from the listener. The relay uses socket
     // timeouts, including when a large reply temporarily fills the send buffer.
     stream.set_nonblocking(false).map_err(failure)?;
@@ -196,9 +200,22 @@ fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
         .get_mut()
         .set_read_timeout(delay)
         .map_err(failure)?;
+    let mut pending = BTreeMap::<u64, Option<Instant>>::new();
     loop {
+        let now = Instant::now();
+        for (id, _) in pending.extract_if(.., |_, deadline| deadline.is_some_and(|at| now >= at)) {
+            send(
+                &mut downstream,
+                &json!({"id": id, "sessionId": attached, "error": {
+                    "code": -32000,
+                    "message": "Chrome did not complete Page.captureScreenshot. Bring the dev tab and its window to the foreground, then retry."
+                }}),
+            )?;
+        }
         if let Some(request) = read(&mut downstream)? {
-            let id = &request["id"];
+            let Some(id) = request["id"].as_u64() else {
+                return Err(failure("Invalid CDP request ID"));
+            };
             let params = &request["params"];
             let method = request["method"].as_str().unwrap_or_default();
             let target_matches = params["targetId"] == binding.target;
@@ -214,16 +231,17 @@ fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
                 (None, "Target.setDiscoverTargets" | "Target.setAutoAttach") => Some(json!({})),
                 (None, "Browser.getVersion") => Some(version.clone()),
                 (None, "Browser.getWindowForTarget") if target_matches => Some(window.clone()),
-                (Some(id), _)
-                    if id == attached
-                        && page_method(method)
-                        && !internal_navigation(method, params) =>
+                _ if (session_id == Some(&attached)
+                    && page_method(method)
+                    && !internal_navigation(method, params))
+                    || (session_id.is_none()
+                        && method == "Target.activateTarget"
+                        && target_matches) =>
                 {
                     send(&mut upstream, &request)?;
-                    None
-                }
-                (None, "Target.activateTarget") if target_matches => {
-                    send(&mut upstream, &request)?;
+                    let deadline = (method == "Page.captureScreenshot")
+                        .then(|| Instant::now() + capture_timeout);
+                    pending.insert(id, deadline);
                     None
                 }
                 _ => {
@@ -246,7 +264,13 @@ fn relay(stream: TcpStream, binding: &Binding) -> Result<(), Failure> {
             {
                 return Err(stale("The attached dev tab is gone"));
             }
-            if !reply["id"].is_null() || reply["sessionId"] == attached {
+            let should_forward = match reply["id"].as_u64() {
+                // A capture can finish after its deadline. Keep it from
+                // generating a second response for the downstream request.
+                Some(id) => pending.remove(&id).is_some(),
+                None => reply["id"].is_null() && reply["sessionId"] == attached,
+            };
+            if should_forward {
                 send(&mut downstream, &reply)?;
             }
         }
@@ -329,8 +353,11 @@ fn send(socket: &mut WebSocket<TcpStream>, value: &Value) -> Result<(), Failure>
 mod tests {
     use super::*;
 
-    #[test]
-    fn screenshot_reply_survives_downstream_backpressure() {
+    fn with_fake_relay(
+        capture_timeout: Duration,
+        chrome_commands: impl FnOnce(&mut WebSocket<TcpStream>) + Send,
+        agent_commands: impl FnOnce(&mut WebSocket<TcpStream>),
+    ) {
         let chrome = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         chrome.set_nonblocking(true).unwrap();
         let adapter = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -342,16 +369,15 @@ mod tests {
             },
             target: "owned".into(),
         };
-        let size = 12 * 1024 * 1024;
-        let (capturing, screenshot_requested) = std::sync::mpsc::channel();
         thread::scope(|threads| {
             threads.spawn(move || {
                 let deadline = Instant::now() + Duration::from_secs(5);
                 let stream = loop {
                     match chrome.accept() {
                         Ok((stream, _)) => break stream,
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock
-                            && Instant::now() < deadline =>
+                        Err(error)
+                            if error.kind() == io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
                         {
                             thread::sleep(Duration::from_millis(5));
                         }
@@ -359,10 +385,15 @@ mod tests {
                     }
                 };
                 stream.set_nonblocking(false).unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
                 let mut socket = tungstenite::accept(stream).unwrap();
                 for (method, result) in [
-                    ("Target.getTargetInfo", json!({"targetInfo": {"targetId": "owned", "type": "page"}})),
+                    (
+                        "Target.getTargetInfo",
+                        json!({"targetInfo": {"targetId": "owned", "type": "page"}}),
+                    ),
                     ("Target.attachToTarget", json!({"sessionId": "attached"})),
                     ("Browser.getVersion", json!({})),
                     ("Browser.getWindowForTarget", json!({})),
@@ -371,15 +402,7 @@ mod tests {
                     assert_eq!(request["method"], method);
                     send(&mut socket, &json!({"id": request["id"], "result": result})).unwrap();
                 }
-                let request = read(&mut socket).unwrap().unwrap();
-                assert_eq!(request["method"], "Page.captureScreenshot");
-                assert_eq!(request["sessionId"], "attached");
-                capturing.send(()).unwrap();
-                send(&mut socket, &json!({
-                    "id": request["id"], "sessionId": "attached", "result": {"data": "a".repeat(size)}
-                })).unwrap();
-                // Keep the upstream available for the next command on this relay.
-                let _ = socket.read();
+                chrome_commands(&mut socket);
             });
             threads.spawn(move || {
                 let (stream, _) = adapter.accept().unwrap();
@@ -391,7 +414,7 @@ mod tests {
                 assert_eq!(stream.peek(&mut [0]).unwrap(), 1);
                 // Reproduce Darwin's accepted socket mode on every platform.
                 stream.set_nonblocking(true).unwrap();
-                let _ = relay(stream, &binding);
+                let _ = relay(stream, &binding, capture_timeout);
             });
 
             let stream = TcpStream::connect(address).unwrap();
@@ -400,24 +423,86 @@ mod tests {
                 .unwrap();
             let (mut socket, _) =
                 client(format!("ws://{address}/devtools/browser/owned"), stream).unwrap();
-            send(
-                &mut socket,
-                &json!({"id": 51, "sessionId": "attached", "method": "Page.captureScreenshot"}),
-            )
-            .unwrap();
-            screenshot_requested
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap();
-            thread::sleep(Duration::from_millis(400));
-            let reply = read(&mut socket).unwrap().unwrap();
-            assert_eq!(reply["id"], 51);
-            assert_eq!(reply["result"]["data"].as_str().unwrap().len(), size);
-            send(
-                &mut socket,
-                &json!({"id": 52, "method": "Browser.getVersion"}),
-            )
-            .unwrap();
-            assert_eq!(read(&mut socket).unwrap().unwrap()["id"], 52);
+            agent_commands(&mut socket);
         });
+    }
+
+    #[test]
+    fn screenshot_reply_survives_downstream_backpressure() {
+        let size = 12 * 1024 * 1024;
+        let (capturing, screenshot_requested) = std::sync::mpsc::channel();
+        with_fake_relay(
+            CAPTURE_TIMEOUT,
+            move |socket| {
+                let request = read(socket).unwrap().unwrap();
+                assert_eq!(request["method"], "Page.captureScreenshot");
+                assert_eq!(request["sessionId"], "attached");
+                capturing.send(()).unwrap();
+                send(socket, &json!({
+                    "id": request["id"], "sessionId": "attached", "result": {"data": "a".repeat(size)}
+                })).unwrap();
+                // Keep the upstream available for the next command on this relay.
+                let _ = socket.read();
+            },
+            |socket| {
+                send(
+                    socket,
+                    &json!({"id": 51, "sessionId": "attached", "method": "Page.captureScreenshot"}),
+                )
+                .unwrap();
+                screenshot_requested
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                thread::sleep(Duration::from_millis(400));
+                let reply = read(socket).unwrap().unwrap();
+                assert_eq!(reply["id"], 51);
+                assert_eq!(reply["result"]["data"].as_str().unwrap().len(), size);
+                send(socket, &json!({"id": 52, "method": "Browser.getVersion"})).unwrap();
+                assert_eq!(read(socket).unwrap().unwrap()["id"], 52);
+            },
+        );
+    }
+
+    #[test]
+    fn missing_capture_reply_times_out_without_losing_the_attachment() {
+        with_fake_relay(
+            Duration::from_millis(100),
+            |socket| {
+                let capture = read(socket).unwrap().unwrap();
+                assert_eq!(capture["method"], "Page.captureScreenshot");
+                let eval = read(socket).unwrap().unwrap();
+                assert_eq!(eval["method"], "Runtime.evaluate");
+                send(
+                    socket,
+                    &json!({
+                        "id": capture["id"], "sessionId": "attached", "result": {"data": "late"}
+                    }),
+                )
+                .unwrap();
+                send(socket, &json!({
+                    "id": eval["id"], "sessionId": "attached", "result": {"result": {"value": 42}}
+                })).unwrap();
+                let _ = socket.read();
+            },
+            |socket| {
+                send(
+                    socket,
+                    &json!({"id": 51, "sessionId": "attached", "method": "Page.captureScreenshot"}),
+                )
+                .unwrap();
+                let reply = read(socket).unwrap().unwrap();
+                assert_eq!(reply["id"], 51);
+                assert_eq!(reply["sessionId"], "attached");
+                assert_eq!(reply["error"]["code"], -32000);
+                send(
+                    socket,
+                    &json!({"id": 52, "sessionId": "attached", "method": "Runtime.evaluate"}),
+                )
+                .unwrap();
+                let reply = read(socket).unwrap().unwrap();
+                assert_eq!(reply["id"], 52);
+                assert_eq!(reply["result"]["result"]["value"], 42);
+            },
+        );
     }
 }

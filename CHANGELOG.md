@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 264 · 2026-11-22
+
+- feature: Dev screenshot requests report a capture timeout if Chrome stops
+  answering, so subsequent commands can reuse their tab and snapshot refs.
+
 ## 263 · 2026-11-22
 
 - feature: Dev Chrome for Testing sessions on macOS keep their CDP attachments
