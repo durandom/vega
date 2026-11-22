@@ -20,8 +20,10 @@ pub fn real_binary() -> Option<PathBuf> {
         .map(|p| env::split_paths(&p).collect())
         .unwrap_or_default();
     dirs.iter().map(|d| d.join(TOOL)).find_map(|candidate| {
+        // Run the PATH entry itself, not its link target: a mise shim links
+        // to the `mise` binary, which dispatches on argv[0].
         let canonical = candidate.canonicalize().ok()?;
-        (is_executable(&canonical) && !in_shim_dir(&canonical)).then_some(canonical)
+        (is_executable(&canonical) && !in_shim_dir(&canonical)).then_some(candidate)
     })
 }
 
@@ -66,7 +68,14 @@ mod tests {
         let path = env::join_paths([&link_dir, &real_dir]).unwrap();
         env::set_var("PATH", &path);
         env::remove_var(ENV);
-        assert_eq!(real_binary(), Some(real.canonicalize().unwrap()));
+        assert_eq!(real_binary(), Some(real.clone()));
+        // A mise-style shim: a link named agent-browser to a multi-call binary.
+        let mise_dir = tmp.path().join("mise/shims");
+        fs::create_dir_all(&mise_dir).unwrap();
+        let mise_shim = mise_dir.join(TOOL);
+        std::os::unix::fs::symlink(&real, &mise_shim).unwrap();
+        env::set_var("PATH", env::join_paths([&link_dir, &mise_dir]).unwrap());
+        assert_eq!(real_binary(), Some(mise_shim));
         env::set_var(ENV, shim.to_string_lossy().as_ref());
         assert_eq!(real_binary(), Some(shim));
         env::remove_var(ENV);
