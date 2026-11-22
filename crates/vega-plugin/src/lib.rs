@@ -10,38 +10,84 @@ use std::path::{Path, PathBuf};
 
 pub const PREFIX: &str = "vega-";
 
-/// The `BEADS_DOLT_*` variables a project's mise config sets for `dir`
-/// (`mise env --json` there), nothing else: mise envs can hold secrets, and
-/// only these decide which dolt server bd talks to. They normally arrive via
-/// `mise activate` in an interactive shell, which processes vega starts do
-/// not have. Empty when mise is missing, `dir` is untrusted or sets none.
+/// The only mise variables vega passes on: they decide which dolt server bd
+/// talks to. No password and nothing else from the project's env (it can hold
+/// secrets).
+pub const BEADS_ENV_KEYS: [&str; 5] = [
+    "BEADS_DOLT_AUTO_START",
+    "BEADS_DOLT_SERVER_HOST",
+    "BEADS_DOLT_SERVER_PORT",
+    "BEADS_DOLT_SERVER_USER",
+    "BEADS_DOLT_SHARED_SERVER",
+];
+
+/// `mise env` must not hold a command up.
+const MISE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The [`BEADS_ENV_KEYS`] a project's mise config sets for `dir` (`mise env
+/// --json` there). They normally arrive via `mise activate` in an interactive
+/// shell, which processes vega starts do not have. Fails open: empty when mise
+/// is missing, slow, or `dir` is untrusted (then with a stderr hint).
 pub fn beads_env(dir: &Path) -> Vec<(String, String)> {
-    let Ok(out) = std::process::Command::new("mise")
-        .args(["env", "--json"])
+    beads_env_with(dir, &[])
+}
+
+fn beads_env_with(dir: &Path, extra_env: &[(&str, &std::ffi::OsStr)]) -> Vec<(String, String)> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("mise");
+    cmd.args(["env", "--json"])
         .current_dir(dir)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-    else {
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let Ok(mut child) = cmd.spawn() else {
         return Vec::new();
     };
-    if !out.status.success() {
+    let Some(mut stdout) = child.stdout.take() else {
+        return Vec::new();
+    };
+    let reader = std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = stdout.read_to_string(&mut buf);
+        buf
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if start.elapsed() < MISE_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Vec::new();
+            }
+        }
+    };
+    let out = reader.join().unwrap_or_default();
+    if !status.success() {
+        eprintln!(
+            "vega: mise env failed in {}: BEADS_DOLT_* not set (untrusted dir? run `mise trust`)",
+            dir.display()
+        );
         return Vec::new();
     }
-    parse_beads_env(&String::from_utf8_lossy(&out.stdout))
+    parse_beads_env(&out)
 }
 
 fn parse_beads_env(json: &str) -> Vec<(String, String)> {
     let Ok(serde_json::Value::Object(map)) = serde_json::from_str(json) else {
         return Vec::new();
     };
-    let mut vars: Vec<(String, String)> = map
-        .into_iter()
-        .filter(|(k, _)| k.starts_with("BEADS_DOLT_"))
-        .filter_map(|(k, v)| Some((k, v.as_str()?.to_string())))
-        .collect();
-    vars.sort();
-    vars
+    BEADS_ENV_KEYS
+        .iter()
+        .filter_map(|k| Some((k.to_string(), map.get(*k)?.as_str()?.to_string())))
+        .collect()
 }
 
 /// Gives this process (and so every `bd` and plugin it starts) the project's
@@ -391,8 +437,8 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn beads_env_keeps_only_beads_dolt_strings() {
-        let json = r#"{"PATH":"/x","AWS_SECRET":"s","BEADS_DOLT_SERVER_PORT":"3307","BEADS_DOLT_AUTO_START":"0","BEADS_DOLT_N":1}"#;
+    fn beads_env_keeps_only_the_allowlist() {
+        let json = r#"{"PATH":"/x","AWS_SECRET":"s","BEADS_DOLT_PASSWORD":"pw","BEADS_DOLT_SERVER_PORT":"3307","BEADS_DOLT_AUTO_START":"0","BEADS_DOLT_SHARED_SERVER":1}"#;
         assert_eq!(
             super::parse_beads_env(json),
             [
@@ -401,6 +447,30 @@ mod tests {
             ]
         );
         assert!(super::parse_beads_env("not json").is_empty());
+    }
+
+    #[test]
+    fn beads_env_reads_a_trusted_mise_config() {
+        if std::process::Command::new("mise")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return; // no mise on this machine: nothing to test
+        }
+        let tmp = std::env::temp_dir().join(format!("vega-beads-env-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(
+            tmp.join("mise.toml"),
+            "[env]\nBEADS_DOLT_SERVER_PORT = \"3307\"\nBEADS_DOLT_PASSWORD = \"pw\"\n",
+        )
+        .unwrap();
+        let got = super::beads_env_with(&tmp, &[("MISE_TRUSTED_CONFIG_PATHS", tmp.as_os_str())]);
+        std::fs::remove_dir_all(&tmp).unwrap();
+        assert_eq!(
+            got,
+            [("BEADS_DOLT_SERVER_PORT".to_string(), "3307".to_string())]
+        );
     }
 
     use super::*;
