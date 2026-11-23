@@ -10,7 +10,7 @@ Commands:
   ab --profile vpn --session <name> <args>
                               Use session-owned tabs in the running VPN profile (start it first).
   install                     Converge the npm global pin or print the required mise update.
-                              Install Chrome for Testing if missing and the pin is met.
+                              Install pinned Chrome for Testing once the agent-browser pin is met.
   status [--json]             Read-only current/differs/missing and Chrome cache status.
   doctor [--json]             Same dependency status as status.
   ab --session <name> <args>  agent-browser on the global Chromium (127.0.0.1:9223).
@@ -134,7 +134,9 @@ versions fail without overwrite. Review those in the VPN certificate manager.
 No macOS keychain writes or browser policies.
 Optional profile must be an absolute dedicated vega-chromium-vpn* directory.
 Stop before changing config. Full-profile SOCKS/remote DNS, no direct fallback;
-no PAC or domain list. Only the user logs in. CDP_CHROMIUM selects the binary.
+no PAC or domain list. Only the user logs in. VPN uses the pinned Chrome for
+Testing from vega browser install unless CDP_CHROMIUM selects another binary.
+VPN status reports browser_version from the running browser.
 Examples: vega browser vpn start; vega browser vpn status --json;
 vega browser ab --profile vpn --session corp-vpn-task tab new https://gitlab.cee.redhat.com
 vega browser vpn stop
@@ -143,8 +145,8 @@ For mise-managed agent-browser, install reports current or prints the mise comma
 to update its source configuration. For npm globals, use your normal login shell.
 An older binary must resolve to that npm prefix's agent-browser package; a
 foreign binary or mismatched VEGA_AGENT_BROWSER_BIN is refused, never shadowed.
-Install checks Chrome for Testing under ~/.agent-browser/browsers; no session is
-started. Existing sessions continue using their already running daemon.
+The pinned Chrome for Testing build is installed under ~/.agent-browser/browsers.
+Existing sessions continue using their already running daemon.
 `vega config apply browser.agent-browser` runs the same installer; deploy's
 config apply includes it. Examples: `vega browser status`, `vega browser install`.
 

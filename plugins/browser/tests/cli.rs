@@ -400,7 +400,10 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
         format!("{}\n", ours_line(&f).replace("4242", "9999")),
     )
     .unwrap();
-    let started = run(&f, &["vpn", "start"], &[]);
+    let pinned = vega_browser::chrome::binary(&f.home);
+    fs::create_dir_all(pinned.parent().unwrap()).unwrap();
+    fs::rename(f.bin.join("chromium"), &pinned).unwrap();
+    let started = run(&f, &["vpn", "start"], &[("CDP_CHROMIUM", String::new())]);
     assert!(
         started.status.success(),
         "{}{}",
@@ -447,6 +450,9 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
     let v: Value = serde_json::from_str(&out(&o)).unwrap();
     assert_eq!(v["corp_http"], "302");
     assert_eq!(v["browser"], true);
+    // The fake running version can differ from the installed pin.
+    assert_eq!(v["browser_version"], "Chrome/146.0.0.0");
+    assert!(out(&run(&f, &["vpn", "status"], &[])).contains("browser_version: Chrome/146.0.0.0"));
     assert_eq!(v["ca_trusted"], true);
     let curl = fs::read_to_string(f.path("curl-argv")).unwrap();
     assert!(curl.contains("--socks5-hostname") && curl.contains("--insecure"));
@@ -464,6 +470,25 @@ mv "$VEGA_FIX/ps.next" "$VEGA_FIX/ps"
         .contains("9999"));
     assert!(f.home.join(".local/share/vega-chromium-vpn").is_dir());
     assert!(run(&f, &["vpn", "stop"], &[]).status.success());
+}
+
+#[test]
+fn vpn_without_a_pinned_browser_reports_the_install_command() {
+    let f = fix();
+    vpn_config(&f, serde_json::json!({}));
+    let status = run(&f, &["vpn", "status", "--json"], &[]);
+    let value: Value = serde_json::from_str(&out(&status)).unwrap();
+    assert_eq!(value["browser"], false);
+    assert!(value["browser_version"].is_null());
+    let start = run(&f, &["vpn", "start"], &[("CDP_CHROMIUM", String::new())]);
+    assert!(!start.status.success());
+    assert!(
+        out(&start).contains("vega browser install"),
+        "{}",
+        out(&start)
+    );
+    assert!(!f.path("chromium-argv").exists());
+    assert!(!f.path("ca-ssh-argv").exists());
 }
 
 #[test]

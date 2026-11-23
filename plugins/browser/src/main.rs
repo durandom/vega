@@ -116,6 +116,12 @@ struct Chromium {
     extra_args: Vec<String>,
 }
 
+fn chromium_override() -> Option<PathBuf> {
+    env::var_os("CDP_CHROMIUM")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
 fn global() -> Chromium {
     let home = || PathBuf::from(env::var_os("HOME").unwrap_or_default());
     Chromium {
@@ -128,9 +134,7 @@ fn global() -> Chromium {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| home().join(".local/share/vega-chromium")),
-        chromium: env::var_os("CDP_CHROMIUM")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
+        chromium: chromium_override()
             .unwrap_or_else(|| PathBuf::from("/Applications/Chromium.app/Contents/MacOS/Chromium")),
     }
 }

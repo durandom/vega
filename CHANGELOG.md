@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 271 · 2026-11-23
+
+- feature: `vega browser install` installs pinned Chrome for Testing 158.0.8127.36.
+  New VPN browser launches use that build by default. `vega browser vpn status`
+  reports the running browser's version.
+
 ## 270 · 2026-11-23
 
 - feature: `vega browser install` recognizes mise-managed agent-browser and

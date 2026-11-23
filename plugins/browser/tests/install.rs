@@ -36,17 +36,39 @@ esac"#,
         );
         script(
             &f.p("template"),
+            r#"test "$1" = --version && echo "agent-browser $(cat "$HOME/version")""#,
+        );
+        script(
+            &f.p("bin/curl"),
             r#"
-case "$1" in
---version) echo "agent-browser $(cat "$HOME/version")";;
-install)
- echo install >> "$HOME/chrome.log"
- test ! -f "$HOME/fail-chrome" || exit 6
- mkdir -p "$HOME/.agent-browser/browsers/chrome-test/Google Chrome for Testing.app/Contents/MacOS"
- touch "$HOME/.agent-browser/browsers/chrome-test/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
- touch "$HOME/.agent-browser/browsers/chrome-test/chrome";;
-*) exit 9;;
-esac"#,
+for arg do
+  case "$arg" in
+    https://*) printf '%s\n' "$arg" >> "$HOME/chrome.log";;
+  esac
+done
+test ! -f "$HOME/fail-chrome"
+"#,
+        );
+        script(
+            &f.p("bin/unzip"),
+            r#"
+test ! -f "$HOME/incomplete-chrome" || exit 0
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) platform=mac-arm64;;
+  Darwin:x86_64) platform=mac-x64;;
+  Linux:aarch64) platform=linux-arm64;;
+  Linux:x86_64) platform=linux64;;
+  *) exit 9;;
+esac
+case "$platform" in
+  mac-*) executable='Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';;
+  *) executable=chrome;;
+esac
+binary="$4/chrome-$platform/$executable"
+mkdir -p "$(dirname "$binary")"
+printf '#!/bin/sh\nexit 9\n' > "$binary"
+chmod +x "$binary"
+"#,
         );
         if let Some(v) = version {
             let real = f.p("prefix/lib/node_modules/agent-browser/bin/agent-browser.js");
@@ -88,6 +110,15 @@ fn ok(o: Output) {
         String::from_utf8_lossy(&o.stderr)
     );
 }
+fn assert_pinned_download(f: &Fix) {
+    let downloads = fs::read_to_string(f.p("chrome.log")).unwrap();
+    assert_eq!(downloads.lines().count(), 1);
+    assert!(downloads.starts_with(&format!(
+        "https://storage.googleapis.com/chrome-for-testing-public/{}/",
+        vega_browser::chrome::VERSION
+    )));
+}
+
 #[test]
 fn missing_upgrade_and_current_converge_without_reinstalling() {
     for initial in [None, Some("0.31.1"), Some("0.43.0")] {
@@ -110,7 +141,7 @@ fn missing_upgrade_and_current_converge_without_reinstalling() {
         }
         ok(f.run(&["install"]));
         assert_eq!(fs::read_to_string(f.p("npm.log")).unwrap_or_default(), npm);
-        assert_eq!(fs::read_to_string(f.p("chrome.log")).unwrap(), "install\n");
+        assert_pinned_download(&f);
     }
 }
 
@@ -135,7 +166,7 @@ fn mise_current_converges_chrome_and_mismatch_suggests_mise_command() {
             &f.p("bin/mise"),
             r#"
 case "${0##*/}:$*" in
-  agent-browser:--version|agent-browser:install) exec "$HOME/mise/installs/npm-agent-browser/test/node_modules/.bin/agent-browser" "$@";;
+  agent-browser:--version) exec "$HOME/mise/installs/npm-agent-browser/test/node_modules/.bin/agent-browser" "$@";;
   'mise:which agent-browser') echo "$HOME/mise/installs/npm-agent-browser/test/node_modules/.bin/agent-browser";;
   'mise:ls --current --json npm:agent-browser') cat "$HOME/mise-list.json";;
   *) echo "$*" >> "$HOME/unexpected-mise.log"; exit 9;;
@@ -165,7 +196,8 @@ esac"#,
         if version == pin {
             assert!(String::from_utf8_lossy(&o.stdout).contains("result: current"));
             ok(o);
-            assert_eq!(fs::read_to_string(f.p("chrome.log")).unwrap(), "install\n");
+            assert_pinned_download(&f);
+            assert!(vega_browser::chrome::installed(f.tmp.path()));
         } else {
             assert_eq!(o.status.code(), Some(1));
             let command = format!(
@@ -215,12 +247,8 @@ fn shim_is_bypassed_and_existing_chrome_is_not_reinstalled_on_upgrade() {
         .args(["status"])
         .output()
         .unwrap());
-    // Seed only Chrome, with the fake binary's installer.
-    ok(Command::new(f.p("prefix/bin/agent-browser"))
-        .env("HOME", f.tmp.path())
-        .arg("install")
-        .output()
-        .unwrap());
+    let pinned = vega_browser::chrome::binary(f.tmp.path());
+    script(&pinned, "exit 9");
     script(&f.p("vega/shims/bin/agent-browser"), "exit 99");
     let path = format!(
         "{}:{}:{}:/usr/bin:/bin",
@@ -229,7 +257,7 @@ fn shim_is_bypassed_and_existing_chrome_is_not_reinstalled_on_upgrade() {
         f.p("prefix/bin").display()
     );
     ok(f.cmd().env("PATH", path).arg("install").output().unwrap());
-    assert_eq!(fs::read_to_string(f.p("chrome.log")).unwrap(), "install\n");
+    assert!(!f.p("chrome.log").exists());
 }
 
 #[test]
@@ -246,4 +274,37 @@ esac"#,
     );
     assert!(!f.run(&["install"]).status.success());
     assert!(!f.p("chrome.log").exists());
+}
+
+#[test]
+fn old_chrome_survives_install_and_an_incomplete_download_can_be_retried() {
+    let f = Fix::new(Some("0.43.0"));
+    let legacy = f.p(".agent-browser/browsers/chrome-146.0.0.0");
+    let legacy = if cfg!(target_os = "macos") {
+        legacy.join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")
+    } else {
+        legacy.join("chrome")
+    };
+    script(&legacy, "exit 9");
+    let status = || -> serde_json::Value {
+        serde_json::from_slice(&f.run(&["status", "--json"]).stdout).unwrap()
+    };
+    assert_eq!(status()["chrome"], "missing");
+    fs::write(f.p("incomplete-chrome"), "").unwrap();
+    assert!(!f.run(&["install"]).status.success());
+    assert_eq!(status()["chrome"], "missing");
+    fs::remove_file(f.p("incomplete-chrome")).unwrap();
+    ok(f.run(&["install"]));
+    assert_eq!(status()["chrome"], "current");
+    assert!(vega_browser::chrome::installed(f.tmp.path()));
+    assert_eq!(fs::read_to_string(legacy).unwrap(), "#!/bin/sh\nexit 9\n");
+    assert!(fs::read_dir(f.p(".agent-browser/browsers"))
+        .unwrap()
+        .all(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("chrome-")
+        }));
 }

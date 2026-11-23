@@ -137,7 +137,10 @@ impl Vpn {
         Chromium {
             port: self.port,
             profile: self.profile.clone(),
-            chromium: global().chromium,
+            chromium: chromium_override().unwrap_or_else(|| {
+                let home = PathBuf::from(env::var_os("HOME").unwrap_or_default());
+                vega_browser::chrome::binary(&home)
+            }),
             extra_args: vec![
                 format!("--proxy-server=socks5://127.0.0.1:{}", self.socks),
                 "--proxy-bypass-list=<-loopback>".into(),
@@ -259,6 +262,14 @@ impl Vpn {
                 "VPN profile already has a browser; stop it before starting",
             ));
         }
+        let browser = self.browser();
+        if !browser.chromium.is_file() {
+            return Err(Failure::new(
+                "missing_chromium",
+                format!("VPN browser is missing at {}", browser.chromium.display()),
+                "run vega browser install, or correct CDP_CHROMIUM",
+            ));
+        }
         self.trust()?;
         let _ = fs::remove_file(self.socket());
         let mut child = Command::new("nohup")
@@ -304,7 +315,7 @@ impl Vpn {
                     ));
                 }
                 if listening(self.socks) && self.control("check") {
-                    return ensure_chromium(&self.browser(), None).map(|_| ());
+                    return ensure_chromium(&browser, None).map(|_| ());
                 }
                 thread::sleep(Duration::from_millis(200));
             }
@@ -349,7 +360,23 @@ impl Vpn {
     fn status(&self) -> serde_json::Value {
         let supervisor = self.supervisor().is_some();
         let tunnel = supervisor && self.control("check") && listening(self.socks);
-        let browser = !self.browser_pids().is_empty() && cdp::probe(self.port) == Probe::Cdp;
+        let endpoint = if self.browser_pids().is_empty() {
+            None
+        } else {
+            ureq::AgentBuilder::new()
+                .try_proxy_from_env(false)
+                .redirects(0)
+                .timeout(Duration::from_secs(2))
+                .build()
+                .get(&format!("http://127.0.0.1:{}/json/version", self.port))
+                .call()
+                .ok()
+                .filter(|r| r.status() == 200)
+        };
+        let browser = endpoint.is_some();
+        let browser_version = endpoint
+            .and_then(|r| r.into_json::<serde_json::Value>().ok())
+            .and_then(|v| v["Browser"].as_str().map(str::to_owned));
         let corp = if tunnel {
             Command::new("curl")
                 .args([
@@ -382,7 +409,7 @@ impl Vpn {
         };
         serde_json::json!({"profile":"vpn", "host":self.host, "cdp_port":self.port, "socks_port":self.socks,
             "ca_sha256":self.ca_sha256, "ca_trusted":self.ca_trusted().ok(),
-            "supervisor":supervisor, "tunnel":tunnel, "browser":browser, "corp_http":corp,
+            "supervisor":supervisor, "tunnel":tunnel, "browser":browser, "browser_version":browser_version, "corp_http":corp,
             "hint": if corp.is_none() { "Corp host unavailable; check VPN on puck (no automatic probe retries)" } else { "" }})
     }
 }

@@ -93,13 +93,11 @@ or changed resolution fails explicitly. A current version does not need npm.
 The shim continues to bypass its own directory and use the same real-binary
 resolution; neither PATH nor the override is rewritten.
 
-Chrome for Testing detection follows [upstream 0.43.0 install.rs](https://github.com/vercel-labs/agent-browser/blob/v0.43.0/cli/src/install.rs):
-`~/.agent-browser/browsers/chrome-*`, with macOS app bundle (direct or under
-`chrome-mac-arm64`/`chrome-mac-x64`) or Linux `chrome`/`chrome-linux64/chrome`.
-Once the agent-browser pin is met, Vega runs `agent-browser install` only
-when this cache is absent and verifies the result.
-Chrome itself is not pinned or upgraded when present. Global Chromium on 9223
-and its profile are unrelated and untouched. No existing daemon is restarted.
+The browser installer pins Chrome for Testing to the stable build recorded in
+`plugins/browser/src/chrome.rs`. It downloads Google's platform archive into a
+staging directory in `~/.agent-browser/browsers` and publishes the complete
+build as `chrome-<version>`. Older cached builds stay available. Global
+Chromium on 9223 keeps its own binary selection.
 
 Config unit **`browser.agent-browser`** plans through `vega-browser status --json`
 and applies through `vega-browser install`, verifying convergence again. It has
@@ -251,7 +249,9 @@ retrying corp reachability. An unavailable host suggests checking puck's VPN.
 Read optional `$XDG_CONFIG_HOME/vega/browser-vpn.json` (default ~/.config), with
 defaults host=puck, socks_port=1080, cdp_port=9224 and profile=
 `~/.local/share/vega-chromium-vpn`. Reject unknown fields and unsafe collisions.
-The Chromium binary uses CDP_CHROMIUM; global CDP_PORT/CDP_PROFILE stay separate.
+VPN defaults to the exact pinned Chrome for Testing build. CDP_CHROMIUM
+overrides the binary; global CDP_PORT/CDP_PROFILE stay separate. Status reads
+`browser_version` from the owned running browser's DevTools endpoint.
 Stop before changing configuration. State is `$XDG_STATE_HOME/vega/browser/vpn`;
 active.json saves launch settings
 so stop/status follow the running profile after config edits. Ports, profile and

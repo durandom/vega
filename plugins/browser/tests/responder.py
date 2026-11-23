@@ -34,7 +34,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.headers.get("Upgrade", "").lower() == "websocket":
             self.websocket()
             return
-        body = json.dumps({"webSocketDebuggerUrl":
+        body = json.dumps({"Browser": "Chrome/146.0.0.0", "webSocketDebuggerUrl":
             f"ws://127.0.0.1:{PORT}/devtools/browser/fade"}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))

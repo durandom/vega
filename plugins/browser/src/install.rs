@@ -1,5 +1,5 @@
 //! Pinned agent-browser installation, respecting the caller's tool manager.
-use crate::real;
+use crate::{chrome, real};
 use serde_json::{json, Value};
 use std::{
     env, fs,
@@ -61,10 +61,6 @@ fn mise_source(bin: &Path) -> Option<String> {
 }
 
 /// Matches upstream v0.43.0 cli/src/install.rs, without starting a browser.
-pub fn chrome(home: &Path) -> bool {
-    chrome_binary(home).is_some()
-}
-
 pub(crate) fn chrome_binary(home: &Path) -> Option<PathBuf> {
     let suffixes: &[&str] = if cfg!(target_os = "macos") {
         &["Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing", "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing", "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"]
@@ -109,7 +105,7 @@ pub fn status() -> Result<Value, Failure> {
     let home = env::var_os("HOME").ok_or_else(|| failure("HOME is missing"))?;
     Ok(
         json!({"state": state, "version": found, "pinned": VERSION.trim(), "binary": bin,
-        "chrome": if chrome(Path::new(&home)) { "current" } else { "missing" },
+        "chrome": if chrome::installed(Path::new(&home)) { "current" } else { "missing" },
         "npm": npm_on_path()}),
     )
 }
@@ -188,11 +184,8 @@ pub fn install() -> Result<(), Failure> {
             ));
         }
     }
-    if before["chrome"] == "missing" {
-        let bin =
-            real::real_binary().ok_or_else(|| failure("agent-browser missing after install"))?;
-        output(Command::new(bin).arg("install"))?;
-    }
+    let home = env::var_os("HOME").ok_or_else(|| failure("HOME is missing"))?;
+    chrome::install(Path::new(&home))?;
     let after = status()?;
     if after["state"] != "current" || after["chrome"] != "current" {
         return Err(failure(
