@@ -46,5 +46,11 @@
     "binaries": [
       "vega-mux"
     ]
+  },
+  {
+    "package": "vega-uac",
+    "binaries": [
+      "vega-uac"
+    ]
   }
 ]

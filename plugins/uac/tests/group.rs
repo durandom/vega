@@ -1,4 +1,6 @@
 //! Exercise the actual CLI with a local-only herdr and an unreachable broker.
+#![cfg(unix)]
+
 use serde_json::json;
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 

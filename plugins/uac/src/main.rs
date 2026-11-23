@@ -14,6 +14,7 @@ mod adoption;
 mod beads;
 mod grants;
 mod group;
+#[cfg(unix)]
 mod land;
 mod terminal;
 
@@ -94,9 +95,11 @@ fn main() -> ExitCode {
             }
         };
     }
+    #[cfg(unix)]
     if args.first().is_some_and(|a| a == "land") {
         return land::main(&args[1..]);
     }
+    #[cfg(unix)]
     if args.first().is_some_and(|a| a == "prune") {
         return land::prune::main(&args[1..]);
     }
@@ -105,6 +108,18 @@ fn main() -> ExitCode {
         .is_some_and(|a| matches!(a.as_str(), "grant" | "revoke" | "grants"))
     {
         return grants::main(&args);
+    }
+    #[cfg(windows)]
+    if args
+        .first()
+        .is_some_and(|a| matches!(a.as_str(), "land" | "prune" | "capacity"))
+        && !args.iter().any(|a| matches!(a.as_str(), "-h" | "--help"))
+    {
+        return done(Err(Failure::new(
+            "unsupported_platform",
+            format!("vega uac {} requires Unix", args[0]),
+            "run the command from a Unix coordinator",
+        )));
     }
     // `adopt --headless`: the flag may stand anywhere after `adopt`.
     let headless = args.first().is_some_and(|a| a == "adopt") && {
@@ -120,6 +135,7 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [] => run(Mode::View),
         [a] if a == "status" => run(Mode::Status),
+        #[cfg(unix)]
         [a, rest @ ..] if a == "capacity" => done(capacity_alias(rest)),
         [a] if a == "claim" => run(Mode::Claim),
         [a] if a == "release" => run(Mode::Release),
@@ -178,6 +194,7 @@ fn main() -> ExitCode {
 
 /// `vega uac capacity [...]` runs `vega-capacity [...]` in its place
 /// (docs/design/capacity.md); returns only when that fails to start.
+#[cfg(unix)]
 fn capacity_alias(args: &[String]) -> Result<(), Failure> {
     use std::os::unix::process::CommandExt;
     let e = std::process::Command::new("vega-capacity")
@@ -400,7 +417,10 @@ fn home(mode: Mode) -> Result<(), Failure> {
     let host = st::post_host();
     let mut lookup = beads::Lookup::default();
     let watching = vega_ci_watch::store::waiting(vega_ci_watch::unix_now());
+    #[cfg(unix)]
     let gates = vega_gate::state::waiting_authors(unix_now());
+    #[cfg(windows)]
+    let gates = std::collections::HashSet::<String>::new();
     let mut rows = Vec::new();
     for s in &snapshots {
         let m = s.machine.as_deref();
@@ -460,6 +480,12 @@ fn home(mode: Mode) -> Result<(), Failure> {
                     silence,
                 )
             };
+            let spawn = st::spawn_of_on(m, pane, agent_name(a), str_of(a, "agent"));
+            let published = m.and_then(|machine| {
+                view?
+                    .agent(&vega_registry::token(&machine.to_lowercase()), pane)
+                    .filter(|entry| entry["name"] == agent_name(a))
+            });
             rows.push(Row {
                 project: agent_project.unwrap_or_default(),
                 machine: m.unwrap_or(&host).to_string(),
@@ -472,8 +498,12 @@ fn home(mode: Mode) -> Result<(), Failure> {
                     .map(|t| str_of(t, "label").to_string())
                     .unwrap_or_default(),
                 kind: str_of(a, "agent").to_string(),
-                selection: st::spawn_of_on(m, pane, agent_name(a), str_of(a, "agent"))
-                    .map(|r| (r.tier.unwrap_or_default(), r.model.unwrap_or_default())),
+                selection: spawn.as_ref().map(|r| {
+                    (
+                        r.tier.clone().unwrap_or_default(),
+                        r.model.clone().unwrap_or_default(),
+                    )
+                }),
                 status: str_of(a, "agent_status").to_string(),
                 dialog: if m.is_none() && matches!(str_of(a, "agent_status"), "blocked" | "unknown")
                 {
@@ -501,14 +531,21 @@ fn home(mode: Mode) -> Result<(), Failure> {
                             format!("{pp} on {ph}")
                         })
                     })
+                    .or_else(|| {
+                        let parent: st::Parent =
+                            serde_json::from_value(published?.get("lineage")?.clone()).ok()?;
+                        Some(parent.label_on(&host, m))
+                    })
                     .unwrap_or_else(|| "-".into()),
                 mode: parent_of_on(m, pane, agent_name(a))
                     .map(|_| st::mode_of(m, pane, agent_name(a)).as_str().to_string())
                     .unwrap_or_default(),
-                // bd runs in the agent's cwd, so only local agents get a bead.
                 bead: match m {
                     None => lookup.bead(Path::new(str_of(a, "cwd")), &host),
-                    Some(_) => String::new(),
+                    Some(_) => spawn
+                        .and_then(|r| r.bead)
+                        .or_else(|| published?.get("bead")?.as_str().map(String::from))
+                        .unwrap_or_default(),
                 },
                 unread: vega_herdr::mail::unread(a, unix_now()),
                 rank: status_rank(str_of(a, "agent_status")),
@@ -1437,6 +1474,7 @@ fn gh_report() {
         ),
         Err(e) => println!("gh: core limit unknown ({})", cell(&e)),
     }
+    #[cfg(unix)]
     for line in shim_calls("gh", now) {
         println!("{line}");
     }
@@ -1445,6 +1483,7 @@ fn gh_report() {
 /// The tea calls per pane on this host (the tea shim counts them), only when
 /// there are any: most hosts never use Forgejo. No limit line: Forgejo sends
 /// no rate headers.
+#[cfg(unix)]
 fn tea_report() {
     for line in tea_lines(shim_calls("tea", unix_now())) {
         println!("{line}");
@@ -1452,6 +1491,7 @@ fn tea_report() {
 }
 
 /// Nothing for a zero table: one line, no rows.
+#[cfg(unix)]
 fn tea_lines(table: Vec<String>) -> Vec<String> {
     if table.len() == 1 {
         Vec::new()
@@ -1462,6 +1502,7 @@ fn tea_lines(table: Vec<String>) -> Vec<String> {
 
 /// The last hour of `tool` calls the shim counted, split into panes and
 /// callers without a herdr pane.
+#[cfg(unix)]
 fn shim_calls(tool: &str, now: i64) -> Vec<String> {
     let (panes, sessions): (Vec<_>, Vec<_>) =
         vega_shim::calls::per_pane(tool, vega_shim::calls::HOUR, now)
@@ -1472,6 +1513,7 @@ fn shim_calls(tool: &str, now: i64) -> Vec<String> {
 
 /// The `<tool>_calls` table: pane ids only; callers without a herdr pane (a
 /// session id) in their own table, labelled by harness.
+#[cfg(unix)]
 fn calls_table(tool: &str, panes: &[(String, usize)], sessions: &[(String, usize)]) -> Vec<String> {
     let mut out = Vec::new();
     if panes.is_empty() {
@@ -1564,6 +1606,7 @@ fn git_report() {
 
 fn report(project: Option<&str>) {
     gh_report();
+    #[cfg(unix)]
     tea_report();
     beads_report();
     git_report();
@@ -2414,6 +2457,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn calls_table_lists_panes_and_labels_sessions() {
         let panes = vec![("w3V:p1".to_string(), 4)];
         let sessions = vec![

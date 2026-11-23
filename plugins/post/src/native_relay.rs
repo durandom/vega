@@ -278,13 +278,9 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
                 .collect(),
             true,
         );
-        let mut entries = std::collections::BTreeMap::new();
+        let entries = vega_registry::agent_entries(&host, &agents, &[]);
         for a in &agents {
             let pane = a["pane_id"].as_str().expect("normalized hc pane");
-            entries.insert(vega_registry::agent_key(&host, pane), json!({
-                "schema":2,"pane":pane,"backend":"hc","address":a["address"],"name":a["name"],
-                "kind":a["agent"],"status":a["agent_status"],"turns":a["completion_seq"],"cwd":a["cwd"]
-            }));
             let (count, floor) = crate::outage::bounded(
                 "relay unread",
                 crate::unread_and_floor(&stream, &host, pane),

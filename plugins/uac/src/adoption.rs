@@ -130,7 +130,7 @@ fn persist(machine: Option<&str>, pane: &str, r: &Request) -> Result<(), Failure
             std::fs::create_dir_all(path.parent().expect("state file parent"))?;
             let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
             std::fs::write(&tmp, &text)?;
-            if let Err(e) = std::fs::rename(&tmp, &path) {
+            if let Err(e) = vega_herdr::platform::replace(&tmp, &path) {
                 let _ = std::fs::remove_file(tmp);
                 return Err(e);
             }

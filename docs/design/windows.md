@@ -249,7 +249,7 @@ build's Cargo configuration to suppress these dependencies or fake success.
 | `vega-config` | 101 | Unix imports, ring C build, SQLite C build |
 | `vega-history` | 101 | ring C build, SQLite C build |
 | `vega-deploy` | 101 | SQLite C build |
-| `vega-uac` | 101 | Unix imports, ring C build, SQLite C build |
+| `vega-uac` | Native subset | hc adoption receiver and project agent view. Landing, pruning, the capacity alias and shim counters are Unix-only. Uses the same MSVC TLS build as `vega-post`. |
 | `vega-capacity` | 101 | SQLite C build |
 | `vega-janitor` | 101 | ring C build, SQLite C build |
 | `vega-review` | 101 | SQLite C build |
@@ -342,8 +342,8 @@ The machine-readable build/install inventory is
 [`scripts/windows-packages.json`](../../scripts/windows-packages.json): the file
 is an array of Cargo `package` names and their shipped `binaries` (without
 `.exe`). Windows CI reads this file; the native installer must read it too.
-It currently ships `vega.exe`, `vega-post.exe`, and `vega-skills.exe`, plus their
-shared library packages. No daemon or shim belongs in that list.
+It ships `vega.exe`, `vega-post.exe`, `vega-skills.exe`, `vega-mux.exe` and
+`vega-uac.exe`, plus their shared library packages. No daemon or shim belongs in that list.
 
 Post's Unix entry point is `plugins/post/src/unix.rs`; the reduced native entry
 point is `windows.rs`. Both include `client_common.rs` and the same retry publisher,
@@ -692,7 +692,9 @@ renamed old images and print recovery paths; successful installs clean up old im
 that are no longer mapped. The opt-in core logon autostart remains independent.
 
 The worker polls only local live hc terminals, inspects per-pane unread counts
-and ack floors, and publishes its own host heartbeat and minimal hc agent keys.
+and ack floors, and publishes its host heartbeat and hc agent keys. The agent
+keys include the project ID resolved from the local checkout, recorded lineage
+and the bead from a matching spawn record when available.
 It never pulls or acknowledges mail: `inbox` retains exclusive ack ownership.
 It reuses `delivery.rs` pointer state and draft parsing, preserves pointer state
 across worker restarts, retries broker/core failures, and rescans mail after
@@ -703,7 +705,18 @@ job, UAC election, config deployment or administrative provisioning is included.
 
 CI uses an owned Rust hc fake and temporary restricted NATS broker. Logout/core
 lifetime and real native harness delivery remain acceptance work in 28.9; no live
-io/io-win run is part of this implementation.
+io/io-win run is part of that implementation.
+
+## Native UAC registration (vega-nic.28.20)
+
+A parent can run `vega uac adopt hc:io-win/t9` for a live worker on io-win.
+The target host’s `vega-uac.exe` verifies the pane and agent name through hc,
+then saves the parent, mode and brief before acknowledging. The native
+`vega-post` relay publishes the worker’s local project identity so the parent’s
+UAC view can list it. Git must be on the relay’s PATH to resolve the checkout.
+The view reads the bead from the matching spawn record
+when the worker was launched with `vega mux spawn --bead`. Keep the native
+relay and UAC binaries on compatible versions.
 
 ## Desktop core at logon and session-0 recovery (vega-nic.28.15)
 

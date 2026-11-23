@@ -1,4 +1,6 @@
 //! Real command dispatch with isolated terminal, mail and bead executables.
+#![cfg(unix)]
+
 use serde_json::json;
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 fn script(dir: &Path, name: &str, body: &str) {

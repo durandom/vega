@@ -5,6 +5,13 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 272 · 2026-11-23
+
+- feature: The native Windows subset includes `vega-uac.exe`. A parent can
+  adopt a worker on io-win, and the native relay publishes the worker's project
+  and lineage for the UAC view. Workers launched with `vega mux spawn --bead`
+  also show their recorded bead.
+
 ## 271 · 2026-11-23
 
 - feature: `vega browser install` installs pinned Chrome for Testing 158.0.8127.36.

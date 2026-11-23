@@ -203,9 +203,8 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// This host's desired entries (without the beat), from herdr's agent and
-/// workspace lists, local state records and local Git origin configuration.
-pub fn local_entries(
+/// Agent entries derived from local inventory, Git identity and state.
+pub fn agent_entries(
     host: &str,
     agents: &[Value],
     workspaces: &[Value],
@@ -274,8 +273,27 @@ pub fn local_entries(
         if let Some(w) = waiting.entry(pane) {
             entry["waiting"] = w;
         }
+        let name = vega_herdr::agent_name(a);
+        if let Some(parent) = state::parent_of_on(None, pane, name) {
+            entry["lineage"] = json!(parent);
+        }
+        if let Some(bead) = state::spawn_of_on(None, pane, name, a["agent"].as_str().unwrap_or(""))
+            .and_then(|spawn| spawn.bead)
+        {
+            entry["bead"] = json!(bead);
+        }
         out.insert(agent_key(host, pane), entry);
     }
+    out
+}
+
+/// This host's desired entries (without the beat), including supervision state.
+pub fn local_entries(
+    host: &str,
+    agents: &[Value],
+    workspaces: &[Value],
+) -> BTreeMap<String, Value> {
+    let mut out = agent_entries(host, agents, workspaces);
     for c in state::children() {
         let m = c.machine.as_deref();
         let child_host = m.map_or_else(|| host.to_string(), str::to_lowercase);
@@ -357,12 +375,13 @@ pub fn local_entries(
 
 /// Folder alias from an owner-local common directory; never an identity.
 pub fn project_folder(common: &str) -> &str {
-    let dir = common.trim_end_matches('/');
-    let dir = dir
-        .strip_suffix("/.git")
-        .or_else(|| dir.strip_suffix("/.bare"))
-        .unwrap_or(dir);
-    dir.rsplit('/').next().unwrap_or(dir)
+    let dir = common.trim_end_matches(['/', '\\']);
+    let (parent, name) = dir.rsplit_once(['/', '\\']).unwrap_or(("", dir));
+    if matches!(name, ".git" | ".bare") && !parent.is_empty() {
+        parent.rsplit(['/', '\\']).next().unwrap_or(parent)
+    } else {
+        name
+    }
 }
 
 #[cfg(unix)]
