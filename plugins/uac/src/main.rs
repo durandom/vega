@@ -717,9 +717,12 @@ fn claim_project(key: &str, path: &Path) -> Result<vega_herdr::project::Project,
 /// process cannot start in a literal `~` dir (a workspace made before
 /// `git init` has no repo_key, so this fallback finds the project).
 fn expand_home(path: &str) -> std::path::PathBuf {
-    match (path.strip_prefix("~/"), env::var("HOME")) {
-        (Some(rest), Ok(home)) => Path::new(&home).join(rest),
-        _ if path == "~" => env::var("HOME").map(Into::into).unwrap_or_default(),
+    let relative = path.strip_prefix("~/");
+    #[cfg(windows)]
+    let relative = relative.or_else(|| path.strip_prefix("~\\"));
+    match (relative, vega_herdr::platform::home()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ if path == "~" => vega_herdr::platform::home().unwrap_or_default(),
         _ => path.into(),
     }
 }
@@ -2183,8 +2186,11 @@ mod tests {
         let cwd = dir.path().to_str().unwrap();
         assert!(project_key(&ws, "w1", cwd).unwrap().is_some());
         // Me.cwd arrives collapsed to `~/...`: it must still reach the filesystem.
-        let home = env::var("HOME").unwrap();
-        assert_eq!(expand_home("~/src/x"), Path::new(&home).join("src/x"));
+        let home = vega_herdr::platform::home().unwrap();
+        assert_eq!(expand_home("~/src/x"), home.join("src/x"));
+        #[cfg(windows)]
+        assert_eq!(expand_home(r"~\src\x"), home.join(r"src\x"));
+        assert_eq!(expand_home("~"), home);
         assert_eq!(expand_home("/abs"), Path::new("/abs"));
     }
 
