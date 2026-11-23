@@ -12,6 +12,7 @@
 
 mod adoption;
 mod beads;
+#[cfg(unix)]
 mod grants;
 mod group;
 #[cfg(unix)]
@@ -103,6 +104,7 @@ fn main() -> ExitCode {
     if args.first().is_some_and(|a| a == "prune") {
         return land::prune::main(&args[1..]);
     }
+    #[cfg(unix)]
     if args
         .first()
         .is_some_and(|a| matches!(a.as_str(), "grant" | "revoke" | "grants"))
@@ -110,10 +112,12 @@ fn main() -> ExitCode {
         return grants::main(&args);
     }
     #[cfg(windows)]
-    if args
-        .first()
-        .is_some_and(|a| matches!(a.as_str(), "land" | "prune" | "capacity"))
-        && !args.iter().any(|a| matches!(a.as_str(), "-h" | "--help"))
+    if args.first().is_some_and(|a| {
+        matches!(
+            a.as_str(),
+            "land" | "prune" | "capacity" | "grant" | "revoke" | "grants"
+        )
+    }) && !args.iter().any(|a| matches!(a.as_str(), "-h" | "--help"))
     {
         return done(Err(Failure::new(
             "unsupported_platform",
@@ -399,6 +403,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
         projects.insert(p.clone());
     }
 
+    #[cfg(unix)]
     if !json {
         grants::listing()?;
     }

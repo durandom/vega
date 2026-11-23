@@ -249,7 +249,7 @@ build's Cargo configuration to suppress these dependencies or fake success.
 | `vega-config` | 101 | Unix imports, ring C build, SQLite C build |
 | `vega-history` | 101 | ring C build, SQLite C build |
 | `vega-deploy` | 101 | SQLite C build |
-| `vega-uac` | Native subset | hc adoption receiver and project agent view. Landing, pruning, the capacity alias and shim counters are Unix-only. Uses the same MSVC TLS build as `vega-post`. |
+| `vega-uac` | Native subset | hc adoption receiver and project agent view. Landing, pruning, mail grant management, the capacity alias and shim counters are Unix-only. Uses the same MSVC TLS build as `vega-post`. |
 | `vega-capacity` | 101 | SQLite C build |
 | `vega-janitor` | 101 | ring C build, SQLite C build |
 | `vega-review` | 101 | SQLite C build |

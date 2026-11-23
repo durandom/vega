@@ -1,10 +1,12 @@
+#![cfg(unix)]
+
 use std::process::{Command, Output};
 
 fn run(root: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_vega-uac"))
         .args(args)
         .env("HOME", root)
-        .env("XDG_STATE_HOME", root.join("state"))
+        .env_remove("XDG_STATE_HOME")
         .env("VEGA_POST_HOST", "proteus")
         .env("VEGA_POST_INBOX_ONLY", "deimos")
         .output()
@@ -105,7 +107,7 @@ fn grant_and_revoke_accept_hc_terminal_ids() {
         Command::new(env!("CARGO_BIN_EXE_vega-uac"))
             .args(args)
             .env("HOME", root.path())
-            .env("XDG_STATE_HOME", root.path().join("state"))
+            .env_remove("XDG_STATE_HOME")
             .env("VEGA_POST_HOST", "proteus")
             .env("VEGA_POST_INBOX_ONLY", "deimos,puck")
             .output()

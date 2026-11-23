@@ -121,4 +121,5 @@ harness on its lane host first, then adopt it from the current UAC. Adoption
 updates vega supervision/mail lineage; hc's native parent is separate.
 
 On Windows, hc adoption and the project agent view use the native relay. Landing,
-pruning, the capacity alias and shim call counters require a Unix coordinator.
+pruning, mail grant management, the capacity alias and shim call counters require
+a Unix coordinator.
