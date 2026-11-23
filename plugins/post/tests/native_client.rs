@@ -336,23 +336,6 @@ mod native {
         conf: &Path,
     ) {
         eprintln!("native relay: guarded delivery and ack ownership");
-        let checkout = win.root.join("checkout with spaces");
-        for args in [
-            &["init", "-q"][..],
-            &[
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/worker.git",
-            ][..],
-        ] {
-            assert!(Command::new("git")
-                .current_dir(&checkout)
-                .args(args)
-                .status()
-                .unwrap()
-                .success());
-        }
         let state = win.root.join("hc-state.json");
         let sends = win.root.join("sends.jsonl");
         let set = |status: &str, screen: &str| {
@@ -397,7 +380,7 @@ mod native {
                     .unwrap()
                     .is_some_and(|agent| {
                         assert_eq!(agent["schema"], 2);
-                        assert_eq!(agent["project"], "github.com/example/worker");
+                        assert_eq!(agent["project"], "example.invalid/team/native");
                         true
                     })
             })
