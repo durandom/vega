@@ -1,4 +1,4 @@
-//! Pinned npm install, in the same global prefix the caller already uses.
+//! Pinned agent-browser installation, respecting the caller's tool manager.
 use crate::real;
 use serde_json::{json, Value};
 use std::{
@@ -35,6 +35,29 @@ fn version(path: &Path) -> Result<String, Failure> {
         .filter(|v| !v.contains(char::is_whitespace) && !v.is_empty())
         .map(str::to_owned)
         .ok_or_else(|| failure(format!("unexpected agent-browser version: {text}")))
+}
+
+fn mise_source(bin: &Path) -> Option<String> {
+    let mut resolved = bin.canonicalize().ok()?;
+    if bin.parent()?.ends_with("shims") && resolved.ends_with("mise") {
+        // The shim dispatches by name. Ask mise which binary it dispatches to.
+        let target = output(Command::new("mise").args(["which", real::TOOL])).ok()?;
+        resolved = Path::new(&target).canonicalize().ok()?;
+    }
+    let tools =
+        output(Command::new("mise").args(["ls", "--current", "--json", "npm:agent-browser"]))
+            .ok()?;
+    let tools: Vec<Value> = serde_json::from_str(&tools).ok()?;
+    tools.iter().find_map(|tool| {
+        let root = Path::new(tool["install_path"].as_str()?)
+            .canonicalize()
+            .ok()?;
+        if tool["active"] == true && resolved.starts_with(root) {
+            tool["source"]["path"].as_str().map(str::to_owned)
+        } else {
+            None
+        }
+    })
 }
 
 /// Matches upstream v0.43.0 cli/src/install.rs, without starting a browser.
@@ -112,6 +135,21 @@ pub fn install() -> Result<(), Failure> {
     let before = status()?;
     print_status(&before, false);
     if before["state"] != "current" {
+        if let Some(source) = before["binary"]
+            .as_str()
+            .map(Path::new)
+            .and_then(mise_source)
+        {
+            let source = source.replace('\'', "'\\''");
+            return Err(Failure::new(
+                "browser_install",
+                "mise-managed agent-browser differs from the pinned version",
+                &format!(
+                    "mise use --path '{source}' --pin npm:agent-browser@{}",
+                    VERSION.trim()
+                ),
+            ));
+        }
         let root = PathBuf::from(output(Command::new("npm").args(["root", "--global"]))?);
         let prefix = PathBuf::from(output(Command::new("npm").args(["prefix", "--global"]))?);
         if !prefix.is_absolute() || root != prefix.join("lib/node_modules") {

@@ -72,11 +72,17 @@ marks rows `live`, `stale` (owner pane gone, or no call for more than a day) or 
 installed and pinned versions, and Chrome for Testing cache presence. These are
 read-only probes: `--version` and filesystem inspection, no browser or session.
 
-`vega browser install` converges the pin with `npm install --global --prefix
+`vega browser install` detects an active `npm:agent-browser` from mise, including
+a mise shim on PATH. On proteus and ganymede, mise reads this tool from
+`~/.config/mise/conf.d/agent-tools.toml`. A matching version skips the package
+install and still checks Chrome. A mismatch fails with a pinned `mise use --path`
+command targeting the configuration that supplied the active version.
+
+For npm globals, `vega browser install` converges the pin with `npm install --global --prefix
 <prefix> agent-browser@0.43.0`. It uses npm on PATH; invoke it in the host's normal
-login shell. Deploy already runs its remote script in a login shell, so fnm on
-proteus/ganymede and mise Node on puck keep selecting their own Node; io uses its
-Linux/WSL npm. This reuses the existing package instead of adding a native binary
+login shell. Deploy already runs its remote script in a login shell, so mise
+Node on puck and Linux/WSL npm on io keep selecting their own Node. This reuses
+the existing package instead of adding a native binary
 in another directory that would shadow it. No Node manager is installed or changed.
 
 Before upgrading, the real binary selected by `real.rs` (including an explicit
@@ -90,7 +96,8 @@ resolution; neither PATH nor the override is rewritten.
 Chrome for Testing detection follows [upstream 0.43.0 install.rs](https://github.com/vercel-labs/agent-browser/blob/v0.43.0/cli/src/install.rs):
 `~/.agent-browser/browsers/chrome-*`, with macOS app bundle (direct or under
 `chrome-mac-arm64`/`chrome-mac-x64`) or Linux `chrome`/`chrome-linux64/chrome`.
-Only absence runs the real `agent-browser install`; the result is verified.
+Once the agent-browser pin is met, Vega runs `agent-browser install` only
+when this cache is absent and verifies the result.
 Chrome itself is not pinned or upgraded when present. Global Chromium on 9223
 and its profile are unrelated and untouched. No existing daemon is restarted.
 
@@ -103,7 +110,7 @@ its existing behavior of reporting config failure without failing the binary
 rollout; the UAC must check the config summary and browser status on each host.
 
 Rollout: install the vega build, then config apply in each host's normal login
-shell. Proteus/ganymede reuse fnm's current global prefix; puck reuses mise Node
+shell. Proteus/ganymede use their configured mise tool; puck reuses mise Node
 LTS; io needs node/npm on its Linux PATH and Chrome's normal runtime libraries.
 If the prefix conflicts, select the Node owning the existing install or explicitly
 remove/migrate the old install before retrying; never fix by adding another copy.

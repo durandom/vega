@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 270 · 2026-11-23
+
+- feature: `vega browser install` recognizes mise-managed agent-browser and
+  prints the pinned mise command when an update is needed.
+
 ## 269 · 2026-11-22
 
 - feature: Pinned agent tooltips in the Herdr sidebar work and no longer

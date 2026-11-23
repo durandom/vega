@@ -113,6 +113,72 @@ fn missing_upgrade_and_current_converge_without_reinstalling() {
         assert_eq!(fs::read_to_string(f.p("chrome.log")).unwrap(), "install\n");
     }
 }
+
+#[test]
+fn mise_current_converges_chrome_and_mismatch_suggests_mise_command() {
+    let pin = vega_browser::install::VERSION.trim();
+    for (version, through_shim) in [(pin, true), ("0.31.1", true), ("0.31.1", false)] {
+        let f = Fix::new(None);
+        let root = f.p("mise/installs/npm-agent-browser/test");
+        let target = root.join("node_modules/.bin/agent-browser");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::copy(f.p("template"), &target).unwrap();
+        fs::write(f.p("version"), version).unwrap();
+        let source = f.p("config with spaces/agent's tools.toml");
+        let listing = serde_json::json!([{
+            "active": true,
+            "install_path": root,
+            "source": {"path": source}
+        }]);
+        fs::write(f.p("mise-list.json"), listing.to_string()).unwrap();
+        script(
+            &f.p("bin/mise"),
+            r#"
+case "${0##*/}:$*" in
+  agent-browser:--version|agent-browser:install) exec "$HOME/mise/installs/npm-agent-browser/test/node_modules/.bin/agent-browser" "$@";;
+  'mise:which agent-browser') echo "$HOME/mise/installs/npm-agent-browser/test/node_modules/.bin/agent-browser";;
+  'mise:ls --current --json npm:agent-browser') cat "$HOME/mise-list.json";;
+  *) echo "$*" >> "$HOME/unexpected-mise.log"; exit 9;;
+esac"#,
+        );
+        let browser_dir = if through_shim {
+            let shims = f.p("mise/shims");
+            fs::create_dir_all(&shims).unwrap();
+            symlink(f.p("bin/mise"), shims.join("agent-browser")).unwrap();
+            shims
+        } else {
+            target.parent().unwrap().to_owned()
+        };
+        let o = f
+            .cmd()
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}:/usr/bin:/bin",
+                    browser_dir.display(),
+                    f.p("bin").display()
+                ),
+            )
+            .arg("install")
+            .output()
+            .unwrap();
+        if version == pin {
+            assert!(String::from_utf8_lossy(&o.stdout).contains("result: current"));
+            ok(o);
+            assert_eq!(fs::read_to_string(f.p("chrome.log")).unwrap(), "install\n");
+        } else {
+            assert_eq!(o.status.code(), Some(1));
+            let command = format!(
+                "mise use --path '{}/config with spaces/agent'\\''s tools.toml' --pin npm:agent-browser@{pin}",
+                f.tmp.path().display()
+            );
+            assert!(String::from_utf8_lossy(&o.stdout).contains(&command));
+            assert!(!f.p("chrome.log").exists());
+        }
+        assert!(!f.p("npm.log").exists());
+        assert!(!f.p("unexpected-mise.log").exists());
+    }
+}
 #[test]
 fn foreign_override_and_wrong_prefix_refuse_before_mutating() {
     let f = Fix::new(Some("0.31.1"));

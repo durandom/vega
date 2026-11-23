@@ -9,8 +9,8 @@ Commands:
                               one bounded corp HTTPS probe; stop preserves the profile.
   ab --profile vpn --session <name> <args>
                               Use session-owned tabs in the running VPN profile (start it first).
-  install                     Converge agent-browser to the repository pin (0.43.0)
-                              using npm global; install Chrome for Testing if missing.
+  install                     Converge the npm global pin or print the required mise update.
+                              Install Chrome for Testing if missing and the pin is met.
   status [--json]             Read-only current/differs/missing and Chrome cache status.
   doctor [--json]             Same dependency status as status.
   ab --session <name> <args>  agent-browser on the global Chromium (127.0.0.1:9223).
@@ -139,10 +139,11 @@ Examples: vega browser vpn start; vega browser vpn status --json;
 vega browser ab --profile vpn --session corp-vpn-task tab new https://gitlab.cee.redhat.com
 vega browser vpn stop
 
-Install uses npm from PATH (run in your normal login shell; fnm/mise supported).
+For mise-managed agent-browser, install reports current or prints the mise command
+to update its source configuration. For npm globals, use your normal login shell.
 An older binary must resolve to that npm prefix's agent-browser package; a
 foreign binary or mismatched VEGA_AGENT_BROWSER_BIN is refused, never shadowed.
-Chrome for Testing is checked under ~/.agent-browser/browsers; no session is
+Install checks Chrome for Testing under ~/.agent-browser/browsers; no session is
 started. Existing sessions continue using their already running daemon.
 `vega config apply browser.agent-browser` runs the same installer; deploy's
 config apply includes it. Examples: `vega browser status`, `vega browser install`.
