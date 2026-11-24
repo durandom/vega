@@ -609,22 +609,22 @@ mod native {
             .unwrap()
             .port();
         let url = format!("nats://127.0.0.1:{port}");
-        let win = Host::make(&root, "native-test", &bin, &url);
+        let sidebar = Host::make(&root, "sidebar-test", &bin, &url);
         // The broker is still offline. Only this test's foreground worker and fake
         // core are used, including when running this case alone on a live host.
-        let labels = win.root.join("labels.jsonl");
-        let state = win.root.join("sidebar-state.json");
+        let labels = sidebar.root.join("labels.jsonl");
+        let state = sidebar.root.join("sidebar-state.json");
         fs::write(
             &state,
             json!({"status":"idle","labels":{"vega.role":"uac","vega.review":"keep"}}).to_string(),
         )
         .unwrap();
         fs::write(
-            win.root.join("roaming/vega/theme.toml"),
-            "[symbols.hosts]\nnative-test = '🌔'\n",
+            sidebar.root.join("roaming/vega/theme.toml"),
+            "[symbols.hosts]\nsidebar-test = '🌔'\n",
         )
         .unwrap();
-        let claims = win.root.join("local/vega/uac/v2");
+        let claims = sidebar.root.join("local/vega/uac/v2");
         fs::create_dir_all(&claims).unwrap();
         let claimed = "example.invalid/team/claimed";
         fs::write(
@@ -632,10 +632,10 @@ mod native {
                 "{}.json",
                 vega_herdr::project::encode_component(claimed)
             )),
-            json!({"schema":2,"project":claimed,"pane":"t5","host":win.host}).to_string(),
+            json!({"schema":2,"project":claimed,"pane":"t5","host":sidebar.host}).to_string(),
         )
         .unwrap();
-        let mut serve = win.cmd(&["relay", "serve"], "t4");
+        let mut serve = sidebar.cmd(&["relay", "serve"], "t4");
         let worker = Broker(
             serve
                 .env("FAKE_STATE", &state)
@@ -664,6 +664,7 @@ mod native {
         if env::args().any(|arg| arg == "--sidebar-only") {
             return;
         }
+        let win = Host::make(&root, "native-test", &bin, &url);
         let peer = Host::make(&root, "peer-test", &bin, &url);
         let admin = nkeys::KeyPair::new_user();
         let conf = root.join("nats.conf");
