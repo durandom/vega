@@ -411,6 +411,18 @@ mod native {
                     })
             })
         });
+        wait_for(|| {
+            rt.block_on(vega_registry::get_one(
+                client,
+                &vega_registry::beat_key(win.host),
+            ))
+            .unwrap()
+            .is_some_and(|beat| {
+                beat["native"]["inventory"]["last_success"]
+                    .as_i64()
+                    .is_some()
+            })
+        });
         assert_eq!(lines(), 0, "blocked waits");
         set("unknown", "❯ ");
         std::thread::sleep(Duration::from_secs(3));
@@ -660,6 +672,19 @@ mod native {
                 json!({"terminal":"t7","labels":{"vega.host":"🌔","vega.project":"native","vega.role":"sentinel"}})
             ]
         );
+        wait_for(|| {
+            fs::read(sidebar.root.join("local/vega/vegad-health.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .is_some_and(|h| {
+                    ["inventory", "labels"].iter().all(|phase| {
+                        h["native"][*phase]["last_success"]
+                            .as_i64()
+                            .is_some_and(|at| at > 0)
+                            && h["native"][*phase]["error"].is_null()
+                    })
+                })
+        });
         drop(worker);
         if env::args().any(|arg| arg == "--sidebar-only") {
             return;

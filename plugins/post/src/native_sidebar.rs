@@ -7,8 +7,33 @@ pub fn start() -> mpsc::Sender<()> {
     let (lifetime, stop) = mpsc::channel();
     std::thread::spawn(move || {
         let mut previous_error = None;
+        let mut health = vega_herdr::daemon_health::Health {
+            native: Some(
+                vega_herdr::daemon_health::read()
+                    .and_then(|h| h.native)
+                    .unwrap_or_default(),
+            ),
+            ..Default::default()
+        };
         loop {
-            let error = reconcile().err().map(|e| (e.code, e.message));
+            let native = health.native.as_mut().unwrap();
+            let inventory = crate::terminals::hc_list();
+            native.inventory.record(
+                vega_herdr::capacity::now(),
+                inventory.as_ref().err().map(|e| e.message.clone()),
+            );
+            let result = inventory.and_then(reconcile);
+            health.at = vega_herdr::capacity::now();
+            let error = result.err().map(|e| (e.code, e.message));
+            native.labels.record(
+                health.at,
+                error.as_ref().map(|(_, message)| message.clone()),
+            );
+            if let Some(path) = vega_herdr::daemon_health::path() {
+                if let Err(e) = health.write(&path) {
+                    eprintln!("sidebar health: {e}");
+                }
+            }
             if error != previous_error {
                 if let Some((code, message)) = &error {
                     eprintln!("sidebar: {code}: {message}");
@@ -23,8 +48,7 @@ pub fn start() -> mpsc::Sender<()> {
     lifetime
 }
 
-fn reconcile() -> Result<(), Failure> {
-    let agents = crate::terminals::hc_list()?;
+fn reconcile(agents: Vec<Value>) -> Result<(), Failure> {
     let host = crate::host();
     let glyph = vega_herdr::theme::symbols().host_label(&host);
     let claims = state::project_uac_records();

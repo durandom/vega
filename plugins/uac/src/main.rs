@@ -274,6 +274,41 @@ enum Mode {
     Adopt(String, Option<String>, bool),
 }
 
+fn print_local_native_health() {
+    if cfg!(windows) {
+        for (host, health) in native_workers(None) {
+            print!("{}", health.render(&host, unix_now()));
+        }
+    }
+}
+
+fn native_workers(
+    view: Option<&vega_registry::View>,
+) -> std::collections::BTreeMap<String, vega_herdr::daemon_health::Native> {
+    let local = st::post_host();
+    let mut workers: std::collections::BTreeMap<_, _> = view
+        .into_iter()
+        .flat_map(|view| &view.entries)
+        .filter_map(|(key, beat)| {
+            let host = key.strip_suffix(".beat")?;
+            if host == local {
+                return None;
+            }
+            Some((
+                host.to_owned(),
+                serde_json::from_value(beat.get("native")?.clone()).ok()?,
+            ))
+        })
+        .collect();
+    if cfg!(windows) {
+        let health = vega_herdr::daemon_health::read()
+            .and_then(|h| h.native)
+            .unwrap_or_default();
+        workers.insert(local, health);
+    }
+    workers
+}
+
 fn home(mode: Mode) -> Result<(), Failure> {
     let status = matches!(mode, Mode::Status);
     let json = matches!(mode, Mode::Json);
@@ -295,7 +330,7 @@ fn home(mode: Mode) -> Result<(), Failure> {
                 .into_owned(),
         }
     } else {
-        terminal::identity()?
+        terminal::identity().inspect_err(|_| print_local_native_health())?
     };
     // Remote machines answer over ssh: ask them in parallel with the local one.
     let remote: Vec<_> = machines()
@@ -310,7 +345,11 @@ fn home(mode: Mode) -> Result<(), Failure> {
         .collect();
     // The registry (other hosts' lineage, UACs, statuses), in parallel.
     let reg = thread::spawn(|| vega_registry::read_blocking_cli(Duration::from_secs(4)));
-    let local = terminal::local()?;
+    let local = terminal::local().inspect_err(|_| {
+        if !json {
+            print_local_native_health();
+        }
+    })?;
 
     let bin = env::current_exe()
         .map(|p| collapse_home(&p.display().to_string()))
@@ -318,7 +357,9 @@ fn home(mode: Mode) -> Result<(), Failure> {
     if !json {
         println!("bin: {bin}");
         println!("description: UAC facility console: every agent on this project across terminal backends and hosts, with parent and bead");
-        print!("{}", vega_herdr::daemon_health::status());
+        if !cfg!(windows) {
+            print!("{}", vega_herdr::daemon_health::status());
+        }
         let my_name = local
             .agents
             .iter()
@@ -338,6 +379,12 @@ fn home(mode: Mode) -> Result<(), Failure> {
         .join()
         .unwrap_or_else(|_| Err("registry read crashed".into()));
     let view = registry.as_ref().ok();
+    let native = native_workers(view);
+    if !json {
+        for (host, health) in &native {
+            print!("{}", health.render(host, unix_now()));
+        }
+    }
     if let Some(p) = &project {
         match &mode {
             Mode::Claim => {
@@ -603,16 +650,28 @@ fn home(mode: Mode) -> Result<(), Failure> {
     if json {
         let grants = vega_herdr::mail_grants::list()
             .map_err(|e| Failure::new("grant_store", e, "inspect vega/mail-grants state files"))?;
-        println!(
-            "{}",
-            facility_json(
-                project.as_deref(),
-                &rows,
-                &grants,
-                &unreachable,
-                registry.as_ref().err()
-            )
+        let mut result = facility_json(
+            project.as_deref(),
+            &rows,
+            &grants,
+            &unreachable,
+            registry.as_ref().err(),
         );
+        if !native.is_empty() {
+            let now = unix_now();
+            result["native_workers"] = serde_json::Value::Object(
+                native
+                    .into_iter()
+                    .map(|(host, health)| {
+                        let mut value = serde_json::json!(health);
+                        value["inventory"]["status"] = health.inventory.status(now).into();
+                        value["labels"]["status"] = health.labels.status(now).into();
+                        (host, value)
+                    })
+                    .collect(),
+            );
+        }
+        println!("{result}");
         return Ok(());
     }
     if let Mode::Ask(question, within) = &mode {
@@ -1999,6 +2058,26 @@ fn shorten(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_native_health_survives_inventory_beat_expiry() {
+        let mut view = vega_registry::View::default();
+        let mut health = vega_herdr::daemon_health::Native::default();
+        health.inventory.record(100, Some("hc unavailable".into()));
+        health.labels.record(100, Some("hc unavailable".into()));
+        view.entries.insert(
+            "fixture-win.beat".into(),
+            serde_json::json!({"schema":2,"at":0,"native":health}),
+        );
+        view.entries.insert(
+            "fixture-unix.beat".into(),
+            serde_json::json!({"schema":2,"at":100}),
+        );
+        let workers = native_workers(Some(&view));
+        assert!(!workers.contains_key("fixture-unix"));
+        assert_eq!(workers["fixture-win"].inventory.status(101), "failed");
+        assert_eq!(workers["fixture-win"].inventory.status(221), "stale");
+    }
 
     #[test]
     fn facility_json_has_agent_and_grant_rows_even_when_empty() {

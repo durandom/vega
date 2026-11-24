@@ -16,7 +16,66 @@ pub struct Sample {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Health {
     pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<Native>,
     pub samples: BTreeMap<String, Sample>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Native {
+    pub inventory: Observation,
+    pub labels: Observation,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Observation {
+    pub at: i64,
+    pub last_success: Option<i64>,
+    pub error: Option<String>,
+}
+
+impl Observation {
+    pub fn record(&mut self, now: i64, error: Option<String>) {
+        self.at = now;
+        if error.is_none() {
+            self.last_success = Some(now);
+        }
+        self.error = error;
+    }
+
+    pub fn status(&self, now: i64) -> &'static str {
+        if self.at == 0 || self.at > now || now.saturating_sub(self.at) > STALE_SECS {
+            "stale"
+        } else if self.error.is_some() {
+            "failed"
+        } else {
+            "fresh"
+        }
+    }
+}
+
+impl Native {
+    pub fn render(&self, host: &str, now: i64) -> String {
+        let mut out = String::new();
+        for (name, obs) in [("inventory", &self.inventory), ("labels", &self.labels)] {
+            out += &format!(
+                "vegad: {} {name} {} (last success {})",
+                crate::cell(host),
+                obs.status(now),
+                obs.last_success
+                    .map_or_else(|| "never".into(), |at| at.to_string())
+            );
+            if let Some(error) = &obs.error {
+                out += &format!(" {}", crate::cell(error));
+            }
+            out.push('\n');
+        }
+        out
+    }
+}
+
+pub fn read() -> Option<Health> {
+    serde_json::from_slice(&std::fs::read(path()?).ok()?).ok()
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -99,18 +158,36 @@ pub fn render(health: Option<&Health>, now: i64) -> String {
 }
 
 pub fn status() -> String {
-    let health = path()
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice::<Health>(&b).ok());
+    let health = read();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
+    if let Some(native) = health.as_ref().and_then(|h| h.native.as_ref()) {
+        return native.render(&crate::state::post_host(), now);
+    }
     render(health.as_ref(), now)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_failure_keeps_last_success_and_ages_out() {
+        let mut h = Native::default();
+        h.inventory.record(100, None);
+        h.labels.record(100, None);
+        h.labels.record(105, Some("label write failed".into()));
+        let output = h.render("io-win", 110);
+        assert!(output.contains("inventory fresh (last success 100)"));
+        assert!(output.contains("labels failed (last success 100) label write failed"));
+        assert!(h.render("io-win", 226).contains("labels stale"));
+        h.labels.record(227, None);
+        assert!(h
+            .render("io-win", 228)
+            .contains("labels fresh (last success 227)"));
+        assert!(h.labels.error.is_none());
+    }
+
     #[test]
     fn empty_xdg_uses_the_same_home_fallback_as_the_daemon() {
         let expected = PathBuf::from("/home/fixture/.local/state/vega/vegad-health.json");

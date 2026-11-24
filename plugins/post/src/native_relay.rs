@@ -136,13 +136,20 @@ fn worker() -> Result<Value, Failure> {
 fn status(as_json: bool) -> Result<(), Failure> {
     let running = lock()?.is_none();
     let info = if running { worker()? } else { json!({}) };
+    let health = vega_herdr::daemon_health::read().and_then(|h| h.native);
     if as_json {
         println!(
             "{}",
-            json!({"running": running, "pid": info["pid"], "exe": info["exe"]})
+            json!({"running": running, "pid": info["pid"], "exe": info["exe"], "native": health})
         );
     } else {
         println!("relay: {}", if running { "running" } else { "stopped" });
+        if let Some(native) = health {
+            print!(
+                "{}",
+                native.render(&crate::host(), vega_herdr::capacity::now())
+            );
+        }
         if let Some(pid) = info["pid"].as_u64() {
             println!("pid: {pid}");
         }
@@ -265,7 +272,19 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
     .collect();
     loop {
         // Failed inventory is not empty: retain state and let the heartbeat age.
-        let agents = terminals::hc_list()?;
+        let agents = match terminals::hc_list() {
+            Ok(agents) => agents,
+            Err(error) => {
+                // A failed scan may report health but cannot renew agent entries.
+                let prior = kv.get(vega_registry::beat_key(&host)).await.map_err(fail)?;
+                let beat = match prior {
+                    Some(bytes) => serde_json::from_slice(&bytes).map_err(fail)?,
+                    None => json!({"schema": 2, "at": 0}),
+                };
+                publish_beat(&kv, &host, beat).await?;
+                return Err(error);
+            }
+        };
         terminals::native_parents(&agents);
         d.snapshot_backend(
             agents
@@ -333,10 +352,24 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
             kv.delete(k).await.map_err(fail)?;
         }
         published = current;
-        vega_registry::heartbeat(&kv, &host).await.map_err(fail)?;
+        publish_beat(&kv, &host, vega_registry::beat()).await?;
         save(d, file)?;
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
+}
+
+async fn publish_beat(
+    kv: &async_nats::jetstream::kv::Store,
+    host: &str,
+    mut beat: Value,
+) -> Result<(), Failure> {
+    if let Some(native) = vega_herdr::daemon_health::read().and_then(|h| h.native) {
+        beat["native"] = json!(native);
+    }
+    kv.put(vega_registry::beat_key(host), beat.to_string().into())
+        .await
+        .map_err(fail)?;
+    Ok(())
 }
 
 fn save(d: &Delivery, file: &std::path::Path) -> Result<(), Failure> {

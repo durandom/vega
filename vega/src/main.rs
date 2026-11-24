@@ -34,6 +34,19 @@ fn main() -> ExitCode {
 
     let bin = format!("{PREFIX}{name}");
     let Some(path) = find_on_path(&bin) else {
+        #[cfg(windows)]
+        if name == "bd" {
+            let flags: Vec<_> = args.collect();
+            if flags.is_empty() || flags == ["status"] {
+                println!("beads_sync: unsupported on Windows");
+                return ExitCode::SUCCESS;
+            }
+            if flags == ["--json"] || flags == ["status", "--json"] || flags == ["--json", "status"]
+            {
+                println!(r#"{{"schema":1,"beads_sync":"unsupported","platform":"windows"}}"#);
+                return ExitCode::SUCCESS;
+            }
+        }
         println!("error{{code,message,hint}}:");
         println!("  unknown_plugin,no {bin} on PATH,run `vega` to list plugins");
         return ExitCode::from(2);
