@@ -2513,8 +2513,7 @@ async fn serve(
 const LIVE_THEME_EVERY: Duration = Duration::from_secs(2);
 
 /// Types `/config theme=<mode>` into each waiting Claude pane that is idle,
-/// done or working with an empty input and no dialog (theme::decide); a
-/// working pane gets it queued. Failed sends remain pending with backoff;
+/// or done with an empty input and no dialog (theme::decide). Failed sends remain pending with backoff;
 /// successful inventory snapshots remove closed panes.
 fn type_theme(drafts: &Drafts) -> Duration {
     let Some(env) = vega_theme_sync::Env::from_env() else {
@@ -2557,57 +2556,48 @@ fn type_theme_in(env: &vega_theme_sync::Env, drafts: &Drafts) -> Result<bool, St
         return Ok(false);
     }
     let line = format!("/config theme={}", mode.as_str());
-    for pane in journal.due(state::unix_now()) {
-        // Missing from an unavailable backend is unknown, not gone.
-        let Some(status) = statuses.get(&pane).map(String::as_str) else {
-            continue;
-        };
-        let working = status == "working";
-        let held = drafts.stashed.contains_key(&pane);
-        if theme::decide(Some(status), held, || screen(&pane)) != theme::Action::Send {
-            continue;
-        }
-        journal.send(env, &pane, state::unix_now(), || {
-            let result = theme::send_checked(
-                &line,
-                || {
-                    notify_queued(&pane, &line, working)
-                        .map_err(|f| format!("{} {}", f.code, f.message))
-                },
-                || screen(&pane),
-            );
-            match &result {
-                Ok(()) => {
-                    log(&format!("theme: typed {line} into {pane}"));
-                    if working {
-                        submit_slash_menu(&pane, &line);
-                    }
-                }
-                Err(e) => log(&format!(
-                    "theme: {pane}: {e}; bounded delivery policy applies"
-                )),
+    let mut snapshot = None;
+    let delivery = (|| -> Result<(), String> {
+        for pane in journal.due(state::unix_now()) {
+            // Missing from an unavailable backend is unknown, not gone.
+            let Some(status) = statuses.get(&pane).map(String::as_str) else {
+                continue;
+            };
+            let held = drafts.stashed.contains_key(&pane);
+            if theme::decide(Some(status), held, || screen(&pane)) != theme::Action::Send {
+                continue;
             }
-            result
-        })?;
-    }
-    Ok(journal.panes.values().any(|p| p.pending))
-}
-
-/// In a working Claude pane the Enter after a typed slash command only picks
-/// from its completion menu: the line stays in the input box (seen live
-/// 2026-11-10). One more Enter runs it, and only when the box holds exactly
-/// that line, so it never submits anything else.
-fn submit_slash_menu(pane: &str, line: &str) {
-    if !terminals::is_hc(pane) {
-        return;
-    }
-    let left = screen(pane).map(|s| delivery::draft(&s));
-    if left == Some(Draft::Text(line.to_string())) {
-        match vega_herdr::hc::hc_local(&["keys", terminals::bare(pane), "enter"]) {
-            Ok(_) => log(&format!("theme: {pane}: Enter after the completion menu")),
-            Err(f) => log(&format!("theme: {pane}: {} {}", f.code, f.message)),
+            let settings = match &snapshot {
+                Some(existing) => existing,
+                None => snapshot.insert(theme::ClaudeSettings::snapshot(env, mode)?),
+            };
+            let before = settings.metadata()?;
+            let sent = journal.send(env, &pane, state::unix_now(), || {
+                let result = theme::send_checked(
+                    &line,
+                    || notify(&pane, &line).map_err(|f| format!("{} {}", f.code, f.message)),
+                    || screen(&pane),
+                );
+                match &result {
+                    Ok(()) => {
+                        log(&format!("theme: typed {line} into {pane}"));
+                    }
+                    Err(e) => log(&format!(
+                        "theme: {pane}: {e}; bounded delivery policy applies"
+                    )),
+                }
+                result
+            });
+            settings.wait_and_restore(&before)?;
+            sent?;
         }
+        Ok(())
+    })();
+    if let Some(settings) = snapshot {
+        settings.restore()?;
     }
+    delivery?;
+    Ok(journal.panes.values().any(|p| p.pending))
 }
 
 /// A broker that refused CI mail is retried this often, so a broker outage
@@ -3139,11 +3129,7 @@ fn screen(pane: &str) -> Option<String> {
 }
 
 fn notify(pane: &str, line: &str) -> Result<(), Failure> {
-    notify_queued(pane, line, false)
-}
-
-fn notify_queued(pane: &str, line: &str, queued: bool) -> Result<(), Failure> {
-    notify_with(pane, line, queued, false)
+    notify_with(pane, line, false, false)
 }
 
 /// `unknown_ok`: see `terminals::send_hc_with` (hc only; herdr has its own status).

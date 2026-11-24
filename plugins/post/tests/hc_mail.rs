@@ -655,6 +655,11 @@ fn theme_fixture() -> Fixture {
         "mode = \"light\"\nlive_claude = true\n",
     )
     .unwrap();
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    write(
+        &home.join(".claude/settings.json"),
+        &json!({"theme":"dark","model":"keep"}),
+    );
     // A recorded different mode makes the watcher emit a real theme event.
     write(
         &home.join("state/vega/theme.json"),
@@ -690,6 +695,22 @@ fn theme_change_reaches_idle_hc_claude_through_guarded_send() {
     wait(f.home.path(), "durable live request log", || {
         f.log().contains("durable live request for light")
     });
+    let home = f.home.path();
+    wait(home, "both stale settings rewrites repaired", || {
+        ["t1", "t2"]
+            .iter()
+            .all(|pane| home.join(format!("stale-{pane}")).exists())
+            && serde_json::from_slice::<Value>(
+                &fs::read(home.join(".claude/settings.json")).unwrap(),
+            )
+            .ok()
+                == Some(json!({"theme":"light","model":"keep"}))
+    });
+    for pane in ["t1", "t2"] {
+        let before: Value =
+            serde_json::from_slice(&fs::read(home.join(format!("stale-{pane}"))).unwrap()).unwrap();
+        assert_eq!(before, json!({"theme":"light","model":"keep"}));
+    }
     assert!(f.prompts("w1:p2").is_empty());
 }
 

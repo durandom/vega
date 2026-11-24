@@ -14,6 +14,7 @@ vega theme apply        # apply the due mode again (idempotent)
 
 - vegad watches the OS appearance and applies every change itself, and types
   `/config theme=<mode>` into Claude panes once they are idle with an empty input.
+  vegad restores the settings snapshot after each send. Edits made during a batch can be overwritten.
   Failed sends retry with backoff and survive vegad restarts. Status lists each pane's last
   successfully sent mode, wanted mode and applied/pending/failed reason (unknown before the first send).
   Receipts confirm transport delivery; Claude does not acknowledge application. There is nothing to poll.

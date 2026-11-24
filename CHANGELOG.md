@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 278 · 2026-11-24
+
+- feature: Claude theme sync preserves current settings when switching idle panes, so stale sessions no longer bring back removed hooks during delivery. Working panes switch once idle. Concurrent settings edits during a switch can be overwritten.
+
 ## 277 · 2026-11-24
 
 - feature: Repo group members now find the coordination database even when bd's per-user `~/.beads` directory exists above the checkout.

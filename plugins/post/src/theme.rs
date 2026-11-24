@@ -6,8 +6,8 @@
 //!
 //! Running Claude panes read their theme only at start, so after a change
 //! the relay loop types `/config theme=<mode>` into each Claude pane of this
-//! host, once, at once: idle, done or working (Claude runs the queued slash
-//! command), with an empty input and no dialog.
+//! host, once idle or done, with an empty input and no dialog. Each send is
+//! bracketed by a settings snapshot and bounded restore.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -179,6 +179,53 @@ pub fn registry_entry(host: &str) -> Option<(String, serde_json::Value)> {
     Some((vega_registry::theme_key(host), entry))
 }
 
+/// The settings to put back after Claude persists its in-memory copy.
+pub struct ClaudeSettings {
+    path: std::path::PathBuf,
+    wanted: serde_json::Value,
+}
+
+impl ClaudeSettings {
+    pub fn snapshot(env: &Env, mode: Mode) -> Result<Self, String> {
+        let path = vega_theme_sync::adapters::claude_path(env);
+        let mut wanted = vega_theme_sync::files::read_json(&path)?
+            .ok_or_else(|| format!("cannot snapshot missing {}", path.display()))?;
+        wanted["theme"] = mode.as_str().into();
+        Ok(Self { path, wanted })
+    }
+
+    /// A stale write can follow a successful or ambiguous send. Also check once
+    /// at the deadline, including when Claude makes no observable change.
+    pub fn wait_and_restore(&self, before: &std::fs::Metadata) -> Result<(), String> {
+        use std::os::unix::fs::MetadataExt;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            let Ok(now) = self.metadata() else { break };
+            if now.ino() != before.ino() || now.modified().ok() != before.modified().ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        self.restore()
+    }
+
+    pub fn metadata(&self) -> Result<std::fs::Metadata, String> {
+        std::fs::metadata(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+
+    fn matches(&self) -> bool {
+        matches!(vega_theme_sync::files::read_json(&self.path), Ok(Some(v)) if v == self.wanted)
+    }
+
+    pub fn restore(&self) -> Result<(), String> {
+        if self.matches() {
+            return Ok(());
+        }
+        let text = serde_json::to_string_pretty(&self.wanted).map_err(|e| e.to_string())?;
+        vega_theme_sync::files::write_atomic(&self.path, &(text + "\n"))
+    }
+}
+
 /// What to do with a pane waiting for `/config theme=<mode>`.
 #[derive(Debug, PartialEq)]
 pub enum Action {
@@ -188,13 +235,13 @@ pub enum Action {
 }
 
 /// `status`: the pane's herdr status, `None` when it is gone or no longer
-/// Claude. `screen`: read only for an idle, done or working pane; `None` when
+/// Claude. `screen`: read only for an idle or done pane; `None` when
 /// it cannot be read. `held`: vegad stashed a draft there.
 pub fn decide(status: Option<&str>, held: bool, screen: impl FnOnce() -> Option<String>) -> Action {
     let Some(status) = status else {
         return Action::Drop;
     };
-    if !matches!(status, "idle" | "done" | "working") || held {
+    if !matches!(status, "idle" | "done") || held {
         return Action::Wait;
     }
     let Some(s) = screen() else {
@@ -318,7 +365,7 @@ mod tests {
     fn decide_guards_the_pane() {
         let empty = || Some("output\n────\n❯ \n────".to_string());
         assert_eq!(decide(None, false, empty), Action::Drop);
-        assert_eq!(decide(Some("working"), false, empty), Action::Send);
+        assert_eq!(decide(Some("working"), false, empty), Action::Wait);
         assert_eq!(decide(Some("blocked"), false, empty), Action::Wait);
         assert_eq!(decide(Some("unknown"), false, empty), Action::Wait);
         assert_eq!(decide(Some("idle"), true, empty), Action::Wait);
@@ -358,7 +405,12 @@ mod tests {
             "control = \"proteus\"\n",
         )
         .unwrap();
-        std::fs::write(dir.path().join(".claude.json"), "{\"theme\": \"light\"}").unwrap();
+        std::fs::create_dir(dir.path().join(".claude")).unwrap();
+        std::fs::write(
+            dir.path().join(".claude/settings.json"),
+            "{\"theme\": \"light\"}",
+        )
+        .unwrap();
         let remote: Remote = Default::default();
         let mut w = Watcher::default();
         let mut err = String::new();
@@ -373,9 +425,11 @@ mod tests {
             (a.mode, a.source.as_str()),
             (Mode::Dark, "registry:proteus")
         );
-        assert!(std::fs::read_to_string(dir.path().join(".claude.json"))
-            .unwrap()
-            .contains("dark"));
+        assert!(
+            std::fs::read_to_string(dir.path().join(".claude/settings.json"))
+                .unwrap()
+                .contains("dark")
+        );
         // Unchanged: no second apply.
         assert!(step(&env, None, &mut w, &remote, &mut err).is_none());
         // The control host turns light.

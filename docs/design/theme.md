@@ -49,7 +49,7 @@ its settings.json must already exist.
 
 | Tool | Setting | Light / dark default | Native auto |
 |---|---|---|---|
-| claude | `~/.claude.json` `.theme` | `light` / `dark` (variants like `light-daltonized` count and stay) | `auto` exists but does not work (Slayer): no |
+| claude | `~/.claude/settings.json` `.theme` | `light` / `dark` (variants like `light-daltonized` count and stay) | `auto` exists but does not work (Slayer): no |
 | codex | `~/.codex/config.toml` `[tui] theme` (syntax theme) | `catppuccin-latte` / `catppuccin-mocha` | no |
 | pi | `~/.pi/agent/settings.json` `.theme = "vega-auto"`, `~/.pi/agent/themes/vega-auto.json` | `catppuccin-latte` / `catppuccin-mocha` | yes: `system` (also unset), or a `light/dark` pair; fixed themes use vega-auto |
 | delta | `~/.gitconfig.local` `delta.features` (swaps the theme feature, keeps others) | `mirthful-willow` / `weeping-willow` | no |
@@ -77,8 +77,7 @@ Native `system` and pairs (including `system/system`) are preserved, even with `
 - **Live Claude switch.** Claude Code reads `.theme` at start only; typing `/config theme=<mode>` switches a
   running pane. After a real change (from the mode this vegad applied, or at start from the recorded state;
   never on the first apply on a host; a restart resumes previously requested work), the relay loop collects this
-  host's Claude panes and types the line into each, once, at once when herdr reports it `idle`, `done` or
-  `working` (Claude runs a slash command typed during a turn; it is sent queued), the screen shows no dialog
+  host's Claude panes and types the line into each once herdr reports it `idle` or `done`, the screen shows no dialog
   (`vega_herdr::dialog`), the input is empty (`delivery::draft`) and vegad holds no stashed draft there. A
   blocked or unknown pane waits; a closed one is dropped; a newer change replaces the
   pending one. A send failure stays pending with its error and exponential backoff
@@ -111,8 +110,13 @@ Native `system` and pairs (including `system/system`) are preserved, even with `
 
 ## Risks
 
-- `~/.claude.json` is rewritten by Claude Code all the time; a read-modify-write can lose a write that lands in
-  between. It happens only on a mode change (writes are skipped when unchanged), as with theme-sync.
+- A file-only light-to-dark switch on 2026-11-24 did not repaint running Claude sessions. Before the first
+  eligible pane command in each batch, vegad snapshots the current settings and sets the snapshot's theme
+  to the requested mode. After each send, including ambiguous sends, it waits up to three seconds for a file
+  change and atomically restores the desired settings if they differ. It checks again when the batch ends.
+  Working panes wait until idle because a queued command could execute beyond the restore window.
+- A concurrent settings edit during the batch can be overwritten. A Claude write after the final check or a
+  daemon exit between delivery and repair can leave stale settings on disk.
 - The live line goes into an agent pane: guarded as above, but a screen vegad misreads could still take it.
 
 ## Dotfiles follow-up (dotfiles UAC)

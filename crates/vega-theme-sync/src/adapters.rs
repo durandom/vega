@@ -4,9 +4,6 @@
 //! idempotent. A missing config file means the tool is not set up on this
 //! host: skipped, never created.
 //! pi additionally creates a managed custom theme file for live reload.
-//!
-//! Running Claude panes switch only when vegad types `/config theme=<mode>`
-//! into them (plugins/post/src/theme.rs); the file here is for new sessions.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -224,10 +221,10 @@ fn json_get(path: &Path, classify: impl Fn(&str) -> Current) -> (String, Current
     }
 }
 
-// --- claude: ~/.claude.json .theme (no key = dark) -------------------------
+// --- claude: ~/.claude/settings.json .theme (no key = dark) -------------------------
 
-fn claude_path(env: &Env) -> PathBuf {
-    env.home.join(".claude.json")
+pub fn claude_path(env: &Env) -> PathBuf {
+    env.home.join(".claude/settings.json")
 }
 
 fn claude_get(env: &Env) -> (String, Current) {
@@ -501,7 +498,7 @@ mod tests {
             fs::write(p, text).unwrap();
         };
         w(
-            ".claude.json",
+            ".claude/settings.json",
             "{\"numStartups\": 3, \"theme\": \"light\", \"projects\": {}}\n",
         );
         w(
@@ -590,8 +587,8 @@ mod tests {
             );
         }
         let read = |rel: &str| fs::read_to_string(d.path().join(rel)).unwrap();
-        assert!(read(".claude.json").contains("\"numStartups\": 3"));
-        assert!(read(".claude.json").contains("\"theme\": \"dark\""));
+        assert!(read(".claude/settings.json").contains("\"numStartups\": 3"));
+        assert!(read(".claude/settings.json").contains("\"theme\": \"dark\""));
         assert!(read(".pi/agent/settings.json").contains("\"defaultModel\""));
         let codex = read(".codex/config.toml");
         assert!(codex.contains("model = \"gpt\""));
@@ -655,10 +652,38 @@ mod tests {
     }
 
     #[test]
+    fn claude_switch_uses_latest_settings_after_hook_removal() {
+        let (dir, env) = home();
+        let settings = dir.path().join(".claude/settings.json");
+        let legacy = dir.path().join(".claude.json");
+        fs::write(&legacy, r#"{"theme":"dark","projects":{}}"#).unwrap();
+        fs::write(&settings, r#"{"theme":"light","hooks":{"Stop":[]}}"#).unwrap();
+        let prefs = Prefs::default();
+        assert_eq!(
+            status(&env, &prefs, "claude").current,
+            Current::Mode(Mode::Light)
+        );
+
+        fs::write(&settings, r#"{"theme":"light","permissions":{"allow":[]}}"#).unwrap();
+        assert!(matches!(
+            apply(&env, &prefs, "claude", Mode::Dark),
+            Outcome::Set { .. }
+        ));
+        assert_eq!(
+            files::read_json(&settings).unwrap().unwrap(),
+            serde_json::json!({"theme":"dark","permissions":{"allow":[]}})
+        );
+        assert_eq!(
+            fs::read_to_string(legacy).unwrap(),
+            r#"{"theme":"dark","projects":{}}"#
+        );
+    }
+
+    #[test]
     fn claude_variants_and_unset() {
         let (d, env) = home();
         let p = Prefs::default();
-        let set = |t: &str| fs::write(d.path().join(".claude.json"), t).unwrap();
+        let set = |t: &str| fs::write(d.path().join(".claude/settings.json"), t).unwrap();
         set("{\"theme\": \"light-daltonized\"}");
         assert_eq!(apply(&env, &p, "claude", Mode::Light), Outcome::Unchanged);
         set("{}");

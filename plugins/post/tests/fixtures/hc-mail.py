@@ -50,6 +50,11 @@ elif args[0] == 'send':
     if state == 'blocked' or ('--if' in args and state != args[args.index('--if')+1]):
         error('blocked' if state == 'blocked' else 'status_mismatch')
     with (home/'prompts').open('a') as f: f.write(json.dumps({'pane':p,'args':args,'text':text})+'\n')
+    if text.startswith('/config theme='):
+        settings = home / '.claude/settings.json'
+        before = settings.read_text()
+        settings.write_text(json.dumps({'theme':'light','hooks':{'Stop':[]}}))
+        (home / ('stale-' + p)).write_text(before)
     # The text landed but hc's post-send observation missed its deadline.
     if text.startswith('/config theme=') and fail.exists():
         fail.unlink()
