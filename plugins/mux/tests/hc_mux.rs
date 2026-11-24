@@ -1784,13 +1784,26 @@ fn flagship_without_bead_requires_why_even_with_model_or_no_parent() {
 }
 
 #[test]
-fn bead_uses_local_cwd_and_derived_tier_resolves_the_pin() {
+fn bead_uses_member_worktree_and_coordination_database() {
     let f = Fixture::new();
     fake_bd(&f);
-    let checkout = f.root().join("checkout");
-    fs::create_dir(&checkout).unwrap();
+    assert!(Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/group-beads.py"
+        ))
+        .arg(f.root())
+        .arg("coord")
+        .status()
+        .unwrap()
+        .success());
+    let checkout = f.root().join("sentinel");
     let out = f
         .cmd()
+        .env(
+            "TEST_BD_DIR",
+            f.root().canonicalize().unwrap().join("coord/.beads"),
+        )
         .args([
             "spawn",
             "worker",

@@ -26,8 +26,7 @@
 //!
 //! Escape hatches: a caller-set `BEADS_ACTOR` wins (nothing is derived), an
 //! explicit `--actor` beats both (bd's own precedence), and `BD_REAL` names
-//! the real binary. Known gap: `bd -C <dir>` still derives the actor from the
-//! current directory.
+//! the real binary. `bd -C <dir>` selects the worktree for the actor and database.
 
 use std::env;
 use std::io::{Read, Seek, SeekFrom};
@@ -49,19 +48,47 @@ fn main() -> ExitCode {
         return ExitCode::from(126);
     };
     env::set_var("PATH", vega_shim::path_without_shims("bd", &me));
-    if env::var_os("BEADS_ACTOR").is_none_or(|v| v.is_empty()) {
-        let host = output("hostname", &["-s"]).unwrap_or_else(|| "unknown".into());
-        let top = output("git", &["rev-parse", "--show-toplevel"]);
-        // Edition 2021: set_var is safe; nothing else runs threads here.
-        env::set_var("BEADS_ACTOR", actor(&host, top.as_deref()));
-    }
     let args: Vec<String> = env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
+    let (dir, route) = route_args(&args);
+    let cwd = env::current_dir()
+        .unwrap_or_default()
+        .join(dir.unwrap_or_default());
+    if env::var_os("BEADS_ACTOR").is_none_or(|v| v.is_empty()) {
+        let host = output("hostname", &["-s"]).unwrap_or_else(|| "unknown".into());
+        let mut git = Command::new("git");
+        git.current_dir(&cwd).args(["rev-parse", "--show-toplevel"]);
+        let top = probe(git, PROBE_LIMIT);
+        // Edition 2021: set_var is safe; nothing else runs threads here.
+        env::set_var("BEADS_ACTOR", actor(&host, top.as_deref()));
+    }
+    let group = if route {
+        match vega_bd_sync::group::coordination(&cwd) {
+            Ok(p) => p,
+            Err(e) => {
+                if args.iter().any(|s| s == "--json") {
+                    vega_herdr::print_failure_json(&e);
+                } else {
+                    vega_herdr::print_failure(&e);
+                }
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(dir) = group.as_ref().and_then(Project::beads_dir) {
+        env::set_var("BEADS_DIR", dir);
+    }
     let manual = env::var_os("VEGA_BD_MANUAL").is_some_and(|v| v == "1");
     if let Some((verb, dir)) = dolt_sync(&args).filter(|_| !manual) {
-        let known = match synced(dir.as_deref()) {
+        let known = match group
+            .as_ref()
+            .map(|p| Ok(Some((p.clone(), store::state(&p.key, &p.common)))))
+            .unwrap_or_else(|| synced(dir.as_deref()))
+        {
             Ok(known) => known,
             Err(e) => {
                 eprintln!("error: {}: {}; {}", e.code, e.message, e.hint);
@@ -80,7 +107,7 @@ fn main() -> ExitCode {
             Guard::Pass => {}
         }
     }
-    for line in hints() {
+    for line in hints(&cwd, group) {
         eprintln!("{line}");
     }
     vega_shim::exec_real("bd", Some("BD_REAL"))
@@ -90,18 +117,15 @@ fn main() -> ExitCode {
 /// (docs/design/git-sync.md, Telling agents): its beads sync stopped, its
 /// main checkout behind with the fast-forward skipped, or its worktree
 /// behind the upstream. Nothing outside a known project.
-fn hints() -> Vec<String> {
-    let Ok(cwd) = env::current_dir() else {
-        return Vec::new();
-    };
-    let Ok(resolved) = vega_herdr::project::resolve(&cwd, &vega_herdr::state::post_host()) else {
+fn hints(cwd: &Path, group: Option<Project>) -> Vec<String> {
+    let Ok(resolved) = vega_herdr::project::resolve(cwd, &vega_herdr::state::post_host()) else {
         return Vec::new();
     };
     let key = resolved.id.to_string();
     let common = resolved.location.common_dir;
     let top = resolved.location.checkout;
-    let beads = store::project(&key, &common).map(|p| {
-        let s = store::state(&key, &common);
+    let beads = group.or_else(|| store::project(&key, &common)).map(|p| {
+        let s = store::state(&p.key, &p.common);
         (p, s)
     });
     sync_hints(
@@ -154,6 +178,46 @@ const VALUE_FLAGS: [&str; 7] = [
     "--dolt-auto-commit",
     "--mem-profile",
 ];
+
+/// Global options can occur on either side of the subcommand.
+fn route_args(args: &[String]) -> (Option<PathBuf>, bool) {
+    let mut dir = None;
+    let mut verb = None;
+    let mut route = true;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--" {
+            break;
+        }
+        let (flag, inline) = arg.split_once('=').unwrap_or((arg, ""));
+        if matches!(
+            flag,
+            "--help" | "-h" | "--version" | "-V" | "--global" | "--db" | "--database"
+        ) {
+            route = false;
+        }
+        if VALUE_FLAGS.contains(&flag) || flag == "--cpu-profile" {
+            let value = if arg.contains('=') {
+                Some(inline)
+            } else {
+                it.next().map(String::as_str)
+            };
+            if matches!(flag, "-C" | "--directory") {
+                dir = value.map(PathBuf::from);
+            }
+        } else if !arg.starts_with('-') && verb.is_none() {
+            verb = Some(arg.as_str());
+        }
+    }
+    (
+        dir,
+        route
+            && !matches!(
+                verb,
+                None | Some("init" | "help" | "version" | "completion" | "bootstrap")
+            ),
+    )
+}
 
 /// `push` or `pull` for `bd [flags] dolt push|pull ...`, with the `-C` dir if
 /// any. Not for `--help`, nor for `--global`, `--db` or `--database`

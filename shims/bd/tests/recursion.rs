@@ -284,3 +284,63 @@ fn real_embedded_bd_returns_promptly() {
         assert!(result.ok && !result.timed_out, "{args:?}: {}", result.out);
     }
 }
+
+#[test]
+fn member_worktree_routes_claims_and_rejects_ambiguous_registration() {
+    let f = Fixture::new();
+    let root = f._tmp.path().canonicalize().unwrap();
+    let provision = |name| {
+        assert!(Command::new("python3")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/group-beads.py"
+            ))
+            .arg(&root)
+            .arg(name)
+            .status()
+            .unwrap()
+            .success());
+    };
+    provision("coord");
+    script(&f.real, "echo \"$BEADS_DIR $BEADS_ACTOR\"");
+    let run = |args: &[&str]| {
+        f.command()
+            .current_dir(root.join("sentinel"))
+            .env_remove("BEADS_ACTOR")
+            .env_remove("BEADS_DIR")
+            .env("XDG_STATE_HOME", root.join("state"))
+            .args(args)
+            .bounded_output()
+            .unwrap()
+    };
+    let claim = run(&["update", "fixture-1", "--claim"]);
+    assert!(claim.status.success(), "{claim:?}");
+    let output = String::from_utf8(claim.stdout).unwrap();
+    assert!(
+        output.starts_with(&format!("{} ", root.join("coord/.beads").display()))
+            && output.trim().ends_with("/sentinel"),
+        "{output}"
+    );
+    let guarded = run(&["dolt", "push"]);
+    assert!(String::from_utf8_lossy(&guarded.stderr).contains("vegad syncs"));
+    provision("second");
+    let ambiguous = run(&["show", "fixture-1", "--json"]);
+    assert!(!ambiguous.status.success());
+    assert!(String::from_utf8_lossy(&ambiguous.stdout).contains("group_database_ambiguous"));
+    // A native workspace in the member's main checkout takes precedence
+    // even from its linked worktree. Explicit bd selectors bypass routing.
+    fs::create_dir(root.join("service/.beads")).unwrap();
+    let native = run(&["show", "fixture-1"]);
+    assert!(native.status.success());
+    assert!(String::from_utf8_lossy(&native.stdout).starts_with(' '));
+    fs::remove_dir(root.join("service/.beads")).unwrap();
+    assert!(run(&["--db", "/fixture/explicit", "show", "fixture-1"])
+        .status
+        .success());
+    for name in ["coord", "second"] {
+        fs::write(root.join(name).join(".vega/group.toml"), "members = []").unwrap();
+    }
+    let absent = run(&["show", "fixture-1", "--json"]);
+    assert!(!absent.status.success());
+    assert!(String::from_utf8_lossy(&absent.stdout).contains("group_database_missing"));
+}

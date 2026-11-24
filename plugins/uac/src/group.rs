@@ -13,71 +13,9 @@ fn root(path: &Path) -> Result<PathBuf, Failure> {
         .location
         .checkout)
 }
-fn validate(id: &str) -> Result<(), Failure> {
-    if id.starts_with("./") || id.starts_with("../") {
-        return Err(error(
-            "local member path does not exist; pass an existing checkout",
-        ));
-    }
-    // Local/file IDs are already owner-qualified and cannot be normalized on
-    // a different host. Network IDs round-trip through the shared resolver.
-    if let Some(rest) = id
-        .strip_prefix("local:")
-        .or_else(|| id.strip_prefix("file:"))
-    {
-        if let Some((host, path)) = rest.split_once(':') {
-            if !host.is_empty()
-                && Path::new(path).is_absolute()
-                && !id.chars().any(char::is_control)
-            {
-                return Ok(());
-            }
-        }
-    } else if !id.contains("://") {
-        // IDs forget transport. A port that is default for HTTPS can still
-        // be a canonical nondefault SSH port (and conversely for port 22).
-        for scheme in ["https", "ssh"] {
-            if vega_herdr::project::normalize_remote(
-                &format!("{scheme}://{id}"),
-                &st::post_host(),
-                Path::new("/"),
-            )
-            .is_ok_and(|normalized| normalized.as_str() == id)
-            {
-                return Ok(());
-            }
-        }
-    }
-    Err(error(
-        "members must be canonical project IDs; use group add <path>",
-    ))
-}
+use vega_bd_sync::group::validate;
 pub(super) fn members(path: &Path) -> Result<BTreeSet<String>, Failure> {
-    let file = root(path)?.join(".vega/group.toml");
-    let text = match fs::read_to_string(file) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
-        Err(e) => return Err(error(e.to_string())),
-    };
-    let doc = text
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|e| error(e.to_string()))?;
-    if doc.iter().any(|(key, _)| key != "members") {
-        return Err(error("unknown group key; only members is supported"));
-    }
-    let array = doc
-        .get("members")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| error("group members must be an array of project IDs"))?;
-    let mut members = BTreeSet::new();
-    for item in array {
-        let id = item
-            .as_str()
-            .ok_or_else(|| error("member must be a project ID string"))?;
-        validate(id)?;
-        members.insert(id.to_owned());
-    }
-    Ok(members)
+    vega_bd_sync::group::members(&root(path)?)
 }
 fn add_input(input: &str) -> Result<String, Failure> {
     let path = expand_home(input);

@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 import json, os, pathlib, sys, time
 root = pathlib.Path(os.environ['HOME'])
+if 'TEST_BD_DIR' in os.environ:
+    assert os.environ.get('BEADS_DIR') == os.environ['TEST_BD_DIR']
 with (root / 'bd-calls').open('a') as f:
     f.write(json.dumps(sys.argv[1:]) + '\n')
 (root / 'bd-cwd').write_text(os.getcwd())

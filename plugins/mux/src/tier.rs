@@ -11,7 +11,11 @@ pub struct Policy {
 
 fn bd(args: &[&str], cwd: Option<&str>) -> Result<Vec<u8>, Failure> {
     let mut cmd = Command::new("bd");
-    cmd.args(args).current_dir(checkout(cwd)?);
+    let dir = checkout(cwd)?;
+    if let Some(project) = vega_bd_sync::group::coordination(&dir)? {
+        cmd.env("BEADS_DIR", project.beads_dir().expect("validated registration"));
+    }
+    cmd.args(args).current_dir(dir);
     let hint = "ensure bd is installed and the bead exists in the local checkout";
     let out = vega_herdr::output_within(&mut cmd, std::time::Duration::from_secs(10))
         .map_err(|e| Failure::new("bead_read_failed", format!("cannot run bd: {e}"), hint))?

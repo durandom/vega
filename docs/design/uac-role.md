@@ -102,7 +102,28 @@ skips the read (no 4 s wait) and prints `registry: off (inbox-only host: local a
 only)`; `vega mux next` and `vega config infra --fleet` skip it the same way.
 Owners keep the registry read.
 Repeated claim is idempotent. Release removes this pane's group records even
-after manifest edits. Beads, attention and sentinel ownership stay per repo.
+after manifest edits. Attention and sentinel ownership stay per repo.
+
+### Coordination beads in member worktrees
+
+A member can keep its own Beads workspace or use the coordination project's
+database. Explicit bd database selection (including `BEADS_DIR`) takes
+precedence, followed by the member's ordinary Git/worktree Beads workspace.
+For a member without one, resolve the member's canonical project ID from its
+local Git configuration. Inspect the flat group manifests of locally provisioned
+coordination checkouts in the bd sync registry. Match the full member ID,
+validate the registered clone's identity and require one matching local
+coordination database. If several match, request an explicit `BEADS_DIR`.
+Membership comes from the manifest even when the UAC runs on another host.
+
+Both mux's `spawn --bead` lookups and provenance updates and the agent bd shim
+pass the registered coordination workspace's absolute `.beads` directory to
+bd through `BEADS_DIR`. Keep the working directory in the selected member
+worktree for claim identity (`<host>/<worktree dir>`) and Git hints. Apply
+the Dolt sync guard and stopped-sync hints to the selected database.
+Provision the coordination project on each host with the same Dolt remote.
+Lookup uses local Git metadata and local registration across organizations,
+so proteus and ganymede need no GitHub authentication for these operations.
 
 The facility view includes agents in the coordination project and all manifest
 members, with project IDs in a project column.

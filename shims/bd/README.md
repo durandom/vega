@@ -16,7 +16,7 @@ worktree on every machine, so two agents could both win a claim. A per-worktree 
   `unknown` as the host. Unavailable git metadata suppresses hints and can bypass project sync detection.
   The user's bd call keeps its own runtime, stdout and exit status once the shim's guards pass.
 - Outside a git checkout the actor is just `<host>`.
-- Known gap: `bd -C <dir>` still derives from the current directory.
+- `bd -C <dir>` derives the actor from the selected worktree. A group member without its own workspace uses the coordination clone registered on this host.
 
 In a project vegad syncs (`vega bd init`), `bd dolt push` and `bd dolt pull` race vegad, so the shim skips them:
 

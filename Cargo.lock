@@ -2868,6 +2868,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "toml_edit",
  "vega-herdr",
 ]
 
@@ -3054,6 +3055,7 @@ dependencies = [
  "clap",
  "serde_json",
  "tempfile",
+ "vega-bd-sync",
  "vega-build",
  "vega-herdr",
  "vega-lanista",

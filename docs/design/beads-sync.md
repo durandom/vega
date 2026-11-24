@@ -263,7 +263,7 @@ Discovery skips invalid overrides, aliases, links to the current shim, and other
 Child PATH excludes shim directories before helpers and passthrough run. If a wrapper re-enters the shim,
 the recursion guard exits 126 and suggests setting `BD_REAL` to the original binary. If the shim cannot identify its executable,
 it exits 126 before consulting `BD_REAL` or PATH; invoke the original bd directly by absolute path.
-These are documented P2 deviations. Known gap: `bd -C <dir>` derives from the current dir.
+These are documented P2 deviations. With `bd -C <dir>`, the selected directory supplies the worktree identity.
 
 Internal hostname/git metadata probes have a two-second deadline; timeout kills their process
 group and reaps the direct child. A failed hostname probe uses `unknown`; a missing git toplevel
@@ -274,6 +274,11 @@ preserving its stdin, stdout and exit status once the shim's guards pass.
 Difference: vega's shims are agent-only (P3), so a human's shell no longer derives an actor; bd
 falls back to `git config user.name` there. Agents do the claiming, so that is acceptable; a human
 who claims sets `BEADS_ACTOR` or `--actor`. The dotfiles shim stays until the UAC removes it.
+
+For a group member without a Beads workspace, mux and the bd shim resolve the
+coordination project's locally registered database. The member worktree supplies
+the actor and Git state. The coordination registration supplies the Dolt guard
+and sync status. See [Repo groups](uac-role.md#coordination-beads-in-member-worktrees).
 
 ## Manual push and pull (bd shim)
 

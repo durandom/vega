@@ -18,6 +18,7 @@ pub mod bd;
 pub mod cutover;
 pub mod doctor;
 pub mod git;
+pub mod group;
 pub mod store;
 pub mod sync;
 
