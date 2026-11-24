@@ -211,10 +211,11 @@ for `$HOME/.local/bin/vega-post` before executing it through `sh -c`, so that ho
 (for example `VEGA_POST_HOST=io` on WSL `io-wsl`) applies: `relay start` loads `vegad.env` before
 it takes the lock. A failed start retries after one minute; the status line shows
 `hc <machine> vegad start failed` after three failures in a row, and nothing blocks the UI.
-A missing binary (reserved preflight marker and exit 77), or hc's explicit missing-`sh`
-spawn error, is `not provisioned`: one log diagnostic per episode, no status-bar error,
-and another check after five minutes or reconnection. A present binary's startup errors
-still count as failures. The starter is the extension point for a future native Windows worker.
+On native Windows, Git sh identifies its platform via `uname -s`. This signal or hc's
+explicit missing-sh error selects direct `vega-post.exe relay start` through the desktop core.
+A missing Unix installation (preflight marker and exit 77) or missing native executable
+logs `not provisioned` once per episode and retries after five minutes or reconnection.
+Other launch errors count towards the failure threshold.
 The lock arbitrates simultaneous starts. `relay stop` on a machine holds at most five minutes
 while the app host runs; on the app host itself it holds until the next app start, herdr hook or explicit relay start.
 

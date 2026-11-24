@@ -28,12 +28,12 @@ without delaying pointer delivery.
 
 ## Desktop process and IPC
 
-Keep the limited demand-task launcher for app-managed starts. For eventual
-opt-in logon startup, register a per-user HKCU Run entry following the hidden
-desktop launcher in vega-4hyn. Invoke the installed worker by absolute path,
-pin io-win independently of WSL, and refuse elevated or session-0 execution.
-Retry inventory while the desktop core starts. SSH on io has an elevated
-token and hc refuses an elevated core. Test logon from hild's ordinary desktop.
+The herdr-app vega mod starts the relay on connection and checks it every five minutes.
+Through `hc exec --on <machine>` the desktop core launches `vega-post.exe relay start`
+with its ordinary user token. The starter checks the worker lock. For a cold start it
+uses a temporary limited interactive demand task so the worker survives the hc exec job.
+Only the desktop core has a logon startup entry (VegaHcDesktopCore, vega-4hyn).
+The Windows relay keeps its io-win identity independently of WSL.
 
 Use hc CLI transport (hc owns its named pipe), the native relay's readiness,
 lock and token-scoped stop files for lifecycle, and NATS for remote mail.
@@ -53,7 +53,5 @@ Age stale health out. Report beads sync separately as unsupported until ported.
    restart, broker outage and unchanged snapshots with a fake hc.
 2. Run the Unix checks, Windows CI and native tests in the io scratch checkout.
    Verify actual labels on a disposable desktop terminal in an approved live run.
-3. Roll out opt-in startup and health projection separately. At the next normal
-   logon verify one limited-token worker, fresh health and labels after core
-   availability. Roll back by removing the opt-in entry and using the existing
-   token-scoped stop and installer recovery paths.
+3. On desktop core connection verify one limited-token worker, fresh health and labels.
+   Repeat the starter and verify the same worker retains its lock.

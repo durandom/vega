@@ -1210,7 +1210,7 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
     const h=load('vega'); let now=1e12, current=result; const logs=[];
     h.api.Date={now:()=>now}; h.api.console={log:s=>logs.push(s)};
     // Real hc shape: launch errors go to stderr with exit 1 and an empty stdout.
-    h.api.exec=async(_bin,args)=>{ const reply = args.includes('vega-post.exe') && (current.error?.message === 'cannot start sh: program not found' || (current.code === 77 && current.stdout)) ? {error:{kind:'spawn_failed',message:'cannot start vega-post.exe: program not found'}} : current; return {code:0,stdout:JSON.stringify(reply.error
+    h.api.exec=async(_bin,args)=>{ const reply = args.includes('vega-post.exe') && current.error?.message === 'cannot start sh: program not found' ? {error:{kind:'spawn_failed',message:'cannot start vega-post.exe: program not found'}} : current; return {code:0,stdout:JSON.stringify(reply.error
       ?{code:1,stdout:'',stderr:JSON.stringify(reply)}
       :{code:0,stdout:JSON.stringify(reply),stderr:''})}; };
     h.mod.machines=[{name:'io-win',state:'connected'}];
@@ -1233,11 +1233,11 @@ test('unprovisioned remote starters stay quiet, diagnose once and recover on slo
   }
 });
 
-test('Git sh without a Unix vega-post falls through to the native Windows worker',async()=>{
+test('Git sh selects the native Windows worker',async()=>{
   const h=load('vega'); const calls=[];
   h.api.exec=async(_bin,args)=>{
     calls.push(Array.from(args));
-    const reply=args.includes('sh') ? {code:77,stdout:Buffer.from('vega-not-provisioned\n').toString('base64')} : {code:0};
+    const reply=args.includes('sh') ? {code:78,stdout:Buffer.from('windows\n').toString('base64')} : {code:0};
     return {code:0,stdout:JSON.stringify({code:0,stdout:JSON.stringify(reply),stderr:''})};
   };
   h.mod.machines=[{name:'io-win',state:'connected'}];
@@ -1258,7 +1258,7 @@ test('native starter accepts recorded hc exec envelopes and retries a worker err
   h.api.exec=async(_bin,args)=>{
     calls.push(Array.from(args));
     const result=args.includes('sh')
-      ? envelope(77,'vega-not-provisioned\n')
+      ? envelope(78,'windows\n')
       : envelope(broken?1:0,broken?'error: relay_failed\n':'relay: started\r\npid: 1234\r\n');
     return {code:0,stdout:JSON.stringify({code:0,stdout:JSON.stringify(result),stderr:''})};
   };

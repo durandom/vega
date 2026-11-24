@@ -96,8 +96,8 @@ else: print(json.dumps({'skipped':True}))`;
 // Idempotent starter on a machine. argv runs without a shell, so sh resolves the remote home;
 // relay start reads that host's vegad.env, so a host pin (io-wsl registered as io) applies.
 // Exit 77 is reserved for the preflight; a present but broken binary still fails normally.
-// A missing sh selects the native Windows worker without a remote shell.
-const remoteStart = '[ -e "$HOME/.local/bin/vega-post" ] || { echo vega-not-provisioned; exit 77; }; exec "$HOME/.local/bin/vega-post" relay start';
+// Git sh on native Windows signals the caller to launch the .exe through hc directly.
+const remoteStart = 'case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo windows; exit 78;; esac; [ -e "$HOME/.local/bin/vega-post" ] || { echo vega-not-provisioned; exit 77; }; exec "$HOME/.local/bin/vega-post" relay start';
 const START_OK_MS = 300000, START_RETRY_MS = 60000;
 
 export default class Vega extends View {
@@ -441,9 +441,10 @@ export default class Vega extends View {
           };
           let {outer, result} = await start(["sh", "-c", remoteStart]);
           const missing = (program) => [0, 1].includes(outer.code) && result.error?.kind === "spawn_failed" && result.error?.message === `cannot start ${program}: program not found`;
-          // A Windows host has no sh, or has Git's sh without a Unix vega-post: try the native worker.
-          const unixMissing = outer.code === 0 && result.code === 77 && result.stdout === "dmVnYS1ub3QtcHJvdmlzaW9uZWQK" && !result.timed_out && !result.signal;
-          if (missing("sh") || unixMissing) {
+          // hc encodes stdout in base64. Require both the reserved exit and its marker.
+          const marked = (code, stdout) => outer.code === 0 && result.code === code && result.stdout === stdout && !result.timed_out && !result.signal;
+          notProvisioned = marked(77, "dmVnYS1ub3QtcHJvdmlzaW9uZWQK");
+          if (missing("sh") || marked(78, "d2luZG93cwo=")) {
             ({outer, result} = await start(["vega-post.exe", "relay", "start"]));
             notProvisioned = missing("vega-post.exe");
           }
