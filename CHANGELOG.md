@@ -5,6 +5,11 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 273 · 2026-11-24
+
+- feature: The native Windows relay now labels local hc terminals with their
+  configured host glyph, project and role, including while the broker is offline.
+
 ## 272 · 2026-11-23
 
 - feature: The native Windows subset includes `vega-uac.exe`. A parent can

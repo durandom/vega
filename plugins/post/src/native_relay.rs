@@ -106,6 +106,7 @@ pub fn run(action: Action) -> Result<(), Failure> {
                 return Ok(());
             };
             vega_herdr::bound_daemon_calls();
+            let _sidebar = crate::native_sidebar::start();
             let stop_file = root()?.join("stop");
             let result = crate::runtime()?.block_on(async {
                 tokio::select! {

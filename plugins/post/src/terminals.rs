@@ -280,6 +280,25 @@ pub fn mail_target(
     ))
 }
 
+pub fn project_display_name(id: &str) -> String {
+    // Local IDs carry the common directory; file IDs carry the source path.
+    // In either case `.git` names its parent repository, including gate clones.
+    let path = if id.starts_with("file:") || id.starts_with("local:") {
+        id.splitn(3, ':').nth(2).unwrap_or(id)
+    } else {
+        id
+    };
+    let path = std::path::Path::new(path);
+    let repo = if path.file_name().is_some_and(|n| n == ".git") {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    repo.file_name()
+        .map(|s| s.to_string_lossy().trim_end_matches(".git").to_string())
+        .unwrap_or_else(|| id.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::send_guard;

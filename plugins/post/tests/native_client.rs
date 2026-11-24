@@ -102,7 +102,7 @@ mod native {
             return;
         }
         let terminal = json!({"address":pane,"state":"live","name":pane,"pid":pid,
-            "argv":[],"labels":{},"created_ms":0,"screen":"exact","cols":80,"rows":24,
+            "argv":[],"labels":state.get("labels").cloned().unwrap_or_else(|| json!({})),"created_ms":0,"screen":"exact","cols":80,"rows":24,
             "cwd":cwd,"foreground":null,"turn":0,
             "status":{"app":"codex","state":state["status"]},"parent":env::var("FAKE_PARENT").ok()});
         let result = match req["method"].as_str().unwrap() {
@@ -110,9 +110,35 @@ mod native {
             "terminal.list" => {
                 let mut remote = terminal.clone();
                 remote["address"] = "other/t9".into();
-                json!({"terminals":[terminal,remote],"machines":[],"hidden_finished":0})
+                let mut rows = vec![terminal.clone(), remote];
+                for (id, role, parent) in [
+                    ("t5", "sentinel", None),
+                    ("t6", "gate-reviewer", None),
+                    ("t7", "", Some("t5")),
+                ] {
+                    if env::var_os("FAKE_LABEL_WRITES").is_some() {
+                        let mut row = terminal.clone();
+                        row["address"] = id.into();
+                        row["labels"]["vega.role"] = role.into();
+                        row["parent"] = json!(parent);
+                        rows.push(row);
+                    }
+                }
+                json!({"terminals":rows,"machines":[],"hidden_finished":0})
             }
             "doc.get" => json!({"version":0,"value":null}),
+            "terminal.label" => {
+                if let Some(path) = env::var_os("FAKE_LABEL_WRITES") {
+                    use std::io::Write;
+                    let mut f = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .unwrap();
+                    writeln!(f, "{}", req["params"]).unwrap();
+                }
+                terminal
+            }
             "terminal.read" => json!({"text":state["screen"],"complete":true,"how":"screen"}),
             "terminal.send" => {
                 assert_ne!(state["status"], "blocked");
@@ -584,6 +610,60 @@ mod native {
             .port();
         let url = format!("nats://127.0.0.1:{port}");
         let win = Host::make(&root, "native-test", &bin, &url);
+        // The broker is still offline. Only this test's foreground worker and fake
+        // core are used, including when running this case alone on a live host.
+        let labels = win.root.join("labels.jsonl");
+        let state = win.root.join("sidebar-state.json");
+        fs::write(
+            &state,
+            json!({"status":"idle","labels":{"vega.role":"uac","vega.review":"keep"}}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            win.root.join("roaming/vega/theme.toml"),
+            "[symbols.hosts]\nnative-test = '🌔'\n",
+        )
+        .unwrap();
+        let claims = win.root.join("local/vega/uac/v2");
+        fs::create_dir_all(&claims).unwrap();
+        let claimed = "example.invalid/team/claimed";
+        fs::write(
+            claims.join(format!(
+                "{}.json",
+                vega_herdr::project::encode_component(claimed)
+            )),
+            json!({"schema":2,"project":claimed,"pane":"t5","host":win.host}).to_string(),
+        )
+        .unwrap();
+        let mut serve = win.cmd(&["relay", "serve"], "t4");
+        let worker = Broker(
+            serve
+                .env("FAKE_STATE", &state)
+                .env("FAKE_LABEL_WRITES", &labels)
+                .spawn()
+                .unwrap(),
+        );
+        wait_for(|| {
+            fs::read_to_string(&labels).is_ok_and(|s| s.ends_with('\n') && s.lines().count() >= 4)
+        });
+        let writes: Vec<Value> = fs::read_to_string(&labels)
+            .unwrap()
+            .lines()
+            .map(|s| serde_json::from_str(s).unwrap())
+            .collect();
+        assert_eq!(
+            writes,
+            [
+                json!({"terminal":"t4","labels":{"vega.host":"🌔","vega.project":"native","vega.role":""}}),
+                json!({"terminal":"t5","labels":{"vega.host":"🌔","vega.project":"claimed","vega.role":"uac"}}),
+                json!({"terminal":"t6","labels":{"vega.host":"🌔","vega.project":"native"}}),
+                json!({"terminal":"t7","labels":{"vega.host":"🌔","vega.project":"native","vega.role":"sentinel"}})
+            ]
+        );
+        drop(worker);
+        if env::args().any(|arg| arg == "--sidebar-only") {
+            return;
+        }
         let peer = Host::make(&root, "peer-test", &bin, &url);
         let admin = nkeys::KeyPair::new_user();
         let conf = root.join("nats.conf");

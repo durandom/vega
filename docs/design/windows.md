@@ -837,3 +837,6 @@ No proteus/ganymede machine entries were changed. Proposed upstream issue:
 
 Once supported, enable existing-only connect for the **io-win entries only** on
 proteus and ganymede. Do not disable implicit startup for unrelated headless hosts.
+
+See [Native vegad on Windows](vegad-windows.md) for the sidebar milestone,
+worker inventory, desktop startup, IPC and UAC health.
