@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 277 · 2026-11-24
+
+- feature: Repo group members now find the coordination database even when bd's per-user `~/.beads` directory exists above the checkout.
+
 ## 276 · 2026-11-24
 
 - feature: From a repo group member without `.beads`, `vega mux spawn --bead` and the agent `bd` shim use the coordination database registered on that host. Claims identify the member worktree.

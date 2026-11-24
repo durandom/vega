@@ -72,22 +72,22 @@ pub fn members(root: &Path) -> Result<BTreeSet<String>, Failure> {
     }
     Ok(members)
 }
+/// A bd workspace, not bd's per-user `~/.beads` (machine-id, shared-server).
+fn workspace(dir: &Path) -> bool {
+    dir.join(".beads/metadata.json").is_file()
+}
 /// Select only a fallback. Native workspaces, redirects and explicit selection
 /// belong to bd. A non-Git cwd has no canonical member identity.
 pub fn coordination(cwd: &Path) -> Result<Option<Project>, Failure> {
     if std::env::var_os("BEADS_DIR").is_some_and(|v| !v.is_empty())
-        || cwd.ancestors().any(|dir| dir.join(".beads").exists())
+        || cwd.ancestors().any(workspace)
     {
         return Ok(None);
     }
     let Ok(member) = vega_herdr::project::resolve(cwd, &vega_herdr::state::post_host()) else {
         return Ok(None);
     };
-    if member
-        .location
-        .common_dir
-        .parent()
-        .is_some_and(|dir| dir.join(".beads").exists())
+    if member.location.common_dir.parent().is_some_and(workspace)
         || store::project(member.id.as_str(), &member.location.common_dir).is_some()
     {
         return Ok(None);

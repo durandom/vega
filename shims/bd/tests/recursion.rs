@@ -329,11 +329,17 @@ fn member_worktree_routes_claims_and_rejects_ambiguous_registration() {
     assert!(String::from_utf8_lossy(&ambiguous.stdout).contains("group_database_ambiguous"));
     // A native workspace in the member's main checkout takes precedence
     // even from its linked worktree. Explicit bd selectors bypass routing.
+    // bd's per-user dir (no metadata.json) above the member is not a workspace.
+    fs::create_dir(root.join(".beads")).unwrap();
+    fs::write(root.join(".beads/machine-id"), "x").unwrap();
+    let home = run(&["show", "fixture-1", "--json"]);
+    assert!(String::from_utf8_lossy(&home.stdout).contains("group_database_ambiguous"));
     fs::create_dir(root.join("service/.beads")).unwrap();
+    fs::write(root.join("service/.beads/metadata.json"), "{}").unwrap();
     let native = run(&["show", "fixture-1"]);
     assert!(native.status.success());
     assert!(String::from_utf8_lossy(&native.stdout).starts_with(' '));
-    fs::remove_dir(root.join("service/.beads")).unwrap();
+    fs::remove_dir_all(root.join("service/.beads")).unwrap();
     assert!(run(&["--db", "/fixture/explicit", "show", "fixture-1"])
         .status
         .success());
