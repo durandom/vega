@@ -140,12 +140,8 @@ pub fn gc_close(name: &str) -> Result<bool, Failure> {
     Ok(true)
 }
 
-fn allocate(cdp: &mut Cdp, dir: &Path, state: &mut Owned) -> Result<(), Failure> {
-    let target = cdp.string(
-        "Target.createTarget",
-        json!({"url":"about:blank"}),
-        "targetId",
-    )?;
+fn allocate(cdp: &mut Cdp, dir: &Path, state: &mut Owned, background: bool) -> Result<(), Failure> {
+    let target = cdp.create_target("about:blank", None, background, false)?;
     state.next += 1;
     state.active = state.next;
     state.tabs.insert(
@@ -162,6 +158,10 @@ fn allocate(cdp: &mut Cdp, dir: &Path, state: &mut Owned) -> Result<(), Failure>
         return Err(e);
     }
     Ok(())
+}
+
+pub fn background_tab_new(args: &[String]) -> bool {
+    Invocation::parse(args).is_ok_and(|call| call.background_tab_new())
 }
 
 pub fn command(args: &[String], port: u16) -> Result<ExitCode, Failure> {
@@ -229,10 +229,10 @@ fn execute(args: &[String], port: u16, resume: bool) -> Result<ExitCode, Failure
                 // Give Chrome an owned successor before it closes the active
                 // target. Its normal adjacent-tab fallback could focus a user tab.
                 if let Some((&next, tab)) = state.tabs.iter().find(|(other, _)| **other != id) {
-                    cdp.call("Target.activateTarget", json!({"targetId": tab.target}))?;
+                    cdp.activate_target(&tab.target)?;
                     state.active = next;
                 } else {
-                    allocate(&mut cdp, &dir, &mut state)?;
+                    allocate(&mut cdp, &dir, &mut state, false)?;
                 }
             }
             close(&mut cdp, &state.tabs[&id])?;
@@ -250,7 +250,7 @@ fn execute(args: &[String], port: u16, resume: bool) -> Result<ExitCode, Failure
                 .tabs
                 .get(&id)
                 .ok_or_else(|| usage("Tab is not owned by this session"))?;
-            cdp.call("Target.activateTarget", json!({"targetId":tab.target}))?;
+            cdp.activate_target(&tab.target)?;
             state.active = id;
             persist(&dir, &state)?;
             call.output(
@@ -262,7 +262,7 @@ fn execute(args: &[String], port: u16, resume: bool) -> Result<ExitCode, Failure
         _ => {}
     }
     if new || state.tabs.is_empty() {
-        allocate(&mut cdp, &dir, &mut state)?;
+        allocate(&mut cdp, &dir, &mut state, call.background_tab_new())?;
     }
     let record = owner::record_from_env(vega_shim::unix_now());
     let project = record.project.clone();

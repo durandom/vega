@@ -58,6 +58,8 @@ For bot blockers, `vega browser launch <url> --session <name>` starts throwaway
 Chromium. Use `vega browser cleanup --session <name>` afterward.
 `vega browser status` checks pinned agent-browser and CfT dependencies.
 
+Agent `tab new <url>` selects a background tab. Use `tab <id>` to activate it.
+
 ## Session cleanup
 
 `vega browser ls --json` lists sessions and owners. GC acts on confirmed dead

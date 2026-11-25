@@ -181,7 +181,12 @@ fn ab(args: &[String]) -> Result<ExitCode, Failure> {
     if let Some(v) = &profile {
         v.require_running()?;
     } else {
-        ensure_chromium(&g, None).map_err(|f| {
+        ensure_chromium(
+            &g,
+            None,
+            vega_browser::dev::shared::background_tab_new(args),
+        )
+        .map_err(|f| {
             Failure::new(
                 &f.code,
                 format!(
@@ -211,7 +216,7 @@ fn chromium(args: &[String]) -> Result<ExitCode, Failure> {
         _ => return Err(usage()),
     };
     let g = global();
-    let label = ensure_chromium(&g, url.as_deref())?;
+    let label = ensure_chromium(&g, url.as_deref(), false)?;
     println!(
         "{}: 127.0.0.1:{}, profile {}",
         label,
@@ -222,7 +227,11 @@ fn chromium(args: &[String]) -> Result<ExitCode, Failure> {
 }
 
 /// The old `chromium.sh` state machine.
-fn ensure_chromium(g: &Chromium, url: Option<&str>) -> Result<&'static str, Failure> {
+fn ensure_chromium(
+    g: &Chromium,
+    url: Option<&str>,
+    background: bool,
+) -> Result<&'static str, Failure> {
     let profile = g.profile.display().to_string();
     match cdp::probe(g.port) {
         Probe::Cdp => {
@@ -238,7 +247,7 @@ fn ensure_chromium(g: &Chromium, url: Option<&str>) -> Result<&'static str, Fail
                     format!("our Chromium runs but CDP on 127.0.0.1:{p} does not answer")
                 })
             } else {
-                start(g, url)?;
+                start(g, url, background)?;
                 wait_up(g, "started", |p| {
                     format!(
                         "Chromium did not open CDP on 127.0.0.1:{p} (is it already open with \
@@ -289,7 +298,7 @@ fn wait_up(
     Err(Failure::new("no_cdp", timeout(g.port), ""))
 }
 
-fn start(g: &Chromium, url: Option<&str>) -> Result<(), Failure> {
+fn start(g: &Chromium, url: Option<&str>, background: bool) -> Result<(), Failure> {
     if !g.chromium.is_file() {
         return Err(Failure::new(
             "missing_chromium",
@@ -314,7 +323,11 @@ fn start(g: &Chromium, url: Option<&str>) -> Result<(), Failure> {
         .arg(format!("--user-data-dir={}", g.profile.display()))
         .args(["--no-first-run", "--no-default-browser-check"])
         .args(&g.extra_args)
-        .arg(url.unwrap_or("about:blank"))
+        .arg(if background {
+            "--no-startup-window"
+        } else {
+            url.unwrap_or("about:blank")
+        })
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

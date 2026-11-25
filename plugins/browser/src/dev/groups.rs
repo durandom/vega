@@ -44,19 +44,15 @@ pub(super) fn package(profile: &Path) -> Result<PathBuf, Failure> {
     Ok(path)
 }
 
-fn control_page(cdp: &mut Cdp, project: Option<&Project>) -> Result<String, Failure> {
+fn control_page(
+    cdp: &mut Cdp,
+    project: Option<&Project>,
+    background: bool,
+) -> Result<String, Failure> {
     let url = format!("chrome-extension://{ID}/control.html");
-    let mut params = json!({"url": url});
-    if let Some(project) = project {
-        params["browserContextId"] = json!(project.context);
-        params["newWindow"] = json!(project.window == 0);
-    } else {
-        // The regular window may have been closed while a project is active.
-        // A hidden target checks the dedicated profile without opening a window.
-        params["hidden"] = json!(true);
-        params["background"] = json!(true);
-    }
-    cdp.string("Target.createTarget", params, "targetId")
+    // The regular window may have been closed while a project is active.
+    // A hidden target checks the dedicated profile without opening a window.
+    cdp.create_target(&url, project, background, project.is_none())
         .map_err(|error| {
             let scope = if project.is_some() {
                 "project"
@@ -117,7 +113,7 @@ fn close(cdp: &mut Cdp, target: &str) -> Result<(), Failure> {
 }
 
 fn has_access(cdp: &mut Cdp) -> Result<bool, Failure> {
-    let target = control_page(cdp, None)?;
+    let target = control_page(cdp, None, true)?;
     let access = (|| {
         let session = attach(cdp, &target)?;
         if wait_for_control(cdp, &session)?.is_none() {
@@ -176,6 +172,11 @@ fn enable_access(cdp: &mut Cdp) -> Result<(), Failure> {
 }
 
 pub(super) fn require_access(cdp: &mut Cdp) -> Result<(), Failure> {
+    // A windowless startup has no debuggable frame, so Chrome rejects hidden
+    // targets until a page exists. Open the regular window without activating it.
+    if page_targets(cdp, Instant::now() + ALLOCATION_TIMEOUT)?.is_empty() {
+        cdp.create_target("about:blank", None, true, false)?;
+    }
     if has_access(cdp)? {
         return Ok(());
     }
@@ -206,8 +207,9 @@ pub(super) fn allocate(
     project: &mut Project,
     name: &str,
     owned: &[i64],
+    background: bool,
 ) -> Result<(String, i64), Failure> {
-    let control = control_page(cdp, Some(project))?;
+    let control = control_page(cdp, Some(project), background)?;
     let mut nonce_url = None;
     let mut verified_target = None;
     let mut window = project.window;

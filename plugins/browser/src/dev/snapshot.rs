@@ -432,7 +432,7 @@ fn restore(
     let browser = match browser {
         Some(browser) => browser,
         None => {
-            let browser = process::launch(profile)?;
+            let browser = process::launch(profile, false)?;
             data.browser = Some(browser.clone());
             data.projects.clear();
             data.pending_restore = None;

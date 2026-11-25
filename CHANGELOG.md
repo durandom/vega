@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 284 · 2026-11-25
+
+- feature: Managed browser tabs open in the background when agents run `tab new <url>`. Use `tab <id>` to activate a tab in Chromium.
+
 ## 283 · 2026-11-25
 
 - feature: The agent switcher's `/` search matches fuzzily like fzf (`rcv1` finds `rc-v1`), best match first.

@@ -241,7 +241,9 @@ fn run(f: &Fix, args: &[&str], env: &[(&str, String)]) -> Output {
         .env_remove("HC_TERMINAL_ID")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         .env_remove("CODEX_THREAD_ID")
-        .env_remove("PI_CODING_AGENT");
+        .env_remove("PI_CODING_AGENT")
+        .env_remove("CLAUDECODE")
+        .env_remove("AI_AGENT");
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -569,6 +571,36 @@ fn chromium_fails_loudly_when_it_does_not_come_up() {
     let o = run(&f, &["chromium"], &[]);
     assert_eq!(o.status.code(), Some(1));
     assert!(out(&o).contains("did not open CDP"), "{}", out(&o));
+}
+
+#[test]
+fn agent_tab_new_creates_in_background_until_explicitly_activated() {
+    let f = fix();
+    let run_tab = |args: &[&str]| {
+        let mut argv = vec!["ab", "--session", "me", "tab"];
+        argv.extend_from_slice(args);
+        let o = run(&f, &argv, &[("CODEX_THREAD_ID", "agent-thread".into())]);
+        assert!(o.status.success(), "{}", out(&o));
+    };
+    run_tab(&["new", "https://example.com/"]);
+    run_tab(&["new"]);
+    run_tab(&["t2"]);
+    let requests = lines_of(&f, "target-requests")
+        .iter()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        requests,
+        [
+            serde_json::json!(["Target.createTarget", {"url":"about:blank", "background":true}]),
+            serde_json::json!(["Target.createTarget", {"url":"about:blank", "background":true}]),
+            serde_json::json!(["Target.activateTarget", {"targetId":"owned2"}]),
+        ]
+    );
+    let chromium_args = fs::read_to_string(f.path("chromium-argv")).unwrap();
+    assert!(chromium_args
+        .split_whitespace()
+        .any(|arg| arg == "--no-startup-window"));
 }
 
 #[test]

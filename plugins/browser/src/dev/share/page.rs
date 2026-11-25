@@ -45,11 +45,11 @@ impl Pages {
             active: 0,
             next: 1,
         };
-        pages.allocate()?;
+        pages.allocate(false)?;
         Ok(pages)
     }
 
-    fn allocate(&mut self) -> Result<(), Failure> {
+    fn allocate(&mut self, background: bool) -> Result<(), Failure> {
         if self.tabs.len() >= 12 {
             return Err(failure("Share tab limit reached"));
         }
@@ -59,7 +59,8 @@ impl Pages {
             .values()
             .map(|tab| tab.chrome_id)
             .collect::<Vec<_>>();
-        let (target, chrome_id) = groups::allocate(&mut cdp, &mut self.project, "share", &owned)?;
+        let (target, chrome_id) =
+            groups::allocate(&mut cdp, &mut self.project, "share", &owned, background)?;
         if let Err(err) = policy::guard(
             &self.browser,
             &self.project,
@@ -104,7 +105,7 @@ impl Pages {
                 {
                     return Err(denied());
                 }
-                self.allocate()?;
+                self.allocate(true)?;
                 if let Some(url) = args.get(2) {
                     return self.command(&["open".into(), url.to_string()]);
                 }
@@ -132,7 +133,7 @@ impl Pages {
                 if !policy::safe_page(&cdp.info(&self.project, &tab.target)?, &self.origins) {
                     return Err(denied());
                 }
-                cdp.call("Target.activateTarget", json!({"targetId":tab.target}))?;
+                cdp.activate_target(&tab.target)?;
                 self.active = id;
                 return Ok(json!(format!("t{id}")));
             }
@@ -150,7 +151,7 @@ impl Pages {
         );
         let _focus = if input {
             let guard = crate::dev::lock(&self.browser.profile)?;
-            cdp.call("Target.activateTarget", json!({"targetId":tab.target}))?;
+            cdp.activate_target(&tab.target)?;
             Some(guard)
         } else {
             None

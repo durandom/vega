@@ -23,7 +23,46 @@ pub(super) struct Cdp {
     id: u64,
 }
 
+fn create_target_params(
+    url: &str,
+    project: Option<&Project>,
+    background: bool,
+    hidden: bool,
+) -> Value {
+    let mut params = json!({"url": url});
+    if let Some(project) = project {
+        params["browserContextId"] = json!(project.context);
+        params["newWindow"] = json!(project.window == 0);
+    }
+    if background {
+        params["background"] = json!(true);
+    }
+    if hidden {
+        params["hidden"] = json!(true);
+    }
+    params
+}
+
 impl Cdp {
+    pub fn create_target(
+        &mut self,
+        url: &str,
+        project: Option<&Project>,
+        background: bool,
+        hidden: bool,
+    ) -> Result<String, Failure> {
+        self.string(
+            "Target.createTarget",
+            create_target_params(url, project, background, hidden),
+            "targetId",
+        )
+    }
+
+    pub fn activate_target(&mut self, target: &str) -> Result<(), Failure> {
+        self.call("Target.activateTarget", json!({"targetId": target}))?;
+        Ok(())
+    }
+
     pub fn connect(browser: &Browser) -> Result<Self, Failure> {
         Self::endpoint(browser.port, &browser.path)
     }
@@ -148,5 +187,37 @@ impl Cdp {
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| failure(format!("Chrome returned no {field}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_project_targets_keep_first_window_and_existing_tab_semantics() {
+        let mut project = Project {
+            label: "test".into(),
+            context: "context".into(),
+            window: 0,
+            origins: Default::default(),
+        };
+        assert_eq!(
+            create_target_params("about:blank", Some(&project), true, false),
+            json!({"url":"about:blank","browserContextId":"context","newWindow":true,"background":true})
+        );
+        project.window = 5;
+        assert_eq!(
+            create_target_params("control", Some(&project), true, false),
+            json!({"url":"control","browserContextId":"context","newWindow":false,"background":true})
+        );
+        assert_eq!(
+            create_target_params("control", None, true, true),
+            json!({"url":"control","background":true,"hidden":true})
+        );
+        assert_eq!(
+            create_target_params("about:blank", None, false, false),
+            json!({"url":"about:blank"})
+        );
     }
 }

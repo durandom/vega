@@ -226,6 +226,19 @@ struct Invocation<'a> {
 }
 
 impl<'a> Invocation<'a> {
+    fn background_tab_new(&self) -> bool {
+        matches!(self.words.as_slice(), ["tab", "new", ..])
+            && [
+                "CLAUDECODE",
+                "CLAUDE_CODE_SESSION_ID",
+                "CODEX_THREAD_ID",
+                "PI_CODING_AGENT",
+                "AI_AGENT",
+            ]
+            .iter()
+            .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()))
+    }
+
     fn parse(args: &'a [String]) -> Result<Self, Failure> {
         let mut this = Self {
             name: session_name(args).ok_or_else(crate::name_failure)?,
@@ -374,14 +387,13 @@ fn create_tab(
     project: &mut Project,
     name: &str,
     owned: &[i64],
+    background: bool,
 ) -> Result<Tab, Failure> {
     let (target, chrome_tab_id) = if env::var("VEGA_BROWSER_MARK").as_deref() == Ok("0") {
-        let target = cdp.string("Target.createTarget", json!({
-            "url": "about:blank", "browserContextId": project.context, "newWindow": project.window == 0
-        }), "targetId")?;
+        let target = cdp.create_target("about:blank", Some(project), background, false)?;
         (target, None)
     } else {
-        let (target, id) = groups::allocate(cdp, project, name, owned)?;
+        let (target, id) = groups::allocate(cdp, project, name, owned, background)?;
         (target, Some(id))
     };
     let result = (|| {
@@ -612,6 +624,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         return Err(stale("The managed CfT generation has changed"));
     }
     let opening_tab = matches!(call.words.as_slice(), ["tab", "new", ..]);
+    let background = call.background_tab_new();
     let opening =
         opening_tab || matches!(call.words.first(), Some(&("open" | "goto" | "navigate")));
     if previous.is_none() && crate::legacy::has_binding(&call.name) {
@@ -623,7 +636,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         return Err(stale("Start the named dev session with open or tab new"));
     }
     if !running {
-        data.browser = Some(process::launch(&profile)?);
+        data.browser = Some(process::launch(&profile, background)?);
         data.projects.clear();
         data.pending_restore = None;
         save(&profile, &data)?;
@@ -665,7 +678,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
             );
         }
         let project = data.projects.get_mut(&repo.id).expect("project allocated");
-        let tab = match create_tab(&mut cdp, &browser, project, &call.name, &[]) {
+        let tab = match create_tab(&mut cdp, &browser, project, &call.name, &[], background) {
             Ok(tab) => tab,
             Err(e) => {
                 if new_project {
@@ -722,7 +735,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
                 if env::var("VEGA_BROWSER_MARK").as_deref() != Ok("0") {
                     groups::require_access(&mut cdp)?;
                 }
-                let tab = create_tab(&mut cdp, &browser, project, &call.name, &owned)?;
+                let tab = create_tab(&mut cdp, &browser, project, &call.name, &owned, background)?;
                 session.active = session.next;
                 session.next += 1;
                 session.tabs.insert(session.active, tab);
@@ -786,7 +799,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
                 .get(&id)
                 .ok_or_else(|| usage("Tab is not owned by this dev session"))?;
             let info = cdp.info(project, &tab.target)?;
-            cdp.call("Target.activateTarget", json!({"targetId": tab.target}))?;
+            cdp.activate_target(&tab.target)?;
             session.active = id;
             save(&profile, &data)?;
             let url = info["url"].as_str().unwrap_or_default();
@@ -843,7 +856,7 @@ pub fn command(args: &[String]) -> Result<ExitCode, Failure> {
         )
     );
     let _focus_guard = if focus {
-        cdp.call("Target.activateTarget", json!({"targetId": binding.target}))?;
+        cdp.activate_target(&binding.target)?;
         Some(guard)
     } else {
         drop(guard);

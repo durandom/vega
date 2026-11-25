@@ -60,6 +60,9 @@ class H(http.server.BaseHTTPRequestHandler):
             request = json.loads(bytes(v ^ mask[i % 4] for i, v in enumerate(frame)))
             method = request["method"]
             target = request.get("params", {}).get("targetId")
+            if method in ("Target.createTarget", "Target.activateTarget"):
+                with open(os.path.join(FIX, "target-requests"), "a") as log:
+                    log.write(json.dumps([method, request.get("params")]) + "\n")
             global next_id
             if method == "Target.createTarget":
                 next_id += 1

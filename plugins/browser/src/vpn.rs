@@ -315,7 +315,7 @@ impl Vpn {
                     ));
                 }
                 if listening(self.socks) && self.control("check") {
-                    return ensure_chromium(&browser, None).map(|_| ());
+                    return ensure_chromium(&browser, None, false).map(|_| ());
                 }
                 thread::sleep(Duration::from_millis(200));
             }

@@ -75,7 +75,7 @@ pub(super) fn running(browser: &Browser, profile: &Path) -> Result<bool, Failure
     Ok(true)
 }
 
-pub(super) fn launch(profile: &Path) -> Result<Browser, Failure> {
+pub(super) fn launch(profile: &Path, background: bool) -> Result<Browser, Failure> {
     let exe = crate::install::chrome_binary(&vega_herdr::platform::home().unwrap_or_default())
         .ok_or_else(|| {
             Failure::new(
@@ -120,7 +120,11 @@ pub(super) fn launch(profile: &Path) -> Result<Browser, Failure> {
         .arg(&profile_arg)
         .args(LAUNCH_ARGS)
         .arg(format!("--load-extension={}", extension.display()))
-        .arg("about:blank")
+        .arg(if background {
+            "--no-startup-window"
+        } else {
+            "about:blank"
+        })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
