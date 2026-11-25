@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 281 · 2026-11-25
+
+- feature: The agent switcher (`ctrl-s l`) also opens right after a restart or mod reload: it fills a short focus history with the most recently active agents.
+
 ## 280 · 2026-11-25
 
 - feature: `ctrl-s l` opens an agent switcher: the last ten agents in focus order, the previous one selected; Enter goes there, arrows or digits pick another. `cmd-;` still toggles directly. Apply with `vega config apply herdr-app`.

@@ -312,11 +312,18 @@ function sampleFocus() {
 }
 // The agent switcher: the last agents in focus order in a dialog, the previous one selected.
 function openSwitcher(f) {
-  const live = new Set(agents().map(a => a.address));
+  const all = agents();
+  const live = new Set(all.map(a => a.address));
   const list = navigation.agents.filter(a => live.has(a)).slice(0, SWITCHER_ROWS);
+  // A fresh history (first start, mod reload) is short: fill it with the most recently active agents.
+  if (f.terminal && live.has(f.terminal) && !list.includes(f.terminal)) list.unshift(f.terminal);
+  for (const a of [...all].sort((x, y) => y.seq - x.seq)) {
+    if (list.length >= SWITCHER_ROWS) break;
+    if (!list.includes(a.address)) list.push(a.address);
+  }
   if (!list.length || (list.length === 1 && list[0] === f.terminal)) return;
   const rows = list.map(address => ({ address, at: navigation.seen.get(address) ?? 0 }));
-  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 64 + 44 * rows.length,
+  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 44 + 53 * rows.length,
     props: { switcher: { rows, index: list[0] === f.terminal ? 1 : 0, current: f.terminal } } });
 }
 function lastFocus(command) {
