@@ -113,7 +113,7 @@ DIAG.flush = diagFlush;
 // Which copy is running: the main sidebar or one of its popup/window views.
 const copyKind = () => {
   const p = props();
-  return p?.globalConfig ? "settings" : p?.mail ? "mail" : p?.attentionProject ? "attention"
+  return p?.switcher ? "switcher" : p?.globalConfig ? "settings" : p?.mail ? "mail" : p?.attentionProject ? "attention"
     : p?.projectConfig ? "project" : p?.viewMenu ? "views" : p?.spaceMenu ? "space-menu"
     : p?.agentMenu ? "agent-menu" : "main";
 };
@@ -265,7 +265,24 @@ function duration(ms) {
 }
 
 // Shared by all copies on herdr-app 0.1.14+. Overlays do not participate.
-const navigation = { agents: [], spaces: [], panes: new Map(), commands: new Map(), sampled: null, polled: 0 };
+const navigation = { agents: [], spaces: [], panes: new Map(), commands: new Map(), sampled: null, polled: 0,
+  // When each agent was last focused (ms); the main copy keeps both in localStorage across restarts.
+  seen: new Map(), dirty: false };
+const SWITCHER_ROWS = 10;
+function restoreAgentHistory() {
+  if (navigation.agents.length) return;
+  try {
+    for (const [address, at] of JSON.parse(localStorage.getItem("agent-history") ?? "[]")) {
+      navigation.agents.push(address); navigation.seen.set(address, at);
+    }
+  } catch (_) {}
+}
+function saveAgentHistory() {
+  if (!navigation.dirty) return;
+  navigation.dirty = false;
+  const kept = navigation.agents.slice(0, 3 * SWITCHER_ROWS);
+  try { localStorage.setItem("agent-history", JSON.stringify(kept.map(a => [a, navigation.seen.get(a) ?? 0]))); } catch (_) {}
+}
 function visit(history, id) {
   if (!id || history[0] === id) return;
   const index = history.indexOf(id);
@@ -283,8 +300,24 @@ function sampleFocus() {
   // The frequent path only reads focused(); copy agent inventory on transitions.
   if (f.terminal !== navigation.sampled) {
     navigation.sampled = f.terminal;
-    if (agents().some(a => a.address === f.terminal)) visit(navigation.agents, f.terminal);
+    if (agents().some(a => a.address === f.terminal)) {
+      visit(navigation.agents, f.terminal);
+      navigation.seen.set(f.terminal, Date.now());
+      navigation.dirty = true;
+    }
   }
+  // Leaving an agent stamps it too: the switcher shows when you last looked at it.
+  const current = navigation.agents[0];
+  if (current === f.terminal) navigation.seen.set(current, Date.now());
+}
+// The agent switcher: the last agents in focus order in a dialog, the previous one selected.
+function openSwitcher(f) {
+  const live = new Set(agents().map(a => a.address));
+  const list = navigation.agents.filter(a => live.has(a)).slice(0, SWITCHER_ROWS);
+  if (!list.length || (list.length === 1 && list[0] === f.terminal)) return;
+  const rows = list.map(address => ({ address, at: navigation.seen.get(address) ?? 0 }));
+  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 64 + 44 * rows.length,
+    props: { switcher: { rows, index: list[0] === f.terminal ? 1 : 0, current: f.terminal } } });
 }
 function lastFocus(command) {
   sampleFocus();
@@ -299,6 +332,9 @@ function lastFocus(command) {
   } else if (command === "last-space") {
     history = navigation.spaces; live = new Set(spaces().map(s => s.id));
     current = f.space; action = "space.select"; argument = "id";
+  } else if (command === "switch-agent") {
+    navigation.agents.splice(0, navigation.agents.length, ...navigation.agents.filter(id => agents().some(a => a.address === id)));
+    return openSwitcher(f);
   } else if (command === "last-pane") {
     history = navigation.panes.get(f.tab) ?? [];
     live = new Set(panes().filter(p => p.tab === f.tab).map(p => p.pane));
@@ -325,6 +361,12 @@ export default class Agents extends View {
 
   initBody(_props, cx) {
     this.dismissBusy = new Set(); this.dismissResults = new Map();
+    if (props()?.switcher) {
+      this.switcherIndex = props().switcher.index ?? 0;
+      this.focusHandle = cx.focus_handle?.();
+      this.focusHandle?.focus();
+      return;
+    }
     if (props()?.globalConfig) {
       this.settingsTab = "models";
       this.focusHandle = cx.focus_handle?.();
@@ -407,6 +449,7 @@ export default class Agents extends View {
       return;
     }
     if (props()?.spaceMenu || props()?.agentMenu) return;
+    restoreAgentHistory();
     this.startNavigation(cx);
     cx.timer.every(1000, cx => this.reconcileWaiting(cx));
     this.preferences = { projects: {}, views: {} };
@@ -453,6 +496,7 @@ export default class Agents extends View {
         if (now - navigation.polled >= 250) {
           navigation.polled = now;
           sampleFocus();
+          saveAgentHistory();
         }
         await cx.sleep(300);
       }
@@ -1454,6 +1498,57 @@ export default class Agents extends View {
     return Boolean(this.vegaTerminals?.get(address)?.labels?.["herdr.pinned"]);
   }
 
+  // Enter goes to the selected agent (the previous one when it opens); arrows, Tab, j/k or l
+  // move; a digit goes to that row (0 is the current agent); Esc closes.
+  switcher(t) {
+    const { rows: all, current } = props().switcher;
+    const byAddress = new Map(agents().map(a => [a.address, a]));
+    const labels = new Map(terminals().map(x => [x.address, x.labels ?? {}]));
+    const rows = all.filter(r => byAddress.has(r.address));
+    const close = () => closeOverlay(props().overlay);
+    if (!rows.length) return div().size_full().p(16).bg(t.popover).text_color(t.dim).child("No agents.");
+    const index = Math.max(0, Math.min(this.switcherIndex ?? 0, rows.length - 1));
+    const go = i => {
+      const r = rows[i];
+      close();
+      if (r && r.address !== current) run("agent.focus", { terminal: r.address });
+    };
+    const move = (step, cx) => { this.switcherIndex = (index + step + rows.length) % rows.length; cx.notify(); };
+    const now = Date.now();
+    const row = (r, i) => {
+      const a = byAddress.get(r.address);
+      const l = labels.get(r.address) ?? {};
+      const name = a.pane_name || l["vega.name"] || a.title || a.tab_name || r.address;
+      const where = [l["vega.project"], a.space_name, l["vega.host"] || machineOf(r.address)].filter(Boolean)
+        .filter((v, k, xs) => xs.indexOf(v) === k).join(" · ");
+      const when = r.address === current ? "now" : r.at ? `${duration(now - r.at)} ago` : "";
+      const color = t[a.status] ?? t.dim;
+      return h_flex().id(`switch-${i}`).h(40).px(10).gap(10).items_center().rounded(7).cursor_pointer()
+        .when(i === index, el => el.bg(t.selected)).hover(el => el.bg(t.hover))
+        .on_click((_e, cx) => { cx.stop_propagation(); go(i); })
+        .child(div().w(14).flex_none().text_color(t.dim).text_size(11).child(String(i)))
+        .child(div().w(8).h(8).flex_none().rounded(4).bg(color))
+        .child(v_flex().flex_1().overflow_hidden()
+          .child(div().text_size(13).truncate().child(name))
+          .child(div().text_size(11).text_color(t.dim).truncate().child(where)))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child([a.status, when].filter(Boolean).join(" · ")));
+    };
+    return v_flex().size_full().p(8).gap(2).bg(t.popover).text_color(t.foreground)
+      .when(Boolean(this.focusHandle), el => el.track_focus(this.focusHandle))
+      .on_key_down((e, cx) => {
+        const k = e.keystroke;
+        if (k === "escape") close();
+        else if (k === "enter") go(index);
+        else if (["down", "tab", "j", "l", "ctrl-n"].includes(k)) move(1, cx);
+        else if (["up", "shift-tab", "k", "h", "ctrl-p"].includes(k)) move(-1, cx);
+        else if (/^[0-9]$/.test(k) && +k < rows.length) go(+k);
+        else return;
+        cx.stop_propagation();
+      })
+      .child(div().px(10).pb(4).text_size(11).text_color(t.dim).child("Switch agent · Enter · ↑↓ · 0–9 · Esc"))
+      .children(rows.map(row));
+  }
+
   openAgentMenu(address, cx, project = null) {
     cx.stop_propagation();
     openOverlay({ mod: "vega-sidebar", kind: "popup", width: 260, height: 100,
@@ -2308,6 +2403,7 @@ export default class Agents extends View {
           .child(div().text_size(11).text_color(t.muted).child(`${m.from || m.host || ""} · ${m.time || ""} · ${m.read === false || m.unread ? "Unread" : "Read"}`))
           .when(Boolean(m.title), el => el.child(div().font_semibold().child(m.title)))
           .child(div().child(m.text ?? m.body ?? ""))) : [div().child("No mail.")]) : [div().child(this.mail)]));
+    if (props()?.switcher) return this.switcher(t);
     if (props()?.attentionProject) return this.attentionPopover(t);
     if (props()?.globalConfig) return this.settingsOverlay(t);
     if (props()?.projectConfig) return this.projectOverlay(t);

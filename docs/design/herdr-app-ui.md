@@ -82,15 +82,23 @@ leave successfully created terminals available for the next invocation.
 
 ## Last-focus navigation (vega-0h4c.70)
 
-`ctrl-s l` or `cmd-;` toggles the last agent, `ctrl-s shift-l` the last space,
+`cmd-;` toggles the last agent, `ctrl-s shift-l` the last space,
 and `ctrl-s ;` the last pane in the current tab. Press again to return (A → B → A).
+
+`ctrl-s l` (`vega-sidebar.switch-agent`) opens the agent switcher: a dialog with
+the last ten live agents in focus order (current first, with when each was last
+focused), the previous one selected. Enter goes there, so `ctrl-s l` Enter is the
+old toggle; arrows, Tab, j/k or l move; a digit jumps to that row (1 = previous);
+Esc closes. The main sidebar copy keeps the agent history and its focus times in
+its localStorage, so the switcher survives a restart; the dialog gets the rows as
+props, since overlays do not share module state.
 Pane history includes mod panes; agent history includes qualified remote addresses
 and ignores shells. Closed targets are skipped; without a previous live target the
 command does nothing. The keys deliver `vega-sidebar.last-agent`,
 `vega-sidebar.last-space` and `vega-sidebar.last-pane` through `nextCommand()`.
 
 History stays in module memory, shared by all sidebar copies on herdr-app 0.1.14+,
-and resets on mod reload or app restart. Renders sample focus; a 300 ms background
+and resets on mod reload or app restart, except the agent history (above). Renders sample focus; a 300 ms background
 loop also samples because the API does not guarantee a render for every focus
 change. Copies share the polling budget and only read agent inventory when the
 terminal changes. Broadcast key deliveries are batched for one microtask so only

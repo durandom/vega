@@ -61,7 +61,7 @@
     "ctrl-s c": "tab.new",
     "ctrl-s n": "tab.next",
     "ctrl-s p": "tab.prev",
-    "ctrl-s l": "vega-sidebar.last-agent",
+    "ctrl-s l": "vega-sidebar.switch-agent",
     "ctrl-s shift-l": "vega-sidebar.last-space",
     "ctrl-s ;": "vega-sidebar.last-pane",
     "ctrl-s shift-t": "tab.rename",
