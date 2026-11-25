@@ -1527,7 +1527,8 @@ export default class Agents extends View {
 
   // Enter goes to the selected agent (the previous one when it opens); arrows, Tab, j/k or l
   // move; a digit goes to that row (0 is the current agent); `d` shows only done agents; `/`
-  // searches all agents fuzzily like fzf (space-separated terms, any order); Esc leaves the search, then closes.
+  // searches all agents fuzzily like fzf (space-separated terms, any order). Herdr closes a dialog on
+  // Esc before the mod sees it, so Esc always closes; Backspace on an empty query leaves the search.
   switcher(t) {
     const { rows: all, current } = props().switcher;
     const byAddress = new Map(agents().map(a => [a.address, a]));
@@ -1593,8 +1594,7 @@ export default class Agents extends View {
         else if (["down", "tab", "ctrl-n"].includes(k)) move(1);
         else if (["up", "shift-tab", "ctrl-p"].includes(k)) move(-1);
         else if (searching) {
-          if (k === "escape") this.switcherQuery = null;
-          else if (k === "backspace") { if (query) this.switcherQuery = query.slice(0, -1); else this.switcherQuery = null; }
+          if (k === "backspace") { if (query) this.switcherQuery = query.slice(0, -1); else this.switcherQuery = null; }
           else if (k === "ctrl-u") this.switcherQuery = "";
           else if (typed && typed >= " ") this.switcherQuery = query + typed;
           else return;
