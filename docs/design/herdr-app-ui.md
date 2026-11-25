@@ -90,8 +90,8 @@ the last ten live agents in focus order (current first, with when each was last
 focused), the previous one selected. Enter goes there, so `ctrl-s l` Enter is the
 old toggle; arrows, Tab, j/k or l move; a digit jumps to that row (1 = previous);
 Esc closes. `d` shows only done agents; `/` searches all live agents
-(space-separated substrings in any order over name, project, space, host, tab and
-address; Backspace edits, ctrl-u clears, Esc leaves the search). The main sidebar copy keeps the agent history and its focus times in
+fuzzily like fzf (space-separated terms in any order, each a subsequence of name,
+project, space, host, tab or address; best score first; Backspace edits, ctrl-u clears, Esc leaves the search). The main sidebar copy keeps the agent history and its focus times in
 its localStorage, so the switcher survives a restart; the dialog gets the rows as
 props, since overlays do not share module state.
 Pane history includes mod panes; agent history includes qualified remote addresses

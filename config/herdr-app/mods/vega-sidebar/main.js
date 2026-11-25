@@ -310,6 +310,28 @@ function sampleFocus() {
   const current = navigation.agents[0];
   if (current === f.terminal) navigation.seen.set(current, Date.now());
 }
+// fzf-style fuzzy score of one term in text (both lowercase): the term's characters in order,
+// not necessarily adjacent; null without a match. Like fzf, it rewards consecutive characters and
+// starts of words and penalizes gaps; it takes the best of every start position.
+const WORD_START = /[\s\-_/.·:|]/;
+function fuzzyScore(term, text) {
+  let best = null;
+  for (let start = text.indexOf(term[0]); start >= 0; start = text.indexOf(term[0], start + 1)) {
+    let score = 0, at = start, previous = -1;
+    for (const ch of term) {
+      at = text.indexOf(ch, previous < 0 ? start : previous + 1);
+      if (at < 0) { score = null; break; }
+      score += 16;
+      if (previous >= 0 && at === previous + 1) score += 8;
+      else if (previous >= 0) score -= Math.min(at - previous - 1, 8);
+      if (at === 0 || WORD_START.test(text[at - 1])) score += 8;
+      previous = at;
+    }
+    if (score === null) break;
+    if (best === null || score > best) best = score;
+  }
+  return best;
+}
 // The agent switcher: the last agents in focus order in a dialog, the previous one selected.
 function openSwitcher(f) {
   const all = agents();
@@ -1505,7 +1527,7 @@ export default class Agents extends View {
 
   // Enter goes to the selected agent (the previous one when it opens); arrows, Tab, j/k or l
   // move; a digit goes to that row (0 is the current agent); `d` shows only done agents; `/`
-  // searches all agents (space-separated substrings, any order); Esc leaves the search, then closes.
+  // searches all agents fuzzily like fzf (space-separated terms, any order); Esc leaves the search, then closes.
   switcher(t) {
     const { rows: all, current } = props().switcher;
     const byAddress = new Map(agents().map(a => [a.address, a]));
@@ -1522,9 +1544,20 @@ export default class Agents extends View {
     };
     const query = this.switcherQuery;
     const terms = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    // Each term must match fuzzily; with a query the best total score wins, ties keep focus order.
     const rows = all.filter(r => byAddress.has(r.address)).map(describe)
       .filter(r => !this.switcherDone || r.a.status === "done")
-      .filter(r => terms.every(term => r.text.includes(term)))
+      .map((r, order) => {
+        let score = 0;
+        for (const term of terms) {
+          const s = fuzzyScore(term, r.text);
+          if (s === null) return null;
+          score += s;
+        }
+        return { ...r, score, order };
+      })
+      .filter(Boolean)
+      .sort((x, y) => terms.length ? y.score - x.score || x.order - y.order : x.order - y.order)
       .slice(0, SWITCHER_ROWS);
     const index = Math.max(0, Math.min(this.switcherIndex ?? 0, rows.length - 1));
     const go = i => {
