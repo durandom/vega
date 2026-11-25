@@ -29,7 +29,7 @@ Use vega adoption to re-parent running/restored lanes after a UAC or host reboot
 Adoption does not create a missing durable spawn record for future `reopen`.
 
 After a boot vegad finds lost agents once and, per ~/.config/vega/resume.toml
-`mode = "offer" | "auto" | "off"` (default offer), leaves one note with this
+`mode = "offer" | "auto" | "off"` (default auto), leaves one note with this
 command or resumes them itself.
 
 Examples:

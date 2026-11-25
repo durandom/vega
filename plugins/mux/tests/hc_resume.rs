@@ -171,6 +171,9 @@ fn lost_agents_resume_in_place_by_reopen_and_boot_pass() {
     std::env::remove_var("HC_TERMINAL_ID");
     std::env::set_var("VEGA_BOOT_EPOCH", "boot-1");
     use vega_herdr::resume::{boot_pass, mode, Mode};
+    assert_eq!(mode(), Mode::Auto, "missing resume.toml means auto");
+    fs::create_dir_all(root.join("config/vega")).unwrap();
+    fs::write(root.join("config/vega/resume.toml"), "mode = \"offer\"\n").unwrap();
     assert_eq!(mode(), Mode::Offer);
     let pass = boot_pass(mode()).unwrap().unwrap();
     assert_eq!(pass.offered, ["t8", "t9", "t10"]);
@@ -181,12 +184,7 @@ fn lost_agents_resume_in_place_by_reopen_and_boot_pass() {
     assert!(boot_pass(mode()).unwrap().is_none(), "once per boot");
 
     // auto on the next boot: vegad types the same lines itself.
-    fs::write(root.join("config/vega/resume.toml"), "mode = \"auto\"\n")
-        .or_else(|_| {
-            fs::create_dir_all(root.join("config/vega"))?;
-            fs::write(root.join("config/vega/resume.toml"), "mode = \"auto\"\n")
-        })
-        .unwrap();
+    fs::write(root.join("config/vega/resume.toml"), "mode = \"auto\"\n").unwrap();
     std::env::set_var("VEGA_BOOT_EPOCH", "boot-2");
     let pass = boot_pass(mode()).unwrap().unwrap();
     assert_eq!(pass.resumed, ["t8", "t9", "t10"], "{:?}", pass.failed);

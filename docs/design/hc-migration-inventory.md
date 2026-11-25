@@ -386,7 +386,7 @@ address, name, labels and parent, but the agent is gone. vega resumes it in plac
    A candidate is a local live `keep` terminal with a spawn record of the same address and name
    (backend hc) and a session, whose foreground is a plain idle shell: foreground program is
    zsh/bash/sh/dash/ksh/fish, its pid is the terminal pid (no child), no harness status.
-3. **Act** per `~/.config/vega/resume.toml` `mode = "offer" | "auto" | "off"` (default offer):
+3. **Act** per `~/.config/vega/resume.toml` `mode = "offer" | "auto" | "off"` (default auto):
    - offer: one note for the Slayer (kind `resume`, `cmd = vega mux reopen <t> ...`).
    - auto: vegad types into each terminal, after re-checking it is still an idle shell:
      `cd <cwd> && K=V... <argv> <resume>`; resume is `--resume <id>` (claude), `resume <id>` (codex),

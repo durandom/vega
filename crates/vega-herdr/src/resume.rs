@@ -20,23 +20,23 @@ pub enum Mode {
 }
 
 /// `$XDG_CONFIG_HOME/vega/resume.toml`, `mode = "offer" | "auto" | "off"`;
-/// missing or unreadable means offer.
+/// missing, unreadable or any other value means auto.
 pub fn mode() -> Mode {
     config_dir()
         .and_then(|d| std::fs::read_to_string(d.join("resume.toml")).ok())
         .map(|t| parse_mode(&t))
-        .unwrap_or(Mode::Offer)
+        .unwrap_or(Mode::Auto)
 }
 
 pub fn parse_mode(text: &str) -> Mode {
     let doc: toml_edit::DocumentMut = match text.parse() {
         Ok(d) => d,
-        Err(_) => return Mode::Offer,
+        Err(_) => return Mode::Auto,
     };
     match doc.get("mode").and_then(|v| v.as_str()) {
-        Some("auto") => Mode::Auto,
+        Some("offer") => Mode::Offer,
         Some("off") => Mode::Off,
-        _ => Mode::Offer,
+        _ => Mode::Auto,
     }
 }
 
@@ -631,12 +631,12 @@ mod tests {
     }
 
     #[test]
-    fn mode_defaults_to_offer() {
-        assert_eq!(parse_mode(""), Mode::Offer);
-        assert_eq!(parse_mode("mode = \"auto\""), Mode::Auto);
+    fn mode_defaults_to_auto() {
+        assert_eq!(parse_mode(""), Mode::Auto);
+        assert_eq!(parse_mode("mode = \"offer\""), Mode::Offer);
         assert_eq!(parse_mode("mode = \"off\""), Mode::Off);
-        assert_eq!(parse_mode("mode = \"bogus\""), Mode::Offer);
-        assert_eq!(parse_mode("not toml ="), Mode::Offer);
+        assert_eq!(parse_mode("mode = \"bogus\""), Mode::Auto);
+        assert_eq!(parse_mode("not toml ="), Mode::Auto);
     }
 
     #[test]
