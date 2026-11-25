@@ -314,16 +314,14 @@ function sampleFocus() {
 function openSwitcher(f) {
   const all = agents();
   const live = new Set(all.map(a => a.address));
-  const list = navigation.agents.filter(a => live.has(a)).slice(0, SWITCHER_ROWS);
-  // A fresh history (first start, mod reload) is short: fill it with the most recently active agents.
+  // Focus history first, then every other live agent, most recently active first: a fresh history
+  // (first start, mod reload) still fills the list, and `d` and `/` search all agents.
+  const list = navigation.agents.filter(a => live.has(a));
   if (f.terminal && live.has(f.terminal) && !list.includes(f.terminal)) list.unshift(f.terminal);
-  for (const a of [...all].sort((x, y) => y.seq - x.seq)) {
-    if (list.length >= SWITCHER_ROWS) break;
-    if (!list.includes(a.address)) list.push(a.address);
-  }
+  for (const a of [...all].sort((x, y) => y.seq - x.seq)) if (!list.includes(a.address)) list.push(a.address);
   if (!list.length || (list.length === 1 && list[0] === f.terminal)) return;
   const rows = list.map(address => ({ address, at: navigation.seen.get(address) ?? 0 }));
-  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 44 + 53 * rows.length,
+  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 70 + 53 * Math.min(SWITCHER_ROWS, rows.length),
     props: { switcher: { rows, index: list[0] === f.terminal ? 1 : 0, current: f.terminal } } });
 }
 function lastFocus(command) {
@@ -1506,53 +1504,81 @@ export default class Agents extends View {
   }
 
   // Enter goes to the selected agent (the previous one when it opens); arrows, Tab, j/k or l
-  // move; a digit goes to that row (0 is the current agent); Esc closes.
+  // move; a digit goes to that row (0 is the current agent); `d` shows only done agents; `/`
+  // searches all agents (space-separated substrings, any order); Esc leaves the search, then closes.
   switcher(t) {
     const { rows: all, current } = props().switcher;
     const byAddress = new Map(agents().map(a => [a.address, a]));
     const labels = new Map(terminals().map(x => [x.address, x.labels ?? {}]));
-    const rows = all.filter(r => byAddress.has(r.address));
     const close = () => closeOverlay(props().overlay);
-    if (!rows.length) return div().size_full().p(16).bg(t.popover).text_color(t.dim).child("No agents.");
-    const index = Math.max(0, Math.min(this.switcherIndex ?? 0, rows.length - 1));
-    const go = i => {
-      const r = rows[i];
-      close();
-      if (r && r.address !== current) run("agent.focus", { terminal: r.address });
-    };
-    const move = (step, cx) => { this.switcherIndex = (index + step + rows.length) % rows.length; cx.notify(); };
     const now = Date.now();
-    const row = (r, i) => {
+    const describe = r => {
       const a = byAddress.get(r.address);
       const l = labels.get(r.address) ?? {};
       const name = a.pane_name || l["vega.name"] || a.title || a.tab_name || r.address;
       const where = [l["vega.project"], a.space_name, l["vega.host"] || machineOf(r.address)].filter(Boolean)
         .filter((v, k, xs) => xs.indexOf(v) === k).join(" · ");
+      return { ...r, a, name, where, text: [name, where, a.tab_name, a.title, r.address].join(" ").toLowerCase() };
+    };
+    const query = this.switcherQuery;
+    const terms = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    const rows = all.filter(r => byAddress.has(r.address)).map(describe)
+      .filter(r => !this.switcherDone || r.a.status === "done")
+      .filter(r => terms.every(term => r.text.includes(term)))
+      .slice(0, SWITCHER_ROWS);
+    const index = Math.max(0, Math.min(this.switcherIndex ?? 0, rows.length - 1));
+    const go = i => {
+      const r = rows[i];
+      if (!r) return;
+      close();
+      if (r.address !== current) run("agent.focus", { terminal: r.address });
+    };
+    const move = step => { if (rows.length) this.switcherIndex = (index + step + rows.length) % rows.length; };
+    // A new filter selects its first row.
+    const refilter = () => { this.switcherIndex = 0; };
+    const row = (r, i) => {
       const when = r.address === current ? "now" : r.at ? `${duration(now - r.at)} ago` : "";
-      const color = t[a.status] ?? t.dim;
       return h_flex().id(`switch-${i}`).h(40).px(10).gap(10).items_center().rounded(7).cursor_pointer()
         .when(i === index, el => el.bg(t.selected)).hover(el => el.bg(t.hover))
         .on_click((_e, cx) => { cx.stop_propagation(); go(i); })
-        .child(div().w(14).flex_none().text_color(t.dim).text_size(11).child(String(i)))
-        .child(div().w(8).h(8).flex_none().rounded(4).bg(color))
+        .child(div().w(14).flex_none().text_color(t.dim).text_size(11).child(query === undefined || query === null ? String(i) : ""))
+        .child(div().w(8).h(8).flex_none().rounded(4).bg(t[r.a.status] ?? t.dim))
         .child(v_flex().flex_1().overflow_hidden()
-          .child(div().text_size(13).truncate().child(name))
-          .child(div().text_size(11).text_color(t.dim).truncate().child(where)))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child([a.status, when].filter(Boolean).join(" · ")));
+          .child(div().text_size(13).truncate().child(r.name))
+          .child(div().text_size(11).text_color(t.dim).truncate().child(r.where)))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child([r.a.status, when].filter(Boolean).join(" · ")));
     };
+    const searching = typeof query === "string";
+    const head = searching ? `/ ${query}▏` : this.switcherDone ? "done only · d all · / search · Enter · Esc"
+      : "Enter · ↑↓ · 0–9 · d done · / search · Esc";
     return v_flex().size_full().p(8).gap(2).bg(t.popover).text_color(t.foreground)
       .when(Boolean(this.focusHandle), el => el.track_focus(this.focusHandle))
       .on_key_down((e, cx) => {
         const k = e.keystroke;
-        if (k === "escape") close();
-        else if (k === "enter") go(index);
-        else if (["down", "tab", "j", "l", "ctrl-n"].includes(k)) move(1, cx);
-        else if (["up", "shift-tab", "k", "h", "ctrl-p"].includes(k)) move(-1, cx);
-        else if (/^[0-9]$/.test(k) && +k < rows.length) go(+k);
+        const typed = !e.modifiers?.control && !e.modifiers?.platform && !e.modifiers?.alt ? e.key_char : undefined;
+        if (k === "enter") go(index);
+        else if (["down", "tab", "ctrl-n"].includes(k)) move(1);
+        else if (["up", "shift-tab", "ctrl-p"].includes(k)) move(-1);
+        else if (searching) {
+          if (k === "escape") this.switcherQuery = null;
+          else if (k === "backspace") { if (query) this.switcherQuery = query.slice(0, -1); else this.switcherQuery = null; }
+          else if (k === "ctrl-u") this.switcherQuery = "";
+          else if (typed && typed >= " ") this.switcherQuery = query + typed;
+          else return;
+          refilter();
+        } else if (k === "escape") { if (this.switcherDone) { this.switcherDone = false; refilter(); } else close(); }
+        // German layouts type "/" as shift-7: go by the character.
+        else if (k === "/" || typed === "/") { this.switcherQuery = ""; refilter(); }
+        else if (k === "d") { this.switcherDone = !this.switcherDone; refilter(); }
+        else if (["j", "l"].includes(k)) move(1);
+        else if (["k", "h"].includes(k)) move(-1);
+        else if (/^[0-9]$/.test(k)) go(+k);
         else return;
         cx.stop_propagation();
+        cx.notify();
       })
-      .child(div().px(10).pb(4).text_size(11).text_color(t.dim).child("Switch agent · Enter · ↑↓ · 0–9 · Esc"))
+      .child(div().px(10).pb(4).text_size(searching ? 13 : 11).text_color(searching ? t.foreground : t.dim).child(head))
+      .when(!rows.length, el => el.child(div().px(10).py(8).text_color(t.dim).child("No matching agents.")))
       .children(rows.map(row));
   }
 

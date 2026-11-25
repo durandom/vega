@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 282 · 2026-11-25
+
+- feature: Agent switcher shortcuts: `d` shows only done agents, `/` searches all agents by substrings.
+
 ## 281 · 2026-11-25
 
 - feature: The agent switcher (`ctrl-s l`) also opens right after a restart or mod reload: it fills a short focus history with the most recently active agents.
