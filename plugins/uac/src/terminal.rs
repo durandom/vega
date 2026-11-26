@@ -73,6 +73,38 @@ pub fn local() -> Result<Snapshot, Failure> {
     }
 }
 
+/// A remote machine's terminals. hc's own `terminal.list` already carries every connected machine's
+/// terminals as `machine/tN`, so one local call answers for all of them; the herdr API socket of an hc
+/// machine does not exist. Only a host without hc asks the machine through herdr.
+pub fn remote(machine: &str) -> Result<Snapshot, Failure> {
+    match vega_herdr::hc::terminal_list() {
+        Ok(v) => {
+            let prefix = format!("{machine}/");
+            let agents = v["terminals"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|t| t["state"] == "live")
+                .filter_map(|t| {
+                    let local = t["address"].as_str()?.strip_prefix(&prefix)?;
+                    let mut a = normalize(t);
+                    a["pane_id"] = local.into();
+                    Some(a)
+                })
+                .collect();
+            Ok(Snapshot {
+                machine: Some(machine.to_string()),
+                agents,
+                workspaces: vec![],
+                tabs: vec![],
+                backends: vec!["hc"],
+            })
+        }
+        Err(f) if f.code == "hc_not_found" => snapshot(Some(machine)),
+        Err(f) => Err(f),
+    }
+}
+
 pub fn agent(target: &str, machine: Option<&str>) -> Result<Value, Failure> {
     let hc = match parse(target) {
         Some(p) => p.backend == Backend::Hc,
