@@ -687,7 +687,12 @@ fn seed(bd_bin: &Path, dir: &Path) -> Result<u64, Failure> {
     if c.ahead == 0 {
         return Ok(0);
     }
-    let r = run_bd(bd_bin, dir, &["dolt", "push"], 600);
+    // Same as vegad's sync push: `bd dolt push` in server mode authenticates as `root`, so a
+    // named-user remote (DOLT_REMOTE_USER) needs the explicit `--user` SQL push (gh #7).
+    let r = match bd::push_sql(bd::remote_user().as_deref()) {
+        Some(sql) => run_bd(bd_bin, dir, &["sql", &sql], 600),
+        None => run_bd(bd_bin, dir, &["dolt", "push"], 600),
+    };
     match bd::classify(&r) {
         bd::Outcome::Ok => Ok(c.ahead),
         bd::Outcome::Behind(m) => Err(Failure::new(
