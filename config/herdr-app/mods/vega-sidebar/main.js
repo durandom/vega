@@ -166,6 +166,13 @@ function parseSymbols(text) {
   return out;
 }
 
+// Host label cell: a fixed 22px column fits a symbol of up to 2 characters; a longer label (a bare host
+// name, when theme.toml has no [symbols.hosts] entry) keeps its natural width instead of wrapping.
+const hostCell = (label, color, dim) => {
+  const cell = div().flex_none().whitespace_nowrap().text_right().text_size(12).text_color(color ?? dim).child(label);
+  return [...label].length > 2 ? cell.ml(4) : cell.w(22);
+};
+
 // A machine's $host label is resolved once per derivation in buildModel (model.hostLabels).
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -1896,7 +1903,7 @@ export default class Agents extends View {
     };
     const host = (address) => {
       const label = labelsOf(address)["vega.host"];
-      return label ? div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[label] ?? t.dim).child(label) : div().w(22).flex_none();
+      return label ? hostCell(label, C.hosts[label], t.dim) : div().w(22).flex_none();
     };
     const tokens = (address, uac) => this.vegaIcons(address, t, uac ? ["uac", "kind", "git"] : ["uac", "kind"], m.waitingByAddress.get(address) ?? []);
     const agentRow = (a, subs, depth, lines = []) => {
@@ -2066,8 +2073,7 @@ export default class Agents extends View {
           .on_mouse_down("right", (_e, cx) => this.openSpaceMenu(sp, cx))
           .child(div().min_w(0).flex_shrink_1().truncate().text_color(t.muted).child(sp.name))
           .child(div().flex_1())
-          .child(div().w(22).flex_none().text_right().text_size(12).text_color(C.hosts[hostLabel] ?? t.dim)
-            .child(hostLabel)));
+          .child(hostCell(hostLabel, C.hosts[hostLabel], t.dim)));
         for (const a of m.agentsBySpace.get(sp.id) ?? []) out.push(...withTree(a));
         out.push(...plainRows(m.plainBySpace.get(sp.id) ?? [], false));
       }
