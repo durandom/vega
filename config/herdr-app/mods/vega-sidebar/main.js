@@ -350,7 +350,7 @@ function openSwitcher(f) {
   for (const a of [...all].sort((x, y) => y.seq - x.seq)) if (!list.includes(a.address)) list.push(a.address);
   if (!list.length || (list.length === 1 && list[0] === f.terminal)) return;
   const rows = list.map(address => ({ address, at: navigation.seen.get(address) ?? 0 }));
-  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 70 + 53 * Math.min(SWITCHER_ROWS, rows.length),
+  openOverlay({ mod: "vega-sidebar", kind: "dialog", width: 560, height: 48 + 48 * Math.min(SWITCHER_ROWS, rows.length),
     props: { switcher: { rows, index: list[0] === f.terminal ? 1 : 0, current: f.terminal } } });
 }
 function lastFocus(command) {
@@ -1599,24 +1599,25 @@ export default class Agents extends View {
     const row = (r, i) => {
       const when = r.address === current ? "now" : r.at ? duration(now - r.at) : "";
       const [glyph, color] = kindOf(r);
-      return h_flex().id(`switch-${i}`).h(40).px(10).gap(8).items_center().rounded(7).cursor_pointer()
+      // Number, dot, age and host sit on the name's line; the detail line is indented under the name.
+      return v_flex().id(`switch-${i}`).h(46).px(10).gap(1).justify_center().rounded(7).cursor_pointer()
         .when(i === index, el => el.bg(t.selected)).hover(el => el.bg(t.hover))
         .on_click((_e, cx) => { cx.stop_propagation(); go(i); })
-        .child(div().w(14).flex_none().text_color(t.dim).text_size(11).child(query === undefined || query === null ? String(i) : ""))
-        .child(div().w(8).h(8).flex_none().rounded(4).bg(t[r.a.status] ?? t.dim))
-        .child(v_flex().flex_1().overflow_hidden()
-          .child(h_flex().gap(6).items_center().overflow_hidden()
-            .when(r.uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(r.l["vega.uac"] || "u▲c")))
-            .child(div().flex_none().text_color(color).child(glyph))
-            .child(div().min_w(0).flex_shrink_1().truncate().text_size(13)
-              .text_color(r.a.status === "idle" ? t.muted : t.foreground).when(r.uac, el => el.font_semibold()).child(r.name)))
-          .when(Boolean(r.where), el => el.child(div().text_size(11).text_color(t.dim).truncate().child(r.where))))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(when))
-        .child(hostCell(r.host, C.hosts[r.host], t.dim));
+        .child(h_flex().gap(8).items_center()
+          .child(div().w(14).flex_none().text_color(t.dim).text_size(11).child(query === undefined || query === null ? String(i) : ""))
+          .child(div().w(8).h(8).flex_none().rounded(4).bg(t[r.a.status] ?? t.dim))
+          .when(r.uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(r.l["vega.uac"] || "u▲c")))
+          .child(div().flex_none().text_color(color).child(glyph))
+          .child(div().min_w(0).flex_1().truncate()
+            .text_color(r.a.status === "idle" ? t.muted : t.foreground).when(r.uac, el => el.font_semibold()).child(r.name))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(when))
+          .child(hostCell(r.host, C.hosts[r.host], t.dim)))
+        .when(Boolean(r.where), el => el.child(div().pl(38).text_size(11).text_color(t.dim).truncate().child(r.where)));
     };
     const searching = typeof query === "string";
     const head = searching ? `/ ${query}▏` : this.switcherDone ? "done only · d all · / search · Enter · Esc"
       : "Enter · ↑↓ · 0–9 · d done · / search · Esc";
+    // Rows inherit the app's UI size like the sidebar rows, so glyphs and labels line up.
     return v_flex().size_full().p(8).gap(2).bg(t.popover).text_color(t.foreground)
       .when(Boolean(this.focusHandle), el => el.track_focus(this.focusHandle))
       .on_key_down((e, cx) => {
@@ -1642,7 +1643,7 @@ export default class Agents extends View {
         cx.stop_propagation();
         cx.notify();
       })
-      .child(div().px(10).pb(4).text_size(searching ? 13 : 11).text_color(searching ? t.foreground : t.dim).child(head))
+      .child(div().px(10).pb(4).when(!searching, el => el.text_size(11)).text_color(searching ? t.foreground : t.dim).child(head))
       .when(!rows.length, el => el.child(div().px(10).py(8).text_color(t.dim).child("No matching agents.")))
       .children(rows.map(row));
   }
