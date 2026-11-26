@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 291 · 2026-11-26
+
+- feature: `agy` gets its first prompt through `-i <prompt>` (it rejects a positional prompt), in gate reviewers and `vega mux spawn` on hc. Other agents keep the positional prompt.
+
 ## 290 · 2026-11-26
 
 - feature: Native Windows builds include `vega secrets` for scoped environment injection and ACL-protected host identities. See the [io-win delivery steps](docs/design/secrets.md#native-windows-io-win).

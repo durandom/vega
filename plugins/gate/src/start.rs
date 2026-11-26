@@ -924,7 +924,7 @@ pub fn hc_spawn_args(
             .map(|s| s.to_string()),
     );
     args.extend(model.iter().filter(|s| !s.is_empty()).cloned());
-    args.push(task.into());
+    args.extend(vega_herdr::launch::prompt_args(kind, task));
     args
 }
 
@@ -1272,6 +1272,24 @@ mod tests {
         assert_eq!(
             choose(&reviewers, "budget", &author, &none, &resolve, &never).unwrap_err(),
             vec!["codex: codex not on PATH", "pi:xai: pi not on PATH"]
+        );
+    }
+
+    #[test]
+    fn hc_spawn_gives_agy_its_task_through_dash_i() {
+        let args = hc_spawn_args(
+            "gate-r",
+            "r",
+            "agy",
+            Path::new("/clone"),
+            "task",
+            &[],
+            None,
+            None,
+        );
+        assert!(
+            args.ends_with(&["-i", "task"].map(String::from)),
+            "{args:?}"
         );
     }
 

@@ -91,6 +91,9 @@ Spawns forward the caller's `SSH_AUTH_SOCK` when set to the agent process. An ex
 `--env SSH_AUTH_SOCK=...` wins, including an empty value. This covers every agent kind and placement, including worktrees. For
 `--machine`, use `--env SSH_AUTH_SOCK=<remote-path>` if the socket path differs on the target host.
 
+hc spawns hand `--prompt` to the agent as its first prompt: agy gets it as `-i <prompt>` (it rejects a
+positional prompt), every other harness positionally.
+
 Codex spawns also pass `-c shell_environment_policy.set.SSH_AUTH_SOCK="<socket>"`
 so tool shells keep the socket even with project `inherit = "core"`. The value comes
 from the caller, with `--env SSH_AUTH_SOCK=...` taking precedence (including an empty

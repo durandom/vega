@@ -2137,3 +2137,31 @@ fn spawn_and_reopen_run_the_agent_through_the_toolbox_launcher() {
         assert!(a[2..agent].iter().any(|v| v == "HERDR_PANE_ID="));
     }
 }
+
+#[test]
+fn hc_spawn_gives_agy_its_prompt_through_dash_i_and_others_positionally() {
+    for (kind, dash_i) in [("agy", true), ("codex", false)] {
+        let f = Fixture::new();
+        f.run(&[
+            "spawn",
+            "worker",
+            "--kind",
+            kind,
+            "--tier",
+            "balanced",
+            "--prompt",
+            "do the task",
+        ]);
+        let calls = f.calls();
+        let run = &calls.iter().find(|v| v[0] == "run").unwrap()[1];
+        let argv: Vec<&str> = run["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|a| a.as_str())
+            .collect();
+        let last = argv.len() - 1;
+        assert!(argv[last].contains("do the task"), "{kind}: {argv:?}");
+        assert_eq!(argv[last - 1] == "-i", dash_i, "{kind}: {argv:?}");
+    }
+}
