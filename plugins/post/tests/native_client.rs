@@ -705,7 +705,7 @@ mod native {
         let peer = Host::make(&root, "peer-test", &bin, &url);
         let admin = nkeys::KeyPair::new_user();
         let conf = root.join("nats.conf");
-        fs::write(&conf,format!("listen: 127.0.0.1:{port}\njetstream {{ store_dir: {} }}\nauthorization {{ users: [{{ nkey: \"{}\" }}, {}, {}] }}\n",json!(root.join("js").to_string_lossy()),admin.public_key(),permissions(win.host,&win.public()),permissions(peer.host,&peer.public()))).unwrap();
+        fs::write(&conf,format!("listen: 127.0.0.1:{port}\njetstream {{ store_dir: {}, max_file_store: 64G }}\nauthorization {{ users: [{{ nkey: \"{}\" }}, {}, {}] }}\n",json!(root.join("js").to_string_lossy()),admin.public_key(),permissions(win.host,&win.public()),permissions(peer.host,&peer.public()))).unwrap();
         let mut broker = Broker(
             Command::new("nats-server")
                 .arg("-c")
