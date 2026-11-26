@@ -97,8 +97,28 @@ pub enum Status {
     Missing { abandoned: usize },
 }
 
-pub fn status(beads: Vec<Bead>) -> Status {
-    let abandoned = beads.iter().filter(|b| b.verdict() == "abandoned").count();
+/// Metadata key of a retry: how many abandons of the key were ignored when
+/// `vega gate start --retry` created the bead. Old beads are never edited.
+pub const RETRY_KEY: &str = "abandons_before_retry";
+
+/// Every abandon of the beads, retried or not.
+pub fn abandons(beads: &[Bead]) -> usize {
+    beads.iter().filter(|b| b.verdict() == "abandoned").count()
+}
+
+/// Abandons that still count: those after the latest retry. `floor` is a retry
+/// of this very start that no bead carries yet.
+pub fn live_abandons(beads: &[Bead], floor: usize) -> usize {
+    let marked = beads
+        .iter()
+        .filter_map(|b| b.meta_str(RETRY_KEY).parse::<usize>().ok())
+        .max()
+        .unwrap_or(0);
+    abandons(beads).saturating_sub(marked.max(floor))
+}
+
+pub fn status(beads: Vec<Bead>, floor: usize) -> Status {
+    let abandoned = live_abandons(&beads, floor);
     if let Some(b) = beads.iter().find(|b| b.is_pass()) {
         return Status::Pass(b.clone());
     }
@@ -201,17 +221,17 @@ mod tests {
           {"id":"g-2","status":"in_progress","metadata":{"verdict":"running"}},
           {"id":"g-3","status":"closed","metadata":{"verdict":"abandoned"}}]}"#;
         let beads = parse_list(list).unwrap();
-        assert!(matches!(status(beads.clone()), Status::Running(b) if b.id == "g-2"));
+        assert!(matches!(status(beads.clone(), 0), Status::Running(b) if b.id == "g-2"));
         let mut with_pass = beads;
         with_pass[0].meta = json!({"verdict":"pass"});
-        assert!(matches!(status(with_pass), Status::Pass(b) if b.id == "g-1"));
+        assert!(matches!(status(with_pass, 0), Status::Pass(b) if b.id == "g-1"));
         let beads =
             parse_list(r#"[{"id":"g-3","status":"closed","metadata":{"verdict":"abandoned"}}]"#)
                 .unwrap();
-        assert!(matches!(status(beads), Status::Missing { abandoned: 1 }));
+        assert!(matches!(status(beads, 0), Status::Missing { abandoned: 1 }));
         // A pass verdict on a bead not yet closed is no pass.
         let open =
             parse_list(r#"[{"id":"g-4","status":"open","metadata":{"verdict":"pass"}}]"#).unwrap();
-        assert!(matches!(status(open), Status::Missing { abandoned: 0 }));
+        assert!(matches!(status(open, 0), Status::Missing { abandoned: 0 }));
     }
 }

@@ -102,6 +102,9 @@ pub struct Plan {
     pub segments: Vec<Segment>,
     /// Segments whose relevant diff is empty.
     pub empty: usize,
+    /// `gate start --retry`: per key, the abandons ignored from now on
+    /// (gate.md section 7). Empty without `--retry`.
+    pub retry: std::collections::BTreeMap<String, usize>,
 }
 
 /// The rubric id of `r` at `target`: its tree or blob id, `default:<sha>` for
@@ -236,6 +239,7 @@ pub fn plan(
         rubrics,
         segments,
         empty,
+        retry: Default::default(),
     })
 }
 

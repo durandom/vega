@@ -11,8 +11,9 @@ Beads repos opt in with `.vega/gate.toml`, read from the push target.
 
 - `git push` (agent sessions, via the git shim): each segment needs a recorded pass. None: the shim starts a reviewer in TUI tab `gate-<branch>` or hc terminal `gate-<review id>` and fails the push (exit 1). Wait for the verdict, fix its findings, push again.
 - A sentinel runs `vega gate start` in its worktree before its done report, never pushes, and names the verdict. The UAC reuses the pass for the same diff/key. After a fail: fix, commit, `vega gate start` again.
-- `vega gate check`: what a push would do (segments, keys, pass or not). `vega gate`: config, segments, running reviews with the reviewer's state (`stuck` or `blocked` names the pane to look at). `vega gate log`: every record.
-- Verdicts include all findings and close reviewers: no reply. TUI authors receive mail from `tool vega-gate`; hc authors receive direct `hc send` (synchronous delivery) pending hc's atomic idle-or-done guard (vega-0h4c.17). Answer questions before the verdict. After new commits run `vega gate start` again; never re-point a reviewer by mail. A fresh reviewer covers every pending segment.
+- "review abandoned twice" fails open. After fixing the cause (reviewer not signed in, missing API key): `vega gate start --retry` ignores earlier abandons and starts a fresh review.
+- `vega gate check`: what a push would do (segments, keys, pass or not). `vega gate`: config, segments, running reviews with the reviewer's state. `vega gate log`: every record.
+- Verdicts include all findings and close reviewers: no reply. TUI authors get mail from `tool vega-gate`; hc authors get a direct `hc send`. Answer questions before the verdict. After new commits run `vega gate start` again.
 - `VEGA_GATE=skip git push ...` skips, recorded in a bead with your actor; add `VEGA_GATE_REASON=<why>`. Skips are visible to the UAC; use them only when the Slayer or UAC agreed.
 - `vega gate: <error>; push not gated`: the gate failed open; the push went through. Mention the line in your report.
 

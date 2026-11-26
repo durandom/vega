@@ -741,3 +741,76 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
     assert!(home.status.success(), "{}", out(&home));
     assert!(out(&home).contains(",gone"), "{}", out(&home));
 }
+
+fn two_abandons(tmp: &Path) {
+    fs::write(
+        tmp.join("bd-list.json"),
+        r#"[{"id":"gate-1","status":"closed","metadata":{"verdict":"abandoned"}},
+            {"id":"gate-2","status":"closed","metadata":{"verdict":"abandoned"}}]"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn two_abandons_fail_open_and_name_retry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    two_abandons(tmp.path());
+    let o = run(&work, tmp.path(), &[("HERDR_PANE_ID", "w1:p1")], &["start"]);
+    let s = out(&o);
+    assert!(s.contains("review abandoned twice for"), "{s}");
+    assert!(s.contains("vega gate start --retry"), "{s}");
+    assert!(!s.contains("review running"), "{s}");
+}
+
+#[test]
+fn retry_ignores_earlier_abandons_and_marks_the_new_bead() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    two_abandons(tmp.path());
+    let o = run(
+        &work,
+        tmp.path(),
+        &[("HERDR_PANE_ID", "w1:p1")],
+        &["start", "--retry"],
+    );
+    let s = out(&o);
+    assert!(o.status.success(), "{s}");
+    assert!(!s.contains("abandoned twice"), "{s}");
+    let bd = log(tmp.path(), "bd");
+    assert!(s.contains("review running in tab"), "{s}");
+    assert!(bd.contains("\"abandons_before_retry\":\"2\""), "{bd}");
+    // Old beads are never rewritten.
+    assert!(!bd.contains("verdict=superseded"), "{bd}");
+    assert_eq!(
+        bd.lines().filter(|l| l.starts_with("create")).count(),
+        1,
+        "{bd}"
+    );
+}
+
+#[test]
+fn only_abandons_after_the_latest_retry_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    // Two old abandons, a retry that recorded them, one new abandon: below 2.
+    fs::write(
+        tmp.path().join("bd-list.json"),
+        r#"[{"id":"gate-1","status":"closed","metadata":{"verdict":"abandoned"}},
+            {"id":"gate-2","status":"closed","metadata":{"verdict":"abandoned"}},
+            {"id":"gate-3","status":"closed","metadata":{"verdict":"abandoned","abandons_before_retry":"2"}}]"#,
+    )
+    .unwrap();
+    let o = run(&work, tmp.path(), &[("HERDR_PANE_ID", "w1:p1")], &["start"]);
+    let s = out(&o);
+    assert!(!s.contains("abandoned twice"), "{s}");
+    assert!(s.contains("review running in tab"), "{s}");
+}
+
+#[test]
+fn check_rejects_retry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    let o = run(&work, tmp.path(), &[], &["check", "--retry"]);
+    assert_eq!(o.status.code(), Some(2));
+}
