@@ -1,0 +1,9 @@
+#!/bin/sh
+# herdr-core `shell` and agent launcher: enter the toolbox and keep hc identity.
+# `toolbox run` passes only a fixed env allowlist, so HC_* is lost; re-inject it.
+# No arguments: an interactive zsh. Arguments: that command (e.g. `claude`).
+# scripts/install-hc-toolbox-shell.sh replaces the container name below.
+hc=$(env | grep '^HC_')
+[ $# -gt 0 ] || set -- zsh
+# shellcheck disable=SC2086
+exec toolbox run -c "__TOOLBOX__" env $hc "$@"

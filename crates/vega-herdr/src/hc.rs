@@ -83,7 +83,9 @@ pub fn own_terminal() -> Result<Terminal, Failure> {
         .filter_map(|p| u32::try_from(p).ok())
         .filter(|p| *p > 1)
         .collect();
-    if crate::reaches(std::process::id(), &pids, crate::parent_of) {
+    if crate::reaches(std::process::id(), &pids, crate::parent_of)
+        || crate::reaches_via_container(&pids)
+    {
         // Only an ancestry-verified caller may bind its harness session.
         let kind = match info["status"]["app"].as_str().unwrap_or("") {
             "claude-code" => "claude",

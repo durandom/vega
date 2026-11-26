@@ -38,6 +38,7 @@ run = [
   "node --test scripts/dcg-guard.test.mjs",
   "python3 scripts/install-dcg.test.py",
   "sh scripts/install-vscode-ext.test.sh",
+  "sh scripts/install-hc-toolbox-shell.test.sh",
   "sh scripts/check-stamp.test.sh",
   "sh scripts/install-cli.test.sh",
   "python3 scripts/target-cache.test.py",
@@ -66,6 +67,8 @@ run = [
   "cd vscode && npm run -s package",
   # Skips with a hint where `code` is not on PATH (e.g. WSL).
   "sh scripts/install-vscode-ext.sh",
+  # Toolbox hosts: new hc terminals enter the toolbox with HC_* intact. Skips elsewhere.
+  "sh scripts/install-hc-toolbox-shell.sh",
 ]
 
 [tasks.install-dcg]
