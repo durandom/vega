@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 285 · 2026-11-26
+
+- feature: The native Windows mail relay uses less CPU at idle by reusing hc connections, caching Git project lookups and writing registry entries only when they change.
+
 ## 284 · 2026-11-25
 
 - feature: Managed browser tabs open in the background when agents run `tab new <url>`. Use `tab <id>` to activate a tab in Chromium.

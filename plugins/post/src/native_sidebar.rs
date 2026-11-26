@@ -1,12 +1,14 @@
 //! Local hc labels continue to reconcile while the broker is unavailable.
-use serde_json::Value;
+use crate::{native_project::Projects, terminals};
+use serde_json::{json, Value};
 use std::{path::Path, sync::mpsc, time::Duration};
-use vega_herdr::{project, state, Failure};
+use vega_herdr::{hc, state, Failure};
 
-pub fn start() -> mpsc::Sender<()> {
+pub fn start(projects: Projects) -> mpsc::Sender<()> {
     let (lifetime, stop) = mpsc::channel();
     std::thread::spawn(move || {
         let mut previous_error = None;
+        let mut hc = hc::Connection::default();
         let mut health = vega_herdr::daemon_health::Health {
             native: Some(
                 vega_herdr::daemon_health::read()
@@ -17,12 +19,19 @@ pub fn start() -> mpsc::Sender<()> {
         };
         loop {
             let native = health.native.as_mut().unwrap();
-            let inventory = crate::terminals::hc_list();
+            let inventory = hc.call("terminal.list", json!({})).and_then(|value| {
+                let mut agents = terminals::hc_agents(&value)?;
+                if let Ok(doc) = hc.call("doc.get", json!({"name":"herdr-app"})) {
+                    terminals::apply_spaces(&mut agents, &doc);
+                }
+                Ok(agents)
+            });
             native.inventory.record(
                 vega_herdr::capacity::now(),
                 inventory.as_ref().err().map(|e| e.message.clone()),
             );
-            let result = inventory.and_then(reconcile);
+            let result = inventory.and_then(|agents| reconcile(agents, &projects, &mut hc));
+            projects.prune();
             health.at = vega_herdr::capacity::now();
             let error = result.err().map(|e| (e.code, e.message));
             native.labels.record(
@@ -48,7 +57,7 @@ pub fn start() -> mpsc::Sender<()> {
     lifetime
 }
 
-fn reconcile(agents: Vec<Value>) -> Result<(), Failure> {
+fn reconcile(agents: Vec<Value>, projects: &Projects, hc: &mut hc::Connection) -> Result<(), Failure> {
     let host = crate::host();
     let glyph = vega_herdr::theme::symbols().host_label(&host);
     let claims = state::project_uac_records();
@@ -77,30 +86,24 @@ fn reconcile(agents: Vec<Value>) -> Result<(), Failure> {
             }
         };
         let project = match claim {
-            Some((id, _, _)) => Ok(Some(id.clone())),
-            None => local_project(&agent, &host),
+            Some((id, _, _)) => Ok(Some(terminals::project_display_name(id))),
+            None => local_project(&agent, projects),
         };
         let mut desired = vec![("vega.host", glyph.clone()), ("vega.role", role.to_owned())];
         match project {
-            Ok(id) => desired.push((
-                "vega.project",
-                id.as_deref()
-                    .map(crate::terminals::project_display_name)
-                    .unwrap_or_default(),
-            )),
+            Ok(Some(label)) => desired.push(("vega.project", label)),
+            Ok(None) => {},
             Err(e) => {
                 first_error.get_or_insert(e);
             }
         }
-        let changed: Vec<_> = desired
+        let changed: serde_json::Map<String, Value> = desired
             .into_iter()
             .filter(|(key, value)| agent["labels"][key].as_str().unwrap_or("") != value)
-            .map(|(key, value)| format!("{key}={value}"))
+            .map(|(key, value)| (key.into(), value.into()))
             .collect();
         if !changed.is_empty() {
-            let mut args = vec!["label", pane];
-            args.extend(changed.iter().map(String::as_str));
-            if let Err(e) = vega_herdr::hc::hc_local(&args) {
+            if let Err(e) = hc.call("terminal.label", json!({"terminal": pane, "labels": changed})) {
                 first_error.get_or_insert(e);
             }
         }
@@ -108,7 +111,8 @@ fn reconcile(agents: Vec<Value>) -> Result<(), Failure> {
     first_error.map_or(Ok(()), Err)
 }
 
-fn local_project(agent: &Value, host: &str) -> Result<Option<String>, Failure> {
+/// None means a lookup is in progress. An empty label clears a lost project.
+fn local_project(agent: &Value, projects: &Projects) -> Result<Option<String>, Failure> {
     for cwd in [
         agent["cwd"].as_str(),
         agent["space_folder"]
@@ -119,9 +123,14 @@ fn local_project(agent: &Value, host: &str) -> Result<Option<String>, Failure> {
     .flatten()
     .filter(|p| !p.is_empty())
     {
-        if let Some(project) = project::resolve_optional(Path::new(cwd), host)? {
-            return Ok(Some(project.id.to_string()));
+        match projects.lookup(Path::new(cwd)).as_deref() {
+            Some(Ok(Some(project))) => {
+                return Ok(Some(terminals::project_display_name(project.id.as_str())));
+            }
+            Some(Ok(None)) => {}
+            Some(Err(error)) => return Err(Failure::new(&error.code, &error.message, &error.hint)),
+            None => return Ok(None),
         }
     }
-    Ok(None)
+    Ok(Some(String::new()))
 }

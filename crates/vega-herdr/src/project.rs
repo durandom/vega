@@ -282,8 +282,7 @@ fn git(path: &Path, args: &[&str]) -> Result<Output, Failure> {
     })
 }
 
-fn git_text(path: &Path, args: &[&str]) -> Result<String, Failure> {
-    let output = git(path, args)?;
+fn git_text(output: Output) -> Result<String, Failure> {
     if !output.status.success() {
         // Git stderr may quote config values or credential-bearing URLs.
         return Err(failure(
@@ -342,8 +341,30 @@ fn validate_host(host: &str) -> Result<(), Failure> {
 /// config failures. Classify Git's stable C-locale diagnostic without exposing
 /// its text (which can contain paths or configuration secrets).
 pub fn resolve_optional(path: &Path, host: &str) -> Result<Option<Project>, Failure> {
+    resolve_optional_with(path, host, &mut git)
+}
+
+/// Run the same optional discovery with a pause before each Git command.
+/// A background relay worker uses this to spread Windows process creation.
+#[cfg(windows)]
+pub fn resolve_optional_paced(
+    path: &Path,
+    host: &str,
+    mut before_git: impl FnMut(),
+) -> Result<Option<Project>, Failure> {
+    resolve_optional_with(path, host, &mut |path, args| {
+        before_git();
+        git(path, args)
+    })
+}
+
+fn resolve_optional_with(
+    path: &Path,
+    host: &str,
+    run_git: &mut impl FnMut(&Path, &[&str]) -> Result<Output, Failure>,
+) -> Result<Option<Project>, Failure> {
     validate_host(host)?;
-    let probe = git(path, &["rev-parse", "--git-common-dir"])?;
+    let probe = run_git(path, &["rev-parse", "--git-common-dir"])?;
     if !probe.status.success() {
         if probe.stderr.starts_with(b"fatal: not a git repository") {
             return Ok(None);
@@ -354,14 +375,23 @@ pub fn resolve_optional(path: &Path, host: &str) -> Result<Option<Project>, Fail
             "check repository layout and config permissions",
         ));
     }
-    resolve(path, host).map(Some)
+    resolve_with(path, host, run_git).map(Some)
 }
 
 /// Resolve locally with no network lookup. Configuration is read explicitly
 /// from common_dir/config, including its includes but excluding worktree,
 /// branch/upstream, global and command-line overrides.
 pub fn resolve(path: &Path, host: &str) -> Result<Project, Failure> {
+    resolve_with(path, host, &mut git)
+}
+
+fn resolve_with(
+    path: &Path,
+    host: &str,
+    run_git: &mut impl FnMut(&Path, &[&str]) -> Result<Output, Failure>,
+) -> Result<Project, Failure> {
     validate_host(host)?;
+    let mut git_text = |path: &Path, args: &[&str]| git_text(run_git(path, args)?);
     let common_dir = canonical(Path::new(&git_text(
         path,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -406,7 +436,7 @@ pub fn resolve(path: &Path, host: &str) -> Result<Project, Failure> {
             &["rev-parse", "--show-toplevel"],
         )?))?
     };
-    let output = git(
+    let output = run_git(
         &common_dir,
         &[
             "config",
@@ -1127,7 +1157,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(mode) = std::env::var("VEGA_PROJECT_TEST_MODE") {
             let start = std::time::Instant::now();
-            let err = git_text(Path::new("/"), &["config", "--list"]).unwrap_err();
+            let err = git(Path::new("/"), &["config", "--list"])
+                .and_then(git_text)
+                .unwrap_err();
             assert_eq!(
                 err.code,
                 match mode.as_str() {

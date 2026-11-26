@@ -73,7 +73,7 @@ pub fn hc_list() -> Result<Vec<Value>, Failure> {
     Ok(agents)
 }
 
-fn apply_spaces(agents: &mut [Value], doc: &Value) {
+pub(crate) fn apply_spaces(agents: &mut [Value], doc: &Value) {
     for agent in agents {
         let space = agent["labels"]["herdr.space"].as_str();
         if let Some(s) = doc["value"]["spaces"]

@@ -305,37 +305,49 @@ fn rpc_with_timeout(
 ) -> Result<Value, Failure> {
     crate::hc_schema::params(method, &params)
         .map_err(|e| Failure::new("usage", e, "use the parameters in the pinned hc RPC schema"))?;
-    let io = |e: std::io::Error| {
-        Failure::new(
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "hc_not_found"
-            } else {
-                "hc_unavailable"
-            },
-            e.to_string(),
-            "check hc and the target machine connection",
-        )
-    };
+    let input = request(method, params);
+    let mut cmd = Command::new("hc");
+    cmd.arg("connect");
+    let output = crate::rpc_line_within(&mut cmd, input, timeout)
+        .map_err(transport_error)?
+        .ok_or_else(timeout_error)?;
+    decode(method, output)
+}
+
+fn request(method: &str, params: Value) -> Vec<u8> {
     let mut input = serde_json::to_vec(&serde_json::json!({
         "jsonrpc":"2.0", "id":1, "method":method, "params":params
     }))
     .expect("JSON value serializes");
     input.push(b'\n');
-    let mut cmd = Command::new("hc");
-    cmd.arg("connect");
-    let output = crate::rpc_line_within(&mut cmd, input, timeout)
-        .map_err(io)?
-        .ok_or_else(|| {
-            Failure::new(
-                "hc_timeout",
-                "hc did not answer before the deadline",
-                "inspect vega mux --all before retrying; a launch may have completed",
-            )
-        })?;
+    input
+}
+
+fn transport_error(e: std::io::Error) -> Failure {
+    Failure::new(
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "hc_not_found"
+        } else {
+            "hc_unavailable"
+        },
+        e.to_string(),
+        "check hc and the target machine connection",
+    )
+}
+
+fn timeout_error() -> Failure {
+    Failure::new(
+        "hc_timeout",
+        "hc did not answer before the deadline",
+        "inspect vega mux --all before retrying; a launch may have completed",
+    )
+}
+
+fn decode(method: &str, output: crate::RpcLine) -> Result<Value, Failure> {
     let diagnostic = || connect_diagnostic(&output.stderr);
     let line = output
         .line
-        .map_err(|e| diagnostic().unwrap_or_else(|| io(e)))?;
+        .map_err(|e| diagnostic().unwrap_or_else(|| transport_error(e)))?;
     let bad = || {
         diagnostic().unwrap_or_else(|| {
             Failure::new(
@@ -431,3 +443,9 @@ pub fn validate_result(method: &str, result: &Value) -> Result<(), Failure> {
         )
     })
 }
+
+#[cfg(windows)]
+#[path = "hc_connection.rs"]
+mod connection;
+#[cfg(windows)]
+pub use connection::Connection;

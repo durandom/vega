@@ -209,6 +209,20 @@ pub fn agent_entries(
     agents: &[Value],
     workspaces: &[Value],
 ) -> BTreeMap<String, Value> {
+    agent_entries_with_project(host, agents, workspaces, |path| {
+        vega_herdr::project::resolve(path, host).map(Some)
+    })
+}
+
+/// Build entries using a caller-supplied local project lookup.
+pub fn agent_entries_with_project(
+    host: &str,
+    agents: &[Value],
+    workspaces: &[Value],
+    mut resolve: impl FnMut(
+        &std::path::Path,
+    ) -> Result<Option<vega_herdr::project::Project>, vega_herdr::Failure>,
+) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
     let waiting = vega_herdr::waiting::read();
     for a in agents {
@@ -252,13 +266,15 @@ pub fn agent_entries(
         static PROJECT_ERRORS: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, String>>> =
             std::sync::OnceLock::new();
         let errors = PROJECT_ERRORS.get_or_init(Default::default);
-        match vega_herdr::project::resolve(&owner_path, host) {
+        match resolve(&owner_path) {
             Ok(project) => {
                 if let Ok(mut logged) = errors.lock() {
                     logged.remove(path);
                 }
-                entry["project"] = json!(project.id);
-                entry["schema"] = json!(2);
+                if let Some(project) = project {
+                    entry["project"] = json!(project.id);
+                    entry["schema"] = json!(2);
+                }
             }
             Err(e) => {
                 if let Ok(mut logged) = errors.lock() {

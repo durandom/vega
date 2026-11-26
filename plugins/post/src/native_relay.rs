@@ -1,6 +1,7 @@
 //! Minimal native hc worker. It never pulls inbox messages: only inbox owns acks.
 use crate::{
     delivery::{self, Decision, Delivery, Draft},
+    native_project::Projects,
     terminals,
 };
 use clap::Subcommand;
@@ -8,12 +9,15 @@ use serde_json::{json, Value};
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::{
-    collections::BTreeSet,
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     path::PathBuf,
     time::Duration,
 };
-use vega_herdr::{platform, Failure};
+use vega_herdr::{hc, platform, Failure};
+
+const POLL_EVERY: Duration = Duration::from_secs(2);
+const BEAT_EVERY: Duration = Duration::from_secs(10);
 
 #[derive(Subcommand)]
 pub enum Action {
@@ -106,11 +110,12 @@ pub fn run(action: Action) -> Result<(), Failure> {
                 return Ok(());
             };
             vega_herdr::bound_daemon_calls();
-            let _sidebar = crate::native_sidebar::start();
+            let projects = Projects::start(crate::host());
+            let _sidebar = crate::native_sidebar::start(projects.clone());
             let stop_file = root()?.join("stop");
             let result = crate::runtime()?.block_on(async {
                 tokio::select! {
-                    result = serve() => result,
+                    result = serve(&projects) => result,
                     _ = async {
                         loop {
                             if fs::read_to_string(&stop_file).ok().as_deref() == Some(&token) { break; }
@@ -235,20 +240,28 @@ fn start_direct(ready: &std::path::Path) -> Result<(), Failure> {
         std::thread::sleep(Duration::from_millis(25));
     }
 }
-async fn serve() -> Result<(), Failure> {
+async fn serve(projects: &Projects) -> Result<(), Failure> {
     let file = root()?.join("delivery.json");
     let mut d = Delivery::default();
+    let mut saved = None;
+    let mut hc = hc::Connection::default();
     if let Ok(v) = fs::read(&file) {
         d.import(&serde_json::from_slice::<Value>(&v).map_err(fail)?);
     }
     loop {
-        if let Err(e) = session(&mut d, &file).await {
+        if let Err(e) = session(&mut d, &file, &mut saved, &mut hc, projects).await {
             eprintln!("relay: {}: {}", e.code, e.message);
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(POLL_EVERY).await;
     }
 }
-async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure> {
+async fn session(
+    d: &mut Delivery,
+    file: &std::path::Path,
+    saved: &mut Option<Value>,
+    hc: &mut hc::Connection,
+    projects: &Projects,
+) -> Result<(), Failure> {
     crate::client_identity::verify_local()?;
     let host = crate::host();
     let client = crate::connect("native relay", None).await?;
@@ -259,7 +272,7 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
         .get_stream(format!("KV_{}", vega_registry::BUCKET))
         .await
         .map_err(fail)?;
-    let mut published: BTreeSet<String> = crate::subject_counts(
+    let mut published: BTreeMap<String, Option<Value>> = crate::subject_counts(
         &registry,
         &format!("$KV.{}.{host}.agent.>", vega_registry::BUCKET),
     )
@@ -267,12 +280,13 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
     .into_iter()
     .filter_map(|(s, _)| {
         s.strip_prefix(&format!("$KV.{}.", vega_registry::BUCKET))
-            .map(str::to_owned)
+            .map(|key| (key.to_owned(), None))
     })
     .collect();
+    let mut next_beat = tokio::time::Instant::now();
     loop {
         // Failed inventory is not empty: retain state and let the heartbeat age.
-        let agents = match terminals::hc_list() {
+        let agents = match hc.call("terminal.list", json!({})).and_then(|value| terminals::hc_agents(&value)) {
             Ok(agents) => agents,
             Err(error) => {
                 // A failed scan may report health but cannot renew agent entries.
@@ -298,7 +312,16 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
                 .collect(),
             true,
         );
-        let entries = vega_registry::agent_entries(&host, &agents, &[]);
+        let entries = vega_registry::agent_entries_with_project(&host, &agents, &[], |cwd| {
+            if cwd.as_os_str().is_empty() {
+                return Ok(None);
+            }
+            match projects.lookup(cwd).as_deref() {
+                Some(Ok(project)) => Ok(project.clone()),
+                Some(Err(error)) => Err(Failure::new(&error.code, &error.message, &error.hint)),
+                None => Ok(None),
+            }
+        });
         for a in &agents {
             let pane = a["pane_id"].as_str().expect("normalized hc pane");
             let (count, floor) = crate::outage::bounded(
@@ -325,7 +348,7 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
                 continue;
             }
             // Fail closed for drafts, unknown screens, failed reads and status races.
-            let screen = vega_herdr::hc::hc_local(&["read", "--lines", "0", pane]);
+            let screen = hc.call("terminal.read", json!({"terminal": pane, "lines": 0}));
             if !matches!(
                 screen
                     .ok()
@@ -342,19 +365,23 @@ async fn session(d: &mut Delivery, file: &std::path::Path) -> Result<(), Failure
             let line = format!("[vega-post] {what} for you. Run: {} inbox", crate::cmd());
             let typed = terminals::send_hc(pane, &line, d.may_queue(pane)).is_ok();
             d.typed(pane, floor, typed);
-            save(d, file)?;
+            save(d, file, saved)?;
         }
         for (k, v) in &entries {
-            kv.put(k, v.to_string().into()).await.map_err(fail)?;
+            if published.get(k).and_then(Option::as_ref) != Some(v) {
+                kv.put(k, v.to_string().into()).await.map_err(fail)?;
+            }
         }
-        let current = entries.keys().cloned().collect::<BTreeSet<_>>();
-        for k in published.difference(&current) {
+        for k in published.keys().filter(|key| !entries.contains_key(*key)) {
             kv.delete(k).await.map_err(fail)?;
         }
-        published = current;
-        publish_beat(&kv, &host, vega_registry::beat()).await?;
-        save(d, file)?;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        published = entries.into_iter().map(|(k, v)| (k, Some(v))).collect();
+        if tokio::time::Instant::now() >= next_beat {
+            publish_beat(&kv, &host, vega_registry::beat()).await?;
+            next_beat = tokio::time::Instant::now() + BEAT_EVERY;
+        }
+        save(d, file, saved)?;
+        tokio::time::sleep(POLL_EVERY).await;
     }
 }
 
@@ -372,10 +399,15 @@ async fn publish_beat(
     Ok(())
 }
 
-fn save(d: &Delivery, file: &std::path::Path) -> Result<(), Failure> {
-    let tmp = file.with_extension("tmp");
-    fs::write(&tmp, d.export().to_string()).map_err(fail)?;
-    platform::replace(tmp, file).map_err(fail)
+fn save(d: &Delivery, file: &std::path::Path, saved: &mut Option<Value>) -> Result<(), Failure> {
+    let contents = d.export();
+    if saved.as_ref() != Some(&contents) {
+        let tmp = file.with_extension("tmp");
+        fs::write(&tmp, contents.to_string()).map_err(fail)?;
+        platform::replace(tmp, file).map_err(fail)?;
+        *saved = Some(contents);
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
