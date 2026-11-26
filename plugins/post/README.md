@@ -85,6 +85,8 @@ nothing is sent. vegad verifies every `uber.answer` before the addressed UAC see
 `log` print it withheld. Other kinds are not checked on receipt yet.
 `ask --kind uber.brief` sends the Uber's brief the same way (body as is); `inbox` tells the UAC how to reply,
 and vegad on the Uber host stores each reply on a recorded brief thread (`vega_uber_msg::brief`).
+vegad's bd calls for an ask (`show`, `comments`) carry the ask checkout's mise `BEADS_DOLT_*` unless vegad's env
+names a server ([beads-sync.md](../../docs/design/beads-sync.md#dolt-server-variables)).
 
 Design: [vegad.md](../../docs/design/vegad.md), [vega-mux-broker-spike.md](../../docs/design/vega-mux-broker-spike.md).
 

@@ -298,6 +298,22 @@ fails or times out, project detection returns no project and the manual-sync gua
 vegad and `vega bd init` run the real bd (`Project.bd`), never the shim; the UAC's conflict
 resolution uses `dolt` directly.
 
+## Dolt server variables
+
+A project's mise config may name bd's dolt server (`BEADS_DOLT_AUTO_START`, `_SERVER_HOST`, `_SERVER_PORT`,
+`_SERVER_USER`, `_SHARED_SERVER`; `vega_plugin::BEADS_ENV_KEYS`). They reach a shell through `mise activate`,
+which agent tool shells and vegad never run. So these bd callers read them from `mise env --json` in the checkout
+bd opens (`BEADS_DIR`'s, else the bd directory; 3 s limit, only these keys, never a password), and only when none is
+set yet:
+
+- the bd shim, for every bd an agent shell runs, including those of plugins started there;
+- `vega mux spawn`, into the agent's env (on the target for `--machine`);
+- plugins vegad runs without the shim: `vega gate gc`'s records (`plugins/gate/src/record.rs`) and the Uber ask
+  follow-up (`plugins/post/src/uber.rs`), through `vega_plugin::bd_beads_env`.
+
+Routing a group member to its coordination database (shim, `plugins/mux/src/tier.rs`) drops inherited values and
+takes the coordination clone's. vegad's own sync (`Project.bd`) is unchanged: it talks to the clone's local server.
+
 ## Not done here
 
 - Running `vega bd init --adopt` on vega's own `.beads` (embedded, no remote) and rally-ng's,

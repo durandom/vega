@@ -61,10 +61,20 @@ const BD_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl Bd {
     fn run(a: &OpenAsk, args: &[&str]) -> Option<std::process::Output> {
+        // vegad has no bd shim in front: the project's dolt server.
+        Bd::run_env(a, args, &vega_plugin::bd_beads_env(&a.cwd))
+    }
+
+    fn run_env(
+        a: &OpenAsk,
+        args: &[&str],
+        env: &[(String, String)],
+    ) -> Option<std::process::Output> {
         let bd = if a.bd.is_empty() { "bd" } else { a.bd.as_str() };
         vega_herdr::output_within(
             std::process::Command::new(bd)
                 .args(args)
+                .envs(env.iter().map(|(k, v)| (k, v)))
                 .current_dir(&a.cwd),
             BD_TIMEOUT,
         )
@@ -598,6 +608,35 @@ pub(crate) mod tests {
         assert!(o.mail.is_none(), "nothing reaches the pane: {o:?}");
         let (title, _) = o.note.as_ref().expect("a note for the human");
         assert!(title.contains(code), "{title}");
+    }
+
+    #[test]
+    fn bd_gets_the_projects_dolt_server_unless_the_caller_named_one() {
+        // vegad runs the ask follow-up with no bd shim and no `mise activate`.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = |name: &str, body: &str| {
+            let p = tmp.path().join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        let mise = script(
+            "mise",
+            r#"echo '{"BEADS_DOLT_SERVER_PORT":"4001","BEADS_DOLT_PASSWORD":"pw"}'"#,
+        );
+        let mut a = ask(Level::L3);
+        a.bd = script(
+            "bd",
+            r#"echo "${BEADS_DOLT_SERVER_PORT:-} ${BEADS_DOLT_PASSWORD:-none}""#,
+        );
+        a.cwd = tmp.path().to_path_buf();
+        let env = vega_plugin::bd_beads_env_in(tmp.path(), |_| None, &mise);
+        let o = Bd::run_env(&a, &["show", "vega-x.1"], &env).expect("bd ran");
+        assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "4001 none");
+        // A server the caller already named stays: nothing from mise.
+        let own = |k: &str| (k == "BEADS_DOLT_SERVER_PORT").then(|| "9999".into());
+        assert!(vega_plugin::bd_beads_env_in(tmp.path(), own, &mise).is_empty());
     }
 
     #[test]

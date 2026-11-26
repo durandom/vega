@@ -187,7 +187,7 @@ pub fn spawn(
     let socket = env::var("SSH_AUTH_SOCK")
         .ok()
         .filter(|_| machine().is_none());
-    let vars = spawn_env(kind, actor.as_deref(), socket.as_deref(), user);
+    let vars = spawn_env(kind, actor.as_deref(), socket.as_deref(), &project_beads_env(&cwd), user);
     let mut labels = serde_json::json!({
         "vega.kind":kind, "vega.harness":kind, "vega.mode":mode.as_str(), "vega.role":"sentinel"
     });

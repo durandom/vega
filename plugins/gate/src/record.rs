@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::{run_ok, tool};
+use crate::{run_ok_env, tool};
 
 pub const LABEL: &str = "gate";
 /// bd slower than this fails the gate open (gate.md section 1).
@@ -41,7 +41,10 @@ impl Bead {
 }
 
 fn bd(dir: &Path, args: &[&str]) -> Result<String, String> {
-    run_ok(&tool("bd"), args, Some(dir), Some(BD_TIMEOUT))
+    // vegad runs `vega-gate gc` with no bd shim in front: name the project's
+    // dolt server here.
+    let env = vega_plugin::bd_beads_env(dir);
+    run_ok_env(&tool("bd"), args, Some(dir), Some(BD_TIMEOUT), &env)
 }
 
 fn parse_list(out: &str) -> Result<Vec<Bead>, String> {
