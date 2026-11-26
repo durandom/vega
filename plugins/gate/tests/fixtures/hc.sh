@@ -28,6 +28,10 @@ if op=="get":
  if n==number("hc-get-fail-at",-1):
   print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32000,"message":"author lookup failed","data":{"kind":"not_found"}}}))
   sys.exit()
+ e=root/"hc-get-error"
+ if e.exists():
+  print(json.dumps({"jsonrpc":"2.0","id":r["id"],"error":{"code":-32000,"message":"hc says no","data":{"kind":e.read_text().strip()}}}))
+  sys.exit()
  f=root/("hc-"+p["terminal"]+".json")
  if f.exists(): emit(json.loads(f.read_text()));sys.exit()
  t=terminal(p["terminal"])

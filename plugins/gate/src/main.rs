@@ -227,6 +227,9 @@ fn start_cmd(target: Option<&str>, retry: bool) -> Result<(), Failure> {
         println!("result: not gated (no .beads: beads repos only)");
         return Ok(());
     }
+    for pane in start::reap_dead(&c.dir, &c.dir) {
+        println!("abandoned: reviewer {pane} exited without a verdict");
+    }
     if p.segments.is_empty() {
         println!("result: pass (no relevant diff against {})", c.target);
         return Ok(());

@@ -14,6 +14,10 @@ name immutable target/base/head SHAs, since clone remote refs can differ from th
 commits run `vega gate start` again; never re-point a reviewer by mail. The old reviewer closes and a
 fresh review is bound to the new head and generation.
 
+`vega gate start` ends an hc review whose reviewer terminal is definitively gone (not found or not
+`live`) with no verdict, once it is 15 s old: beads `abandoned`, state and clone cleaned. Any other hc
+error (timeout, daemon down) leaves the review alone; the read-only `vega gate` view never ends one.
+
 Design: [gate.md](../../docs/design/gate.md).
 
 Agent guide: `vega skills gate`
@@ -21,6 +25,8 @@ Agent guide: `vega skills gate`
 Gate uses the author's terminal backend. In hc/herdr-app it starts a detached reviewer with the
 `vega.role` and `vega.review` labels and inherits the author's `herdr.space` for visibility.
 Both backends share harness defaults and existing repo trust propagation from `vega-herdr::launch`.
+An hc reviewer gets its task as the first prompt: `-i <prompt>` for agy (it rejects a positional
+prompt), positionally for the other harnesses.
 Review state records the backend; old records default to herdr. An hc verdict requires matching
 review state and label plus verified process ancestry. hc verdict delivery keeps using `hc send`
 directly until hc offers an atomic idle-or-done guard (vega-0h4c.17); direct `hc send` proves

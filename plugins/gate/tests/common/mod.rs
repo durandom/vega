@@ -192,6 +192,10 @@ fn fake_tools() -> Vec<(String, PathBuf)> {
         "bd",
         r#"L=${FAKE_LOG:?}
 printf '%s\n' "$*" >> $L/bd.log
+if [ -f $L/fail-abandon ] && [ "$1" = update ] && [ "$4" = verdict=abandoned ]; then
+  echo "injected storage failure" >&2
+  exit 1
+fi
 if [ -f $L/fail-supersede ] && [ "$1" = update ] && [ "$4" = verdict=superseded ]; then
   echo "injected storage failure" >&2
   exit 1

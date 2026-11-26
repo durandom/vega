@@ -255,11 +255,12 @@ pub fn spawn(
         .then(vega_herdr::launch::toolbox_launcher)
         .flatten();
     if let Some(p) = prompt {
-        args.push(if no_parent && own.is_none() {
+        let text = if no_parent && own.is_none() {
             p.into()
         } else {
             backend::body(p, handoff(no_parent, mode).0, machine().is_some())?
-        });
+        };
+        args.extend(vega_herdr::launch::prompt_args(kind, &text));
     }
     if let Some(w) = visible_env_warning(user, launcher.is_some()) {
         eprintln!("{w}");
