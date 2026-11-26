@@ -3,7 +3,9 @@
 An LLM review before an agent pushes. A repo opts in with `.vega/gate.toml` (which rubric reviews which paths),
 read from the push target. The `git` shim checks a recorded pass for each segment of a push (a run of direct
 commits, each merged branch) and otherwise starts a reviewer agent in the author's backend (herdr or hc) and fails the push until its
-verdict. Records are beads (label `gate`), synced across hosts.
+verdict. Records are beads (label `gate`), synced across hosts. Their bd calls carry the checkout's mise
+`BEADS_DOLT_*` unless the caller names a server, so `vega gate gc` from vegad (no bd shim) reaches the project's
+dolt server ([beads-sync.md](../../docs/design/beads-sync.md#dolt-server-variables)).
 
 Commands: `vega gate`, `check`, `start`, `verdict`, `log`, `gc`. The library (`vega_gate`) is shared with
 [`shims/git`](../../shims/git/).

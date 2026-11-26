@@ -5,6 +5,12 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 292 · 2026-11-26
+
+- feature: bd calls of plugins vegad runs (no bd shim, no `mise activate`) get the project's `BEADS_DOLT_*` from
+  `mise env` too: `vega gate gc`'s review records and the Uber ask follow-up (`bd show`/`comments`). A server the
+  caller already names wins. vegad's own beads sync keeps talking to the clone's local server.
+
 ## 291 · 2026-11-26
 
 - feature: `bd` in agent sessions and agents from `vega mux spawn` reach the project's dolt server without
@@ -17,8 +23,7 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   gives none; an untrusted one prints a `run mise trust` hint on stderr.
 - optional: precedence. In the shim, any `BEADS_DOLT_*` already set means nothing is read; `vega mux spawn`
   puts the project's values over the caller's and `--env` wins over both. Agents keep their spawn-time values.
-  Plugins vegad runs (no shim, no `mise activate`) read them too: `vega gate gc`'s bd calls and the uber
-  ask follow-up. vegad's own beads sync keeps talking to the clone's local server.
+  vegad and other callers outside an agent shell bypass the shim and are not covered.
 
 ## 290 · 2026-11-26
 

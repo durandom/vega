@@ -29,13 +29,17 @@ const MISE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 /// shell, which processes vega starts do not have. Fails open: empty when mise
 /// is missing, slow, or `dir` is untrusted (then with a stderr hint).
 pub fn beads_env(dir: &Path) -> Vec<(String, String)> {
-    beads_env_with(dir, &[])
+    beads_env_with("mise", dir, &[])
 }
 
-fn beads_env_with(dir: &Path, extra_env: &[(&str, &std::ffi::OsStr)]) -> Vec<(String, String)> {
+fn beads_env_with(
+    mise: &str,
+    dir: &Path,
+    extra_env: &[(&str, &std::ffi::OsStr)],
+) -> Vec<(String, String)> {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    let mut cmd = Command::new("mise");
+    let mut cmd = Command::new(mise);
     cmd.args(["env", "--json"])
         .current_dir(dir)
         .stdin(Stdio::null())
@@ -116,11 +120,26 @@ pub fn beads_env_dir(cwd: &Path, beads_dir: Option<&Path>) -> PathBuf {
 /// such as plugins vegad runs; under the shim the values set here make it skip
 /// its own lookup.
 pub fn bd_beads_env(dir: &Path) -> Vec<(String, String)> {
-    if beads_env_chosen() {
+    bd_beads_env_in(dir, |k| env::var_os(k), "mise")
+}
+
+/// [`bd_beads_env`] with the caller's environment read through `var` and mise
+/// run as `mise`, so callers can test it without touching the process env.
+pub fn bd_beads_env_in(
+    dir: &Path,
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+    mise: &str,
+) -> Vec<(String, String)> {
+    let set = |k: &str| var(k).filter(|v| !v.is_empty());
+    if BEADS_ENV_KEYS.iter().any(|k| set(k).is_some()) {
         return Vec::new();
     }
-    let beads_dir = env::var_os("BEADS_DIR").filter(|v| !v.is_empty());
-    beads_env(&beads_env_dir(dir, beads_dir.as_deref().map(Path::new)))
+    let beads_dir = set("BEADS_DIR");
+    beads_env_with(
+        mise,
+        &beads_env_dir(dir, beads_dir.as_deref().map(Path::new)),
+        &[],
+    )
 }
 
 /// Points `cmd`, a bd run against the database of checkout `dir` instead of
@@ -510,7 +529,11 @@ mod tests {
             "[env]\nBEADS_DOLT_SERVER_PORT = \"3307\"\nBEADS_DOLT_PASSWORD = \"pw\"\n",
         )
         .unwrap();
-        let got = super::beads_env_with(&tmp, &[("MISE_TRUSTED_CONFIG_PATHS", tmp.as_os_str())]);
+        let got = super::beads_env_with(
+            "mise",
+            &tmp,
+            &[("MISE_TRUSTED_CONFIG_PATHS", tmp.as_os_str())],
+        );
         std::fs::remove_dir_all(&tmp).unwrap();
         assert_eq!(
             got,
