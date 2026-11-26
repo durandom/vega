@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 288 · 2026-11-26
+
+- feature: Agent switcher rows look like sidebar rows: UAC rows show u▲c and the project, every row the harness glyph and the coloured host label.
+
 ## 287 · 2026-11-26
 
 - feature: local `vega mux spawn` and `reopen` on hc start the agent through `~/.local/bin/hc-toolbox-shell`

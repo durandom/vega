@@ -399,6 +399,13 @@ export default class Agents extends View {
       this.switcherIndex = props().switcher.index ?? 0;
       this.focusHandle = cx.focus_handle?.();
       this.focusHandle?.focus();
+      // The sidebar's symbol colours (harness glyphs, u▲c, host labels).
+      cx.spawn(async (cx) => {
+        try {
+          const r = await exec("cat", [`${home()}/.config/vega/theme.toml`]);
+          if (r.code === 0) { this.symbols = parseSymbols(r.stdout); cx.notify(); }
+        } catch (_) {}
+      });
       return;
     }
     if (props()?.globalConfig) {
@@ -1545,10 +1552,15 @@ export default class Agents extends View {
     const describe = r => {
       const a = byAddress.get(r.address);
       const l = labels.get(r.address) ?? {};
-      const name = a.pane_name || l["vega.name"] || a.title || a.tab_name || r.address;
-      const where = [l["vega.project"], a.space_name, l["vega.host"] || machineOf(r.address)].filter(Boolean)
-        .filter((v, k, xs) => xs.indexOf(v) === k).join(" · ");
-      return { ...r, a, name, where, text: [name, where, a.tab_name, a.title, r.address].join(" ").toLowerCase() };
+      const uac = l["vega.role"] === "uac";
+      // As in the sidebar: a UAC row is its project; other agents go by their label or title.
+      const name = uac ? (l["vega.project"] || a.space_name || r.address)
+        : (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.pane_name || l["vega.name"] || a.title || a.tab_name || r.address);
+      const where = (uac ? [a.title] : [l["vega.project"], a.space_name]).filter(Boolean)
+        .filter((v, k, xs) => xs.indexOf(v) === k && v !== name).join(" · ");
+      const host = l["vega.host"] || machineOf(r.address);
+      return { ...r, a, l, uac, name, where, host,
+        text: [uac ? "uac" : "", name, where, host, a.tab_name, a.title, r.address].join(" ").toLowerCase() };
     };
     const query = this.switcherQuery;
     const terms = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
@@ -1577,17 +1589,30 @@ export default class Agents extends View {
     const move = step => { if (rows.length) this.switcherIndex = (index + step + rows.length) % rows.length; };
     // A new filter selects its first row.
     const refilter = () => { this.switcherIndex = 0; };
+    const C = this.colors();
+    // Harness glyphs as in the sidebar rows (projectTree kindOf).
+    const kindOf = r => {
+      const key = (r.l["vega.harness"] || r.a.program?.key || r.a.app || "").toLowerCase();
+      for (const [name, glyph] of [["claude", "✳"], ["codex", "֍"], ["copilot", "✈"], ["pi", "π"]]) if (key.includes(name)) return [glyph, C[name]];
+      return ["◇", C.other_agent];
+    };
     const row = (r, i) => {
-      const when = r.address === current ? "now" : r.at ? `${duration(now - r.at)} ago` : "";
-      return h_flex().id(`switch-${i}`).h(40).px(10).gap(10).items_center().rounded(7).cursor_pointer()
+      const when = r.address === current ? "now" : r.at ? duration(now - r.at) : "";
+      const [glyph, color] = kindOf(r);
+      return h_flex().id(`switch-${i}`).h(40).px(10).gap(8).items_center().rounded(7).cursor_pointer()
         .when(i === index, el => el.bg(t.selected)).hover(el => el.bg(t.hover))
         .on_click((_e, cx) => { cx.stop_propagation(); go(i); })
         .child(div().w(14).flex_none().text_color(t.dim).text_size(11).child(query === undefined || query === null ? String(i) : ""))
         .child(div().w(8).h(8).flex_none().rounded(4).bg(t[r.a.status] ?? t.dim))
         .child(v_flex().flex_1().overflow_hidden()
-          .child(div().text_size(13).truncate().child(r.name))
-          .child(div().text_size(11).text_color(t.dim).truncate().child(r.where)))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child([r.a.status, when].filter(Boolean).join(" · ")));
+          .child(h_flex().gap(6).items_center().overflow_hidden()
+            .when(r.uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(r.l["vega.uac"] || "u▲c")))
+            .child(div().flex_none().text_color(color).child(glyph))
+            .child(div().min_w(0).flex_shrink_1().truncate().text_size(13)
+              .text_color(r.a.status === "idle" ? t.muted : t.foreground).when(r.uac, el => el.font_semibold()).child(r.name)))
+          .when(Boolean(r.where), el => el.child(div().text_size(11).text_color(t.dim).truncate().child(r.where))))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(when))
+        .child(hostCell(r.host, C.hosts[r.host], t.dim));
     };
     const searching = typeof query === "string";
     const head = searching ? `/ ${query}▏` : this.switcherDone ? "done only · d all · / search · Enter · Esc"
