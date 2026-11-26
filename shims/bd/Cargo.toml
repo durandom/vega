@@ -14,6 +14,7 @@ path = "src/main.rs"
 vega-shim = { path = "../../crates/vega-shim" }
 vega-bd-sync = { path = "../../crates/vega-bd-sync" }
 vega-herdr = { path = "../../crates/vega-herdr" }
+vega-plugin = { path = "../../crates/vega-plugin" }
 
 tempfile = "3"
 libc = "0.2"

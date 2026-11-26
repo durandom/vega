@@ -18,6 +18,13 @@ worktree on every machine, so two agents could both win a claim. A per-worktree 
 - Outside a git checkout the actor is just `<host>`.
 - `bd -C <dir>` derives the actor from the selected worktree. A group member without its own workspace uses the coordination clone registered on this host.
 
+Dolt server: with no `BEADS_DOLT_*` set, the shim reads the five server variables (`BEADS_DOLT_AUTO_START`,
+`_SERVER_HOST`, `_SERVER_PORT`, `_SERVER_USER`, `_SHARED_SERVER`) from `mise env` in the checkout bd opens (the one
+holding `BEADS_DIR`, else the bd directory; 3 s limit, never a password), as agent tool shells never run
+`mise activate`. One variable already set means the caller chose and nothing is read. A group member routed to the
+coordination clone drops its inherited values and takes the coordination clone's. `--help`, `--version`, `--global`
+and `--db` read nothing.
+
 In a project vegad syncs (`vega bd init`), `bd dolt push` and `bd dolt pull` race vegad, so the shim skips them:
 
 - Sync ok: exit 0, one stderr line (vegad pushes within ~5 s of a write, pulls every 60 s; `vega bd status`).

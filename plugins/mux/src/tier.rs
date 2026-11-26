@@ -14,6 +14,7 @@ fn bd(args: &[&str], cwd: Option<&str>) -> Result<Vec<u8>, Failure> {
     let dir = checkout(cwd)?;
     if let Some(project) = vega_bd_sync::group::coordination(&dir)? {
         cmd.env("BEADS_DIR", project.beads_dir().expect("validated registration"));
+        vega_plugin::route_beads_env(&mut cmd, &project.dir);
     }
     cmd.args(args).current_dir(dir);
     let hint = "ensure bd is installed and the bead exists in the local checkout";

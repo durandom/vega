@@ -5,6 +5,20 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 291 · 2026-11-26
+
+- feature: `bd` in agent sessions and agents from `vega mux spawn` reach the project's dolt server without
+  `mise activate`: the bd shim and spawn read `BEADS_DOLT_AUTO_START`, `_SERVER_HOST`, `_SERVER_PORT`,
+  `_SERVER_USER` and `_SHARED_SERVER` from `mise env` in the checkout bd opens (3 s limit; nothing else of
+  mise's env, never a password). A group member routed to its coordination database uses the coordination
+  clone's values, not its own. `--machine` spawns resolve them on the target through its `vega-mux beads-env`,
+  so the target needs this version; an older one gets none, with a stderr note.
+- required: an untrusted directory, or one whose mise config lacks the variables (e.g. no `mise.local.toml`),
+  gives none; an untrusted one prints a `run mise trust` hint on stderr.
+- optional: precedence. In the shim, any `BEADS_DOLT_*` already set means nothing is read; `vega mux spawn`
+  puts the project's values over the caller's and `--env` wins over both. Agents keep their spawn-time values.
+  vegad and other callers outside an agent shell bypass the shim and are not covered.
+
 ## 290 · 2026-11-26
 
 - feature: Native Windows builds include `vega secrets` for scoped environment injection and ACL-protected host identities. See the [io-win delivery steps](docs/design/secrets.md#native-windows-io-win).

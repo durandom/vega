@@ -52,8 +52,6 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    // bd (and nested vega calls) under this plugin need the project's dolt server.
-    vega_plugin::inherit_beads_env();
     #[cfg(unix)]
     let err = Command::new(&path).arg0(&bin).args(args).exec();
     #[cfg(windows)]

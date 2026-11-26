@@ -245,6 +245,7 @@ dependencies = [
  "tempfile",
  "vega-bd-sync",
  "vega-herdr",
+ "vega-plugin",
  "vega-shim",
 ]
 

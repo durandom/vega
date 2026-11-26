@@ -350,3 +350,68 @@ fn member_worktree_routes_claims_and_rejects_ambiguous_registration() {
     assert!(!absent.status.success());
     assert!(String::from_utf8_lossy(&absent.stdout).contains("group_database_missing"));
 }
+
+#[test]
+fn dolt_server_env_follows_the_database_bd_runs_against() {
+    let f = Fixture::new();
+    let root = f._tmp.path().canonicalize().unwrap();
+    assert!(Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/group-beads.py"
+        ))
+        .arg(&root)
+        .arg("coord")
+        .status()
+        .unwrap()
+        .success());
+    let calls = root.join("mise-calls");
+    // A per-checkout mise config; the password must never pass.
+    script(
+        &f.real.with_file_name("mise"),
+        &format!(
+            "echo \"$PWD\" >> '{}'\ncase \"$PWD\" in\n*/coord) echo '{{\"BEADS_DOLT_SERVER_PORT\":\"4001\",\"BEADS_DOLT_PASSWORD\":\"pw\"}}' ;;\n*/embedded) echo '{{\"BEADS_DOLT_SERVER_PORT\":\"4003\"}}' ;;\n*) echo '{{}}' ;;\nesac",
+            calls.display()
+        ),
+    );
+    script(
+        &f.real,
+        "echo \"${BEADS_DOLT_SERVER_PORT:-none} ${BEADS_DOLT_PASSWORD:-none}\"",
+    );
+    let run = |dir: &Path, port: Option<&str>, args: &[&str]| {
+        let mut cmd = f.command();
+        cmd.current_dir(dir)
+            .env_remove("BEADS_DIR")
+            .env_remove("BEADS_DOLT_PASSWORD")
+            .env("XDG_STATE_HOME", root.join("state"));
+        for k in [
+            "BEADS_DOLT_AUTO_START",
+            "BEADS_DOLT_SERVER_HOST",
+            "BEADS_DOLT_SERVER_PORT",
+            "BEADS_DOLT_SERVER_USER",
+            "BEADS_DOLT_SHARED_SERVER",
+        ] {
+            cmd.env_remove(k);
+        }
+        if let Some(port) = port {
+            cmd.env("BEADS_DOLT_SERVER_PORT", port);
+        }
+        let out = cmd.args(args).bounded_output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    // Unrouted, nothing set: the checkout's mise config.
+    assert_eq!(run(&f.repo, None, &["list"]), "4003 none");
+    // Unrouted, the caller chose a server: kept, mise not asked.
+    let _ = fs::remove_file(&calls);
+    assert_eq!(run(&f.repo, Some("9999"), &["list"]), "9999 none");
+    assert!(!calls.exists());
+    // Routed to the coordination database: its server replaces the member's.
+    assert_eq!(
+        run(&root.join("sentinel"), Some("9999"), &["list"]),
+        "4001 none"
+    );
+    // Commands that open no database do not ask mise.
+    let _ = fs::remove_file(&calls);
+    run(&f.repo, None, &["--version"]);
+    assert!(!calls.exists());
+}

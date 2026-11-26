@@ -27,6 +27,11 @@
 //! Escape hatches: a caller-set `BEADS_ACTOR` wins (nothing is derived), an
 //! explicit `--actor` beats both (bd's own precedence), and `BD_REAL` names
 //! the real binary. `bd -C <dir>` selects the worktree for the actor and database.
+//!
+//! Dolt server: with none of `vega_plugin::BEADS_ENV_KEYS` set, the shim sets
+//! them from `mise env` in the checkout bd opens (`BEADS_DIR`'s, else the bd
+//! directory), as agent tool shells never run `mise activate`. Routing a group
+//! member to its coordination database drops the member's inherited values.
 
 use std::env;
 use std::io::{Read, Seek, SeekFrom};
@@ -81,6 +86,18 @@ fn main() -> ExitCode {
     };
     if let Some(dir) = group.as_ref().and_then(Project::beads_dir) {
         env::set_var("BEADS_DIR", dir);
+        // The inherited dolt server is the member's, not the coordination
+        // database's.
+        for k in vega_plugin::BEADS_ENV_KEYS {
+            env::remove_var(k);
+        }
+    }
+    if route && !vega_plugin::beads_env_chosen() {
+        let beads_dir = env::var_os("BEADS_DIR").filter(|v| !v.is_empty());
+        let at = vega_plugin::beads_env_dir(&cwd, beads_dir.as_deref().map(Path::new));
+        for (k, v) in vega_plugin::beads_env(&at) {
+            env::set_var(k, v);
+        }
     }
     let manual = env::var_os("VEGA_BD_MANUAL").is_some_and(|v| v == "1");
     if let Some((verb, dir)) = dolt_sync(&args).filter(|_| !manual) {

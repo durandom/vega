@@ -90,17 +90,35 @@ fn parse_beads_env(json: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Gives this process (and so every `bd` and plugin it starts) the project's
-/// `BEADS_DOLT_*` from `mise env` in the current directory. Variables already
-/// set win: an explicit environment beats the project's. Call before any
-/// thread starts.
-pub fn inherit_beads_env() {
-    let Ok(cwd) = env::current_dir() else { return };
-    for (k, v) in beads_env(&cwd) {
-        if env::var_os(&k).is_none() {
-            env::set_var(k, v);
-        }
+/// Whether this process already names bd's dolt server: any
+/// [`BEADS_ENV_KEYS`] set and non-empty (by `mise activate`, a spawn or the
+/// caller). Then bd callers leave the environment alone.
+pub fn beads_env_chosen() -> bool {
+    BEADS_ENV_KEYS
+        .iter()
+        .any(|k| env::var_os(k).is_some_and(|v| !v.is_empty()))
+}
+
+/// The checkout whose mise config names bd's dolt server: the one holding
+/// `beads_dir` (`BEADS_DIR`, e.g. a group's coordination database, brings its
+/// own server), else `cwd`.
+pub fn beads_env_dir(cwd: &Path, beads_dir: Option<&Path>) -> PathBuf {
+    beads_dir
+        .and_then(Path::parent)
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(cwd)
+        .to_path_buf()
+}
+
+/// Points `cmd`, a bd run against the database of checkout `dir` instead of
+/// the caller's, at that checkout's dolt server: the caller's
+/// [`BEADS_ENV_KEYS`] name another database's server, so they are removed and
+/// `dir`'s mise values set.
+pub fn route_beads_env(cmd: &mut std::process::Command, dir: &Path) {
+    for k in BEADS_ENV_KEYS {
+        cmd.env_remove(k);
     }
+    cmd.envs(beads_env(dir));
 }
 
 /// `bd --json` output with the `{"data": ..., "schema_version": n}` envelope
@@ -436,6 +454,20 @@ fn is_executable(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn beads_env_dir_follows_beads_dir() {
+        let cwd = std::path::Path::new("/src/member");
+        assert_eq!(super::beads_env_dir(cwd, None), cwd);
+        assert_eq!(
+            super::beads_env_dir(cwd, Some(std::path::Path::new("/src/coord/.beads"))),
+            std::path::Path::new("/src/coord")
+        );
+        assert_eq!(
+            super::beads_env_dir(cwd, Some(std::path::Path::new(".beads"))),
+            cwd
+        );
+    }
+
     #[test]
     fn beads_env_keeps_only_the_allowlist() {
         let json = r#"{"PATH":"/x","AWS_SECRET":"s","BEADS_DOLT_PASSWORD":"pw","BEADS_DOLT_SERVER_PORT":"3307","BEADS_DOLT_AUTO_START":"0","BEADS_DOLT_SHARED_SERVER":1}"#;
