@@ -794,7 +794,14 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
         format!(r#"{{"argv":[],"labels":{{}}, "cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"{pane}","state":"finished"}}"#),
     )
     .unwrap();
+    // With no relevant diff (back on main) `start` still ends the review.
+    git(&work, &["checkout", "-q", "main"]);
     let started = run(&work, tmp.path(), &env, &["start"]);
+    assert!(
+        out(&started).contains("no relevant diff"),
+        "{}",
+        out(&started)
+    );
     assert!(
         out(&started).contains(&format!(
             "abandoned: reviewer {pane} exited without a verdict"
