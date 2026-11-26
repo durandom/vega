@@ -3201,6 +3201,8 @@ dependencies = [
  "age",
  "tempfile",
  "toml_edit",
+ "vega-herdr",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

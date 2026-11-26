@@ -3,6 +3,7 @@
 //! with `use vega <tool>` (docs/design/secrets.md, Projects).
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -524,13 +525,31 @@ pub fn write_keep_mode(path: &Path, text: &str) -> Result<(), Error> {
             "check the file's permissions",
         )
     };
-    let mode = fs::metadata(path)
-        .map(|m| m.permissions().mode())
-        .unwrap_or(0o600);
     let tmp = path.with_extension("vega-tmp");
-    fs::write(&tmp, text).map_err(io)?;
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(mode)).map_err(io)?;
-    fs::rename(&tmp, path).map_err(io)
+    #[cfg(unix)]
+    {
+        let mode = fs::metadata(path)
+            .map(|m| m.permissions().mode())
+            .unwrap_or(0o600);
+        fs::write(&tmp, text).map_err(io)?;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(mode)).map_err(io)?;
+        fs::rename(&tmp, path).map_err(io)
+    }
+    #[cfg(windows)]
+    {
+        use std::io::Write;
+        use vega_secrets::windows::{create_private, replace_preserving_acl};
+
+        let mut file = create_private(&tmp).map_err(io)?;
+        let written = file.write_all(text.as_bytes());
+        drop(file);
+        written
+            .and_then(|()| replace_preserving_acl(path, &tmp))
+            .map_err(|err| {
+                let _ = fs::remove_file(&tmp);
+                io(err)
+            })
+    }
 }
 
 #[cfg(test)]

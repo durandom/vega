@@ -164,8 +164,49 @@ Decided with the Slayer, 2026-10-11 (log in the bead's notes):
 
 ## Cross-host and onboarding
 
-Each host fetches ciphertext from the chezmoi repo itself (`chezmoi update`). Secrets never travel
+Unix hosts fetch ciphertext from the chezmoi repo (`chezmoi update`). Secrets never travel
 over the NATS registry or `vega post`, and no private key travels at all.
+
+### Native Windows (io-win)
+
+The Windows client uses Vega's `%APPDATA%\vega` config and `%LOCALAPPDATA%\vega\secrets`
+state locations, with the usual XDG overrides. It uses the enrolled Vega host name
+(`VEGA_POST_HOST=io-win` on io-win). Run `vega secrets host init` from the normal desktop
+session. It creates `%APPDATA%\vega\age\host.key` with a protected ACL granting access
+only to that user and prints the public age recipient.
+
+On proteus, the Slayer adds io-win to the two rally-ng-maps secrets. This re-encrypts
+those two files for their existing recipients and io-win, and adds the changed files to
+the chezmoi source.
+
+```sh
+vega secrets host add io-win '<public age recipient>' \
+  --secret rally-ng-maps-key-id --secret rally-ng-maps-secret
+root="${XDG_CONFIG_HOME:-$HOME/.config}/vega"
+chezmoi git -- add -- "$(chezmoi source-path "$root/secrets.toml")" \
+  "$(chezmoi source-path "$root/secrets/rally-ng-maps-key-id.age")" \
+  "$(chezmoi source-path "$root/secrets/rally-ng-maps-secret.age")"
+chezmoi git -- commit -m 'Authorize io-win for rally-ng maps'
+chezmoi git -- push
+```
+
+Native chezmoi is absent on io-win. Deliver the applied files using the existing SSH
+connection. Repeat these copies after rotating either secret or changing the manifest.
+
+```sh
+ssh io 'if not exist "%APPDATA%\vega\secrets" mkdir "%APPDATA%\vega\secrets"'
+target='io:C:/Users/hild/AppData/Roaming/vega'
+scp "$root/secrets/rally-ng-maps-key-id.age" \
+  "$root/secrets/rally-ng-maps-secret.age" "$target/secrets/"
+scp "$root/secrets.toml" "$target/secrets.toml"
+```
+
+In the normal Windows session, verify scope injection without echoing either value.
+
+```powershell
+vega secrets run --for rally-ng-maps -- powershell.exe -NoProfile -NonInteractive -Command 'if (!$env:RALLY_MAPS_S3_ACCESS_KEY_ID -or !$env:RALLY_MAPS_S3_SECRET_ACCESS_KEY) { exit 1 }; exit 0'
+$LASTEXITCODE
+```
 
 New host (e.g. the machine that replaces deimos):
 

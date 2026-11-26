@@ -5,6 +5,10 @@ notable commands. `vega onboard` shows the blocks newer than the one this host s
 [docs/design/onboarding.md](docs/design/onboarding.md). Newest block first; never edit a block that is on
 main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `feature`.
 
+## 290 · 2026-11-26
+
+- feature: Native Windows builds include `vega secrets` for scoped environment injection and ACL-protected host identities. See the [io-win delivery steps](docs/design/secrets.md#native-windows-io-win).
+
 ## 289 · 2026-11-26
 
 - feature: `vega bd init --adopt` seeds a named-user Dolt remote as `DOLT_REMOTE_USER` (SQL push with `--user`) instead of failing as `root` (gh #7).

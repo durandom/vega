@@ -10,8 +10,10 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::Command;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,6 +22,9 @@ use age::secrecy::ExposeSecret;
 use age::x25519;
 use toml_edit::{Array, DocumentMut, Item, Table};
 use zeroize::Zeroizing;
+
+#[cfg(windows)]
+pub mod windows;
 
 /// A structured failure (AXI 6). Never carries a value.
 #[derive(Debug, Clone, PartialEq)]
@@ -272,15 +277,16 @@ pub type EnvFor = (Vec<(String, Secret)>, Vec<Error>);
 /// audit log, and which host it is.
 #[derive(Debug, Clone)]
 pub struct Store {
-    /// `~/.config/vega`
+    /// Vega configuration directory.
     pub config: PathBuf,
-    /// `~/.local/state/vega/secrets`
+    /// Vega secrets state directory.
     pub state: PathBuf,
     pub host: String,
 }
 
 impl Store {
-    /// The store of this user on this host (XDG dirs, `hostname -s`).
+    /// The store of this user on this host.
+    #[cfg(unix)]
     pub fn from_env() -> Result<Self, Error> {
         let home = std::env::var_os("HOME").map(PathBuf::from);
         let xdg = |var: &str, rel: &str| {
@@ -296,6 +302,21 @@ impl Store {
         Ok(Self {
             config: config.join("vega"),
             state: state.join("vega").join("secrets"),
+            host: hostname(),
+        })
+    }
+
+    #[cfg(windows)]
+    pub fn from_env() -> Result<Self, Error> {
+        use vega_herdr::platform::{config_home, state_home};
+
+        let no_home = || Error::new("no_home", "no Windows user profile", "set USERPROFILE");
+        Ok(Self {
+            config: config_home().ok_or_else(no_home)?.join("vega"),
+            state: state_home()
+                .ok_or_else(no_home)?
+                .join("vega")
+                .join("secrets"),
             host: hostname(),
         })
     }
@@ -375,15 +396,26 @@ impl Store {
         ));
         let dir = self.key_path().parent().expect("has parent").to_path_buf();
         fs::create_dir_all(&dir).map_err(|e| io_error(&dir, e))?;
+        #[cfg(unix)]
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
-        let mut f = fs::OpenOptions::new()
+        let path = self.key_path();
+        #[cfg(unix)]
+        let file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(self.key_path())
-            .map_err(|e| io_error(&self.key_path(), e))?;
-        f.write_all(body.as_bytes())
-            .map_err(|e| io_error(&self.key_path(), e))?;
+            .open(&path);
+        #[cfg(windows)]
+        let file = windows::create_private(&path);
+        let mut file = file.map_err(|e| io_error(&path, e))?;
+        if let Err(err) = file
+            .write_all(body.as_bytes())
+            .and_then(|()| file.sync_all())
+        {
+            drop(file);
+            let _ = fs::remove_file(&path);
+            return Err(io_error(&path, err));
+        }
         Ok((public, true))
     }
 
@@ -547,12 +579,11 @@ impl Store {
             .unwrap_or_else(|| format!("pid {}", std::process::id()));
         let line = format!("{},{name},{tool},{caller}\n", now_rfc3339());
         let _ = fs::create_dir_all(&self.state);
-        if let Ok(mut f) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .open(self.audit_path())
-        {
+        let mut options = fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        if let Ok(mut f) = options.open(self.audit_path()) {
             let _ = f.write_all(line.as_bytes());
         }
     }
@@ -567,7 +598,7 @@ fn io_error(path: &Path, e: std::io::Error) -> Error {
 }
 
 /// Writes via a temp file in the same dir and a rename.
-fn write_atomic(path: &Path, data: &[u8], mode: u32) -> Result<(), Error> {
+fn write_atomic(path: &Path, data: &[u8], _mode: u32) -> Result<(), Error> {
     let dir = path.parent().expect("has parent");
     fs::create_dir_all(dir).map_err(|e| io_error(dir, e))?;
     let tmp = dir.join(format!(
@@ -576,14 +607,14 @@ fn write_atomic(path: &Path, data: &[u8], mode: u32) -> Result<(), Error> {
         std::process::id()
     ));
     let res = (|| {
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(mode)
-            .open(&tmp)?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(_mode);
+        let mut f = options.open(&tmp)?;
         f.write_all(data)?;
         f.sync_all()?;
+        drop(f);
         fs::rename(&tmp, path)
     })();
     res.map_err(|e| {
@@ -593,6 +624,7 @@ fn write_atomic(path: &Path, data: &[u8], mode: u32) -> Result<(), Error> {
 }
 
 /// `hostname -s`, lowercase (as `vega uac claim` and the bd shim use it).
+#[cfg(unix)]
 pub fn hostname() -> String {
     Command::new("hostname")
         .arg("-s")
@@ -602,6 +634,12 @@ pub fn hostname() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "unknown".into())
+}
+
+/// Use the enrolled native host name (for example, io-win).
+#[cfg(windows)]
+pub fn hostname() -> String {
+    vega_herdr::state::post_host()
 }
 
 fn civil(unix: i64) -> (i64, i64, i64, i64, i64, i64) {
@@ -689,8 +727,11 @@ mod tests {
         let p = store(dir.path(), "proteus");
         let (k1, created) = p.host_init().unwrap();
         assert!(created && k1.starts_with("age1"));
-        let mode = fs::metadata(p.key_path()).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(unix)]
+        assert_eq!(
+            fs::metadata(p.key_path()).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let (k2, created) = p.host_init().unwrap();
         assert!(!created);
         assert_eq!(k1, k2);
@@ -717,11 +758,15 @@ mod tests {
         let log = fs::read_to_string(p.audit_path()).unwrap();
         assert!(log.lines().all(|l| l.contains(",aa,lanista,")));
         assert!(!log.contains("v1"));
-        let mode = fs::metadata(p.secret_path("aa"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(unix)]
+        assert_eq!(
+            fs::metadata(p.secret_path("aa"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 
     #[test]

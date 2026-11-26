@@ -24,6 +24,16 @@
     "binaries": []
   },
   {
+    "package": "vega-secrets",
+    "binaries": []
+  },
+  {
+    "package": "vega-secrets-cli",
+    "binaries": [
+      "vega-secrets"
+    ]
+  },
+  {
     "package": "vega",
     "binaries": [
       "vega"

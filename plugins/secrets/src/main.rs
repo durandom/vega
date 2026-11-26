@@ -8,6 +8,7 @@ mod adopt;
 use std::env;
 use std::fs;
 use std::io::{IsTerminal, Read};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -413,7 +414,13 @@ fn run(store: &Store, tool: &str, cmd: &[String]) -> Result<ExitCode, Error> {
     for (k, v) in &vars {
         c.env(k, v.expose());
     }
+    #[cfg(unix)]
     let err = c.exec();
+    #[cfg(windows)]
+    let err = match c.status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => err,
+    };
     Err(Error::new(
         "exec_failed",
         format!("{}: {err}", cmd[0]),
