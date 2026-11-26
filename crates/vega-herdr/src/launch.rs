@@ -44,12 +44,19 @@ pub fn toolbox_launcher() -> Option<String> {
     toolbox_launcher_in(Path::new(&env::var("HOME").ok()?))
 }
 
+#[cfg(unix)]
 fn toolbox_launcher_in(home: &Path) -> Option<String> {
     use std::os::unix::fs::PermissionsExt;
     let path = home.join(".local/bin/hc-toolbox-shell");
     let meta = fs::metadata(&path).ok()?;
     (meta.is_file() && meta.permissions().mode() & 0o111 != 0)
         .then(|| path.to_string_lossy().into_owned())
+}
+
+/// Toolboxes are a Linux host feature; Windows never starts agents through one.
+#[cfg(not(unix))]
+fn toolbox_launcher_in(_home: &Path) -> Option<String> {
+    None
 }
 
 /// `toolbox run` passes only a fixed env allowlist (the launcher re-injects `HC_*`), so the
@@ -600,6 +607,7 @@ fn git(dir: &str, args: &[&str]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     #[test]
     fn toolbox_launcher_needs_an_executable_file() {
         use std::os::unix::fs::PermissionsExt;
