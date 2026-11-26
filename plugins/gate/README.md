@@ -14,6 +14,10 @@ name immutable target/base/head SHAs, since clone remote refs can differ from th
 commits run `vega gate start` again; never re-point a reviewer by mail. The old reviewer closes and a
 fresh review is bound to the new head and generation.
 
+`vega gate start` ends an hc review whose reviewer terminal is definitively gone (not found or not
+`live`) with no verdict, once it is 15 s old: beads `abandoned`, state and clone cleaned. Any other hc
+error (timeout, daemon down) leaves the review alone; the read-only `vega gate` view never ends one.
+
 Design: [gate.md](../../docs/design/gate.md).
 
 Agent guide: `vega skills gate`

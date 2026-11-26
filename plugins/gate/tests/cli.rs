@@ -759,16 +759,51 @@ fn hc_status_and_sentinel_guidance_follow_terminal_fields() {
         "{}",
         log(tmp.path(), "bd")
     );
-    // A finished terminal (or a definite not-found) ends it.
+    // A finished terminal (or a definite not-found) ends it, unless bd cannot
+    // mark the bead: then the state stays for a retry.
     fs::remove_file(&err).unwrap();
+    let fail = tmp.path().join("fail-abandon");
+    fs::write(&fail, "").unwrap();
+    let blocked = run(&work, tmp.path(), &env, &["start"]);
+    assert!(
+        !out(&blocked).contains("abandoned: reviewer t11"),
+        "{}",
+        out(&blocked)
+    );
+    assert!(
+        out(&blocked).contains("reviewer t11 not ended"),
+        "{}",
+        out(&blocked)
+    );
+    assert!(!log(tmp.path(), "bd").contains("close gate-1"));
+    fs::remove_file(&fail).unwrap();
+    // The start above replaced the review with a fresh one; age it past the
+    // grace so the next start reaps it.
+    let sf = fs::read_dir(tmp.path().join("state/vega/gate"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "json"))
+        .expect("the fresh review's state");
+    let mut st: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&sf).unwrap()).unwrap();
+    st["started_at"] = (st["started_at"].as_i64().unwrap() - 100).into();
+    fs::write(&sf, st.to_string()).unwrap();
+    let pane = st["pane"].as_str().unwrap().to_string();
+    fs::write(
+        tmp.path().join(format!("hc-{pane}.json")),
+        format!(r#"{{"argv":[],"labels":{{}}, "cwd":"/fixture","created_ms":0,"screen":"exact","cols":80,"rows":24,"address":"{pane}","state":"finished"}}"#),
+    )
+    .unwrap();
     let started = run(&work, tmp.path(), &env, &["start"]);
     assert!(
-        out(&started).contains("abandoned: reviewer t11 exited without a verdict"),
+        out(&started).contains(&format!(
+            "abandoned: reviewer {pane} exited without a verdict"
+        )),
         "{}",
         out(&started)
     );
     assert!(
-        log(tmp.path(), "bd").contains("abandoned: reviewer t11 exited"),
+        log(tmp.path(), "bd").contains(&format!("abandoned: reviewer {pane} exited")),
         "{}",
         log(tmp.path(), "bd")
     );

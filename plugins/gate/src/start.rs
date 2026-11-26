@@ -418,7 +418,8 @@ fn reviewer_gone(r: &Review) -> bool {
 /// (exited) with no verdict written: their running beads become `abandoned` and the state,
 /// clone and pane are cleaned, so the next `vega gate start` starts a fresh
 /// review instead of waiting for the timeout. The state lock decides against
-/// a verdict in flight. Run by `vega gate start` only, never by the read-only
+/// a verdict in flight. A bead that cannot be marked keeps the review's state
+/// for a retry. Run by `vega gate start` only, never by the read-only
 /// home view. Returns the abandoned panes.
 pub fn reap_dead(dir: &Path, repo: &Path) -> Vec<String> {
     let mut out = Vec::new();
@@ -429,14 +430,20 @@ pub fn reap_dead(dir: &Path, repo: &Path) -> Vec<String> {
         let Ok(Some(guard)) = state::lock_current(&r) else {
             continue;
         };
-        for b in &r.beads {
-            let _ = record::finish(
+        let marked = r.beads.iter().try_for_each(|b| {
+            record::finish(
                 dir,
                 b,
                 "abandoned",
                 &format!("abandoned: reviewer {} exited without a verdict", r.pane),
                 None,
-            );
+            )
+        });
+        if let Err(e) = marked {
+            // Keep the state: a later start retries instead of leaving a
+            // running bead with no review behind it.
+            eprintln!("vega gate: reviewer {} not ended: {e}", r.pane);
+            continue;
         }
         state::remove(&r.pane);
         drop(guard);
