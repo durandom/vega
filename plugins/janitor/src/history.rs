@@ -154,7 +154,7 @@ pub fn events(db: &Connection, paths: &[String], limit: usize) -> rusqlite::Resu
             });
         }
     }
-    out.sort_by(|a, b| b.at.cmp(&a.at));
+    out.sort_by_key(|a| std::cmp::Reverse(a.at));
     if limit > 0 {
         out.truncate(limit);
     }
