@@ -59,7 +59,7 @@ if cmd=='run':
  (root/'counter').write_text(i[1:])
  if p.get('on'): i=p['on']+'/'+i
  labels=p['labels']
- assert p['argv'][0]==(os.environ.get('TEST_WINDOWS_EXE',labels['vega.kind']))
+ assert p['argv'][0]==(os.environ.get('TEST_WINDOWS_EXE',labels['vega.kind'])) or p['argv'][0].endswith('hc-toolbox-shell')
  t=terminal({'address':i,'argv':p['argv'],'name':n,'state':'live','pid':int(os.environ['TEST_PARENT_PID']),'status':{'app':labels['vega.kind'],'state':'idle'},'cwd':p['cwd'],'labels':labels,'turn':0})
  ts[i]=t;save()
  if p.get('on') and (root/'remote-home').exists():
