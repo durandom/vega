@@ -110,6 +110,19 @@ pub fn beads_env_dir(cwd: &Path, beads_dir: Option<&Path>) -> PathBuf {
         .to_path_buf()
 }
 
+/// The env for a bd that runs in checkout `dir`: the project's
+/// [`BEADS_ENV_KEYS`] from mise, or none when this process already names a
+/// server ([`beads_env_chosen`]). For bd callers with no bd shim in front,
+/// such as plugins vegad runs; under the shim the values set here make it skip
+/// its own lookup.
+pub fn bd_beads_env(dir: &Path) -> Vec<(String, String)> {
+    if beads_env_chosen() {
+        return Vec::new();
+    }
+    let beads_dir = env::var_os("BEADS_DIR").filter(|v| !v.is_empty());
+    beads_env(&beads_env_dir(dir, beads_dir.as_deref().map(Path::new)))
+}
+
 /// Points `cmd`, a bd run against the database of checkout `dir` instead of
 /// the caller's, at that checkout's dolt server: the caller's
 /// [`BEADS_ENV_KEYS`] name another database's server, so they are removed and

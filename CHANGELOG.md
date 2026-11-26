@@ -17,7 +17,8 @@ main, add a new one. Entry kinds: `required`, `optional`, `unit`, `migration`, `
   gives none; an untrusted one prints a `run mise trust` hint on stderr.
 - optional: precedence. In the shim, any `BEADS_DOLT_*` already set means nothing is read; `vega mux spawn`
   puts the project's values over the caller's and `--env` wins over both. Agents keep their spawn-time values.
-  vegad and other callers outside an agent shell bypass the shim and are not covered.
+  Plugins vegad runs (no shim, no `mise activate`) read them too: `vega gate gc`'s bd calls and the uber
+  ask follow-up. vegad's own beads sync keeps talking to the clone's local server.
 
 ## 290 · 2026-11-26
 

@@ -65,6 +65,8 @@ impl Bd {
         vega_herdr::output_within(
             std::process::Command::new(bd)
                 .args(args)
+                // vegad has no bd shim in front: the project's dolt server.
+                .envs(vega_plugin::bd_beads_env(Path::new(&a.cwd)))
                 .current_dir(&a.cwd),
             BD_TIMEOUT,
         )

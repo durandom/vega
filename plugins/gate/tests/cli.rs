@@ -22,6 +22,16 @@ fn run(work: &Path, tmp: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
         .env_remove("HC_TERMINAL_ID")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         .env_remove("CODEX_THREAD_ID");
+    for k in [
+        "BEADS_DIR",
+        "BEADS_DOLT_AUTO_START",
+        "BEADS_DOLT_SERVER_HOST",
+        "BEADS_DOLT_SERVER_PORT",
+        "BEADS_DOLT_SERVER_USER",
+        "BEADS_DOLT_SHARED_SERVER",
+    ] {
+        c.env_remove(k);
+    }
     for (k, v) in fakes(tmp) {
         c.env(k, v);
     }
@@ -74,6 +84,32 @@ fn check_shows_the_missing_segment_and_writes_nothing() {
         .lines()
         .all(|l| l.starts_with("list ")));
     assert!(log(tmp.path(), "vega").is_empty());
+}
+
+#[test]
+fn bd_gets_the_projects_dolt_server_unless_the_caller_named_one() {
+    // vegad runs vega-gate with no bd shim and no `mise activate`.
+    let tmp = tempfile::tempdir().unwrap();
+    let work = feature(tmp.path());
+    fs::write(
+        tmp.path().join("mise-env.json"),
+        r#"{"BEADS_DOLT_SERVER_PORT":"4001","BEADS_DOLT_PASSWORD":"pw"}"#,
+    )
+    .unwrap();
+    assert!(run(&work, tmp.path(), &[], &["check"]).status.success());
+    let ports = log(tmp.path(), "bd-env");
+    assert!(
+        !ports.is_empty() && ports.lines().all(|l| l == "4001"),
+        "{ports}"
+    );
+    fs::remove_file(tmp.path().join("bd-env.log")).unwrap();
+    let own = [("BEADS_DOLT_SERVER_PORT", "9999")];
+    assert!(run(&work, tmp.path(), &own, &["check"]).status.success());
+    let ports = log(tmp.path(), "bd-env");
+    assert!(
+        !ports.is_empty() && ports.lines().all(|l| l == "9999"),
+        "{ports}"
+    );
 }
 
 #[test]

@@ -192,6 +192,7 @@ fn fake_tools() -> Vec<(String, PathBuf)> {
         "bd",
         r#"L=${FAKE_LOG:?}
 printf '%s\n' "$*" >> $L/bd.log
+printf '%s\n' "${BEADS_DOLT_SERVER_PORT:-}" >> $L/bd-env.log
 if [ -f $L/fail-supersede ] && [ "$1" = update ] && [ "$4" = verdict=superseded ]; then
   echo "injected storage failure" >&2
   exit 1
@@ -237,6 +238,12 @@ esac
 "#,
     );
     let hc = shared_script("gate-fakes", "hc", include_str!("../fixtures/hc.sh"));
+    // Next to hc on PATH: `mise env --json` answers `<log>/mise-env.json`.
+    shared_script(
+        "gate-fakes",
+        "mise",
+        "cat \"${FAKE_LOG:?}/mise-env.json\" 2>/dev/null || echo '{}'\n",
+    );
     let mut harness = PathBuf::new();
     for kind in ["codex", "claude", "pi", "agy"] {
         harness = shared_script("gate-harness", kind, "exit 0\n");

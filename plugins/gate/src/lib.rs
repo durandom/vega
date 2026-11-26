@@ -49,8 +49,20 @@ pub fn run(
     dir: Option<&Path>,
     timeout: Option<Duration>,
 ) -> Result<Out, String> {
+    run_env(program, args, dir, timeout, &[])
+}
+
+/// [`run`] with `env` added to the child's environment.
+pub fn run_env(
+    program: &str,
+    args: &[&str],
+    dir: Option<&Path>,
+    timeout: Option<Duration>,
+    env: &[(String, String)],
+) -> Result<Out, String> {
     let mut cmd = Command::new(program);
     cmd.args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -104,7 +116,18 @@ pub fn run_ok(
     dir: Option<&Path>,
     timeout: Option<Duration>,
 ) -> Result<String, String> {
-    let o = run(program, args, dir, timeout)?;
+    run_ok_env(program, args, dir, timeout, &[])
+}
+
+/// [`run_ok`] with `env` added to the child's environment.
+pub fn run_ok_env(
+    program: &str,
+    args: &[&str],
+    dir: Option<&Path>,
+    timeout: Option<Duration>,
+    env: &[(String, String)],
+) -> Result<String, String> {
+    let o = run_env(program, args, dir, timeout, env)?;
     if o.ok {
         Ok(o.stdout)
     } else {
