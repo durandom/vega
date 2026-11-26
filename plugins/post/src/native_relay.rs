@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     path::PathBuf,
     time::Duration,
@@ -312,14 +312,18 @@ async fn session(
                 .collect(),
             true,
         );
-        let entries = vega_registry::agent_entries_with_project(&host, &agents, &[], |cwd| {
+        let mut pending_projects = BTreeSet::new();
+        let entries = vega_registry::agent_entries_with_project(&host, &agents, &[], |pane, cwd| {
             if cwd.as_os_str().is_empty() {
                 return Ok(None);
             }
             match projects.lookup(cwd).as_deref() {
                 Some(Ok(project)) => Ok(project.clone()),
                 Some(Err(error)) => Err(Failure::new(&error.code, &error.message, &error.hint)),
-                None => Ok(None),
+                None => {
+                    pending_projects.insert(vega_registry::agent_key(&host, pane));
+                    Ok(None)
+                }
             }
         });
         for a in &agents {
@@ -348,7 +352,13 @@ async fn session(
                 continue;
             }
             // Fail closed for drafts, unknown screens, failed reads and status races.
-            let screen = hc.call("terminal.read", json!({"terminal": pane, "lines": 0}));
+            let mut params = json!({"terminal": pane, "lines": 0});
+            if let Ok(caller) = std::env::var("HC_TERMINAL_ID") {
+                if !caller.is_empty() {
+                    params["caller"] = caller.into();
+                }
+            }
+            let screen = hc.call("terminal.read", params);
             if !matches!(
                 screen
                     .ok()
@@ -367,15 +377,23 @@ async fn session(
             d.typed(pane, floor, typed);
             save(d, file, saved)?;
         }
-        for (k, v) in &entries {
-            if published.get(k).and_then(Option::as_ref) != Some(v) {
-                kv.put(k, v.to_string().into()).await.map_err(fail)?;
+        let stale = published
+            .keys()
+            .filter(|key| !entries.contains_key(*key))
+            .cloned()
+            .collect::<Vec<_>>();
+        for (key, value) in entries {
+            if !pending_projects.contains(&key)
+                && published.get(&key).and_then(Option::as_ref) != Some(&value)
+            {
+                kv.put(&key, value.to_string().into()).await.map_err(fail)?;
+                published.insert(key, Some(value));
             }
         }
-        for k in published.keys().filter(|key| !entries.contains_key(*key)) {
-            kv.delete(k).await.map_err(fail)?;
+        for key in stale {
+            kv.delete(&key).await.map_err(fail)?;
+            published.remove(&key);
         }
-        published = entries.into_iter().map(|(k, v)| (k, Some(v))).collect();
         if tokio::time::Instant::now() >= next_beat {
             publish_beat(&kv, &host, vega_registry::beat()).await?;
             next_beat = tokio::time::Instant::now() + BEAT_EVERY;

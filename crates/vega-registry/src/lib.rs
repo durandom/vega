@@ -209,7 +209,7 @@ pub fn agent_entries(
     agents: &[Value],
     workspaces: &[Value],
 ) -> BTreeMap<String, Value> {
-    agent_entries_with_project(host, agents, workspaces, |path| {
+    agent_entries_with_project(host, agents, workspaces, |_, path| {
         vega_herdr::project::resolve(path, host).map(Some)
     })
 }
@@ -220,6 +220,7 @@ pub fn agent_entries_with_project(
     agents: &[Value],
     workspaces: &[Value],
     mut resolve: impl FnMut(
+        &str,
         &std::path::Path,
     ) -> Result<Option<vega_herdr::project::Project>, vega_herdr::Failure>,
 ) -> BTreeMap<String, Value> {
@@ -266,7 +267,7 @@ pub fn agent_entries_with_project(
         static PROJECT_ERRORS: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, String>>> =
             std::sync::OnceLock::new();
         let errors = PROJECT_ERRORS.get_or_init(Default::default);
-        match resolve(&owner_path) {
+        match resolve(pane, &owner_path) {
             Ok(project) => {
                 if let Ok(mut logged) = errors.lock() {
                     logged.remove(path);

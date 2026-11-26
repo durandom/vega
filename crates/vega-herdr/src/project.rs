@@ -346,7 +346,6 @@ pub fn resolve_optional(path: &Path, host: &str) -> Result<Option<Project>, Fail
 
 /// Run the same optional discovery with a pause before each Git command.
 /// A background relay worker uses this to spread Windows process creation.
-#[cfg(windows)]
 pub fn resolve_optional_paced(
     path: &Path,
     host: &str,

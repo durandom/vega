@@ -444,8 +444,6 @@ pub fn validate_result(method: &str, result: &Value) -> Result<(), Failure> {
     })
 }
 
-#[cfg(windows)]
 #[path = "hc_connection.rs"]
 mod connection;
-#[cfg(windows)]
 pub use connection::Connection;

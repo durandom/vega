@@ -6,7 +6,6 @@ mod core_doctor;
 #[allow(dead_code)] // Shared policy also includes Unix daemon features.
 mod delivery;
 mod native_project;
-
 mod native_relay;
 mod native_sidebar;
 mod reach;

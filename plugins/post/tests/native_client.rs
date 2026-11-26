@@ -77,8 +77,13 @@ mod native {
         }
     }
     pub fn fake_hc() {
-        let line = std::io::stdin().lock().lines().next().unwrap().unwrap();
-        let req: Value = serde_json::from_str(&line).unwrap();
+        for line in std::io::stdin().lock().lines() {
+            let req: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            fake_hc_request(req);
+        }
+    }
+
+    fn fake_hc_request(req: Value) {
         let pane =
             req["params"]["terminal"]
                 .as_str()
@@ -655,23 +660,30 @@ mod native {
                 .spawn()
                 .unwrap(),
         );
-        wait_for(|| {
-            fs::read_to_string(&labels).is_ok_and(|s| s.ends_with('\n') && s.lines().count() >= 4)
+        let expected = json!({
+            "t4":{"vega.host":"🌔","vega.project":"native","vega.role":""},
+            "t5":{"vega.host":"🌔","vega.project":"claimed","vega.role":"uac"},
+            "t6":{"vega.host":"🌔","vega.project":"native"},
+            "t7":{"vega.host":"🌔","vega.project":"native","vega.role":"sentinel"}
         });
-        let writes: Vec<Value> = fs::read_to_string(&labels)
-            .unwrap()
-            .lines()
-            .map(|s| serde_json::from_str(s).unwrap())
-            .collect();
-        assert_eq!(
-            writes,
-            [
-                json!({"terminal":"t4","labels":{"vega.host":"🌔","vega.project":"native","vega.role":""}}),
-                json!({"terminal":"t5","labels":{"vega.host":"🌔","vega.project":"claimed","vega.role":"uac"}}),
-                json!({"terminal":"t6","labels":{"vega.host":"🌔","vega.project":"native"}}),
-                json!({"terminal":"t7","labels":{"vega.host":"🌔","vega.project":"native","vega.role":"sentinel"}})
-            ]
-        );
+        // Git identity arrives asynchronously. Apply the writes in order and
+        // verify the final labels even if role and project arrive separately.
+        wait_for(|| {
+            let mut actual = json!({});
+            let Ok(writes) = fs::read_to_string(&labels) else {
+                return false;
+            };
+            for line in writes.lines() {
+                let Ok(write) = serde_json::from_str::<Value>(line) else {
+                    return false;
+                };
+                let pane = write["terminal"].as_str().unwrap();
+                for (key, value) in write["labels"].as_object().unwrap() {
+                    actual[pane][key] = value.clone();
+                }
+            }
+            actual == expected
+        });
         wait_for(|| {
             fs::read(sidebar.root.join("local/vega/vegad-health.json"))
                 .ok()

@@ -55,7 +55,7 @@ impl Projects {
     }
 
     /// Keep a previous result during refresh. With no result yet, the sidebar
-    /// leaves the project label alone and registry entries omit project identity.
+    /// leaves the project label alone and the relay defers that registry entry.
     pub fn lookup(&self, path: &Path) -> Option<Arc<Resolution>> {
         let now = Instant::now();
         let mut entries = self.entries.lock().expect("project cache");

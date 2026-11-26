@@ -23,15 +23,16 @@ impl Connection {
         let session = self.0.as_ref().unwrap();
         let output = session.exchange(request(method, params));
         let reset = !matches!(&output, Ok(out) if out.line.is_ok());
-        if reset {
+        let result = output.and_then(|out| decode(method, out));
+        if reset || result.as_ref().is_err_and(|e| e.code == "hc_bad_output") {
             self.0 = None;
         }
-        output.and_then(|out| decode(method, out))
+        result
     }
 }
 
 struct Session {
-    child: Child,
+    child: Option<Child>,
     _tree: crate::platform::ProcessTree,
     requests: mpsc::Sender<Vec<u8>>,
     replies: mpsc::Receiver<io::Result<Vec<u8>>>,
@@ -73,7 +74,7 @@ impl Session {
             }
         });
         Ok(Self {
-            child,
+            child: Some(child),
             _tree: tree,
             requests,
             replies,
@@ -102,6 +103,8 @@ impl Drop for Session {
     fn drop(&mut self) {
         // The job closes immediately after Drop and ends descendants that
         // might still hold the I/O threads' pipes.
-        crate::platform::kill_tree(&mut self.child);
+        if let Some(child) = self.child.take() {
+            crate::kill_and_reap(child);
+        }
     }
 }
