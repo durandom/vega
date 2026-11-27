@@ -1727,7 +1727,9 @@ export default class Agents extends View {
   // but only into a project with a UAC (the signal behind the "no UAC" marker, vega-0h4c.79).
   foreignChild(k) {
     const own = k.labels?.["vega.project-id"], parent = this.projectLabelOf(k.parent);
-    return Boolean(own && parent && own !== parent && this.projectUacs?.has(own));
+    // A group UAC's sentinel on a member project is its own branch, not foreign.
+    return Boolean(own && parent && own !== parent && this.projectUacs?.has(own)
+      && this.projectUacs.get(own)?.address !== k.parent);
   }
 
   // Live tree-eligible children by parent, so tree() walks subtrees without
