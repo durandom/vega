@@ -1547,6 +1547,8 @@ export default class Agents extends View {
     const { rows: all, current } = props().switcher;
     const byAddress = new Map(agents().map(a => [a.address, a]));
     const labels = new Map(terminals().map(x => [x.address, x.labels ?? {}]));
+    // A tab name the Slayer gave wins over the agent's own title, as in the sidebar.
+    const named = new Map(spaces().flatMap(s => s.tabs).filter(tab => tab.named).map(tab => [tab.id, tab.name]));
     const close = () => closeOverlay(props().overlay);
     const now = Date.now();
     const describe = r => {
@@ -1554,9 +1556,10 @@ export default class Agents extends View {
       const l = labels.get(r.address) ?? {};
       const uac = l["vega.role"] === "uac";
       // As in the sidebar: a UAC row is its project; other agents go by their label or title.
+      const tabName = named.get(a.tab);
       const name = uac ? (l["vega.project"] || a.space_name || r.address)
-        : (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.pane_name || l["vega.name"] || a.title || a.tab_name || r.address);
-      const where = (uac ? [a.title] : [l["vega.project"], a.space_name]).filter(Boolean)
+        : (tabName || l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.pane_name || l["vega.name"] || a.title || a.tab_name || r.address);
+      const where = (uac ? [tabName || a.title] : [l["vega.project"], a.space_name]).filter(Boolean)
         .filter((v, k, xs) => xs.indexOf(v) === k && v !== name).join(" · ");
       const host = l["vega.host"] || machineOf(r.address);
       // The hc terminal name (t1j), as vega mux and vega post address it.

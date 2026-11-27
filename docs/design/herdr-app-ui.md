@@ -88,7 +88,7 @@ and `ctrl-s ;` the last pane in the current tab. Press again to return (A → B 
 `ctrl-s l` (`vega-sidebar.switch-agent`) opens the agent switcher: a dialog with
 the last ten live agents in focus order (current first, with when each was last
 focused), the previous one selected. Rows use the sidebar's symbols: u▲c plus the project
-name for a UAC, the harness glyph, the hc terminal name (`t1j`, as `vega mux` and `vega post` address it; searchable), and the coloured host label from theme.toml. Enter goes there, so `ctrl-s l` Enter is the
+name for a UAC (its detail line, like other rows' name, prefers a tab name the Slayer gave over the agent's title), the harness glyph, the hc terminal name (`t1j`, as `vega mux` and `vega post` address it; searchable), and the coloured host label from theme.toml. Enter goes there, so `ctrl-s l` Enter is the
 old toggle; arrows, Tab, j/k or l move; a digit jumps to that row (1 = previous);
 Esc closes. `d` shows only done agents; `/` searches all live agents
 fuzzily like fzf (space-separated terms in any order, each a subsequence of name,
