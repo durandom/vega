@@ -160,9 +160,23 @@ fn project_uac_claims() -> Vec<Value> {
         .collect()
 }
 
+/// Whether a claim is a group member's, held by the UAC of another project.
+fn member_claim(v: &Value) -> bool {
+    v["group"].as_str().is_some_and(|g| v["project"] != g)
+}
+
+/// Member claims first, so a pane's own claim comes last: callers that map a
+/// pane to one project (last wins) label a group UAC with its own project,
+/// not with whichever member's file the directory listed last.
+fn primary_last(mut claims: Vec<Value>) -> Vec<Value> {
+    claims.sort_by_key(|v| !member_claim(v));
+    claims
+}
+
 /// Project IDs, panes and claim times from v2 state, for publication/routing.
+/// A pane's own claim follows its group members' claims.
 pub fn project_uac_records() -> Vec<(String, String, i64)> {
-    project_uac_claims()
+    primary_last(project_uac_claims())
         .iter()
         .filter_map(|v| {
             Some((
@@ -1109,6 +1123,29 @@ fn remove(file: &Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_uac_claims_put_the_own_project_last() {
+        // ganymede 2026-11-27: the rally-ng-meta group UAC was labelled
+        // rally-ng-app, its first member, by directory order.
+        let claim = |project: &str, group: Option<&str>| {
+            let mut v =
+                serde_json::json!({"schema":2,"project":project,"pane":"t1j","host":"ganymede"});
+            if let Some(g) = group {
+                v["group"] = g.into();
+            }
+            v
+        };
+        let meta = "github.com/durandom/rally-ng-meta";
+        let ordered = primary_last(vec![
+            claim(meta, None),
+            claim("github.com/durandom/rally-ng-app", Some(meta)),
+            claim("github.com/durandom/rbr-stage", Some(meta)),
+        ]);
+        assert_eq!(ordered.last().unwrap()["project"], meta);
+        // A group key naming the claim's own project is not a member claim.
+        assert!(!member_claim(&claim(meta, Some(meta))));
+    }
 
     #[test]
     fn hc_state_paths_are_single_components_and_preserve_legacy_paths() {
