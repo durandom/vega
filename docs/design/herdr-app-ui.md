@@ -172,7 +172,7 @@ launch/unlock races, and ignoring persisted overlay handles from a previous app 
    localStorage); under it the UAC first, its sentinels as tree branches, then the project's other agents on
    any machine. Below, "Spaces": every space without a UAC, a click selects it. Rows follow the TUI symbols
    ([theme-symbols](theme-symbols.md)): status, `u▲c` only on the UAC row, the harness glyph (`✳` `֍` `✈`
-   `π`) in its colour, name, git, badges, duration and the machine's `$host` label (`♆₈`) right-aligned in
+   `π`) in its colour, name (a UAC row, whose project is the header, shows its hc name such as `t1j` and its title), git, badges, duration and the machine's `$host` label (`♆₈`) right-aligned in
    its host colour from `~/.config/vega/theme.toml`. No sentinel cog: the tree line marks a child. The
    project row carries git and the positive totals `✉ ⚖ ✋`.
 4. **Decisions go to a `vega-inbox` window, not the chat.** An overlay of `kind: "window"` with `key` and
@@ -452,6 +452,8 @@ Its click toggles the pin and stops propagation, as does its left mouse-down, so
 fold or drag the header. Pins live in vega project preferences (`projects.toml`, `pinned: true`),
 not localStorage. The sidebar reads `vega project config --json`, writes
 `vega project config <id> --pin|--unpin --json`, then refreshes; failures use the config error line.
+A member project's pin pins its whole coordination block: the header's pin then shows
+dimmed in the accent colour, its tooltip names the pinned member, and a click unpins that member.
 With Active on, a pinned project's group and UAC remain even if idle or without status; idle
 sub-agents and other idle agents still hide. Pins respect the current label/machine view and
 do not retain projects outside it. Retained pinned UACs do not count in `N idle hidden`.

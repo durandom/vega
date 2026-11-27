@@ -1941,7 +1941,8 @@ export default class Agents extends View {
       const [glyph, color] = kindOf(a);
       const st = { ...a, status: depth ? kidStatus(a, this.listed) : this.topStatus(a) };
       const when = depth ? 0 : this.since(a);
-      const name = uac ? "" : depth
+      // A UAC row's project is its header: show its hc name (t1j) and title instead.
+      const name = uac ? clean(a.title) || "" : depth
         ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
         : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
       const on = a.address === m.shown;
@@ -1965,6 +1966,7 @@ export default class Agents extends View {
         .when(this.isPinned(a.address), el => el.child(pinnedAgentIcon(t)))
         .when(uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(l["vega.uac"] || "u▲c")))
         .child(div().flex_none().text_color(color).child(glyph))
+        .when(uac, el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(a.address.split("/").at(-1))))
         .when(!depth && this.foreignChild(this.vegaTerminals.get(a.address) ?? {}), el => el.child(div().flex_none().text_size(11).text_color(t.dim)
           .tooltip(`Spawned by ${this.vegaTerminals.get(a.address).parent}`).child(`↑ ${this.vegaTerminals.get(a.address).parent.split("/").at(-1)}`)))
         .when(Boolean(name), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(a.status === "idle" ? t.muted : t.foreground).child(name)))
@@ -2059,12 +2061,20 @@ export default class Agents extends View {
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
             .cursor_pointer().on_click((_e, cx) => this.openAttention(project, address, cx)));
         })
-        .when(!nested, el => el.child(div().id(`pin-${gid}`).flex_none().text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim)
-          .cursor_pointer().tooltip(this.preferences?.projects?.[project]?.pinned ? "Unpin project" : "Pin project in Active view")
-          .child(svg("mods/vega-sidebar/pin.svg").size(12).text_color(this.preferences?.projects?.[project]?.pinned ? t.accent : t.dim))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          // The click's cx dies after the handler: the awaiting toggle runs in cx.spawn.
-          .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(cx => this.toggleProjectPin(project, cx)); })))
+        .when(!nested, el => {
+          // A member project's pin pins the whole block: show it here and name its source.
+          const own = this.preferences?.projects?.[project]?.pinned;
+          const via = own ? [] : membership.projectsInBlock(project).filter(id => id !== project && this.preferences?.projects?.[id]?.pinned);
+          const tip = own ? "Unpin project" : via.length ? `Pinned via ${via.map(id => id.split("/").at(-1)).join(", ")}: click to unpin` : "Pin project in Active view";
+          return el.child(div().id(`pin-${gid}`).flex_none().cursor_pointer().tooltip(tip)
+            .child(svg("mods/vega-sidebar/pin.svg").size(12).text_color(own ? t.accent : via.length ? t.accent + "99" : t.dim))
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            // The click's cx dies after the handler: the awaiting toggle runs in cx.spawn.
+            .on_click((_e, cx) => {
+              cx.stop_propagation();
+              cx.spawn(async cx => { for (const id of via.length ? via : [project]) await this.toggleProjectPin(id, cx); });
+            }));
+        })
         .child(div().id(`gear-${gid}`).flex_none().text_color(t.dim).cursor_pointer().tooltip("Project window")
           .child(svg("mods/workspace-chrome/settings.svg").size(12).text_color(t.dim))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
