@@ -172,7 +172,7 @@ launch/unlock races, and ignoring persisted overlay handles from a previous app 
    localStorage); under it the UAC first, its sentinels as tree branches, then the project's other agents on
    any machine. Below, "Spaces": every space without a UAC, a click selects it. Rows follow the TUI symbols
    ([theme-symbols](theme-symbols.md)): status, `u▲c` only on the UAC row, the harness glyph (`✳` `֍` `✈`
-   `π`) in its colour, name (a UAC row, whose project is the header, shows its hc name such as `t1j`, then its tab name or else its title), git, badges, duration and the machine's `$host` label (`♆₈`) right-aligned in
+   `π`) in its colour, name (a UAC row, whose project is the header, shows its tab name or else its title), git, badges, duration and the machine's `$host` label (`♆₈`) right-aligned in
    its host colour from `~/.config/vega/theme.toml`. No sentinel cog: the tree line marks a child. The
    project row carries git and the positive totals `✉ ⚖ ✋`.
 4. **Decisions go to a `vega-inbox` window, not the chat.** An overlay of `kind: "window"` with `key` and

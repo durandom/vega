@@ -15,7 +15,7 @@ Originally forked from the installed 0.1.15 on 2026-11-13.
 - `tabs/win-restore.svg`: SHA256 `69ccde33c78d83ce39972ef129e158dd09fb19d3002bd709047801802fbad51d`
 
 The working spinner is replaced with the static `theme.working` dot used by
-vega-sidebar. Owned asset paths use the fork name; other behavior and SVGs
+vega-sidebar. Each tab adds its lead terminal's hc name (`t1j`), dimmed. Owned asset paths use the fork name; other behavior and SVGs
 remain stock. Other mod assets remain upstream references. `mod.json` records
 the clone base.
 

@@ -1941,8 +1941,8 @@ export default class Agents extends View {
       const [glyph, color] = kindOf(a);
       const st = { ...a, status: depth ? kidStatus(a, this.listed) : this.topStatus(a) };
       const when = depth ? 0 : this.since(a);
-      // A UAC row's project is its header: it shows its hc name (t1j) and, like
-      // other rows, a tab name someone gave it, else the agent's title.
+      // A UAC row's project is its header: like other rows, it shows a tab name
+      // someone gave it, else the agent's title.
       const name = depth && !uac
         ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
         : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
@@ -1967,7 +1967,6 @@ export default class Agents extends View {
         .when(this.isPinned(a.address), el => el.child(pinnedAgentIcon(t)))
         .when(uac, el => el.child(div().flex_none().font_semibold().text_color(C.uac).child(l["vega.uac"] || "u▲c")))
         .child(div().flex_none().text_color(color).child(glyph))
-        .when(uac, el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(a.address.split("/").at(-1))))
         .when(!depth && this.foreignChild(this.vegaTerminals.get(a.address) ?? {}), el => el.child(div().flex_none().text_size(11).text_color(t.dim)
           .tooltip(`Spawned by ${this.vegaTerminals.get(a.address).parent}`).child(`↑ ${this.vegaTerminals.get(a.address).parent.split("/").at(-1)}`)))
         .when(Boolean(name), el => el.child(div().min_w(0).flex_shrink_1().truncate().text_color(a.status === "idle" ? t.muted : t.foreground).child(name)))

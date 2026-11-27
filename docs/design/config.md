@@ -88,7 +88,8 @@ maintained by vega. `vega config` compares its `cloned_from.version` with `herdr
 its `vega_source.installed_hash` with `installed.json["layout:main"]["json"]`. A changed or
 missing fingerprint reports drift, even within the same app version. The agents block uses
 the vega-owned clone. Tabs and pane headers use `vega-tabs` and `vega-pane`, minimal forks of
-stock 0.1.15 with static `theme.working` dots instead of animated spinners. Each fork's `UPSTREAM.md`
+stock 0.1.15 with static `theme.working` dots instead of animated spinners; each tab also shows
+its lead terminal's hc name (`t1j`) dimmed, so inactive tabs can be addressed too. Each fork's `UPSTREAM.md`
 records source hashes for later rebases; other shipped mod references remain upstream-owned.
 
 For explicit maintenance, run `python3 scripts/herdr-app-layout.py --write`, review the generated
