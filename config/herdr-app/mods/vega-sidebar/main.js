@@ -1559,8 +1559,10 @@ export default class Agents extends View {
       const where = (uac ? [a.title] : [l["vega.project"], a.space_name]).filter(Boolean)
         .filter((v, k, xs) => xs.indexOf(v) === k && v !== name).join(" · ");
       const host = l["vega.host"] || machineOf(r.address);
-      return { ...r, a, l, uac, name, where, host,
-        text: [uac ? "uac" : "", name, where, host, a.tab_name, a.title, r.address].join(" ").toLowerCase() };
+      // The hc terminal name (t1j), as vega mux and vega post address it.
+      const pane = r.address.split("/").pop();
+      return { ...r, a, l, uac, name, where, host, pane,
+        text: [pane, uac ? "uac" : "", name, where, host, a.tab_name, a.title, r.address].join(" ").toLowerCase() };
     };
     const query = this.switcherQuery;
     const terms = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
@@ -1611,6 +1613,7 @@ export default class Agents extends View {
           .child(div().min_w(0).flex_1().truncate()
             .text_color(r.a.status === "idle" ? t.muted : t.foreground).when(r.uac, el => el.font_semibold()).child(r.name))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(when))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(r.pane))
           .child(hostCell(r.host, C.hosts[r.host], t.dim)))
         .when(Boolean(r.where), el => el.child(div().pl(38).text_size(11).text_color(t.dim).truncate().child(r.where)));
     };
