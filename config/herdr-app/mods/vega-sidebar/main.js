@@ -1941,8 +1941,9 @@ export default class Agents extends View {
       const [glyph, color] = kindOf(a);
       const st = { ...a, status: depth ? kidStatus(a, this.listed) : this.topStatus(a) };
       const when = depth ? 0 : this.since(a);
-      // A UAC row's project is its header: show its hc name (t1j) and title instead.
-      const name = uac ? clean(a.title) || "" : depth
+      // A UAC row's project is its header: it shows its hc name (t1j) and, like
+      // other rows, a tab name someone gave it, else the agent's title.
+      const name = depth && !uac
         ? (l["vega.label"]?.replace(/^[^\p{L}\p{N}]+/u, "") || a.name || a.template || a.title || a.address)
         : [this.rowLabel(a), clean(a.title), a.program?.name].find(n => n && !/^\d+$/.test(n)) || "";
       const on = a.address === m.shown;
@@ -2429,7 +2430,8 @@ export default class Agents extends View {
     const leads = leadPanes(panes());
     const tabLabels = new Map(spaces().flatMap(s => s.tabs).map(tab => [tab.id, title(tab, leads.get(tab.id))]));
     const labels = new Map(list.map(a => [a.address, tabLabels.get(a.tab) ?? (a.title || a.program?.name || "")]));
-    const label = (a) => labels.get(a.address);
+    // A group UAC kept as context may be missing from the list: read its tab directly.
+    const label = (a) => labels.get(a.address) ?? tabLabels.get(a.tab);
     const detail = new Map(list.map(a => [a.address, /^\d+$/.test(label(a)) ? null : label(a)]));
     const seenLabels = {};
     for (const a of list) { const k = `${a.space_name}\u0000${detail.get(a.address) ?? ""}`; seenLabels[k] = (seenLabels[k] ?? 0) + 1; }
