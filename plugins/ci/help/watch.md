@@ -1,5 +1,8 @@
 TARGET: 42, #42, a PR URL, a run URL, owner/repo#42, owner/repo@branch, owner/repo/run/<id>,
 or a branch name. Without TARGET: the current branch (its upstream name) of this checkout.
+A bare number resolves against this checkout's origin: in a group's coordination checkout, pass
+owner/repo#42 for a member repo. On GitHub the watch prints the PR's title and state and warns
+when it is already merged or closed.
 The watch mails this pane: the one whose process tree holds the caller (HERDR_PANE_ID is a hint);
 outside a pane it fails with not_in_herdr. --for <pane> mails that pane instead (any pane on this host): for yourself, pass your own pane, not the one you report to.
 One mail per new verdict of the head (green, or red with the failed checks), one when the

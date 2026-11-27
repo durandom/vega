@@ -310,12 +310,47 @@ fn watch(sel: &Sel, pane: Option<String>) -> Result<(), Failure> {
         .filter(|o| o.target == t && o.pane != pane)
         .count();
     println!("watch: {} for {pane}", t.label());
+    // Name the PR, so a number resolved against the wrong repo (a group's
+    // coordination checkout) shows at once instead of as a stale verdict.
+    if let (Some(n), true) = (t.pr, t.forge.is_github()) {
+        let path = format!("repos/{}/pulls/{n}", t.repo);
+        if let Ok(r) = vega_ci_watch::gh::get(&t.host, &path, None) {
+            for line in pr_lines(r.status, &r.body, &t.repo, n) {
+                println!("{line}");
+            }
+        }
+    }
     if others > 0 {
         println!("shared: {others} other pane(s) watch it; one poll serves all");
     }
     println!("{}", poller_line());
     println!("help: the verdict arrives as mail; do not poll. `vega ci` shows the cached state");
     Ok(())
+}
+
+/// `pr:` with title and state; a warning when the PR is no longer open.
+fn pr_lines(status: u16, body: &str, repo: &str, n: u64) -> Vec<String> {
+    let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    if status != 200 || !v.is_object() {
+        return Vec::new();
+    }
+    let state = match (v["state"].as_str(), v["merged"].as_bool()) {
+        (Some("closed"), Some(true)) => "merged",
+        (Some(s), _) => s,
+        _ => return Vec::new(),
+    };
+    let mut lines = vec![format!(
+        "pr: {} ({state}{})",
+        cell(v["title"].as_str().unwrap_or("")),
+        if v["draft"] == true { ", draft" } else { "" }
+    )];
+    if state != "open" {
+        lines.push(format!(
+            "warn: {repo}#{n} is already {state}; its verdict will not change. \
+             A PR in another repo: vega ci watch owner/repo#{n}"
+        ));
+    }
+    lines
 }
 
 fn unwatch(sel: &Sel, pane: Option<String>) -> Result<(), Failure> {
@@ -599,6 +634,22 @@ fn show(sel: &Sel, all: bool) -> Result<(), Failure> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pr_lines_name_the_pr_and_warn_when_it_is_closed() {
+        // spellkave 2026-11-27: `watch 79` in the coordination checkout
+        // watched b4arena/spellkave#79 (merged), not sk-server#79.
+        let merged = r#"{"title":"Old work","state":"closed","merged":true}"#;
+        let lines = super::pr_lines(200, merged, "b4arena/spellkave", 79);
+        assert_eq!(lines[0], "pr: Old work (merged)");
+        assert!(lines[1].starts_with("warn: b4arena/spellkave#79 is already merged"));
+        let open = r#"{"title":"New","state":"open","merged":false,"draft":true}"#;
+        assert_eq!(
+            super::pr_lines(200, open, "o/r", 1),
+            vec!["pr: New (open, draft)".to_string()]
+        );
+        assert!(super::pr_lines(404, "{}", "o/r", 1).is_empty());
+    }
+
     #[test]
     fn my_pane_trusts_only_for_and_the_process_tree() {
         let me = |pane: &str| {
